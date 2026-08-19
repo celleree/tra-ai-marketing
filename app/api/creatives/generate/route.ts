@@ -90,12 +90,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Creative generation failed', error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? `Creative generation failed: ${error.message}`
-            : 'Creative generation failed.',
-      },
+      { error: 'Creative generation failed. Check the server configuration and try again.' },
       { status: 500 }
     );
   }
