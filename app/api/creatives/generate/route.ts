@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
+  analyzeReferenceCreative,
   generateCreativeCopy,
   generateReferenceCreativeImage,
 } from '@/lib/ai/openai';
@@ -43,9 +44,14 @@ export async function POST(request: Request) {
     }
 
     const formatPlan = buildCreativeFormatPlan(parsed.data);
+    const analysis = await analyzeReferenceCreative(
+      source,
+      parsed.data.context
+    );
     const copyByIndex = await generateCreativeCopy(
       formatPlan,
-      parsed.data.context
+      parsed.data.context,
+      analysis
     );
     const creatives: GeneratedCreative[] = [];
 
@@ -64,6 +70,7 @@ export async function POST(request: Request) {
             secondaryFormat: item.secondaryFormat,
             context: parsed.data.context,
             copy,
+            analysis,
           });
           const generatedFile = new File(
             [new Uint8Array(imageBuffer)],
@@ -86,7 +93,7 @@ export async function POST(request: Request) {
     }
 
     creatives.sort((a, b) => a.index - b.index);
-    return NextResponse.json({ creatives, formatPlan });
+    return NextResponse.json({ creatives, formatPlan, analysis });
   } catch (error) {
     console.error('Creative generation failed', error);
     return NextResponse.json(
