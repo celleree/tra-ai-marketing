@@ -7,6 +7,16 @@ interface ImageUploadProps {
   onUploaded: (media: MediaAsset) => void;
 }
 
+interface UploadPlan {
+  direct: boolean;
+  uploadUrl?: string;
+  media?: MediaAsset;
+  error?: string;
+}
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+
 export function ImageUpload({ onUploaded }: ImageUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [localPreview, setLocalPreview] = useState<string>('');
@@ -22,8 +32,40 @@ export function ImageUpload({ onUploaded }: ImageUploadProps) {
   const chooseFile = (nextFile: File | null) => {
     if (localPreview) URL.revokeObjectURL(localPreview);
     setError('');
+
+    if (nextFile && !ALLOWED_TYPES.includes(nextFile.type)) {
+      setFile(null);
+      setLocalPreview('');
+      setError('Upload a PNG, JPEG, or WebP image.');
+      return;
+    }
+
+    if (nextFile && nextFile.size > MAX_UPLOAD_BYTES) {
+      setFile(null);
+      setLocalPreview('');
+      setError('The image is larger than the 10 MB upload limit.');
+      return;
+    }
+
     setFile(nextFile);
     setLocalPreview(nextFile ? URL.createObjectURL(nextFile) : '');
+  };
+
+  const uploadThroughServer = async (sourceFile: File) => {
+    const formData = new FormData();
+    formData.append('file', sourceFile);
+
+    const response = await fetch('/api/media/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Upload failed.');
+    }
+
+    return payload as MediaAsset;
   };
 
   const upload = async () => {
@@ -33,20 +75,52 @@ export function ImageUpload({ onUploaded }: ImageUploadProps) {
     setError('');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/media/upload', {
+      const planResponse = await fetch('/api/media/upload-url', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          mimeType: file.type,
+          size: file.size,
+        }),
       });
-      const payload = await response.json();
+      const plan = (await planResponse.json()) as UploadPlan;
 
-      if (!response.ok) {
-        throw new Error(payload.error || 'Upload failed.');
+      if (!planResponse.ok) {
+        throw new Error(plan.error || 'Upload could not be prepared.');
       }
 
-      onUploaded(payload as MediaAsset);
+      if (!plan.direct) {
+        onUploaded(await uploadThroughServer(file));
+        return;
+      }
+
+      if (!plan.uploadUrl || !plan.media) {
+        throw new Error('Upload could not be prepared.');
+      }
+
+      const putResponse = await fetch(plan.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+
+      if (!putResponse.ok) {
+        throw new Error('Direct image upload failed.');
+      }
+
+      const confirmResponse = await fetch('/api/media/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaId: plan.media.id }),
+      });
+      const confirmation = await confirmResponse.json();
+
+      if (!confirmResponse.ok) {
+        throw new Error(confirmation.error || 'Uploaded image could not be validated.');
+      }
+
+      onUploaded(plan.media);
     } catch (uploadError) {
       setError(
         uploadError instanceof Error ? uploadError.message : 'Upload failed.'
