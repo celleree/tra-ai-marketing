@@ -21,6 +21,7 @@ const MIME_BY_EXTENSION: Record<string, AllowedImageMimeType> = {
   webp: 'image/webp',
 };
 
+const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const SAFE_STORED_NAME = /^media_[a-f0-9]{32}\.(png|jpg|webp)$/;
 const DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -119,10 +120,25 @@ export class LocalMediaStorage implements MediaStorage {
 
     try {
       const buffer = await readFile(resolve(this.root, fileName));
-      return { buffer, mimeType };
+      return { fileName, buffer, mimeType };
     } catch {
       return null;
     }
+  }
+
+  async readImageById(mediaId: string): Promise<StoredMediaFile | null> {
+    if (!SAFE_MEDIA_ID.test(mediaId)) {
+      return null;
+    }
+
+    for (const extension of Object.keys(MIME_BY_EXTENSION)) {
+      const stored = await this.readImage(`${mediaId}.${extension}`);
+      if (stored) {
+        return stored;
+      }
+    }
+
+    return null;
   }
 }
 
