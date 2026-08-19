@@ -6,6 +6,18 @@ import type { StoredMediaFile } from '@/lib/media/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
+export interface CreativeReferenceAnalysis {
+  summary: string;
+  visibleText: string[];
+  visualStructure: string;
+  hookOrAngle: string;
+  offerOrCta: string;
+  styleNotes: string;
+  preserve: string[];
+  avoid: string[];
+  unknowns: string[];
+}
+
 const getApiKey = () => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -51,6 +63,102 @@ const extractOutputText = (payload: unknown) => {
   return '';
 };
 
+const referenceImageDataUrl = (source: StoredMediaFile) =>
+  `data:${source.mimeType};base64,${source.buffer.toString('base64')}`;
+
+const REFERENCE_ANALYSIS_RULES = `
+Analyze an uploaded advertising creative for Tax Relief Advocates (TRA).
+Your job is to understand the creative mechanism, not to copy the ad.
+Describe what is visibly present and separate observations from guesses.
+Focus on layout, hierarchy, hook, CTA/offer presentation, typography feel, imagery, spacing, visual rhythm, and why the creative is easy or difficult to understand at a glance.
+Do not assume the reference ad performed well.
+Do not infer private performance data, customer outcomes, advertiser intent, or facts that are not visible.
+If third-party logos, trademarks, people, exact wording, testimonial claims, statistics, or outcome claims appear, put those concepts in avoid rather than suggesting they be copied.
+The resulting analysis will be used to create an original TRA ad, so preserve only high-level creative mechanisms and structural ideas.
+`;
+
+export async function analyzeReferenceCreative(
+  source: StoredMediaFile,
+  context: string
+): Promise<CreativeReferenceAnalysis> {
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${getApiKey()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      store: false,
+      input: [
+        {
+          role: 'developer',
+          content: [{ type: 'input_text', text: REFERENCE_ANALYSIS_RULES }],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: `Analyze this source creative. User direction for the TRA adaptation:\n${context}`,
+            },
+            {
+              type: 'input_image',
+              image_url: referenceImageDataUrl(source),
+              detail: 'high',
+            },
+          ],
+        },
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'tra_reference_analysis',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              summary: { type: 'string' },
+              visibleText: { type: 'array', items: { type: 'string' } },
+              visualStructure: { type: 'string' },
+              hookOrAngle: { type: 'string' },
+              offerOrCta: { type: 'string' },
+              styleNotes: { type: 'string' },
+              preserve: { type: 'array', items: { type: 'string' } },
+              avoid: { type: 'array', items: { type: 'string' } },
+              unknowns: { type: 'array', items: { type: 'string' } },
+            },
+            required: [
+              'summary',
+              'visibleText',
+              'visualStructure',
+              'hookOrAngle',
+              'offerOrCta',
+              'styleNotes',
+              'preserve',
+              'avoid',
+              'unknowns',
+            ],
+            additionalProperties: false,
+          },
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  const text = extractOutputText(await response.json());
+  if (!text) {
+    throw new Error('OpenAI returned no reference analysis.');
+  }
+
+  return JSON.parse(text) as CreativeReferenceAnalysis;
+}
+
 const TRA_COPY_RULES = `
 You are writing Meta ad copy for Tax Relief Advocates (TRA), a tax-relief service business.
 Use plain, clear consumer language.
@@ -61,13 +169,15 @@ Treat the user's context as creative direction, not proof of a factual claim unl
 For testimonial/review formats, use customer-centered themes without inventing a quote or named person.
 For statistics/data formats, do not invent a number; use a data-inspired structure without unsupported figures.
 Keep each variation meaningfully different and appropriate to its assigned creative format.
+Use the reference analysis for creative structure and inspiration, but never copy third-party wording, logos, trademarks, people, or unsupported claims from the source.
 `;
 
 export async function generateCreativeCopy(
   plan: PlannedCreativeFormat[],
-  context: string
+  context: string,
+  analysis: CreativeReferenceAnalysis
 ): Promise<Map<number, CreativeCopy>> {
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-5.6-luna';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-5.6-terra';
   const requested = plan.map((item) => ({
     index: item.index,
     primaryFormat: CREATIVE_FORMAT_LABELS[item.primaryFormat],
@@ -97,6 +207,10 @@ export async function generateCreativeCopy(
               type: 'input_text',
               text: `Create copy for these ad variations:\n${JSON.stringify(
                 requested,
+                null,
+                2
+              )}\n\nReference creative analysis:\n${JSON.stringify(
+                analysis,
                 null,
                 2
               )}\n\nUser direction:\n${context}`,
@@ -183,7 +297,8 @@ const buildImagePrompt = (
   primaryFormat: CreativeFormatId,
   secondaryFormat: CreativeFormatId | undefined,
   context: string,
-  copy: CreativeCopy
+  copy: CreativeCopy,
+  analysis: CreativeReferenceAnalysis
 ) => `
 Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA), using the attached source image as a real visual reference.
 
@@ -195,13 +310,21 @@ ${
 }
 User direction: ${context}
 
+Reference analysis:
+Summary: ${analysis.summary}
+Visual structure: ${analysis.visualStructure}
+Hook/angle: ${analysis.hookOrAngle}
+Style notes: ${analysis.styleNotes}
+High-level ideas worth preserving: ${analysis.preserve.join('; ') || 'none'}
+Elements to avoid copying: ${analysis.avoid.join('; ') || 'none'}
+
 Use this approved ad copy as the messaging source:
 Headline: ${copy.headline}
 Primary text idea: ${copy.primaryText}
 Description: ${copy.description}
 
 Reference-image rules:
-- Use the source image for high-level visual inspiration such as composition, hierarchy, spacing, visual rhythm, or creative mechanism when useful.
+- Use the source image and the analysis for high-level visual inspiration such as composition, hierarchy, spacing, visual rhythm, or creative mechanism when useful.
 - Do not recreate the source verbatim.
 - Do not copy third-party logos, brand names, trademarks, people, or exact source wording.
 - Make the output clearly original and specific to Tax Relief Advocates.
@@ -221,6 +344,7 @@ export async function generateReferenceCreativeImage(args: {
   secondaryFormat?: CreativeFormatId;
   context: string;
   copy: CreativeCopy;
+  analysis: CreativeReferenceAnalysis;
 }): Promise<Buffer> {
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const formData = new FormData();
@@ -231,7 +355,8 @@ export async function generateReferenceCreativeImage(args: {
       args.primaryFormat,
       args.secondaryFormat,
       args.context,
-      args.copy
+      args.copy,
+      args.analysis
     )
   );
   formData.set('size', '1024x1024');
