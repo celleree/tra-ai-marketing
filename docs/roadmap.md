@@ -20,6 +20,11 @@ Create a repeatable workflow:
 
 Reference ad or concept -> AI analysis -> TRA adaptation -> multiple static variations -> automated QA -> human selection
 
+Also support video-to-image repurposing:
+- Accept one source video.
+- Extract or generate roughly 10-20 useful static image candidates from strong moments in the video.
+- Use those images as ad creatives or creative references.
+
 ## Phase 3 - Quality Control
 
 Check generated work for:
@@ -45,11 +50,30 @@ Start read-only.
 
 Turn raw metrics into concise recommendations and repeatable daily/weekly analysis workflows.
 
-## Phase 6 - Scale and Automation
+## Phase 6 - Autonomous Static Ad Flywheel
 
-After validation:
-- Increase creative volume
-- Automate recurring analysis
-- Add controlled actions where appropriate
-- Connect CRM and revenue data
-- Prepare for higher-quality AI video workflows when TRA decides the quality/risk is acceptable
+After validation, allow the agent to continuously manage only approved static-image ads and their copy.
+
+Target loop:
+
+Create -> Launch -> Measure -> Learn -> Pause Losers -> Replace -> Repeat
+
+The agent should be able to:
+- Generate and launch new static image creatives and copy inside approved campaigns/ad sets.
+- Give each ad enough time and data before judging performance.
+- Keep strong performers running.
+- Pause underperforming ads rather than deleting them so performance history is preserved.
+- Replace weak ads with new concepts or variants.
+- Store performance learnings and use them to improve future creative decisions.
+- Run continuously with minimal human involvement once the workflow has been validated.
+
+Hard restrictions:
+- Existing video ads are off-limits unless TRA explicitly opts them into automation later.
+- The agent may only modify specifically approved static-image campaigns/ad sets.
+- Spending changes should remain inside predefined limits.
+- Human review should remain available, especially during initial rollout and for image quality.
+
+Additional scale steps:
+- Automate recurring analysis.
+- Connect CRM and revenue data.
+- Prepare for higher-quality AI video workflows when TRA decides the quality/risk is acceptable.
