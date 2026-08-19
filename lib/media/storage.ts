@@ -39,13 +39,17 @@ export interface PreparedMediaImage extends MediaAsset {
   buffer: Buffer;
 }
 
-const isAllowedMimeType = (value: string): value is AllowedImageMimeType =>
+export const isAllowedImageMimeType = (
+  value: string
+): value is AllowedImageMimeType =>
   ALLOWED_IMAGE_MIME_TYPES.includes(value as AllowedImageMimeType);
 
 const hasPrefix = (buffer: Buffer, prefix: number[]) =>
   prefix.every((byte, index) => buffer[index] === byte);
 
-const detectImageMimeType = (buffer: Buffer): AllowedImageMimeType | null => {
+export const detectImageMimeType = (
+  buffer: Buffer
+): AllowedImageMimeType | null => {
   if (
     buffer.length >= 8 &&
     hasPrefix(buffer, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -68,11 +72,24 @@ const detectImageMimeType = (buffer: Buffer): AllowedImageMimeType | null => {
   return null;
 };
 
-const getMaxUploadBytes = () => {
+export const getMaxUploadBytes = () => {
   const configured = Number.parseInt(process.env.MAX_UPLOAD_BYTES || '', 10);
   return Number.isFinite(configured) && configured > 0
     ? configured
     : DEFAULT_MAX_UPLOAD_BYTES;
+};
+
+export const validateStoredMediaImage = (stored: StoredMediaFile) => {
+  if (stored.buffer.length > getMaxUploadBytes()) {
+    throw new MediaValidationError('The image is larger than the upload limit.');
+  }
+
+  const detectedMimeType = detectImageMimeType(stored.buffer);
+  if (!detectedMimeType || detectedMimeType !== stored.mimeType) {
+    throw new MediaValidationError(
+      'The file contents do not match a supported PNG, JPEG, or WebP image.'
+    );
+  }
 };
 
 export const prepareMediaImage = async (
@@ -86,7 +103,7 @@ export const prepareMediaImage = async (
     throw new MediaValidationError('The image is larger than the upload limit.');
   }
 
-  if (!isAllowedMimeType(file.type)) {
+  if (!isAllowedImageMimeType(file.type)) {
     throw new MediaValidationError('Upload a PNG, JPEG, or WebP image.');
   }
 
