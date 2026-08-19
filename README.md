@@ -21,27 +21,31 @@ A vendor-neutral workspace for building AI-assisted Meta advertising workflows f
 
 ## Creative App Status
 
-The first application layer is now scaffolded with Next.js + TypeScript.
+The first working image-first creative workflow is implemented with Next.js + TypeScript.
 
 Implemented:
-- one-page creative generator shell
-- PNG/JPEG/WebP source image upload
-- 10 MB default upload limit
-- server-side MIME and file-signature validation
-- server-generated safe filenames
-- local media storage behind a storage interface
-- uploaded-image preview route
+- one-page creative generator
+- PNG/JPEG/WebP source image upload with a 10 MB default limit
+- direct browser-to-Cloudflare-R2 production uploads using short-lived presigned URLs
+- local development upload fallback
+- server-side file-signature validation after upload
+- persistent R2 media storage in production
 - context input and variation-count controls
+- controlled primary/secondary creative-format labels for diversity
+- source-image-conditioned GPT Image generation
+- Meta ad copy generation
+- generated image + copy result cards
+- TRA claim/testimonial/statistic guardrails in the generation prompt
 
-Next:
-- image analysis
-- TRA creative brief generation
-- source-image-capable image generation
-- multiple visual variations
-- Meta copy generation
-- lightweight creative QA
+Still to build:
+- deeper creative QA and scoring
+- richer TRA brand/offer/compliance knowledge retrieval
+- optional reference-image analysis before generation
+- generation history/library
+- Meta performance data connection
+- media-buyer assistant workflows
 
-See `docs/creative-workflow-architecture.md` for the implementation plan.
+See `docs/creative-workflow-architecture.md` for the implementation plan and `docs/r2-browser-upload.md` for the production R2 CORS requirement.
 
 ## Local Development
 
@@ -57,7 +61,7 @@ npm run dev
 
 Then open `http://localhost:3000`.
 
-Optional local settings can be copied from `.env.example`. By default, uploaded source images are written to `data/uploads/`, which is ignored by git.
+Copy `.env.example` for local settings. Local uploads are written to `data/uploads/`, which is ignored by git. Creative generation requires `OPENAI_API_KEY`.
 
 Useful checks:
 
@@ -66,11 +70,28 @@ npm run typecheck
 npm run build
 ```
 
+## Production Configuration
+
+Required server-only environment variables:
+- `R2_ACCOUNT_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_BUCKET_NAME`
+- `OPENAI_API_KEY`
+
+Optional model overrides:
+- `OPENAI_IMAGE_MODEL` (defaults to `gpt-image-2`)
+- `OPENAI_TEXT_MODEL` (defaults to `gpt-5.6-luna`)
+
+The R2 bucket also needs a CORS policy allowing PUT requests from the live app origin. See `docs/r2-browser-upload.md`.
+
 ## Repository Structure
 
 - `app/` - Next.js pages and API routes
-- `components/creative-generator/` - source upload and generation UI
+- `components/creative-generator/` - source upload, generation, and result UI
 - `lib/media/` - upload validation and storage abstraction
+- `lib/ai/` - AI-provider integration
+- `lib/creatives/` - creative planning and result contracts
 - `docs/knowledge-base/` - TRA brand, offer, compliance, and messaging source material
 - `prompts/` - reusable AI workflows and prompt templates
 - `references/ads/` - curated creative examples and notes
@@ -79,4 +100,4 @@ npm run build
 
 ## Current Priority
 
-Finish the image-first creative workflow before adding Meta automation.
+Test and harden the image-first creative workflow, then add deeper QA and Meta performance data.
