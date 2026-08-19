@@ -3,7 +3,9 @@
 interface GenerateControlsProps {
   variationCount: number;
   onVariationCountChange: (value: number) => void;
+  onGenerate: () => void;
   ready: boolean;
+  generating: boolean;
 }
 
 const VARIATION_OPTIONS = [2, 4, 6, 8];
@@ -11,7 +13,9 @@ const VARIATION_OPTIONS = [2, 4, 6, 8];
 export function GenerateControls({
   variationCount,
   onVariationCountChange,
+  onGenerate,
   ready,
+  generating,
 }: GenerateControlsProps) {
   return (
     <section className="panel">
@@ -33,19 +37,27 @@ export function GenerateControls({
                 : 'variation-option'
             }
             onClick={() => onVariationCountChange(count)}
+            disabled={generating}
           >
             {count}
           </button>
         ))}
       </div>
 
-      <button className="button button-primary button-full" type="button" disabled>
-        Generate creatives
+      <button
+        className="button button-primary button-full"
+        type="button"
+        disabled={!ready || generating}
+        onClick={onGenerate}
+      >
+        {generating ? 'Generating…' : 'Generate creatives'}
       </button>
       <p className="muted control-note">
-        {ready
-          ? 'Upload is ready. Image generation connects in the next implementation step.'
-          : 'Upload an image and add context first.'}
+        {generating
+          ? 'Creating distinct TRA concepts from the source image.'
+          : ready
+            ? 'Each variation uses a different approved creative format.'
+            : 'Upload an image and add context first.'}
       </p>
     </section>
   );
