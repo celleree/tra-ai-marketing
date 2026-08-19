@@ -1,0 +1,39 @@
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.pem
+*.key
+
+# Private/raw business data
+exports/
+customer-data/
+leads/
+data/private/
+
+# Dependencies and caches
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Build and generated output
+dist/
+build/
+output/
+tmp/
+temp/
+*.log
+
+# Local AI/tool settings
+.claude/settings.local.json
+.mcp.local.json
+
+# Editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
