@@ -4,7 +4,7 @@ A vendor-neutral workspace for building AI-assisted Meta advertising workflows f
 
 ## Goals
 
-- Generate high volumes of strong static Facebook and Instagram ad concepts.
+- Generate high volumes of strong, meaningfully diverse static Facebook and Instagram ad concepts across different hooks, angles, formats, layouts, visual styles, and messaging approaches.
 - Analyze Meta performance data and return clear, actionable insights.
 - Turn strong reference ads into original TRA-specific concepts and variations.
 - Build a reusable TRA knowledge base for brand, copy, compliance, and campaign context.
