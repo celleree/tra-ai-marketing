@@ -16,6 +16,7 @@ export interface MediaAsset {
 }
 
 export interface StoredMediaFile {
+  fileName: string;
   buffer: Buffer;
   mimeType: AllowedImageMimeType;
 }
