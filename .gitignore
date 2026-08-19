@@ -13,12 +13,18 @@ customer-data/
 leads/
 data/private/
 
+# Local media files
+data/uploads/
+data/generated/
+
 # Dependencies and caches
 node_modules/
 .venv/
 venv/
 __pycache__/
 *.pyc
+.next/
+*.tsbuildinfo
 
 # Build and generated output
 dist/
