@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
 import styles from './boomin-landing.module.css';
 
 const PLACEHOLDERS = Array.from({ length: 18 }, (_, index) => index);
@@ -25,7 +26,7 @@ export function BoominLanding() {
               style={{
                 '--offset': `${(item % 3) * 52}px`,
                 '--delay': `${(item % 6) * -1.8}s`,
-              } as React.CSSProperties}
+              } as CSSProperties}
             >
               <span>TRA</span>
             </div>
