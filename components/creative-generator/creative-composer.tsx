@@ -253,7 +253,7 @@ export function CreativeComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
-        rows={7}
+        rows={4}
         maxLength={4000}
         placeholder="Tell TRA AI what you want to create…"
       />
@@ -285,8 +285,8 @@ export function CreativeComposer({
           <button
             className={styles.plusButton}
             type="button"
-            aria-label="Add source creative"
-            title="Add source creative"
+            aria-label="Add optional source creative"
+            title="Add optional source creative"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
           >
@@ -297,7 +297,7 @@ export function CreativeComposer({
               ? 'Uploading source creative…'
               : localPreview
                 ? 'Source creative attached'
-                : 'Add an image or drag it here'}
+                : 'Add an image (optional) or drag it here'}
           </span>
         </div>
 
