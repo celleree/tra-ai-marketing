@@ -4,6 +4,7 @@ import {
   generateCreativeCopy,
   generateReferenceCreativeImage,
 } from '@/lib/ai/openai';
+import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import {
   buildCreativePlan,
   validateGenerateCreativeRequest,
@@ -40,13 +41,18 @@ export async function POST(request: Request) {
     }
 
     const creativePlan = buildCreativePlan(parsed.data);
-    const analysis = await analyzeReferenceCreative(
-      source,
-      parsed.data.context
-    );
+    const categoryDirections = creativePlan
+      .map(
+        (item) =>
+          `Variation ${item.index}: ${CREATIVE_CATEGORY_LABELS[item.category]}`
+      )
+      .join('\n');
+    const generationContext = `${parsed.data.context}\n\nPrimary creative categories:\n${categoryDirections}\n\nTreat each category as the main messaging direction. The format is only the presentation structure.`;
+
+    const analysis = await analyzeReferenceCreative(source, generationContext);
     const copyByIndex = await generateCreativeCopy(
       creativePlan,
-      parsed.data.context,
+      generationContext,
       analysis
     );
     const creatives: GeneratedCreative[] = [];
@@ -62,9 +68,8 @@ export async function POST(request: Request) {
 
           const imageBuffer = await generateReferenceCreativeImage({
             source,
-            category: item.category,
-            format: item.format,
-            context: parsed.data.context,
+            primaryFormat: item.format,
+            context: `${parsed.data.context}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.`,
             copy,
             analysis,
           });
