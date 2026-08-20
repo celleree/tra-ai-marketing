@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/meta-one-click-mvp
+  pull_request:
+    branches:
+      - staging
 
 jobs:
   verify:
