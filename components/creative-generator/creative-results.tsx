@@ -5,9 +5,48 @@ import styles from '@/components/creative-generator/creative-results.module.css'
 
 interface CreativeResultsProps {
   creatives: GeneratedCreative[];
+  generating?: boolean;
+  requestedCount?: number;
 }
 
-export function CreativeResults({ creatives }: CreativeResultsProps) {
+export function CreativeResults({
+  creatives,
+  generating = false,
+  requestedCount = 0,
+}: CreativeResultsProps) {
+  if (generating) {
+    const count = Math.max(2, requestedCount);
+
+    return (
+      <section className={styles.section} aria-live="polite" aria-busy="true">
+        <div className={styles.heading}>
+          <div>
+            <p className="eyebrow">Generating</p>
+            <h2>Building your creative variations</h2>
+          </div>
+          <span className="muted">{count} concepts</span>
+        </div>
+
+        <div className={styles.grid}>
+          {Array.from({ length: count }, (_, index) => (
+            <article className={`${styles.card} ${styles.skeletonCard}`} key={index}>
+              <div className={`${styles.image} ${styles.skeleton}`} />
+              <div className={styles.body}>
+                <div className={styles.skeletonPills}>
+                  <span className={`${styles.skeleton} ${styles.skeletonPill}`} />
+                  <span className={`${styles.skeleton} ${styles.skeletonPillShort}`} />
+                </div>
+                <div className={`${styles.skeleton} ${styles.skeletonTitle}`} />
+                <div className={`${styles.skeleton} ${styles.skeletonLine}`} />
+                <div className={`${styles.skeleton} ${styles.skeletonLineShort}`} />
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   if (!creatives.length) return null;
 
   return (
