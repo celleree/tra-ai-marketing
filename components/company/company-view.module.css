@@ -248,6 +248,87 @@
   color: #9aa6b2;
 }
 
+.logoEditor {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 126px;
+  padding: 16px;
+  border: 1px solid #dfe4ea;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.logoPreview {
+  display: flex;
+  flex: 0 0 190px;
+  align-items: center;
+  justify-content: center;
+  width: 190px;
+  height: 96px;
+  overflow: hidden;
+  border: 1px solid #e1e6eb;
+  border-radius: 10px;
+  background: #f7f9fb;
+  color: #8b97a3;
+  font-size: 13px;
+  text-align: center;
+}
+
+.logoPreview img {
+  display: block;
+  max-width: calc(100% - 20px);
+  max-height: calc(100% - 20px);
+  object-fit: contain;
+}
+
+.logoActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.logoUploadButton,
+.logoRemoveButton {
+  border-radius: 9px;
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.logoUploadButton {
+  position: relative;
+  overflow: hidden;
+  background: #244fd3;
+  color: #fff;
+}
+
+.logoUploadButton:focus-within {
+  outline: 2px solid #17212b;
+  outline-offset: 2px;
+}
+
+.logoUploadButton input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.logoRemoveButton {
+  border: 1px solid #cfd7df;
+  background: #fff;
+  color: #334252;
+}
+
+.logoMessage {
+  flex-basis: 100%;
+  color: #71808f;
+  font-size: 12px;
+}
+
 @media (max-width: 920px) {
   .shell {
     width: min(100% - 32px, 760px);
@@ -266,7 +347,8 @@
 @media (max-width: 640px) {
   .header,
   .panelHeading,
-  .websiteControls {
+  .websiteControls,
+  .logoEditor {
     flex-direction: column;
   }
 
@@ -281,5 +363,14 @@
 
   .tabs button {
     white-space: nowrap;
+  }
+
+  .logoPreview {
+    flex-basis: auto;
+    width: 100%;
+  }
+
+  .logoActions {
+    width: 100%;
   }
 }
