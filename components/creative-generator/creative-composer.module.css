@@ -27,6 +27,15 @@
   pointer-events: none;
 }
 
+.attachmentRow {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .attachment {
   display: flex;
   width: fit-content;
@@ -79,6 +88,44 @@
   border-radius: 50%;
   background: #16a261;
   box-shadow: 0 0 0 4px rgba(22, 162, 97, 0.1);
+}
+
+.modeToggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  border: 1px solid #dfe4ea;
+  border-radius: 999px;
+  background: #f4f6f8;
+  padding: 3px;
+}
+
+.modeButton {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  padding: 7px 11px;
+  color: #6d7884;
+  font-size: 0.74rem;
+  font-weight: 750;
+  line-height: 1;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.modeButtonActive {
+  background: #ffffff;
+  color: #17212b;
+  box-shadow: 0 1px 4px rgba(23, 33, 43, 0.12);
+}
+
+.modeButton:focus-visible {
+  outline: 3px solid rgba(53, 97, 232, 0.18);
+  outline-offset: 2px;
+}
+
+.modeButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .textarea {
@@ -333,6 +380,18 @@
     min-height: 230px;
     border-radius: 18px;
     padding: 14px;
+  }
+
+  .attachmentRow {
+    align-items: flex-start;
+  }
+
+  .modeToggle {
+    width: 100%;
+  }
+
+  .modeButton {
+    flex: 1;
   }
 
   .textarea {

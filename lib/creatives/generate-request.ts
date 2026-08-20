@@ -4,13 +4,21 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 
+export type UploadMode = 'tra' | 'reference';
+
 export type GenerateCreativeRequest = {
   mediaId?: string;
   context: string;
   variationCount: number;
+  uploadMode?: UploadMode;
 };
 
-export type ValidGenerateCreativeRequest = GenerateCreativeRequest;
+export type ValidGenerateCreativeRequest = Omit<
+  GenerateCreativeRequest,
+  'uploadMode'
+> & {
+  uploadMode: UploadMode;
+};
 
 export type PlannedCreative = {
   index: number;
@@ -56,6 +64,8 @@ export function validateGenerateCreativeRequest(input: unknown):
     typeof body.variationCount === 'number'
       ? body.variationCount
       : Number(body.variationCount);
+  const uploadMode =
+    typeof body.uploadMode === 'string' ? body.uploadMode.trim() : 'tra';
 
   if (!context) {
     return { success: false, error: 'context is required' };
@@ -72,21 +82,31 @@ export function validateGenerateCreativeRequest(input: unknown):
     };
   }
 
+  if (uploadMode !== 'tra' && uploadMode !== 'reference') {
+    return {
+      success: false,
+      error: 'uploadMode must be either tra or reference',
+    };
+  }
+
   return {
     success: true,
     data: {
       ...(mediaId ? { mediaId } : {}),
       context,
       variationCount,
+      uploadMode,
     },
   };
 }
 
 export function buildCreativePlan(
-  request: ValidGenerateCreativeRequest
+  request: ValidGenerateCreativeRequest,
+  forcedCategory?: CreativeCategoryId
 ): PlannedCreative[] {
   return Array.from({ length: request.variationCount }, (_, offset) => {
-    const category = CREATIVE_CATEGORIES[offset % CREATIVE_CATEGORIES.length];
+    const category =
+      forcedCategory || CREATIVE_CATEGORIES[offset % CREATIVE_CATEGORIES.length];
     const format = FORMAT_BY_CATEGORY[category];
     return {
       index: offset + 1,

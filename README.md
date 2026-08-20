@@ -37,7 +37,7 @@ See `AGENTS.md` for the mandatory AI-agent workflow rules.
 
 ## Creative App Status
 
-The first working image-first creative workflow is implemented with Next.js + TypeScript.
+The working static-creative workflow is implemented with Next.js + TypeScript.
 
 Implemented:
 - one-page creative generator
@@ -47,17 +47,33 @@ Implemented:
 - server-side file-signature validation after upload
 - persistent R2 media storage in production
 - context input and variation-count controls
+- upload-mode toggle for `TRA ad` versus `Reference ad`
+- persistent reference-image library in R2, organized into the 15 canonical creative categories
 - 15 canonical messaging categories as the primary creative-diversity system
 - 5 simplified presentation formats selected automatically underneath the categories
-- GPT-5.6 Terra reference-creative analysis before generation
+- GPT-5.6 Terra source/reference analysis before generation
 - GPT-5.6 Terra Meta ad copy generation
-- source-image-conditioned GPT Image 2 generation
+- GPT Image 2 source/reference-conditioned generation
 - generated image + copy result cards labeled by category and format
 - TRA claim/testimonial/statistic guardrails in the generation prompt
 
-Generation flow:
+Generation modes:
 
-`uploaded image -> GPT-5.6 Terra analysis -> category-led creative plan -> presentation format -> GPT-5.6 Terra copy -> GPT Image 2 image variations -> R2 -> results`
+**TRA ad mode**
+
+`uploaded TRA ad (brand/content anchor) + category-matched reference-library ad (creative-execution anchor) -> analysis + category-led creative plan -> copy -> new TRA image -> R2 -> results`
+
+The uploaded TRA ad establishes the advertiser and useful TRA brand/content cues. The reference library supplies fresh layout, composition, visual mechanism, and presentation inspiration. The output must be a new TRA ad rather than a minor edit of the uploaded TRA ad.
+
+**Reference ad mode**
+
+`uploaded reference ad -> dominant-category analysis -> TRA adaptation within that category -> copy -> new TRA image -> R2 -> results`
+
+The uploaded reference is creative inspiration rather than the advertiser identity. Its dominant angle/category is detected once and the generated variations normally stay within that angle while being converted into original TRA ads.
+
+**No-image mode**
+
+`user context -> category-led creative plan -> copy -> original TRA images -> R2 -> results`
 
 Still to build:
 - deeper creative QA and scoring
@@ -112,17 +128,19 @@ The R2 bucket also needs a CORS policy allowing PUT requests from the live app o
 ## Repository Structure
 
 - `app/` - Next.js pages and API routes
-- `components/creative-generator/` - source upload, generation, and result UI
-- `lib/media/` - upload validation and storage abstraction
+- `components/creative-generator/` - source upload, mode selection, generation, and result UI
+- `components/reference-library/` - reference-image library UI
+- `lib/media/` - upload validation and R2/local storage abstraction
+- `lib/references/` - reference-library metadata and storage
 - `lib/ai/` - AI-provider integration
 - `lib/creatives/` - creative planning and result contracts
 - `docs/creative-categories.md` - canonical 15 messaging categories
 - `docs/knowledge-base/` - TRA brand, offer, compliance, customer, and messaging source material
 - `prompts/` - reusable AI workflows and prompt templates
-- `references/ads/` - curated creative examples and notes
+- `references/ads/` - curated repository reference notes
 - `assets/brand/` - approved logos and brand assets
 - `docs/` - implementation notes and roadmap
 
 ## Current Priority
 
-Test and harden the image-first creative workflow, then add deeper QA and Meta performance data.
+Test and harden the reference-library-driven static creative workflow, then add deeper QA and Meta performance data.
