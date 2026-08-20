@@ -190,6 +190,7 @@ export async function POST(request: Request) {
           const image = await storage.saveImage(generatedFile);
 
           return {
+            id: `creative_${image.id.slice('media_'.length)}`,
             index: item.index,
             category: item.category,
             format: item.format,
