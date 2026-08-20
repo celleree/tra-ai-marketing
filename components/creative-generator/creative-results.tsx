@@ -1,3 +1,4 @@
+import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import styles from '@/components/creative-generator/creative-results.module.css';
@@ -31,13 +32,11 @@ export function CreativeResults({ creatives }: CreativeResultsProps) {
             <div className={styles.body}>
               <div className={styles.pills}>
                 <span className={styles.pill}>
-                  {CREATIVE_FORMAT_LABELS[creative.primaryFormat]}
+                  {CREATIVE_CATEGORY_LABELS[creative.category]}
                 </span>
-                {creative.secondaryFormat ? (
-                  <span className={`${styles.pill} ${styles.secondary}`}>
-                    {CREATIVE_FORMAT_LABELS[creative.secondaryFormat]}
-                  </span>
-                ) : null}
+                <span className={`${styles.pill} ${styles.secondary}`}>
+                  {CREATIVE_FORMAT_LABELS[creative.format]}
+                </span>
               </div>
               <h3>{creative.copy.headline}</h3>
               <p>{creative.copy.primaryText}</p>
