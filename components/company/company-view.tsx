@@ -3,15 +3,18 @@
 import { useState } from 'react';
 import styles from './company-view.module.css';
 
-type CompanyTab = 'brand-guidelines' | 'knowledge-base';
+type CompanyTab = 'knowledge-base' | 'brand-guidelines' | 'guardrails';
 
 const COMPANY_TABS: Array<{ id: CompanyTab; label: string }> = [
-  { id: 'brand-guidelines', label: 'Brand Guidelines' },
   { id: 'knowledge-base', label: 'Knowledge Base' },
+  { id: 'brand-guidelines', label: 'Brand Guidelines' },
+  { id: 'guardrails', label: 'Guardrails' },
 ];
 
 export function CompanyView() {
-  const [activeTab, setActiveTab] = useState<CompanyTab>('brand-guidelines');
+  const [activeTab, setActiveTab] = useState<CompanyTab>('knowledge-base');
+  const activeLabel =
+    COMPANY_TABS.find((tab) => tab.id === activeTab)?.label || 'Knowledge Base';
 
   return (
     <div className={styles.shell}>
@@ -35,9 +38,7 @@ export function CompanyView() {
         id={`company-panel-${activeTab}`}
         className={styles.panel}
         role="tabpanel"
-        aria-label={
-          activeTab === 'brand-guidelines' ? 'Brand Guidelines' : 'Knowledge Base'
-        }
+        aria-label={activeLabel}
       />
     </div>
   );
