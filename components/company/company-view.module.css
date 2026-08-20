@@ -1,7 +1,7 @@
 .shell {
   width: min(1180px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 38px 0 72px;
+  padding: 40px 0 72px;
 }
 
 .header {
@@ -9,21 +9,24 @@
   justify-content: space-between;
   gap: 32px;
   align-items: flex-start;
-  margin-bottom: 18px;
+  margin-bottom: 24px;
 }
 
 .header h1 {
-  margin: 4px 0 8px;
+  margin: 0 0 8px;
   color: #17212b;
   font-size: 32px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
 }
 
 .eyebrow {
-  margin: 0;
+  margin: 0 0 6px;
   color: #244fd3;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -43,6 +46,7 @@
   display: block;
   color: #17212b;
   font-size: 30px;
+  font-weight: 700;
 }
 
 .overallScore span {
@@ -54,7 +58,7 @@
   overflow: hidden;
   height: 10px;
   border-radius: 999px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
   background: #e9edf2;
 }
 
@@ -81,7 +85,7 @@
 
 .websiteCard {
   padding: 18px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
   border: 1px solid #dfe4ea;
   border-radius: 14px;
   background: #fff;
@@ -107,7 +111,7 @@
   width: 100%;
   box-sizing: border-box;
   border: 1px solid #cfd7df;
-  border-radius: 9px;
+  border-radius: 10px;
   background: #fff;
   color: #17212b;
   font: inherit;
@@ -121,11 +125,11 @@
 .websiteControls button {
   flex: 0 0 auto;
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   padding: 11px 16px;
   background: #244fd3;
   color: #fff;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -150,7 +154,7 @@
   background: transparent;
   padding: 0 0 14px;
   color: #71808f;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -174,7 +178,7 @@
 
 .panel {
   min-height: 480px;
-  padding-top: 28px;
+  padding-top: 24px;
 }
 
 .panelHeading {
@@ -182,13 +186,15 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .panelHeading h2 {
   margin: 0 0 5px;
   color: #17212b;
-  font-size: 22px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .completionPill {
@@ -196,13 +202,13 @@
   border-radius: 999px;
   padding: 6px 10px;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 800;
 }
 
 .fieldGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  gap: 16px;
 }
 
 .field,
@@ -220,7 +226,7 @@
 .fullField > span {
   color: #334252;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .fieldHelp {
@@ -251,11 +257,11 @@
 .logoEditor {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
   min-height: 126px;
   padding: 16px;
   border: 1px solid #dfe4ea;
-  border-radius: 12px;
+  border-radius: 14px;
   background: #fff;
 }
 
@@ -291,10 +297,10 @@
 
 .logoUploadButton,
 .logoRemoveButton {
-  border-radius: 9px;
+  border-radius: 10px;
   padding: 10px 14px;
   font: inherit;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -332,7 +338,7 @@
 @media (max-width: 920px) {
   .shell {
     width: min(100% - 32px, 760px);
-    padding: 30px 0 56px;
+    padding: 32px 0 56px;
   }
 
   .fieldGrid {

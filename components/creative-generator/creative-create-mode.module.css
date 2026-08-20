@@ -1,22 +1,22 @@
 .modeSwitch {
   display: inline-flex;
   gap: 4px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
   border: 1px solid #d7dde5;
-  border-radius: 12px;
+  border-radius: 14px;
   background: #f5f7fa;
   padding: 4px;
 }
 
 .modeButton {
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   background: transparent;
   padding: 8px 12px;
   color: #607080;
   font: inherit;
   font-size: 0.86rem;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -43,7 +43,9 @@
 
 .uploadHeader h2 {
   margin: 4px 0 0;
-  font-size: 1.35rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .creditBadge {
@@ -94,7 +96,7 @@
   padding: 10px 14px;
   color: #ffffff;
   font: inherit;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -115,8 +117,8 @@
 .copyGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 18px;
+  gap: 16px;
+  margin-top: 20px;
 }
 
 .copyGrid label {
@@ -128,7 +130,7 @@
 .copyGrid label > span {
   color: #394858;
   font-size: 0.8rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .copyGrid input,
@@ -152,7 +154,7 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 18px;
+  margin-top: 20px;
 }
 
 .uploadFooter > div {
