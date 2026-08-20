@@ -51,22 +51,27 @@ export function CompanyView() {
   const [websiteInput, setWebsiteInput] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisMessage, setAnalysisMessage] = useState('');
+  const [hasLoadedSavedProfile, setHasLoadedSavedProfile] = useState(false);
 
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (!saved) return;
-      const parsed = JSON.parse(saved) as CompanyProfile;
-      setProfile(parsed);
-      setWebsiteInput(parsed.websiteUrl || '');
+      if (saved) {
+        const parsed = JSON.parse(saved) as CompanyProfile;
+        setProfile(parsed);
+        setWebsiteInput(parsed.websiteUrl || '');
+      }
     } catch {
       // Ignore invalid local browser state and use repository defaults.
+    } finally {
+      setHasLoadedSavedProfile(true);
     }
   }, []);
 
   useEffect(() => {
+    if (!hasLoadedSavedProfile) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-  }, [profile]);
+  }, [hasLoadedSavedProfile, profile]);
 
   const completions = useMemo(
     () => ({
@@ -104,9 +109,7 @@ export function CompanyView() {
       });
       const payload = (await response.json()) as WebsiteAnalysisResponse;
 
-      if (!response.ok) {
-        throw new Error(payload.error || 'Website analysis failed.');
-      }
+      if (!response.ok) throw new Error(payload.error || 'Website analysis failed.');
 
       setProfile((current) =>
         mergeWebsiteProfile(current, payload.sections || {}, payload.websiteUrl)
