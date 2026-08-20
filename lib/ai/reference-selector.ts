@@ -1,13 +1,12 @@
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
-import type { StoredMediaFile } from '@/lib/media/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const MAX_REFERENCE_CANDIDATES = 40;
 
 export interface ReferenceSelectionCandidate {
   item: ReferenceLibraryItem;
-  source: StoredMediaFile;
+  imageUrl: string;
 }
 
 export interface SelectedReferenceCreative extends ReferenceSelectionCandidate {
@@ -53,9 +52,6 @@ const extractOutputText = (payload: unknown) => {
 
   return '';
 };
-
-const imageDataUrl = (source: StoredMediaFile) =>
-  `data:${source.mimeType};base64,${source.buffer.toString('base64')}`;
 
 const newestFirst = (a: ReferenceSelectionCandidate, b: ReferenceSelectionCandidate) =>
   new Date(b.item.addedAt).getTime() - new Date(a.item.addedAt).getTime();
@@ -121,13 +117,13 @@ export async function selectBestReferenceCreatives(args: {
   if (args.requestedCount < 1) return [];
   if (args.candidates.length < args.requestedCount) {
     throw new Error(
-      `Only ${args.candidates.length} usable reference image${args.candidates.length === 1 ? '' : 's'} are available for ${args.requestedCount} requested creatives.`
+      `Only ${args.candidates.length} reference image${args.candidates.length === 1 ? '' : 's'} are available for ${args.requestedCount} requested creatives.`
     );
   }
 
   const pool = buildCandidatePool(args.candidates);
   if (pool.length < args.requestedCount) {
-    throw new Error('There are not enough usable reference images to create this batch.');
+    throw new Error('There are not enough reference images to create this batch.');
   }
 
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
@@ -145,7 +141,7 @@ export async function selectBestReferenceCreatives(args: {
     });
     userContent.push({
       type: 'input_image',
-      image_url: imageDataUrl(candidate.source),
+      image_url: candidate.imageUrl,
       detail: 'low',
     });
   }
@@ -179,8 +175,6 @@ export async function selectBestReferenceCreatives(args: {
             properties: {
               selections: {
                 type: 'array',
-                minItems: args.requestedCount,
-                maxItems: args.requestedCount,
                 items: {
                   type: 'object',
                   properties: {
