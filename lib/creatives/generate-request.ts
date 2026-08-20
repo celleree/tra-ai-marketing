@@ -9,6 +9,9 @@ export type UploadMode = 'tra' | 'reference';
 export type GenerateCreativeRequest = {
   mediaId?: string;
   brandLogoMediaId?: string;
+  brandColors?: string[];
+  brandFontNames?: string[];
+  brandFontSpecimenMediaIds?: string[];
   context: string;
   variationCount: number;
   uploadMode?: UploadMode;
@@ -52,6 +55,16 @@ const FORMAT_BY_CATEGORY: Record<CreativeCategoryId, CreativeFormatId> = {
 };
 
 const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
+const SAFE_HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
+
+const stringArray = (value: unknown, max: number) =>
+  Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, max)
+    : [];
 
 export function validateGenerateCreativeRequest(input: unknown):
   | { success: true; data: ValidGenerateCreativeRequest }
@@ -66,6 +79,14 @@ export function validateGenerateCreativeRequest(input: unknown):
     typeof body.brandLogoMediaId === 'string'
       ? body.brandLogoMediaId.trim()
       : '';
+  const brandColors = stringArray(body.brandColors, 6);
+  const brandFontNames = stringArray(body.brandFontNames, 6).map((name) =>
+    name.slice(0, 100)
+  );
+  const brandFontSpecimenMediaIds = stringArray(
+    body.brandFontSpecimenMediaIds,
+    6
+  );
   const context = typeof body.context === 'string' ? body.context.trim() : '';
   const variationCount =
     typeof body.variationCount === 'number'
@@ -103,11 +124,27 @@ export function validateGenerateCreativeRequest(input: unknown):
     };
   }
 
+  if (brandColors.some((color) => !SAFE_HEX_COLOR.test(color))) {
+    return { success: false, error: 'brandColors contains an invalid color' };
+  }
+
+  if (brandFontSpecimenMediaIds.some((id) => !SAFE_MEDIA_ID.test(id))) {
+    return {
+      success: false,
+      error: 'brandFontSpecimenMediaIds contains an invalid media id',
+    };
+  }
+
   return {
     success: true,
     data: {
       ...(mediaId ? { mediaId } : {}),
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
+      ...(brandColors.length ? { brandColors } : {}),
+      ...(brandFontNames.length ? { brandFontNames } : {}),
+      ...(brandFontSpecimenMediaIds.length
+        ? { brandFontSpecimenMediaIds }
+        : {}),
       context,
       variationCount,
       uploadMode,
