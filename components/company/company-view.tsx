@@ -25,17 +25,17 @@ type WebsiteAnalysisResponse = {
   error?: string;
 };
 
-const STORAGE_KEY = 'tra-company-profile-v1';
+const STORAGE_KEY = 'tra-company-profile-v2';
 
 const COMPANY_TABS: Array<{ id: CompanyTab; label: string }> = [
+  { id: 'knowledgeBase', label: 'Knowledge' },
   { id: 'brandGuidelines', label: 'Brand Guidelines' },
-  { id: 'knowledgeBase', label: 'Knowledge Base' },
   { id: 'guardrails', label: 'Guardrails' },
 ];
 
 const FIELD_SETS = {
-  brandGuidelines: BRAND_GUIDELINE_FIELDS,
   knowledgeBase: KNOWLEDGE_BASE_FIELDS,
+  brandGuidelines: BRAND_GUIDELINE_FIELDS,
   guardrails: GUARDRAIL_FIELDS,
 } as const;
 
@@ -46,7 +46,7 @@ const completionClass = (value: number) => {
 };
 
 export function CompanyView() {
-  const [activeTab, setActiveTab] = useState<CompanyTab>('brandGuidelines');
+  const [activeTab, setActiveTab] = useState<CompanyTab>('knowledgeBase');
   const [profile, setProfile] = useState<CompanyProfile>(DEFAULT_COMPANY_PROFILE);
   const [websiteInput, setWebsiteInput] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
