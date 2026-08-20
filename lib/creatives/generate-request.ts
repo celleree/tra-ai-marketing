@@ -68,11 +68,11 @@ export function validateGenerateCreativeRequest(input: unknown):
   if (
     !Number.isInteger(variationCount) ||
     variationCount < 1 ||
-    variationCount > 15
+    variationCount > 30
   ) {
     return {
       success: false,
-      error: 'variationCount must be an integer between 1 and 15',
+      error: 'variationCount must be an integer between 1 and 30',
     };
   }
 
