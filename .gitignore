@@ -16,6 +16,7 @@ data/private/
 # Local media files
 data/uploads/
 data/generated/
+data/brand-fonts/
 
 # Dependencies and caches
 node_modules/
