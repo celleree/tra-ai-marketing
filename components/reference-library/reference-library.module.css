@@ -142,31 +142,140 @@
   line-height: 1.5;
 }
 
-.library {
+.libraryLayout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
   margin-top: 34px;
+}
+
+.folderPanel {
+  position: sticky;
+  top: 104px;
+  overflow: hidden;
+  border: 1px solid #e0e4e9;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 5px 20px rgba(23, 33, 43, 0.03);
+}
+
+.folderHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #eceff2;
+  padding: 15px 14px 12px;
+}
+
+.folderHeader strong {
+  font-size: 0.85rem;
+}
+
+.folderHeader span {
+  color: #8a95a1;
+  font-size: 0.7rem;
+}
+
+.folderList {
+  display: grid;
+  gap: 2px;
+  padding: 7px;
+}
+
+.folderButton {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  width: 100%;
+  min-height: 39px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  padding: 6px 8px;
+  color: #586573;
+  text-align: left;
+  font-size: 0.77rem;
+}
+
+.folderButton:hover {
+  background: #f5f7f9;
+  color: #17212b;
+}
+
+.folderButtonActive {
+  background: #eef2ff;
+  color: #244fd3;
+  font-weight: 750;
+}
+
+.folderButtonActive:hover {
+  background: #eef2ff;
+  color: #244fd3;
+}
+
+.folderIcon {
+  color: currentColor;
+  font-size: 1rem;
+  opacity: 0.75;
+}
+
+.folderName {
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.folderCount {
+  min-width: 24px;
+  border-radius: 999px;
+  background: #f0f2f5;
+  padding: 3px 6px;
+  color: #7b8692;
+  font-size: 0.67rem;
+  text-align: center;
+}
+
+.folderButtonActive .folderCount {
+  background: #dfe6ff;
+  color: #244fd3;
+}
+
+.library {
+  min-width: 0;
 }
 
 .libraryHeader {
   display: flex;
-  align-items: baseline;
+  min-height: 45px;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 14px;
 }
 
 .libraryHeader h3 {
-  margin: 0;
-  font-size: 1rem;
+  margin: 2px 0 0;
+  font-size: 1.08rem;
 }
 
-.libraryHeader span {
+.libraryHeader > span {
   color: #7c8794;
   font-size: 0.82rem;
 }
 
+.libraryEyebrow {
+  color: #8b95a0;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -187,12 +296,49 @@
 }
 
 .cardFooter {
-  overflow: hidden;
+  display: grid;
+  gap: 10px;
   padding: 11px 12px 12px;
+}
+
+.fileName {
+  overflow: hidden;
   color: #5d6875;
   font-size: 0.78rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.angleControl {
+  display: grid;
+  gap: 5px;
+}
+
+.angleControl span {
+  color: #929ba6;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.angleControl select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid #d9dfe5;
+  border-radius: 8px;
+  outline: none;
+  background: #fafbfc;
+  padding: 0 8px;
+  color: #3d4854;
+  font: inherit;
+  font-size: 0.74rem;
+}
+
+.angleControl select:focus {
+  border-color: #3561e8;
+  box-shadow: 0 0 0 3px rgba(53, 97, 232, 0.08);
 }
 
 .empty {
@@ -214,6 +360,7 @@
 }
 
 .empty span {
+  max-width: 360px;
   font-size: 0.82rem;
 }
 
@@ -223,9 +370,27 @@
   font-size: 1.7rem;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1080px) {
   .grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .libraryLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .folderPanel {
+    position: static;
+  }
+
+  .folderList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -253,14 +418,16 @@
     bottom: 12px;
     left: 18px;
   }
-
-  .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
-@media (max-width: 460px) {
+@media (max-width: 560px) {
+  .folderList,
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .libraryHeader {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
