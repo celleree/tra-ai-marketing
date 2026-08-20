@@ -1,6 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import {
+  applyBrandLogoToCreatives,
+  readStoredBrandLogo,
+} from '@/lib/creatives/brand-logo';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import type { UploadMode } from '@/lib/creatives/generate-request';
 import type { MediaAsset } from '@/lib/media/types';
@@ -54,11 +58,13 @@ export function CreativeGenerator() {
     setCreatives([]);
 
     try {
+      const brandLogo = readStoredBrandLogo();
       const response = await fetch('/api/creatives/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(media ? { mediaId: media.id } : {}),
+          ...(brandLogo ? { brandLogoMediaId: brandLogo.mediaId } : {}),
           uploadMode,
           context: context.trim(),
           variationCount,
@@ -70,7 +76,15 @@ export function CreativeGenerator() {
         throw new Error(payload.error || 'Creative generation failed.');
       }
 
-      setCreatives((payload.creatives || []) as GeneratedCreative[]);
+      let nextCreatives = (payload.creatives || []) as GeneratedCreative[];
+      if (brandLogo && nextCreatives.length) {
+        nextCreatives = await applyBrandLogoToCreatives(
+          nextCreatives,
+          brandLogo.url
+        );
+      }
+
+      setCreatives(nextCreatives);
     } catch (error) {
       setGenerationError(
         error instanceof Error ? error.message : 'Creative generation failed.'

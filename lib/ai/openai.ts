@@ -359,12 +359,23 @@ export async function generateCreativeCopy(
   return copyByIndex;
 }
 
+const logoSafeAreaRules = (reserveLogoArea: boolean) =>
+  reserveLogoArea
+    ? `
+Approved-logo placement:
+- Do NOT draw, imitate, typeset, or invent a TRA logo in the generated image.
+- Leave the upper-left area clear of important text, faces, CTA buttons, and essential imagery: approximately the left 27% of the canvas and top 13% of the canvas.
+- The exact approved TRA logo asset will be composited into that reserved space after image generation. Treat that space as a deliberate brand lockup area.
+`
+    : '';
+
 const buildReferenceImagePrompt = (
   primaryFormat: CreativeFormatId,
   secondaryFormat: CreativeFormatId | undefined,
   context: string,
   copy: CreativeCopy,
-  analysis: CreativeReferenceAnalysis
+  analysis: CreativeReferenceAnalysis,
+  reserveLogoArea: boolean
 ) => `
 Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA), using the attached image as CREATIVE INSPIRATION.
 
@@ -392,12 +403,13 @@ Primary text idea: ${copy.primaryText}
 Description: ${copy.description}
 
 Reference-ad rules:
-- Borrow only the high-level creative mechanism, layout logic, hierarchy, visual rhythm, or presentation idea when useful.
+- Make the attached reference materially visible in the new execution through its high-level layout logic, hierarchy, spacing, visual mechanism, or presentation style.
+- Do not fall back to a generic direct-response template when the attached reference uses a distinct creative structure.
 - Do not recreate the reference verbatim.
 - Do not copy its company name, logo, trademarks, people, exact wording, testimonial, statistics, claims, or other brand identity.
 - Replace the reference advertiser identity with Tax Relief Advocates / TRA.
 - Make the result clearly original and specific to TRA.
-
+${logoSafeAreaRules(reserveLogoArea)}
 TRA guardrails:
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
@@ -412,15 +424,13 @@ const buildTraLibraryImagePrompt = (
   secondaryFormat: CreativeFormatId | undefined,
   context: string,
   copy: CreativeCopy,
-  traAnalysis: CreativeReferenceAnalysis
+  traAnalysis: CreativeReferenceAnalysis,
+  reserveLogoArea: boolean
 ) => `
-Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA) using TWO attached images with DIFFERENT jobs.
+Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
-Attached-image roles, in order:
-1. FIRST IMAGE = existing TRA ad. This is the TRA BRAND/CONTENT ANCHOR only.
-2. SECOND IMAGE = reference-library ad. This is the CREATIVE-EXECUTION ANCHOR only.
-
-The final output must be a NEW TRA ad. Do not simply make another variation of the first image.
+The ONE attached image is the selected REFERENCE-LIBRARY CREATIVE and is the PRIMARY VISUAL-EXECUTION ANCHOR.
+The uploaded TRA source ad is intentionally NOT attached to this image-generation call because its old layout must not compete with the reference. TRA source information is provided below as text analysis only.
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}
 ${
@@ -430,7 +440,7 @@ ${
 }
 User direction: ${context}
 
-TRA source analysis:
+TRA source analysis for brand/content context only:
 Summary: ${traAnalysis.summary}
 TRA identity/message cues worth preserving: ${traAnalysis.preserve.join('; ') || 'Tax Relief Advocates identity'}
 Source elements to avoid repeating or relying on: ${traAnalysis.avoid.join('; ') || 'none'}
@@ -440,15 +450,14 @@ Headline: ${copy.headline}
 Primary text idea: ${copy.primaryText}
 Description: ${copy.description}
 
-Two-image rules:
-- Use the FIRST image to understand that the advertiser is TRA and to carry forward useful TRA brand, service, logo, color, and factual/message cues when appropriate.
-- Do NOT use the FIRST image as the composition template. The new ad must be meaningfully different from it in layout, hierarchy, visual structure, and presentation.
-- Use the SECOND image for creative inspiration: layout logic, composition, hierarchy, spacing, visual mechanism, design treatment, and presentation style.
-- The SECOND image does NOT define the advertiser, factual claims, people, wording, logos, trademarks, or brand identity.
-- Do not copy third-party company names, logos, people, exact wording, testimonials, statistics, results, or protected brand elements from the SECOND image.
-- The final image should feel like TRA using a fresh creative execution inspired by the reference library, not like a lightly edited version of the uploaded TRA ad.
-- Simple changes such as recoloring, moving one text block, swapping one photo, or changing only a headline are not enough.
-
+Reference-driven rules:
+- The attached library reference should materially drive the output's composition family, major visual blocks, hierarchy, spacing, visual mechanism, and presentation treatment.
+- Keep the recognizable high-level creative idea of the reference while rebuilding it as an original TRA ad.
+- Do NOT default back to the uploaded TRA ad's old composition or a generic TRA direct-response layout.
+- Do not merely recolor the reference or swap a headline. Rebuild the execution with TRA copy and identity while retaining the reference's useful structural logic.
+- Do not copy third-party company names, logos, people, exact wording, testimonials, statistics, results, or protected brand elements from the reference.
+- The reference does NOT define factual claims. Use only the approved TRA copy and TRA source analysis supplied here.
+${logoSafeAreaRules(reserveLogoArea)}
 TRA guardrails:
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
@@ -514,6 +523,7 @@ export async function generateReferenceCreativeImage(args: {
   context: string;
   copy: CreativeCopy;
   analysis: CreativeReferenceAnalysis;
+  reserveLogoArea?: boolean;
 }): Promise<Buffer> {
   return generateImageEdit(
     buildReferenceImagePrompt(
@@ -521,20 +531,21 @@ export async function generateReferenceCreativeImage(args: {
       args.secondaryFormat,
       args.context,
       args.copy,
-      args.analysis
+      args.analysis,
+      Boolean(args.reserveLogoArea)
     ),
     [{ source: args.source, fileName: `reference-${args.source.fileName}` }]
   );
 }
 
 export async function generateTraCreativeFromLibraryReference(args: {
-  traSource: StoredMediaFile;
   creativeReference: StoredMediaFile;
   primaryFormat: CreativeFormatId;
   secondaryFormat?: CreativeFormatId;
   context: string;
   copy: CreativeCopy;
   traAnalysis: CreativeReferenceAnalysis;
+  reserveLogoArea?: boolean;
 }): Promise<Buffer> {
   return generateImageEdit(
     buildTraLibraryImagePrompt(
@@ -542,10 +553,10 @@ export async function generateTraCreativeFromLibraryReference(args: {
       args.secondaryFormat,
       args.context,
       args.copy,
-      args.traAnalysis
+      args.traAnalysis,
+      Boolean(args.reserveLogoArea)
     ),
     [
-      { source: args.traSource, fileName: `tra-source-${args.traSource.fileName}` },
       {
         source: args.creativeReference,
         fileName: `library-reference-${args.creativeReference.fileName}`,

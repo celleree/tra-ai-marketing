@@ -8,6 +8,7 @@ export type UploadMode = 'tra' | 'reference';
 
 export type GenerateCreativeRequest = {
   mediaId?: string;
+  brandLogoMediaId?: string;
   context: string;
   variationCount: number;
   uploadMode?: UploadMode;
@@ -50,6 +51,8 @@ const FORMAT_BY_CATEGORY: Record<CreativeCategoryId, CreativeFormatId> = {
   'customer-personas': 'native-social',
 };
 
+const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
+
 export function validateGenerateCreativeRequest(input: unknown):
   | { success: true; data: ValidGenerateCreativeRequest }
   | { success: false; error: string } {
@@ -59,6 +62,10 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   const body = input as Record<string, unknown>;
   const mediaId = typeof body.mediaId === 'string' ? body.mediaId.trim() : '';
+  const brandLogoMediaId =
+    typeof body.brandLogoMediaId === 'string'
+      ? body.brandLogoMediaId.trim()
+      : '';
   const context = typeof body.context === 'string' ? body.context.trim() : '';
   const variationCount =
     typeof body.variationCount === 'number'
@@ -89,10 +96,18 @@ export function validateGenerateCreativeRequest(input: unknown):
     };
   }
 
+  if (brandLogoMediaId && !SAFE_MEDIA_ID.test(brandLogoMediaId)) {
+    return {
+      success: false,
+      error: 'brandLogoMediaId is invalid',
+    };
+  }
+
   return {
     success: true,
     data: {
       ...(mediaId ? { mediaId } : {}),
+      ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
       context,
       variationCount,
       uploadMode,

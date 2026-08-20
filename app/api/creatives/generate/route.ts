@@ -7,12 +7,16 @@ import {
   generateTraCreativeFromLibraryReference,
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
-import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
+import {
+  CREATIVE_CATEGORIES,
+  CREATIVE_CATEGORY_LABELS,
+} from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import {
   buildCreativePlan,
   validateGenerateCreativeRequest,
   type PlannedCreative,
+  type ValidGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
 import { getMediaStorage } from '@/lib/media/local-storage';
@@ -68,6 +72,7 @@ const generatePromptOnlyCreativeImage = async (args: {
   primaryFormat: keyof typeof CREATIVE_FORMAT_LABELS;
   context: string;
   copy: CreativeCopy;
+  reserveLogoArea: boolean;
 }) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -75,6 +80,14 @@ const generatePromptOnlyCreativeImage = async (args: {
   }
 
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+  const logoDirection = args.reserveLogoArea
+    ? `
+Approved-logo placement:
+- Do NOT draw, imitate, typeset, or invent a TRA logo in the generated image.
+- Leave the upper-left area clear of important text, faces, CTA buttons, and essential imagery: approximately the left 27% of the canvas and top 13% of the canvas.
+- The exact approved TRA logo asset will be composited into that reserved space after image generation.
+`
+    : '';
   const prompt = `
 Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
@@ -86,6 +99,7 @@ Headline: ${args.copy.headline}
 Primary text idea: ${args.copy.primaryText}
 Description: ${args.copy.description}
 
+${logoDirection}
 TRA guardrails:
 - This request has no reference image. Invent the visual composition from scratch.
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
@@ -126,6 +140,33 @@ TRA guardrails:
   return Buffer.from(base64, 'base64');
 };
 
+const rotate = <T,>(items: T[]): T[] => {
+  if (items.length < 2) return [...items];
+  const offset = Math.floor(Math.random() * items.length);
+  return [...items.slice(offset), ...items.slice(0, offset)];
+};
+
+const buildReferenceDrivenPlan = (
+  request: ValidGenerateCreativeRequest,
+  library: ReferenceLibraryItem[]
+): PlannedCreative[] => {
+  const availableCategories = CREATIVE_CATEGORIES.filter((category) =>
+    library.some((item) => item.angle === category)
+  );
+  if (!availableCategories.length) return [];
+
+  const orderedCategories = rotate([...availableCategories]);
+  return Array.from({ length: request.variationCount }, (_, offset) => {
+    const category = orderedCategories[offset % orderedCategories.length];
+    const [template] = buildCreativePlan(
+      { ...request, variationCount: 1 },
+      category
+    );
+
+    return { ...template, index: offset + 1 };
+  });
+};
+
 const selectLibraryReferences = async (
   plan: PlannedCreative[],
   storage: MediaStorage,
@@ -134,11 +175,7 @@ const selectLibraryReferences = async (
   const selections = new Map<number, SelectedLibraryReference>();
   if (!library.length) return selections;
 
-  const rotation = Math.floor(Math.random() * library.length);
-  const orderedLibrary = [
-    ...library.slice(rotation),
-    ...library.slice(0, rotation),
-  ];
+  const orderedLibrary = rotate([...library]);
   const usedIds = new Set<string>();
   const sourceCache = new Map<string, Promise<StoredMediaFile | null>>();
 
@@ -151,26 +188,22 @@ const selectLibraryReferences = async (
   };
 
   for (const creative of plan) {
-    const groups = [
-      orderedLibrary.filter(
-        (item) => item.angle === creative.category && !usedIds.has(item.id)
-      ),
-      orderedLibrary.filter((item) => !usedIds.has(item.id)),
-      orderedLibrary.filter((item) => item.angle === creative.category),
-      orderedLibrary,
+    const categoryPool = orderedLibrary.filter(
+      (item) => item.angle === creative.category
+    );
+    const candidates = [
+      ...categoryPool.filter((item) => !usedIds.has(item.id)),
+      ...categoryPool,
     ];
     const seen = new Set<string>();
-    const candidates = groups
-      .flat()
-      .filter((item) => {
-        if (seen.has(item.id)) return false;
-        seen.add(item.id);
-        return true;
-      });
 
     for (const candidate of candidates) {
+      if (seen.has(candidate.id)) continue;
+      seen.add(candidate.id);
+
       const source = await readSource(candidate.id);
       if (!source) continue;
+
       selections.set(creative.index, { item: candidate, source });
       usedIds.add(candidate.id);
       break;
@@ -208,35 +241,41 @@ export async function POST(request: Request) {
       );
     }
 
+    const brandLogo = parsed.data.brandLogoMediaId
+      ? await storage.readImageById(parsed.data.brandLogoMediaId)
+      : null;
+    if (parsed.data.brandLogoMediaId && !brandLogo) {
+      return NextResponse.json(
+        {
+          error:
+            'The saved TRA logo could not be found. Re-upload the logo in Company > Brand Guidelines and try again.',
+        },
+        { status: 404 }
+      );
+    }
+    const reserveLogoArea = Boolean(brandLogo);
+
     let analysis: CreativeReferenceAnalysis;
     let creativePlan: PlannedCreative[];
+    let librarySelections = new Map<number, SelectedLibraryReference>();
 
     if (source && parsed.data.uploadMode === 'reference') {
       analysis = await analyzeReferenceCreative(source, parsed.data.context);
       creativePlan = buildCreativePlan(parsed.data, analysis.dominantCategory);
-    } else {
-      creativePlan = buildCreativePlan(parsed.data);
-      analysis = source
-        ? await analyzeTraSourceCreative(source, parsed.data.context)
-        : buildPromptOnlyAnalysis(parsed.data.context, creativePlan);
-    }
-
-    const categoryDirections = creativePlan
-      .map(
-        (item) =>
-          `Variation ${item.index}: ${CREATIVE_CATEGORY_LABELS[item.category]}`
-      )
-      .join('\n');
-    const modeDirection = source
-      ? parsed.data.uploadMode === 'tra'
-        ? 'TRA ad mode: the uploaded image is the TRA brand/content anchor. Use the reference library for fresh creative execution and do not repeat the uploaded ad layout.'
-        : `Reference ad mode: the uploaded image is creative inspiration. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the concept into original TRA ads.`
-      : 'No-image mode: create original TRA ads from the user direction.';
-    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\nPrimary creative categories:\n${categoryDirections}\n\nTreat each category as the main messaging direction. The format is only the presentation structure.`;
-
-    let librarySelections = new Map<number, SelectedLibraryReference>();
-    if (source && parsed.data.uploadMode === 'tra') {
+    } else if (source && parsed.data.uploadMode === 'tra') {
       const library = await listReferenceLibrary();
+      creativePlan = buildReferenceDrivenPlan(parsed.data, library);
+
+      if (!creativePlan.length) {
+        return NextResponse.json(
+          {
+            error:
+              'TRA ad mode needs categorized images in the Reference Images library before it can build reference-driven concepts.',
+          },
+          { status: 409 }
+        );
+      }
+
       librarySelections = await selectLibraryReferences(
         creativePlan,
         storage,
@@ -247,12 +286,30 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              'TRA ad mode needs at least one usable image in the Reference Images library. Add or re-upload a reference image and try again.',
+              'One or more planned creative categories do not have a usable matching reference image. Re-upload the missing category reference and try again.',
           },
           { status: 409 }
         );
       }
+
+      analysis = await analyzeTraSourceCreative(source, parsed.data.context);
+    } else {
+      creativePlan = buildCreativePlan(parsed.data);
+      analysis = buildPromptOnlyAnalysis(parsed.data.context, creativePlan);
     }
+
+    const categoryDirections = creativePlan
+      .map(
+        (item) =>
+          `Creative ${item.index}: ${CREATIVE_CATEGORY_LABELS[item.category]}`
+      )
+      .join('\n');
+    const modeDirection = source
+      ? parsed.data.uploadMode === 'tra'
+        ? 'TRA ad mode: the uploaded TRA image supplies brand/content context through analysis only. Every generated image uses a category-matched library reference as its visual execution anchor. The uploaded TRA ad itself is not passed into final image generation, so its old layout cannot overpower the reference.'
+        : `Reference ad mode: the uploaded image is creative inspiration. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the concept into original TRA ads.`
+      : 'No-image mode: create original TRA ads from the user direction.';
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\nPrimary creative categories:\n${categoryDirections}\n\nTreat each category as the main messaging direction. The format is only the presentation structure.`;
 
     const copyByIndex = await generateCreativeCopy(
       creativePlan,
@@ -267,7 +324,7 @@ export async function POST(request: Request) {
         batch.map(async (item): Promise<GeneratedCreative> => {
           const copy = copyByIndex.get(item.index);
           if (!copy) {
-            throw new Error(`Missing copy for variation ${item.index}.`);
+            throw new Error(`Missing copy for creative ${item.index}.`);
           }
 
           const itemContext = `${parsed.data.context}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.`;
@@ -278,6 +335,7 @@ export async function POST(request: Request) {
               primaryFormat: item.format,
               context: itemContext,
               copy,
+              reserveLogoArea,
             });
           } else if (parsed.data.uploadMode === 'reference') {
             imageBuffer = await generateReferenceCreativeImage({
@@ -286,21 +344,23 @@ export async function POST(request: Request) {
               context: itemContext,
               copy,
               analysis,
+              reserveLogoArea,
             });
           } else {
             const selectedReference = librarySelections.get(item.index);
             if (!selectedReference) {
               throw new Error(
-                `Missing library reference for variation ${item.index}.`
+                `Missing category-matched library reference for creative ${item.index}.`
               );
             }
+
             imageBuffer = await generateTraCreativeFromLibraryReference({
-              traSource: source,
               creativeReference: selectedReference.source,
               primaryFormat: item.format,
-              context: itemContext,
+              context: `${itemContext}\nThis exact attached image was selected from the ${CREATIVE_CATEGORY_LABELS[item.category]} reference-library category. Its visual execution should materially shape this output.`,
               copy,
               traAnalysis: analysis,
+              reserveLogoArea,
             });
           }
 
@@ -332,6 +392,7 @@ export async function POST(request: Request) {
       analysis,
       uploadMode: source ? parsed.data.uploadMode : null,
       usedReferenceImage: Boolean(source),
+      usedBrandLogo: reserveLogoArea,
       referenceLibrarySelections: Array.from(librarySelections.entries()).map(
         ([index, selection]) => ({
           index,
