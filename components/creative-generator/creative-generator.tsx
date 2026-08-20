@@ -39,8 +39,6 @@ export function CreativeGenerator() {
           mediaId: media.id,
           context: context.trim(),
           variationCount,
-          formatMode: 'diverse',
-          allowSecondaryFormats: true,
         }),
       });
       const payload = await response.json();
@@ -66,7 +64,7 @@ export function CreativeGenerator() {
         <h1>Turn one image into multiple ad concepts.</h1>
         <p className="hero-copy">
           Upload a source image, add a short instruction, then generate multiple
-          TRA ad variations and copy from the same starting point.
+          TRA ad concepts across different messaging categories.
         </p>
       </header>
 
