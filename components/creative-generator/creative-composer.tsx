@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, DragEvent } from 'react';
+import type {
+  ChangeEvent,
+  CSSProperties,
+  DragEvent,
+  KeyboardEvent,
+} from 'react';
 import type { MediaAsset } from '@/lib/media/types';
 import styles from './creative-composer.module.css';
 
@@ -10,6 +15,11 @@ interface CreativeComposerProps {
   onChange: (value: string) => void;
   onUploadStart: () => void;
   onUploaded: (media: MediaAsset) => void;
+  variationCount: number;
+  onVariationCountChange: (value: number) => void;
+  onSubmit: () => void;
+  ready: boolean;
+  generating: boolean;
 }
 
 interface UploadPlan {
@@ -21,12 +31,19 @@ interface UploadPlan {
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const MIN_VARIATIONS = 2;
+const MAX_VARIATIONS = 30;
 
 export function CreativeComposer({
   value,
   onChange,
   onUploadStart,
   onUploaded,
+  variationCount,
+  onVariationCountChange,
+  onSubmit,
+  ready,
+  generating,
 }: CreativeComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
@@ -178,6 +195,27 @@ export function CreativeComposer({
     acceptFile(event.dataTransfer.files?.[0] || null);
   };
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    if (ready && !generating) onSubmit();
+  };
+
+  const sliderProgress =
+    ((variationCount - MIN_VARIATIONS) /
+      (MAX_VARIATIONS - MIN_VARIATIONS)) *
+    100;
+  const sliderStyle = {
+    '--slider-progress': `${sliderProgress}%`,
+  } as CSSProperties;
+
   return (
     <section
       className={`${styles.composer} ${dragActive ? styles.dragging : ''}`}
@@ -214,10 +252,33 @@ export function CreativeComposer({
         className={styles.textarea}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={handleKeyDown}
         rows={7}
         maxLength={4000}
         placeholder="Tell TRA AI what you want to create…"
       />
+
+      <div className={styles.variationControl}>
+        <div className={styles.variationMeta}>
+          <span>Creatives</span>
+          <strong>{variationCount}</strong>
+        </div>
+        <input
+          id="creative-variation-slider"
+          className={styles.variationSlider}
+          type="range"
+          min={MIN_VARIATIONS}
+          max={MAX_VARIATIONS}
+          step={1}
+          value={variationCount}
+          style={sliderStyle}
+          aria-label="Number of creatives to generate"
+          onChange={(event) =>
+            onVariationCountChange(Number(event.target.value))
+          }
+          disabled={generating}
+        />
+      </div>
 
       <div className={styles.toolbar}>
         <div className={styles.tools}>
@@ -239,7 +300,22 @@ export function CreativeComposer({
                 : 'Add an image or drag it here'}
           </span>
         </div>
-        <span className={styles.count}>{value.length}/4000</span>
+
+        <div className={styles.submitGroup}>
+          <span className={styles.count}>{value.length}/4000</span>
+          <button
+            className={styles.sendButton}
+            type="button"
+            aria-label={generating ? 'Generating creatives' : 'Generate creatives'}
+            title="Generate creatives"
+            disabled={!ready || generating}
+            onClick={onSubmit}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M10 15V5M6 9l4-4 4 4" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {dragActive ? (
