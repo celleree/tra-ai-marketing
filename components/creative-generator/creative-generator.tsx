@@ -1,10 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import {
-  applyBrandLogoToCreatives,
-  readStoredBrandLogo,
-} from '@/lib/creatives/brand-logo';
+import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
+import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import type { UploadMode } from '@/lib/creatives/generate-request';
 import type { MediaAsset } from '@/lib/media/types';
@@ -58,13 +56,18 @@ export function CreativeGenerator() {
     setCreatives([]);
 
     try {
-      const brandLogo = readStoredBrandLogo();
+      const brand = readStoredBrandGuidance();
       const response = await fetch('/api/creatives/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(media ? { mediaId: media.id } : {}),
-          ...(brandLogo ? { brandLogoMediaId: brandLogo.mediaId } : {}),
+          ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
+          ...(brand.colors.length ? { brandColors: brand.colors } : {}),
+          ...(brand.fontNames.length ? { brandFontNames: brand.fontNames } : {}),
+          ...(brand.fontSpecimenMediaIds.length
+            ? { brandFontSpecimenMediaIds: brand.fontSpecimenMediaIds }
+            : {}),
           uploadMode,
           context: context.trim(),
           variationCount,
@@ -77,10 +80,10 @@ export function CreativeGenerator() {
       }
 
       let nextCreatives = (payload.creatives || []) as GeneratedCreative[];
-      if (brandLogo && nextCreatives.length) {
+      if (brand.logo && nextCreatives.length) {
         nextCreatives = await applyBrandLogoToCreatives(
           nextCreatives,
-          brandLogo.url
+          brand.logo.url
         );
       }
 
