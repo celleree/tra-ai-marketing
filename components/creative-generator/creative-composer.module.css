@@ -30,7 +30,7 @@
 .attachment {
   display: flex;
   width: fit-content;
-  max-width: calc(100% - 72px);
+  max-width: 100%;
   align-items: center;
   gap: 10px;
   border: 1px solid #e0e5ea;
@@ -81,17 +81,9 @@
   box-shadow: 0 0 0 4px rgba(22, 162, 97, 0.1);
 }
 
-.composerBody {
-  display: grid;
-  min-height: 235px;
-  flex: 1;
-  grid-template-columns: minmax(0, 1fr) 62px;
-  gap: 10px;
-}
-
 .textarea {
   width: 100%;
-  min-height: 235px;
+  min-height: 220px;
   flex: 1;
   resize: none;
   border: 0;
@@ -109,119 +101,112 @@
 
 .variationControl {
   display: flex;
-  min-height: 230px;
+  width: fit-content;
   align-items: center;
-  flex-direction: column;
-  padding: 11px 0 6px 10px;
-  border-left: 1px solid #eef1f4;
-  color: #6f7a86;
+  gap: 10px;
+  align-self: flex-end;
+  margin: 0 2px 10px 0;
 }
 
-.variationValue {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid #d9dfe6;
-  border-radius: 11px;
-  background: #f7f8fa;
+.variationMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #7b8794;
+}
+
+.variationMeta span {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.variationMeta strong {
+  min-width: 20px;
   color: #17212b;
   font-size: 0.82rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-}
-
-.variationLabel {
-  margin-top: 5px;
-  color: #8a95a1;
-  font-size: 0.61rem;
-  font-weight: 750;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.rangeEndpoint {
-  color: #98a1ab;
-  font-size: 0.66rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.rangeEndpoint:first-of-type {
-  margin-top: 9px;
-}
-
-.sliderWrap {
-  display: grid;
-  width: 28px;
-  min-height: 145px;
-  flex: 1;
-  place-items: center;
-  overflow: visible;
+  text-align: right;
 }
 
 .variationSlider {
-  width: 150px;
+  width: 196px;
   height: 28px;
   margin: 0;
   appearance: none;
-  transform: rotate(-90deg);
   border: 0;
-  outline: 0;
+  border-radius: 999px;
+  outline: none;
   background: transparent;
   cursor: pointer;
 }
 
 .variationSlider::-webkit-slider-runnable-track {
-  height: 4px;
+  height: 24px;
   border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    #17212b 0%,
-    #17212b var(--slider-progress),
-    #e4e8ec var(--slider-progress),
-    #e4e8ec 100%
-  );
+  background:
+    radial-gradient(circle at 7% 50%, rgba(255, 255, 255, 0.36) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 29% 50%, rgba(255, 255, 255, 0.3) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 51% 50%, rgba(255, 255, 255, 0.3) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 73% 50%, rgba(255, 255, 255, 0.28) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 94% 50%, rgba(255, 255, 255, 0.28) 0 2px, transparent 2.4px),
+    linear-gradient(
+      to right,
+      #0285ff 0%,
+      #0285ff var(--slider-progress),
+      #4a4a4a var(--slider-progress),
+      #4a4a4a 100%
+    );
 }
 
 .variationSlider::-webkit-slider-thumb {
-  width: 16px;
-  height: 16px;
-  margin-top: -6px;
+  width: 28px;
+  height: 28px;
+  margin-top: -2px;
   appearance: none;
-  border: 3px solid #ffffff;
+  border: 0;
   border-radius: 50%;
-  background: #17212b;
-  box-shadow: 0 1px 4px rgba(23, 33, 43, 0.28);
+  background: #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
 }
 
 .variationSlider::-moz-range-track {
-  height: 4px;
+  height: 24px;
+  border: 0;
   border-radius: 999px;
-  background: #e4e8ec;
+  background:
+    radial-gradient(circle at 7% 50%, rgba(255, 255, 255, 0.36) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 29% 50%, rgba(255, 255, 255, 0.3) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 51% 50%, rgba(255, 255, 255, 0.3) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 73% 50%, rgba(255, 255, 255, 0.28) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 94% 50%, rgba(255, 255, 255, 0.28) 0 2px, transparent 2.4px),
+    #4a4a4a;
 }
 
 .variationSlider::-moz-range-progress {
-  height: 4px;
+  height: 24px;
+  border: 0;
   border-radius: 999px;
-  background: #17212b;
+  background: #0285ff;
 }
 
 .variationSlider::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
-  border: 3px solid #ffffff;
+  width: 28px;
+  height: 28px;
+  border: 0;
   border-radius: 50%;
-  background: #17212b;
-  box-shadow: 0 1px 4px rgba(23, 33, 43, 0.28);
+  background: #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
 }
 
-.variationSlider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 4px rgba(53, 97, 232, 0.16), 0 1px 4px rgba(23, 33, 43, 0.28);
+.variationSlider:focus-visible {
+  outline: 3px solid rgba(2, 133, 255, 0.2);
+  outline-offset: 3px;
 }
 
 .variationSlider:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.5;
 }
 
 .toolbar {
@@ -345,45 +330,24 @@
 
 @media (max-width: 620px) {
   .composer {
-    min-height: 340px;
+    min-height: 330px;
     border-radius: 18px;
     padding: 14px;
   }
 
-  .attachment {
-    max-width: calc(100% - 56px);
-  }
-
-  .composerBody {
-    grid-template-columns: minmax(0, 1fr) 52px;
-    gap: 6px;
-  }
-
   .textarea {
-    min-height: 210px;
+    min-height: 190px;
     padding-top: 14px;
   }
 
   .variationControl {
-    min-height: 205px;
-    padding-left: 6px;
-  }
-
-  .variationValue {
-    width: 30px;
-    height: 30px;
-  }
-
-  .variationLabel {
-    display: none;
-  }
-
-  .sliderWrap {
-    min-height: 130px;
+    width: 100%;
+    justify-content: flex-end;
+    margin-right: 0;
   }
 
   .variationSlider {
-    width: 132px;
+    width: min(196px, 58vw);
   }
 
   .hint {
