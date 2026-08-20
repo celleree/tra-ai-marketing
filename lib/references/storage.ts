@@ -6,8 +6,15 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import {
+  isCreativeCategory,
+  type CreativeCategoryId,
+} from '@/lib/creative-categories';
 import type { MediaAsset } from '@/lib/media/types';
-import type { ReferenceLibraryItem } from '@/lib/references/types';
+import type {
+  ReferenceAngleSource,
+  ReferenceLibraryItem,
+} from '@/lib/references/types';
 
 const INDEX_KEY = '_metadata/reference-library.json';
 const LOCAL_INDEX_PATH = resolve(
@@ -16,11 +23,23 @@ const LOCAL_INDEX_PATH = resolve(
 );
 
 interface ReferenceLibraryIndex {
-  version: 1;
+  version: 2;
   items: ReferenceLibraryItem[];
 }
 
-const emptyIndex = (): ReferenceLibraryIndex => ({ version: 1, items: [] });
+export interface ReferenceLibraryAddition {
+  media: MediaAsset;
+  angle: CreativeCategoryId;
+  angleSource: ReferenceAngleSource;
+}
+
+const emptyIndex = (): ReferenceLibraryIndex => ({ version: 2, items: [] });
+const ANGLE_SOURCES: ReferenceAngleSource[] = [
+  'ai',
+  'manual',
+  'legacy',
+  'fallback',
+];
 
 const isMissingObjectError = (error: unknown) =>
   error instanceof NoSuchKey ||
@@ -30,12 +49,55 @@ const isMissingObjectError = (error: unknown) =>
       ('Code' in error && error.Code === 'NoSuchKey') ||
       ('code' in error && error.code === 'NoSuchKey')));
 
+const normalizeItem = (value: unknown): ReferenceLibraryItem | null => {
+  if (!value || typeof value !== 'object') return null;
+  const item = value as Record<string, unknown>;
+
+  const id = typeof item.id === 'string' ? item.id : '';
+  const fileName = typeof item.fileName === 'string' ? item.fileName : '';
+  const originalName =
+    typeof item.originalName === 'string' ? item.originalName : 'reference';
+  const mimeType = typeof item.mimeType === 'string' ? item.mimeType : '';
+  const size = typeof item.size === 'number' ? item.size : Number(item.size);
+  const url = typeof item.url === 'string' ? item.url : '';
+  const addedAt =
+    typeof item.addedAt === 'string' ? item.addedAt : new Date(0).toISOString();
+  const angle =
+    typeof item.angle === 'string' && isCreativeCategory(item.angle)
+      ? item.angle
+      : 'customer-problems';
+  const angleSource =
+    typeof item.angleSource === 'string' &&
+    ANGLE_SOURCES.includes(item.angleSource as ReferenceAngleSource)
+      ? (item.angleSource as ReferenceAngleSource)
+      : 'legacy';
+
+  if (!id || !fileName || !mimeType || !url || !Number.isFinite(size)) {
+    return null;
+  }
+
+  return {
+    id,
+    fileName,
+    originalName,
+    mimeType: mimeType as MediaAsset['mimeType'],
+    size,
+    url,
+    addedAt,
+    angle,
+    angleSource,
+  };
+};
+
 const parseIndex = (raw: string): ReferenceLibraryIndex => {
   try {
-    const parsed = JSON.parse(raw) as Partial<ReferenceLibraryIndex>;
+    const parsed = JSON.parse(raw) as { items?: unknown };
+    const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
     return {
-      version: 1,
-      items: Array.isArray(parsed.items) ? parsed.items : [],
+      version: 2,
+      items: rawItems
+        .map(normalizeItem)
+        .filter((item): item is ReferenceLibraryItem => Boolean(item)),
     };
   } catch {
     return emptyIndex();
@@ -136,20 +198,46 @@ export const listReferenceLibrary = async (): Promise<ReferenceLibraryItem[]> =>
 };
 
 export const addToReferenceLibrary = async (
-  media: MediaAsset[]
+  additions: ReferenceLibraryAddition[]
 ): Promise<ReferenceLibraryItem[]> => {
   const index = await readIndex();
   const existingIds = new Set(index.items.map((item) => item.id));
   const addedAt = new Date().toISOString();
-  const additions = media
-    .filter((item) => !existingIds.has(item.id))
-    .map((item) => ({ ...item, addedAt }));
+  const nextItems = additions
+    .filter(({ media }) => !existingIds.has(media.id))
+    .map(({ media, angle, angleSource }) => ({
+      ...media,
+      addedAt,
+      angle,
+      angleSource,
+    }));
 
   const nextIndex: ReferenceLibraryIndex = {
-    version: 1,
-    items: [...additions, ...index.items],
+    version: 2,
+    items: [...nextItems, ...index.items],
   };
 
   await writeIndex(nextIndex);
   return nextIndex.items;
+};
+
+export const updateReferenceAngle = async (
+  id: string,
+  angle: CreativeCategoryId
+): Promise<ReferenceLibraryItem[]> => {
+  const index = await readIndex();
+  let found = false;
+
+  const items = index.items.map((item) => {
+    if (item.id !== id) return item;
+    found = true;
+    return { ...item, angle, angleSource: 'manual' as const };
+  });
+
+  if (!found) {
+    throw new Error('Reference image was not found.');
+  }
+
+  await writeIndex({ version: 2, items });
+  return items;
 };
