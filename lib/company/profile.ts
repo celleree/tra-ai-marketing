@@ -13,38 +13,130 @@ export interface CompanyProfile {
 }
 
 export const KNOWLEDGE_BASE_FIELDS = [
-  { key: 'companySummary', label: 'Company summary', multiline: true },
-  { key: 'servicesOffers', label: 'Services & offers', multiline: true },
-  { key: 'targetCustomers', label: 'Target customers', multiline: true },
-  { key: 'customerProblems', label: 'Customer problems', multiline: true },
-  { key: 'desiredOutcomes', label: 'Desired outcomes', multiline: true },
-  { key: 'differentiators', label: 'Differentiators', multiline: true },
-  { key: 'proof', label: 'Proof', multiline: true },
-  { key: 'faqsFacts', label: 'FAQs & important facts', multiline: true },
+  {
+    key: 'companySummary',
+    label: 'Company summary',
+    description: 'What the company does and where it operates.',
+    multiline: true,
+  },
+  {
+    key: 'servicesOffers',
+    label: 'Services & offers',
+    description: 'Services, pricing or offers, CTA, and how it works.',
+    multiline: true,
+  },
+  {
+    key: 'targetCustomers',
+    label: 'Target customers',
+    description: 'Who the company serves and its key personas.',
+    multiline: true,
+  },
+  {
+    key: 'customerProblems',
+    label: 'Customer problems',
+    description: 'Pain points, fears, and frustrations.',
+    multiline: true,
+  },
+  {
+    key: 'desiredOutcomes',
+    label: 'Desired outcomes',
+    description: 'What customers want to achieve or feel.',
+    multiline: true,
+  },
+  {
+    key: 'differentiators',
+    label: 'Differentiators',
+    description: 'Why a customer should choose this company.',
+    multiline: true,
+  },
+  {
+    key: 'proof',
+    label: 'Proof',
+    description: 'Reviews, testimonials, credentials, and important statistics.',
+    multiline: true,
+  },
+  {
+    key: 'faqsFacts',
+    label: 'FAQs & important facts',
+    description: 'Useful information the AI should know.',
+    multiline: true,
+  },
 ] as const;
 
 export const BRAND_GUIDELINE_FIELDS = [
-  { key: 'logo', label: 'Logo', multiline: false },
-  { key: 'brandColors', label: 'Brand colors', multiline: true },
-  { key: 'fonts', label: 'Fonts', multiline: true },
-  { key: 'voiceTone', label: 'Voice & tone', multiline: true },
-  { key: 'visualStyle', label: 'Visual style', multiline: true },
-  { key: 'copyStyle', label: 'Copy style', multiline: true },
+  {
+    key: 'logo',
+    label: 'Logo',
+    description: 'Primary logo asset or approved logo reference.',
+    multiline: false,
+  },
+  {
+    key: 'brandColors',
+    label: 'Brand colors',
+    description: 'Approved brand colors and color values when known.',
+    multiline: true,
+  },
+  {
+    key: 'fonts',
+    label: 'Fonts',
+    description: 'Approved brand fonts or typography guidance.',
+    multiline: true,
+  },
+  {
+    key: 'voiceTone',
+    label: 'Voice & tone',
+    description: 'Professional, conversational, empathetic, direct, or other voice traits.',
+    multiline: true,
+  },
+  {
+    key: 'visualStyle',
+    label: 'Visual style',
+    description: 'Photography, graphics, people, and the overall aesthetic.',
+    multiline: true,
+  },
+  {
+    key: 'copyStyle',
+    label: 'Copy style',
+    description: 'Headline style, CTA style, and words or phrases the brand likes.',
+    multiline: true,
+  },
 ] as const;
 
 export const GUARDRAIL_FIELDS = [
-  { key: 'neverSay', label: 'Never say', multiline: true },
-  { key: 'approvedClaims', label: 'Approved claims', multiline: true },
-  { key: 'claimsRequiringProof', label: 'Claims requiring proof/review', multiline: true },
-  { key: 'requiredDisclaimers', label: 'Required disclaimers', multiline: true },
+  {
+    key: 'neverSay',
+    label: 'Never say',
+    description: 'Prohibited words, claims, and promises.',
+    multiline: true,
+  },
+  {
+    key: 'approvedClaims',
+    label: 'Approved claims',
+    description: 'Things the AI is explicitly allowed to say.',
+    multiline: true,
+  },
+  {
+    key: 'claimsRequiringProof',
+    label: 'Claims requiring proof/review',
+    description: 'Claims that need evidence or human review before use.',
+    multiline: true,
+  },
+  {
+    key: 'requiredDisclaimers',
+    label: 'Required disclaimers',
+    description: 'Disclaimer language that must appear when applicable.',
+    multiline: true,
+  },
   {
     key: 'testimonialsStatisticsRules',
     label: 'Testimonials & statistics rules',
+    description: 'What testimonial and statistical evidence can actually be used.',
     multiline: true,
   },
   {
     key: 'industryComplianceRules',
     label: 'Industry/compliance rules',
+    description: 'IRS/government affiliation and tax-relief-specific restrictions.',
     multiline: true,
   },
 ] as const;
@@ -55,7 +147,7 @@ export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   websiteUrl: '',
   knowledgeBase: {
     companySummary:
-      'Tax Relief Advocates (TRA) is a tax-relief service business that helps people dealing with IRS and tax problems.',
+      'Tax Relief Advocates (TRA) is a U.S. tax-relief service business that helps people dealing with IRS and tax problems.',
     servicesOffers: '',
     targetCustomers:
       'People dealing with IRS or tax problems, including overwhelmed taxpayers, skeptical buyers, people who tried handling a tax issue themselves, people who received an unexpected IRS notice, and people seeking clearer next steps.',
