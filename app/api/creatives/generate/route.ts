@@ -22,7 +22,6 @@ import {
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
 import { getMediaStorage } from '@/lib/media/local-storage';
-import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
@@ -31,6 +30,10 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+
+interface SelectedLibraryReference extends SelectedReferenceCreative {
+  source: StoredMediaFile;
+}
 
 const getOpenAIError = async (response: Response) => {
   try {
@@ -137,23 +140,37 @@ TRA guardrails:
   return Buffer.from(base64, 'base64');
 };
 
-const readReferenceCandidates = async (
-  storage: MediaStorage,
-  library: ReferenceLibraryItem[]
-): Promise<ReferenceSelectionCandidate[]> => {
-  const candidates: ReferenceSelectionCandidate[] = [];
+const buildReferenceCandidates = (
+  library: ReferenceLibraryItem[],
+  requestUrl: string
+): ReferenceSelectionCandidate[] =>
+  library.map((item) => ({
+    item,
+    imageUrl: new URL(item.url, requestUrl).toString(),
+  }));
 
-  for (const item of library) {
-    const source = await storage.readImageById(item.id);
-    if (source) candidates.push({ item, source });
+const hydrateSelectedReferences = async (
+  selections: SelectedReferenceCreative[]
+): Promise<SelectedLibraryReference[]> => {
+  const storage = getMediaStorage();
+  const hydrated: SelectedLibraryReference[] = [];
+
+  for (const selection of selections) {
+    const source = await storage.readImageById(selection.item.id);
+    if (!source) {
+      throw new Error(
+        `Selected reference ${selection.item.id} could not be loaded from media storage.`
+      );
+    }
+    hydrated.push({ ...selection, source });
   }
 
-  return candidates;
+  return hydrated;
 };
 
 const buildPlanFromSelectedReferences = (
   request: ValidGenerateCreativeRequest,
-  selections: SelectedReferenceCreative[]
+  selections: SelectedLibraryReference[]
 ): PlannedCreative[] =>
   selections.map((selection, offset) => {
     const [template] = buildCreativePlan(
@@ -207,8 +224,8 @@ export async function POST(request: Request) {
 
     let analysis: CreativeReferenceAnalysis;
     let creativePlan: PlannedCreative[];
-    let selectedReferences: SelectedReferenceCreative[] = [];
-    let librarySelections = new Map<number, SelectedReferenceCreative>();
+    let selectedReferences: SelectedLibraryReference[] = [];
+    let librarySelections = new Map<number, SelectedLibraryReference>();
 
     if (source && parsed.data.uploadMode === 'reference') {
       analysis = await analyzeReferenceCreative(source, parsed.data.context);
@@ -217,33 +234,23 @@ export async function POST(request: Request) {
       analysis = await analyzeTraSourceCreative(source, parsed.data.context);
 
       const library = await listReferenceLibrary();
-      if (!library.length) {
+      if (library.length < parsed.data.variationCount) {
         return NextResponse.json(
           {
-            error:
-              'TRA ad mode needs images in the Reference Images library before it can build reference-driven concepts.',
+            error: `TRA ad mode needs at least ${parsed.data.variationCount} reference images to create ${parsed.data.variationCount} separate reference remakes. Only ${library.length} are currently available.`,
           },
           { status: 409 }
         );
       }
 
-      const candidates = await readReferenceCandidates(storage, library);
-      if (candidates.length < parsed.data.variationCount) {
-        return NextResponse.json(
-          {
-            error: `TRA ad mode needs at least ${parsed.data.variationCount} usable reference images to create ${parsed.data.variationCount} separate reference remakes. Only ${candidates.length} are currently usable.`,
-          },
-          { status: 409 }
-        );
-      }
-
-      selectedReferences = await selectBestReferenceCreatives({
-        candidates,
+      const chosen = await selectBestReferenceCreatives({
+        candidates: buildReferenceCandidates(library, request.url),
         requestedCount: parsed.data.variationCount,
         userContext: parsed.data.context,
         traSummary: analysis.summary,
         traPreserve: analysis.preserve,
       });
+      selectedReferences = await hydrateSelectedReferences(chosen);
       creativePlan = buildPlanFromSelectedReferences(parsed.data, selectedReferences);
       librarySelections = new Map(
         selectedReferences.map((selection, index) => [index + 1, selection])
