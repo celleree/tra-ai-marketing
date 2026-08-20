@@ -11,7 +11,6 @@ export type GenerateCreativeRequest = {
   brandLogoMediaId?: string;
   brandColors?: string[];
   brandFontNames?: string[];
-  brandFontSpecimenMediaIds?: string[];
   context: string;
   variationCount: number;
   uploadMode?: UploadMode;
@@ -81,11 +80,7 @@ export function validateGenerateCreativeRequest(input: unknown):
       : '';
   const brandColors = stringArray(body.brandColors, 6);
   const brandFontNames = stringArray(body.brandFontNames, 6).map((name) =>
-    name.slice(0, 100)
-  );
-  const brandFontSpecimenMediaIds = stringArray(
-    body.brandFontSpecimenMediaIds,
-    6
+    name.slice(0, 500)
   );
   const context = typeof body.context === 'string' ? body.context.trim() : '';
   const variationCount =
@@ -128,13 +123,6 @@ export function validateGenerateCreativeRequest(input: unknown):
     return { success: false, error: 'brandColors contains an invalid color' };
   }
 
-  if (brandFontSpecimenMediaIds.some((id) => !SAFE_MEDIA_ID.test(id))) {
-    return {
-      success: false,
-      error: 'brandFontSpecimenMediaIds contains an invalid media id',
-    };
-  }
-
   return {
     success: true,
     data: {
@@ -142,9 +130,6 @@ export function validateGenerateCreativeRequest(input: unknown):
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),
-      ...(brandFontSpecimenMediaIds.length
-        ? { brandFontSpecimenMediaIds }
-        : {}),
       context,
       variationCount,
       uploadMode,
