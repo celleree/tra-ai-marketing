@@ -58,8 +58,10 @@ Do not expose this token to the browser and do not commit it to the repository.
 For the demo account, the token must belong to a Meta user/system user with access to the chosen ad account and Page and with the permissions needed for the operations above. The practical first-version permission set is:
 - `ads_management` for creating ad images, creatives, and ads
 - `pages_show_list` for listing Pages available to the token
+- `pages_manage_ads` for creating ads/creatives tied to the selected Facebook Page
 - `ads_read` may also be requested for read-only advertising access; `ads_management` is still required for creation
 - `business_management` is only needed when the selected Business Manager/system-user setup requires business-asset access; do not require it globally when the demo account does not need it
+- `pages_read_engagement` is not required by this first-version workflow unless we later read or reuse existing Page posts/content
 
 Use Meta's Access Token Debugger / Business settings to verify the token's scopes and asset access. User access tokens expire; for a durable internal integration, move to the appropriate Business Manager system-user/token setup once TRA's real Meta Business is connected.
 
