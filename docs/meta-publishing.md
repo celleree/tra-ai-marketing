@@ -55,6 +55,8 @@ The Graph/Marketing API version is configurable with `META_GRAPH_API_VERSION` an
 
 Do not expose this token to the browser and do not commit it to the repository.
 
+For preview testing, store `META_ACCESS_TOKEN` in the Vercel Preview environment and create a fresh preview deployment after adding or changing the value so the deployment receives the updated secret.
+
 For the demo account, the token must belong to a Meta user/system user with access to the chosen ad account and Page and with the permissions needed for the operations above. The practical first-version permission set is:
 - `ads_management` for creating ad images, creatives, and ads
 - `pages_show_list` for listing Pages available to the token
