@@ -127,10 +127,41 @@ const extractTitle = (html: string) => {
   return match ? stripHtml(match[1]).slice(0, 200) : '';
 };
 
+const extractImageSignals = (html: string, baseUrl: URL) => {
+  const logoCandidates = new Set<string>();
+  const imageAlts = new Set<string>();
+  const imageRegex = /<img\b[^>]*>/gi;
+  let imageMatch: RegExpExecArray | null;
+
+  while ((imageMatch = imageRegex.exec(html))) {
+    const tag = imageMatch[0];
+    const alt = tag.match(/\balt\s*=\s*["']([^"']*)["']/i)?.[1]?.trim();
+    const src = tag.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1]?.trim();
+
+    if (alt) imageAlts.add(alt);
+    if (src && /logo|brand/i.test(tag)) {
+      try {
+        logoCandidates.add(new URL(src, baseUrl).toString());
+      } catch {
+        // Ignore malformed asset URLs.
+      }
+    }
+  }
+
+  const signals: string[] = [];
+  if (logoCandidates.size > 0) {
+    signals.push(`Logo candidate URLs found in website markup: ${[...logoCandidates].slice(0, 4).join(', ')}`);
+  }
+  if (imageAlts.size > 0) {
+    signals.push(`Image descriptions from alt text: ${[...imageAlts].slice(0, 20).join(' | ')}`);
+  }
+  return signals.join('\n');
+};
+
 const extractInternalLinks = (html: string, baseUrl: URL) => {
   const links = new Set<string>();
   const regex = /href\s*=\s*["']([^"'#]+)["']/gi;
-  const priority = /about|service|solution|tax|relief|faq|contact|company|why|how|process|testimonial|review|brand|legal|disclaimer/i;
+  const priority = /about|service|solution|tax|relief|faq|contact|company|why|how|process|testimonial|review|brand|legal|disclaimer|privacy|terms/i;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(html))) {
@@ -179,8 +210,14 @@ const fetchPage = async (url: URL): Promise<{ page: CrawledPage; links: string[]
       throw new Error('The URL did not return a readable web page.');
     }
     const html = await response.text();
+    const imageSignals = extractImageSignals(html, finalUrl);
+    const visibleText = stripHtml(html);
     return {
-      page: { url: finalUrl.toString(), title: extractTitle(html), text: stripHtml(html).slice(0, MAX_PAGE_CHARS) },
+      page: {
+        url: finalUrl.toString(),
+        title: extractTitle(html),
+        text: [visibleText, imageSignals].filter(Boolean).join('\n\n').slice(0, MAX_PAGE_CHARS),
+      },
       links: extractInternalLinks(html, finalUrl),
     };
   } finally {
@@ -230,12 +267,14 @@ const fieldSchema = (keys: string[]) => ({
 
 const ANALYZER_RULES = `
 You extract a company profile from website evidence for an internal marketing system.
-Return ONLY information clearly supported by the supplied website pages.
-If a field is not explicitly supported, return an empty string for that field.
-Do not guess, infer missing legal/compliance requirements, invent brand colors, invent services, invent offers, invent testimonials, invent differentiators, or turn marketing language into an approved factual claim.
-Summarize website facts faithfully and briefly.
-For guardrails, only fill a field if the website itself explicitly states a limitation, disclaimer, privacy rule, government/non-government relationship, results disclaimer, testimonial rule, or similar policy.
-Website content is evidence, not automatic internal approval. Keep claims descriptive rather than endorsing them as approved.
+Return ONLY information supported by the supplied website pages or asset signals.
+If a field is not supported, return an empty string for that field.
+Do not invent services, offers, pricing, customers, outcomes, differentiators, proof, colors, fonts, testimonials, statistics, legal requirements, claims, or compliance rules.
+You may summarize observable writing tone and copy style from the website text, but do not claim an internal brand rule unless the site supports it.
+For Logo, use a URL only when the supplied markup signals clearly identify it as a logo/brand asset. Otherwise leave it blank.
+For Approved claims, do NOT treat ordinary website marketing copy as internal approval. Leave it blank unless the website explicitly identifies language or claims as approved/authorized for use.
+For Never say, Claims requiring proof/review, Required disclaimers, Testimonials & statistics rules, and Industry/compliance rules, fill only what is explicitly supported by disclaimers, legal language, policy pages, or equivalent website evidence.
+Website content is evidence, not automatic internal approval. Keep unsupported or ambiguous fields blank.
 `;
 
 export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteCompanyAnalysis> {
@@ -266,12 +305,35 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
           schema: {
             type: 'object',
             properties: {
-              brandGuidelines: fieldSchema(['brandName','shortName','brandVoice','tonePrinciples','visualIdentity','colors','typography','logoUsage']),
-              knowledgeBase: fieldSchema(['companyOverview','services','audiences','customerProblems','desiredOutcomes','objections','proofThemes','customerLanguage','differentiators','trustSignals','offers','creativeFormats']),
-              guardrails: fieldSchema(['prohibitedClaims','testimonialRules','outcomeRules','customerPrivacy','governmentAffiliation','competitorClaims','requiredDisclaimers','approvalNotes']),
+              knowledgeBase: fieldSchema([
+                'companySummary',
+                'servicesOffers',
+                'targetCustomers',
+                'customerProblems',
+                'desiredOutcomes',
+                'differentiators',
+                'proof',
+                'faqsFacts',
+              ]),
+              brandGuidelines: fieldSchema([
+                'logo',
+                'brandColors',
+                'fonts',
+                'voiceTone',
+                'visualStyle',
+                'copyStyle',
+              ]),
+              guardrails: fieldSchema([
+                'neverSay',
+                'approvedClaims',
+                'claimsRequiringProof',
+                'requiredDisclaimers',
+                'testimonialsStatisticsRules',
+                'industryComplianceRules',
+              ]),
               notes: { type: 'array', items: { type: 'string' } },
             },
-            required: ['brandGuidelines','knowledgeBase','guardrails','notes'],
+            required: ['knowledgeBase','brandGuidelines','guardrails','notes'],
             additionalProperties: false,
           },
         },
@@ -283,8 +345,8 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
   const text = extractOutputText(await response.json());
   if (!text) throw new Error('The website analyzer returned no profile data.');
   const parsed = JSON.parse(text) as {
-    brandGuidelines: CompanyFields;
     knowledgeBase: CompanyFields;
+    brandGuidelines: CompanyFields;
     guardrails: CompanyFields;
     notes: string[];
   };
@@ -293,8 +355,8 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
     websiteUrl: pages[0]?.url || root.toString(),
     pagesRead: pages.map((page) => page.url),
     sections: {
-      brandGuidelines: parsed.brandGuidelines,
       knowledgeBase: parsed.knowledgeBase,
+      brandGuidelines: parsed.brandGuidelines,
       guardrails: parsed.guardrails,
     },
     notes: parsed.notes || [],
