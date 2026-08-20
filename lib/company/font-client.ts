@@ -69,6 +69,19 @@ export async function createBrandFontSpecimen(
   return payload as MediaAsset;
 }
 
+export async function analyzeBrandFontSpecimen(mediaId: string) {
+  const response = await fetch('/api/company/fonts/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mediaId }),
+  });
+  const payload = await response.json();
+  if (!response.ok || typeof payload.description !== 'string') {
+    throw new Error(payload.error || 'The font style could not be analyzed.');
+  }
+  return payload.description as string;
+}
+
 export async function loadBrandFontFace(asset: BrandFontAsset) {
   const family = `tra-font-${asset.id}`;
   const fontFace = new FontFace(family, `url("${asset.url}")`);
