@@ -50,20 +50,15 @@
   font-size: 13px;
 }
 
-.overallProgress,
-.smallTrack {
-  overflow: hidden;
-  background: #e9edf2;
-}
-
 .overallProgress {
+  overflow: hidden;
   height: 10px;
   border-radius: 999px;
   margin-bottom: 28px;
+  background: #e9edf2;
 }
 
-.progressFill,
-.smallFill {
+.progressFill {
   display: block;
   height: 100%;
   transition: width 180ms ease;
@@ -85,25 +80,13 @@
 }
 
 .websiteCard {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.8fr);
-  gap: 20px 28px;
-  align-items: end;
-  padding: 22px;
-  margin-bottom: 24px;
+  padding: 18px;
+  margin-bottom: 28px;
   border: 1px solid #dfe4ea;
   border-radius: 14px;
   background: #fff;
 }
 
-.websiteCopy label {
-  display: block;
-  margin-bottom: 6px;
-  color: #17212b;
-  font-weight: 800;
-}
-
-.websiteCopy p,
 .analysisMessage,
 .panelHeading p {
   margin: 0;
@@ -115,6 +98,7 @@
 .websiteControls {
   display: flex;
   gap: 10px;
+  width: 100%;
 }
 
 .websiteControls input,
@@ -151,47 +135,7 @@
 }
 
 .analysisMessage {
-  grid-column: 1 / -1;
-  padding-top: 2px;
-}
-
-.tabSummary {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 28px;
-}
-
-.summaryCard {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  text-align: left;
-  border: 1px solid #dfe4ea;
-  border-radius: 12px;
-  padding: 15px;
-  background: #fff;
-  color: #334252;
-  cursor: pointer;
-}
-
-.summaryCard > span:first-child {
-  font-weight: 750;
-}
-
-.summaryCard strong {
-  color: #17212b;
-}
-
-.activeSummary {
-  border-color: #9eb3f2;
-  box-shadow: 0 0 0 1px #9eb3f2 inset;
-}
-
-.smallTrack {
-  grid-column: 1 / -1;
-  height: 7px;
-  border-radius: 999px;
+  padding-top: 10px;
 }
 
 .tabs {
@@ -310,17 +254,12 @@
     padding: 30px 0 56px;
   }
 
-  .websiteCard,
   .fieldGrid {
     grid-template-columns: 1fr;
   }
 
   .fullField {
     grid-column: auto;
-  }
-
-  .tabSummary {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -333,10 +272,6 @@
 
   .overallScore {
     text-align: left;
-  }
-
-  .websiteCard {
-    grid-template-columns: 1fr;
   }
 
   .tabs {
