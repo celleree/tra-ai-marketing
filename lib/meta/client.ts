@@ -12,6 +12,10 @@ interface MetaApiErrorPayload {
     message?: string;
     code?: number;
     error_subcode?: number;
+    error_user_title?: string;
+    error_user_msg?: string;
+    error_data?: unknown;
+    fbtrace_id?: string;
   };
 }
 
@@ -60,10 +64,21 @@ const assertGraphId = (value: string, label: string) => {
 const parseError = async (response: Response) => {
   try {
     const payload = (await response.json()) as MetaApiErrorPayload;
+    const metaError = payload.error;
+    const detailParts = [
+      metaError?.message,
+      metaError?.error_user_title,
+      metaError?.error_user_msg,
+      metaError?.code ? `code ${metaError.code}` : '',
+      metaError?.error_subcode ? `subcode ${metaError.error_subcode}` : '',
+    ].filter(Boolean);
+
     return new MetaApiError(
-      payload.error?.message || `Meta API request failed with status ${response.status}.`,
-      payload.error?.code,
-      payload.error?.error_subcode
+      detailParts.length
+        ? detailParts.join(' · ')
+        : `Meta API request failed with status ${response.status}.`,
+      metaError?.code,
+      metaError?.error_subcode
     );
   } catch {
     return new MetaApiError(`Meta API request failed with status ${response.status}.`);
@@ -281,10 +296,7 @@ export const createMetaAdCreative = async (args: {
     linkData.description = description;
   }
   if (args.ctaType) {
-    linkData.call_to_action = {
-      type: args.ctaType,
-      value: { link: args.destinationUrl },
-    };
+    linkData.call_to_action = { type: args.ctaType };
   }
 
   const body = new URLSearchParams({
