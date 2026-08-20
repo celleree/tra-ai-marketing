@@ -7,6 +7,7 @@ import {
   createPausedMetaAd,
   createPausedMetaAdSet,
   createPausedMetaCampaign,
+  listMetaPromotablePages,
   MetaApiError,
   uploadMetaAdImage,
 } from '@/lib/meta/client';
@@ -55,12 +56,12 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as PublishBody;
     const adAccountId = body.adAccountId?.trim() || '';
-    const pageId = body.pageId?.trim() || '';
+    const requestedPageId = body.pageId?.trim() || '';
     const destinationUrl = body.destinationUrl?.trim() || '';
     const creatives = Array.isArray(body.creatives) ? body.creatives : [];
     const dailyBudgetCents = Number(body.dailyBudgetCents || 2000);
 
-    if (!adAccountId || !pageId) {
+    if (!adAccountId || !requestedPageId) {
       return NextResponse.json(
         { error: 'Ad account and Facebook Page are required.' },
         { status: 400 }
@@ -89,6 +90,23 @@ export async function POST(request: Request) {
       );
     }
 
+    const promotablePages = await listMetaPromotablePages(adAccountId);
+    const requestedPage = promotablePages.find((page) => page.id === requestedPageId);
+    const resolvedPage = requestedPage || (promotablePages.length === 1 ? promotablePages[0] : null);
+
+    if (!resolvedPage) {
+      const available = promotablePages.map((page) => page.name).filter(Boolean).join(', ');
+      return NextResponse.json(
+        {
+          error: promotablePages.length
+            ? `The saved Facebook Page cannot be advertised from this ad account. Open Meta setup and choose one of this account's promotable Pages: ${available}.`
+            : 'This ad account has no promotable Facebook Pages available to the current Meta token. Check the Page/ad-account asset access in Meta Business settings.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const pageId = resolvedPage.id;
     const stamp = batchStamp();
     campaignId = await createPausedMetaCampaign({
       adAccountId,
@@ -107,17 +125,23 @@ export async function POST(request: Request) {
 
     for (const creative of creatives) {
       const creativeId = typeof creative.id === 'string' ? creative.id : '';
+      let stage = 'validating creative data';
+      let imageHash = '';
+      let metaCreativeId = '';
+
       try {
         if (!creativeId || !creative.imageId || !creative.copy?.headline || !creative.copy?.primaryText) {
           throw new Error('Creative data is incomplete.');
         }
 
+        stage = 'loading generated image';
         const image = await storage.readImageById(creative.imageId);
         if (!image) {
           throw new Error('The generated image could not be found in media storage.');
         }
 
-        const imageHash = await uploadMetaAdImage(adAccountId, image);
+        stage = 'uploading image to Meta';
+        imageHash = await uploadMetaAdImage(adAccountId, image);
         const categoryLabel =
           CREATIVE_CATEGORY_LABELS[creative.category as keyof typeof CREATIVE_CATEGORY_LABELS] || creative.category;
         const formatLabel =
@@ -134,7 +158,8 @@ export async function POST(request: Request) {
           .slice(0, 255);
         const ctaType = chooseCta(creative);
 
-        const metaCreativeId = await createMetaAdCreative({
+        stage = 'creating Meta ad creative';
+        metaCreativeId = await createMetaAdCreative({
           adAccountId,
           name: `${adName} | Creative`.slice(0, 255),
           pageId,
@@ -145,6 +170,8 @@ export async function POST(request: Request) {
           description: creative.copy.description || '',
           ctaType,
         });
+
+        stage = 'creating Meta ad';
         const metaAdId = await createPausedMetaAd({
           adAccountId,
           adSetId,
@@ -162,11 +189,25 @@ export async function POST(request: Request) {
           ctaType,
         });
       } catch (error) {
-        const message =
+        const baseMessage =
           error instanceof MetaApiError || error instanceof Error
             ? error.message
             : 'Meta publishing failed for this creative.';
-        results.push({ creativeId, status: 'failed', error: message });
+        const message = `${stage}: ${baseMessage}`;
+        console.error('Meta ad creation failed', {
+          campaignId,
+          adSetId,
+          creativeId,
+          stage,
+          error: baseMessage,
+        });
+        results.push({
+          creativeId,
+          status: 'failed',
+          ...(imageHash ? { metaImageHash: imageHash } : {}),
+          ...(metaCreativeId ? { metaCreativeId } : {}),
+          error: message,
+        });
       }
     }
 
@@ -183,6 +224,7 @@ export async function POST(request: Request) {
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Meta publishing failed.';
+    console.error('Meta publish batch failed', { campaignId, error: message });
     return NextResponse.json(
       {
         error: message,
