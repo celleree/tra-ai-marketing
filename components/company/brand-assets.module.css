@@ -1,0 +1,248 @@
+.assetField {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid #e3e7ec;
+  border-radius: 14px;
+  background: #fff;
+  padding: 18px;
+}
+
+.fieldHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fieldHeading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldHeading strong {
+  font-size: 0.96rem;
+  color: #17202a;
+}
+
+.fieldHeading span,
+.help,
+.message,
+.emptyText,
+.fontMeta span,
+.fontStatus span {
+  color: #687684;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.logoRow {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.logoPreview {
+  width: 190px;
+  min-height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #dfe5ea;
+  border-radius: 12px;
+  background: #f8fafb;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.logoPreview img {
+  display: block;
+  max-width: 100%;
+  max-height: 72px;
+  object-fit: contain;
+}
+
+.logoPreview span {
+  color: #8a96a1;
+  font-size: 0.8rem;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.uploadButton,
+.secondaryButton {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  padding: 0 14px;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.uploadButton {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #1f6f50;
+  background: #1f6f50;
+  color: #fff;
+}
+
+.uploadButton input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.uploadButton:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  border: 1px solid #d8dee4;
+  background: #fff;
+  color: #45515c;
+}
+
+.swatches {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.swatchItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #e1e6eb;
+  border-radius: 999px;
+  padding: 5px 9px 5px 6px;
+  background: #fafbfc;
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 50%;
+}
+
+.swatchItem code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #3e4a55;
+  font-size: 0.76rem;
+}
+
+.colorInput {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #dce2e7;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  color: #25303a;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.fontList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.fontCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #e1e6eb;
+  border-radius: 12px;
+  background: #fafbfc;
+  padding: 14px;
+}
+
+.fontMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fontMeta strong,
+.fontMeta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fontPreview {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+  overflow: hidden;
+  color: #111;
+  font-size: 1.25rem;
+  line-height: 1.15;
+}
+
+.fontStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fontStatus button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #a43a3a;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.count {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #eef3f6;
+  padding: 4px 8px;
+  color: #52616e;
+  font-size: 0.74rem !important;
+  font-weight: 650;
+}
+
+.message {
+  display: block;
+}
+
+.emptyText {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .fontList {
+    grid-template-columns: 1fr;
+  }
+
+  .logoPreview {
+    width: 100%;
+  }
+}
