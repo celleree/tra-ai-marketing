@@ -1,5 +1,5 @@
-import { CreativeGenerator } from '@/components/creative-generator/creative-generator';
+import { BoominLanding } from '@/components/landing/boomin-landing';
 
 export default function HomePage() {
-  return <CreativeGenerator />;
+  return <BoominLanding />;
 }
