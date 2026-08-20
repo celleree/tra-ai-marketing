@@ -15,4 +15,8 @@ export interface GeneratedCreative {
   format: CreativeFormatId;
   image: MediaAsset;
   copy: CreativeCopy;
+  referenceImageId?: string;
+  referenceImageUrl?: string;
+  referenceCategory?: CreativeCategoryId;
+  referenceSelectionReason?: string;
 }
