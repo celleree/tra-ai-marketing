@@ -158,17 +158,12 @@ export function CompanyView() {
       </div>
 
       <form className={styles.websiteCard} onSubmit={analyzeWebsite}>
-        <div className={styles.websiteCopy}>
-          <label htmlFor="company-website">Company website URL</label>
-          <p>
-            Enter the public website and the system will fill only information it can actually support from the pages it reads. It will not guess missing information.
-          </p>
-        </div>
         <div className={styles.websiteControls}>
           <input
             id="company-website"
             type="text"
             inputMode="url"
+            aria-label="Company website URL"
             placeholder="https://www.example.com"
             value={websiteInput}
             onChange={(event) => setWebsiteInput(event.target.value)}
@@ -179,29 +174,6 @@ export function CompanyView() {
         </div>
         {analysisMessage ? <p className={styles.analysisMessage}>{analysisMessage}</p> : null}
       </form>
-
-      <div className={styles.tabSummary}>
-        {COMPANY_TABS.map((tab) => {
-          const completion = completions[tab.id];
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              className={`${styles.summaryCard} ${activeTab === tab.id ? styles.activeSummary : ''}`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span>{tab.label}</span>
-              <strong>{completion}%</strong>
-              <span className={styles.smallTrack}>
-                <span
-                  className={`${styles.smallFill} ${completionClass(completion)}`}
-                  style={{ width: `${completion}%` }}
-                />
-              </span>
-            </button>
-          );
-        })}
-      </div>
 
       <div className={styles.tabs} role="tablist" aria-label="Company resources">
         {COMPANY_TABS.map((tab) => (
