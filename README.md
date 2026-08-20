@@ -31,16 +31,17 @@ Implemented:
 - server-side file-signature validation after upload
 - persistent R2 media storage in production
 - context input and variation-count controls
-- controlled primary/secondary creative-format labels for diversity
+- 15 canonical messaging categories as the primary creative-diversity system
+- 5 simplified presentation formats selected automatically underneath the categories
 - GPT-5.6 Terra reference-creative analysis before generation
 - GPT-5.6 Terra Meta ad copy generation
 - source-image-conditioned GPT Image 2 generation
-- generated image + copy result cards
+- generated image + copy result cards labeled by category and format
 - TRA claim/testimonial/statistic guardrails in the generation prompt
 
 Generation flow:
 
-`uploaded image -> GPT-5.6 Terra analysis -> creative-format plan -> GPT-5.6 Terra copy -> GPT Image 2 image variations -> R2 -> results`
+`uploaded image -> GPT-5.6 Terra analysis -> category-led creative plan -> presentation format -> GPT-5.6 Terra copy -> GPT Image 2 image variations -> R2 -> results`
 
 Still to build:
 - deeper creative QA and scoring
@@ -99,7 +100,8 @@ The R2 bucket also needs a CORS policy allowing PUT requests from the live app o
 - `lib/media/` - upload validation and storage abstraction
 - `lib/ai/` - AI-provider integration
 - `lib/creatives/` - creative planning and result contracts
-- `docs/knowledge-base/` - TRA brand, offer, compliance, and messaging source material
+- `docs/creative-categories.md` - canonical 15 messaging categories
+- `docs/knowledge-base/` - TRA brand, offer, compliance, customer, and messaging source material
 - `prompts/` - reusable AI workflows and prompt templates
 - `references/ads/` - curated creative examples and notes
 - `assets/brand/` - approved logos and brand assets
