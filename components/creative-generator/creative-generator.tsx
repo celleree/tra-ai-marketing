@@ -3,16 +3,13 @@
 import { useState } from 'react';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import type { MediaAsset } from '@/lib/media/types';
+import { CompanyView } from '@/components/company/company-view';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { GenerateControls } from '@/components/creative-generator/generate-controls';
 import { ReferenceLibrary } from '@/components/reference-library/reference-library';
 
-type WorkspaceSection =
-  | 'upload'
-  | 'knowledge-base'
-  | 'brand-guidelines'
-  | 'reference-images';
+type WorkspaceSection = 'upload' | 'company' | 'reference-images';
 
 const NAV_ITEMS: Array<{
   id: WorkspaceSection;
@@ -21,8 +18,7 @@ const NAV_ITEMS: Array<{
   icon: string;
 }> = [
   { id: 'upload', label: 'Create', shortLabel: 'Create', icon: '+' },
-  { id: 'knowledge-base', label: 'Knowledge Base', shortLabel: 'Knowledge', icon: 'K' },
-  { id: 'brand-guidelines', label: 'Brand Guidelines', shortLabel: 'Brand', icon: 'B' },
+  { id: 'company', label: 'Company', shortLabel: 'Company', icon: 'C' },
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
 ];
 
@@ -157,12 +153,14 @@ export function CreativeGenerator() {
 
             <CreativeResults creatives={creatives} />
           </div>
-        ) : activeSection === 'reference-images' ? (
+        ) : activeSection === 'company' ? (
+          <div className="workspace-view">
+            <CompanyView />
+          </div>
+        ) : (
           <div className="workspace-view">
             <ReferenceLibrary />
           </div>
-        ) : (
-          <div className="workspace-view workspace-empty-view" aria-label={`${activeLabel} workspace`} />
         )}
       </section>
     </main>
