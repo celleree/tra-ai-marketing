@@ -9,6 +9,7 @@ export interface CreativeCopy {
 }
 
 export interface GeneratedCreative {
+  id: string;
   index: number;
   category: CreativeCategoryId;
   format: CreativeFormatId;

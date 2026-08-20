@@ -15,6 +15,43 @@
   font-size: 1.45rem;
 }
 
+.actions,
+.modalActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.primaryButton,
+.secondaryButton,
+.closeButton {
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.primaryButton {
+  background: #14213d;
+  padding: 10px 14px;
+  color: #ffffff;
+}
+
+.secondaryButton {
+  border: 1px solid #d7dde5;
+  background: #ffffff;
+  padding: 9px 13px;
+  color: #263442;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.closeButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -22,11 +59,39 @@
 }
 
 .card {
+  position: relative;
   overflow: hidden;
   border: 1px solid #dfe4ea;
   border-radius: 18px;
   background: #ffffff;
   box-shadow: 0 8px 30px rgba(23, 33, 43, 0.05);
+}
+
+.cardSelected {
+  border-color: #244fd3;
+  box-shadow: 0 0 0 2px rgba(36, 79, 211, 0.12), 0 8px 30px rgba(23, 33, 43, 0.05);
+}
+
+.selectionControl {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(20, 33, 61, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 7px 10px;
+  color: #14213d;
+  font-size: 0.78rem;
+  font-weight: 800;
+  box-shadow: 0 4px 14px rgba(20, 33, 61, 0.12);
+}
+
+.selectionControl input {
+  margin: 0;
 }
 
 .image {
@@ -79,6 +144,144 @@
   font-size: 0.88rem;
 }
 
+.creativeId {
+  margin-top: 12px !important;
+  color: #8a96a3 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.publishStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 14px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.publishStatus span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.publishSuccess {
+  background: #edf8f1;
+  color: #207044;
+}
+
+.publishFailed {
+  background: #fff0f0;
+  color: #a43a3a;
+}
+
+.publishUploading {
+  background: #eef2ff;
+  color: #244fd3;
+}
+
+.modalBackdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.48);
+  padding: 24px;
+}
+
+.modal {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border-radius: 18px;
+  background: #ffffff;
+  padding: 24px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.modalHeader h2 {
+  margin: 4px 0 0;
+  font-size: 1.35rem;
+}
+
+.closeButton {
+  width: 34px;
+  height: 34px;
+  background: #f2f4f7;
+  color: #394858;
+  font-size: 1.35rem;
+}
+
+.safetyNote {
+  margin: 18px 0;
+  border-radius: 10px;
+  background: #f6f8fb;
+  padding: 12px 14px;
+  color: #44515e;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.formGrid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formGrid label > span {
+  color: #394858;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.formGrid select,
+.formGrid input {
+  width: 100%;
+  border: 1px solid #d7dde5;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 11px;
+  color: #1d2935;
+  font: inherit;
+}
+
+.fullWidth {
+  grid-column: 1 / -1;
+}
+
+.modalMessage,
+.modalError {
+  margin-top: 14px;
+  font-size: 0.86rem;
+}
+
+.modalError {
+  color: #a43a3a;
+}
+
+.modalActions {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
 .skeletonCard {
   pointer-events: none;
 }
@@ -94,12 +297,7 @@
   inset: 0;
   content: '';
   transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.72),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
   animation: skeleton-shimmer 1.35s ease-in-out infinite;
 }
 
@@ -161,12 +359,22 @@
 }
 
 @media (max-width: 820px) {
-  .grid {
+  .grid,
+  .formGrid {
     grid-template-columns: 1fr;
   }
 
   .heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .fullWidth {
+    grid-column: auto;
   }
 }
