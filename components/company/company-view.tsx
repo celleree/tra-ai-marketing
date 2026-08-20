@@ -239,6 +239,7 @@ export function CompanyView() {
           {activeFields.map((field) => (
             <label key={field.key} className={field.multiline ? styles.fullField : styles.field}>
               <span>{field.label}</span>
+              <small className={styles.fieldHelp}>{field.description}</small>
               {field.multiline ? (
                 <textarea
                   rows={5}
