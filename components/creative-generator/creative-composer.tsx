@@ -248,46 +248,36 @@ export function CreativeComposer({
         </div>
       ) : null}
 
-      <div className={styles.composerBody}>
-        <textarea
-          className={styles.textarea}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={7}
-          maxLength={4000}
-          placeholder="Tell TRA AI what you want to create…"
-        />
+      <textarea
+        className={styles.textarea}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={handleKeyDown}
+        rows={7}
+        maxLength={4000}
+        placeholder="Tell TRA AI what you want to create…"
+      />
 
-        <div className={styles.variationControl}>
-          <output
-            className={styles.variationValue}
-            htmlFor="creative-variation-slider"
-            aria-live="polite"
-          >
-            {variationCount}
-          </output>
-          <span className={styles.variationLabel}>Creatives</span>
-          <span className={styles.rangeEndpoint}>30</span>
-          <div className={styles.sliderWrap}>
-            <input
-              id="creative-variation-slider"
-              className={styles.variationSlider}
-              type="range"
-              min={MIN_VARIATIONS}
-              max={MAX_VARIATIONS}
-              step={1}
-              value={variationCount}
-              style={sliderStyle}
-              aria-label="Number of creatives to generate"
-              onChange={(event) =>
-                onVariationCountChange(Number(event.target.value))
-              }
-              disabled={generating}
-            />
-          </div>
-          <span className={styles.rangeEndpoint}>2</span>
+      <div className={styles.variationControl}>
+        <div className={styles.variationMeta}>
+          <span>Creatives</span>
+          <strong>{variationCount}</strong>
         </div>
+        <input
+          id="creative-variation-slider"
+          className={styles.variationSlider}
+          type="range"
+          min={MIN_VARIATIONS}
+          max={MAX_VARIATIONS}
+          step={1}
+          value={variationCount}
+          style={sliderStyle}
+          aria-label="Number of creatives to generate"
+          onChange={(event) =>
+            onVariationCountChange(Number(event.target.value))
+          }
+          disabled={generating}
+        />
       </div>
 
       <div className={styles.toolbar}>
