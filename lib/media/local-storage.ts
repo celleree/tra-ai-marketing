@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { resolve } from 'path';
 import type { MediaAsset, StoredMediaFile } from '@/lib/media/types';
 import {
@@ -52,6 +52,26 @@ export class LocalMediaStorage implements MediaStorage {
     }
 
     return null;
+  }
+
+  async deleteImage(fileName: string): Promise<void> {
+    if (!getStoredImageMimeType(fileName)) {
+      return;
+    }
+
+    try {
+      await unlink(resolve(this.root, fileName));
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
+        return;
+      }
+      throw error;
+    }
   }
 }
 
