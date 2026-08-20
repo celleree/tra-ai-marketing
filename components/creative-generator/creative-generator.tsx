@@ -3,10 +3,9 @@
 import { useState } from 'react';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import type { MediaAsset } from '@/lib/media/types';
-import { ContextInput } from '@/components/creative-generator/context-input';
+import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { GenerateControls } from '@/components/creative-generator/generate-controls';
-import { ImageUpload } from '@/components/creative-generator/image-upload';
 
 type WorkspaceSection =
   | 'upload'
@@ -36,6 +35,12 @@ export function CreativeGenerator() {
   const [generationError, setGenerationError] = useState('');
 
   const ready = Boolean(media && context.trim());
+
+  const handleUploadStart = () => {
+    setMedia(null);
+    setCreatives([]);
+    setGenerationError('');
+  };
 
   const handleUploaded = (nextMedia: MediaAsset) => {
     setMedia(nextMedia);
@@ -126,22 +131,14 @@ export function CreativeGenerator() {
 
         {activeSection === 'upload' ? (
           <div className="workspace-view workspace-view-upload">
-            {media ? (
-              <section className="uploaded-banner">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={media.url} alt="Uploaded source" />
-                <div>
-                  <strong>Creative uploaded</strong>
-                  <p>{media.originalName}</p>
-                </div>
-                <span className="status-pill">Ready</span>
-              </section>
-            ) : null}
-
             <div className="generator-grid">
               <div className="generator-main">
-                <ImageUpload onUploaded={handleUploaded} />
-                <ContextInput value={context} onChange={setContext} />
+                <CreativeComposer
+                  value={context}
+                  onChange={setContext}
+                  onUploadStart={handleUploadStart}
+                  onUploaded={handleUploaded}
+                />
               </div>
               <aside className="generator-controls-column">
                 <GenerateControls
