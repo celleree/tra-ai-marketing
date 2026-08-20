@@ -6,6 +6,7 @@ interface GenerateControlsProps {
   onGenerate: () => void;
   ready: boolean;
   generating: boolean;
+  progress?: string;
 }
 
 const VARIATION_OPTIONS = [2, 5, 10, 20, 30];
@@ -16,6 +17,7 @@ export function GenerateControls({
   onGenerate,
   ready,
   generating,
+  progress,
 }: GenerateControlsProps) {
   return (
     <section className="panel">
@@ -54,10 +56,11 @@ export function GenerateControls({
       </button>
       <p className="muted control-note">
         {generating
-          ? 'Creating distinct TRA concepts across different categories.'
-          : ready
-            ? 'Generate up to 30 category-led creative variations in one run.'
-            : 'Upload an image and add context first.'}
+          ? progress || 'Preparing the creative plan…'
+          : progress ||
+            (ready
+              ? 'Generate up to 30 category-led creative variations in one run.'
+              : 'Upload an image and add context first.')}
       </p>
     </section>
   );
