@@ -64,9 +64,8 @@ export function CreativeGenerator() {
           ...(media ? { mediaId: media.id } : {}),
           ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
           ...(brand.colors.length ? { brandColors: brand.colors } : {}),
-          ...(brand.fontNames.length ? { brandFontNames: brand.fontNames } : {}),
-          ...(brand.fontSpecimenMediaIds.length
-            ? { brandFontSpecimenMediaIds: brand.fontSpecimenMediaIds }
+          ...(brand.fontGuidance.length
+            ? { brandFontNames: brand.fontGuidance }
             : {}),
           uploadMode,
           context: context.trim(),
