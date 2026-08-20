@@ -21,15 +21,57 @@ interface UploadPlan {
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
+function FolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M3.5 7.75A2.25 2.25 0 0 1 5.75 5.5H9l2 2h7.25a2.25 2.25 0 0 1 2.25 2.25v7.5a2.25 2.25 0 0 1-2.25 2.25H5.75a2.25 2.25 0 0 1-2.25-2.25v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4.5 7h15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M9.25 3.75h5.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M7 7.25 7.7 19a1.75 1.75 0 0 0 1.75 1.65h5.1A1.75 1.75 0 0 0 16.3 19L17 7.25"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10 10.5v6.25M14 10.5v6.25" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ImageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.25" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="9" cy="10" r="1.4" stroke="currentColor" strokeWidth="1.5" />
+      <path d="m5.5 17 4.25-4 2.75 2.5 2.25-2 3.75 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function ReferenceLibrary() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const [items, setItems] = useState<ReferenceLibraryItem[]>([]);
   const [selectedAngle, setSelectedAngle] =
     useState<CreativeCategoryId>('customer-problems');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [movingId, setMovingId] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [progress, setProgress] = useState({ complete: 0, total: 0 });
   const [error, setError] = useState('');
@@ -151,6 +193,7 @@ export function ReferenceLibrary() {
         if (!response.ok) throw new Error(payload.error || 'Could not save references.');
         const nextItems = (payload.items || []) as ReferenceLibraryItem[];
         setItems(nextItems);
+        setSelectedIds([]);
         if (nextItems[0]?.angle) setSelectedAngle(nextItems[0].angle);
       } catch (registerError) {
         failures.push(
@@ -176,10 +219,55 @@ export function ReferenceLibrary() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Could not move reference.');
       setItems((payload.items || []) as ReferenceLibraryItem[]);
+      setSelectedIds((current) => current.filter((selectedId) => selectedId !== id));
     } catch (moveError) {
       setError(moveError instanceof Error ? moveError.message : 'Could not move reference.');
     } finally {
       setMovingId('');
+    }
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((selectedId) => selectedId !== id)
+        : [...current, id]
+    );
+  };
+
+  const deleteSelected = async () => {
+    if (!selectedIds.length || deleting) return;
+
+    const count = selectedIds.length;
+    const confirmed = window.confirm(
+      `Delete ${count} selected reference${count === 1 ? '' : 's'}? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setError('');
+
+    try {
+      const response = await fetch('/api/references', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedIds }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Could not delete selected references.');
+      }
+
+      setItems((payload.items || []) as ReferenceLibraryItem[]);
+      setSelectedIds([]);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : 'Could not delete selected references.'
+      );
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -206,6 +294,11 @@ export function ReferenceLibrary() {
     dragDepth.current = 0;
     setDragActive(false);
     void uploadFiles(Array.from(event.dataTransfer.files || []));
+  };
+
+  const changeFolder = (angle: CreativeCategoryId) => {
+    setSelectedAngle(angle);
+    setSelectedIds([]);
   };
 
   const visibleItems = items.filter((item) => item.angle === selectedAngle);
@@ -263,6 +356,25 @@ export function ReferenceLibrary() {
 
       {error ? <p className={styles.error}>{error}</p> : null}
 
+      <div className={styles.selectionBar}>
+        <span>
+          {selectedIds.length
+            ? `${selectedIds.length} selected`
+            : 'Select references to manage them'}
+        </span>
+        <button
+          className={styles.deleteButton}
+          type="button"
+          onClick={() => void deleteSelected()}
+          disabled={!selectedIds.length || deleting}
+          aria-label="Delete selected references"
+          title="Delete selected references"
+        >
+          <TrashIcon />
+          <span>{deleting ? 'Deleting…' : 'Delete'}</span>
+        </button>
+      </div>
+
       <section className={styles.libraryLayout}>
         <aside className={styles.folderPanel}>
           <div className={styles.folderHeader}>
@@ -280,9 +392,11 @@ export function ReferenceLibrary() {
                   className={`${styles.folderButton} ${
                     selectedAngle === angle ? styles.folderButtonActive : ''
                   }`}
-                  onClick={() => setSelectedAngle(angle)}
+                  onClick={() => changeFolder(angle)}
                 >
-                  <span className={styles.folderIcon} aria-hidden="true">▱</span>
+                  <span className={styles.folderIcon}>
+                    <FolderIcon />
+                  </span>
                   <span className={styles.folderName}>{CREATIVE_CATEGORY_LABELS[angle]}</span>
                   <span className={styles.folderCount}>{count}</span>
                 </button>
@@ -304,37 +418,54 @@ export function ReferenceLibrary() {
             <div className={styles.empty}>Loading references…</div>
           ) : visibleItems.length ? (
             <div className={styles.grid}>
-              {visibleItems.map((item) => (
-                <article key={item.id} className={styles.card}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={item.url} alt={item.originalName} />
-                  <div className={styles.cardFooter}>
-                    <div className={styles.fileName} title={item.originalName}>
-                      {item.originalName}
-                    </div>
-                    <label className={styles.angleControl}>
-                      <span>Angle</span>
-                      <select
-                        value={item.angle}
-                        disabled={movingId === item.id}
-                        onChange={(event) =>
-                          void moveReference(item.id, event.target.value as CreativeCategoryId)
-                        }
-                      >
-                        {CREATIVE_CATEGORIES.map((angle) => (
-                          <option key={angle} value={angle}>
-                            {CREATIVE_CATEGORY_LABELS[angle]}
-                          </option>
-                        ))}
-                      </select>
+              {visibleItems.map((item) => {
+                const selected = selectedIds.includes(item.id);
+                return (
+                  <article
+                    key={item.id}
+                    className={`${styles.card} ${selected ? styles.cardSelected : ''}`}
+                  >
+                    <label className={styles.cardCheckbox}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleSelection(item.id)}
+                        aria-label={`Select ${item.originalName}`}
+                      />
+                      <span aria-hidden="true" />
                     </label>
-                  </div>
-                </article>
-              ))}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={item.url} alt={item.originalName} />
+                    <div className={styles.cardFooter}>
+                      <div className={styles.fileName} title={item.originalName}>
+                        {item.originalName}
+                      </div>
+                      <label className={styles.angleControl}>
+                        <span>Angle</span>
+                        <select
+                          value={item.angle}
+                          disabled={movingId === item.id}
+                          onChange={(event) =>
+                            void moveReference(item.id, event.target.value as CreativeCategoryId)
+                          }
+                        >
+                          {CREATIVE_CATEGORIES.map((angle) => (
+                            <option key={angle} value={angle}>
+                              {CREATIVE_CATEGORY_LABELS[angle]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <div className={styles.empty}>
-              <div className={styles.emptyIcon} aria-hidden="true">▧</div>
+              <div className={styles.emptyIcon}>
+                <ImageIcon />
+              </div>
               <strong>No references in this angle yet</strong>
               <span>Upload references above and AI will sort them automatically.</span>
             </div>
