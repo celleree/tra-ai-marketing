@@ -5,14 +5,16 @@ import { getMediaStorage } from '@/lib/media/local-storage';
 import {
   createMetaAdCreative,
   createPausedMetaAd,
+  createPausedMetaAdSet,
+  createPausedMetaCampaign,
   MetaApiError,
   uploadMetaAdImage,
 } from '@/lib/meta/client';
-import {
-  META_CTA_TYPES,
-  type MetaCtaType,
-  type MetaPublishCreativeInput,
-  type MetaPublishCreativeResult,
+import type {
+  MetaCtaType,
+  MetaPublishBatchResult,
+  MetaPublishCreativeInput,
+  MetaPublishCreativeResult,
 } from '@/lib/meta/types';
 
 export const runtime = 'nodejs';
@@ -20,10 +22,9 @@ export const maxDuration = 300;
 
 interface PublishBody {
   adAccountId?: string;
-  adSetId?: string;
   pageId?: string;
   destinationUrl?: string;
-  ctaType?: MetaCtaType | '';
+  dailyBudgetCents?: number;
   creatives?: MetaPublishCreativeInput[];
 }
 
@@ -39,19 +40,29 @@ const isValidUrl = (value: string) => {
 const cleanNamePart = (value: string) =>
   value.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
 
+const batchStamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
+
+const chooseCta = (creative: MetaPublishCreativeInput): MetaCtaType => {
+  const text = `${creative.copy.headline} ${creative.copy.primaryText} ${creative.copy.description}`.toLowerCase();
+  if (/\bapply\b|\bapplication\b/.test(text)) return 'APPLY_NOW';
+  if (/\bcontact\b|\bcall\b|\bspeak\b|\btalk\b|\bconsult/.test(text)) return 'CONTACT_US';
+  return 'LEARN_MORE';
+};
+
 export async function POST(request: Request) {
+  let campaignId = '';
+
   try {
     const body = (await request.json()) as PublishBody;
     const adAccountId = body.adAccountId?.trim() || '';
-    const adSetId = body.adSetId?.trim() || '';
     const pageId = body.pageId?.trim() || '';
     const destinationUrl = body.destinationUrl?.trim() || '';
     const creatives = Array.isArray(body.creatives) ? body.creatives : [];
-    const ctaType = body.ctaType || undefined;
+    const dailyBudgetCents = Number(body.dailyBudgetCents || 2000);
 
-    if (!adAccountId || !adSetId || !pageId) {
+    if (!adAccountId || !pageId) {
       return NextResponse.json(
-        { error: 'Ad account, ad set, and Facebook Page are required.' },
+        { error: 'Ad account and Facebook Page are required.' },
         { status: 400 }
       );
     }
@@ -61,8 +72,15 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (ctaType && !META_CTA_TYPES.includes(ctaType)) {
-      return NextResponse.json({ error: 'Unsupported CTA type.' }, { status: 400 });
+    if (
+      !Number.isInteger(dailyBudgetCents) ||
+      dailyBudgetCents < 500 ||
+      dailyBudgetCents > 100000
+    ) {
+      return NextResponse.json(
+        { error: 'Daily budget must be between 500 and 100000 minor currency units.' },
+        { status: 400 }
+      );
     }
     if (!creatives.length || creatives.length > 30) {
       return NextResponse.json(
@@ -70,6 +88,19 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    const stamp = batchStamp();
+    campaignId = await createPausedMetaCampaign({
+      adAccountId,
+      name: `TRA AI | Creative Batch | ${stamp} UTC`.slice(0, 255),
+    });
+
+    const adSetId = await createPausedMetaAdSet({
+      adAccountId,
+      campaignId,
+      name: `TRA AI | Broad US | Landing Page Views | ${stamp} UTC`.slice(0, 255),
+      dailyBudgetCents,
+    });
 
     const storage = getMediaStorage();
     const results: MetaPublishCreativeResult[] = [];
@@ -101,6 +132,7 @@ export async function POST(request: Request) {
           .filter(Boolean)
           .join(' | ')
           .slice(0, 255);
+        const ctaType = chooseCta(creative);
 
         const metaCreativeId = await createMetaAdCreative({
           adAccountId,
@@ -127,6 +159,7 @@ export async function POST(request: Request) {
           metaCreativeId,
           metaImageHash: imageHash,
           adStatus: 'PAUSED',
+          ctaType,
         });
       } catch (error) {
         const message =
@@ -137,9 +170,25 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ results });
+    const payload: MetaPublishBatchResult = {
+      campaignId,
+      adSetId,
+      campaignStatus: 'PAUSED',
+      adSetStatus: 'PAUSED',
+      objective: 'OUTCOME_TRAFFIC',
+      optimizationGoal: 'LANDING_PAGE_VIEWS',
+      results,
+    };
+
+    return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Meta publishing failed.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: message,
+        ...(campaignId ? { campaignId, campaignStatus: 'PAUSED' } : {}),
+      },
+      { status: 500 }
+    );
   }
 }

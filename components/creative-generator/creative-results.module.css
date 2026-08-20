@@ -52,6 +52,38 @@
   opacity: 0.5;
 }
 
+.batchStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 16px;
+  border: 1px solid #cfe7d8;
+  border-radius: 12px;
+  background: #edf8f1;
+  padding: 12px 14px;
+  color: #207044;
+}
+
+.batchStatus strong {
+  font-size: 0.88rem;
+}
+
+.batchStatus span {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.inlineError {
+  margin: 0 0 16px;
+  border-radius: 10px;
+  background: #fff0f0;
+  padding: 10px 12px;
+  color: #a43a3a;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -267,10 +299,16 @@
   grid-column: 1 / -1;
 }
 
+.setupHint,
 .modalMessage,
 .modalError {
   margin-top: 14px;
   font-size: 0.86rem;
+}
+
+.setupHint {
+  color: #607080;
+  line-height: 1.5;
 }
 
 .modalError {
