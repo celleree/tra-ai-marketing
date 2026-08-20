@@ -5,7 +5,7 @@ import {
 import type { CreativeFormatId } from '@/lib/creative-formats';
 
 export type GenerateCreativeRequest = {
-  mediaId: string;
+  mediaId?: string;
   context: string;
   variationCount: number;
 };
@@ -57,10 +57,6 @@ export function validateGenerateCreativeRequest(input: unknown):
       ? body.variationCount
       : Number(body.variationCount);
 
-  if (!mediaId) {
-    return { success: false, error: 'mediaId is required' };
-  }
-
   if (!context) {
     return { success: false, error: 'context is required' };
   }
@@ -78,7 +74,11 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   return {
     success: true,
-    data: { mediaId, context, variationCount },
+    data: {
+      ...(mediaId ? { mediaId } : {}),
+      context,
+      variationCount,
+    },
   };
 }
 
