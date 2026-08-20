@@ -8,6 +8,8 @@ export interface CreativeCopy {
   description: string;
 }
 
+export type CreativeSource = 'generated' | 'uploaded';
+
 export interface GeneratedCreative {
   id: string;
   index: number;
@@ -15,6 +17,7 @@ export interface GeneratedCreative {
   format: CreativeFormatId;
   image: MediaAsset;
   copy: CreativeCopy;
+  source?: CreativeSource;
   referenceImageId?: string;
   referenceImageUrl?: string;
   referenceCategory?: CreativeCategoryId;

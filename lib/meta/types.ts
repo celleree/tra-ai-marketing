@@ -23,6 +23,7 @@ export interface MetaPublishCreativeInput {
   imageId: string;
   category: string;
   format: string;
+  source?: 'generated' | 'uploaded';
   copy: {
     primaryText: string;
     headline: string;

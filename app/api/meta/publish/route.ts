@@ -134,21 +134,24 @@ export async function POST(request: Request) {
           throw new Error('Creative data is incomplete.');
         }
 
-        stage = 'loading generated image';
+        stage = 'loading image';
         const image = await storage.readImageById(creative.imageId);
         if (!image) {
-          throw new Error('The generated image could not be found in media storage.');
+          throw new Error('The creative image could not be found in media storage.');
         }
 
         stage = 'uploading image to Meta';
         imageHash = await uploadMetaAdImage(adAccountId, image);
-        const categoryLabel =
-          CREATIVE_CATEGORY_LABELS[creative.category as keyof typeof CREATIVE_CATEGORY_LABELS] || creative.category;
-        const formatLabel =
-          CREATIVE_FORMAT_LABELS[creative.format as keyof typeof CREATIVE_FORMAT_LABELS] || creative.format;
+        const uploaded = creative.source === 'uploaded';
+        const categoryLabel = uploaded
+          ? 'Uploaded'
+          : CREATIVE_CATEGORY_LABELS[creative.category as keyof typeof CREATIVE_CATEGORY_LABELS] || creative.category;
+        const formatLabel = uploaded
+          ? 'Static Image'
+          : CREATIVE_FORMAT_LABELS[creative.format as keyof typeof CREATIVE_FORMAT_LABELS] || creative.format;
         const adName = [
           'TRA',
-          'AI',
+          uploaded ? 'Upload' : 'AI',
           cleanNamePart(categoryLabel),
           cleanNamePart(formatLabel),
           cleanNamePart(creativeId),

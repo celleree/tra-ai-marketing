@@ -9,9 +9,12 @@ import type { MediaAsset } from '@/lib/media/types';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
+import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
+import createStyles from '@/components/creative-generator/creative-create-mode.module.css';
 import { ReferenceLibrary } from '@/components/reference-library/reference-library';
 
 type WorkspaceSection = 'upload' | 'company' | 'reference-images';
+type CreationMode = 'generate' | 'direct-upload';
 
 const NAV_ITEMS: Array<{
   id: WorkspaceSection;
@@ -26,6 +29,7 @@ const NAV_ITEMS: Array<{
 
 export function CreativeGenerator() {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
+  const [creationMode, setCreationMode] = useState<CreationMode>('generate');
   const [media, setMedia] = useState<MediaAsset | null>(null);
   const [uploadMode, setUploadMode] = useState<UploadMode>('tra');
   const [context, setContext] = useState('');
@@ -46,6 +50,19 @@ export function CreativeGenerator() {
     setMedia(nextMedia);
     setCreatives([]);
     setGenerationError('');
+  };
+
+  const handleDirectUploaded = (nextCreatives: GeneratedCreative[]) => {
+    setCreatives(nextCreatives);
+    setGenerationError('');
+  };
+
+  const switchCreationMode = (nextMode: CreationMode) => {
+    if (nextMode === creationMode) return;
+    setCreationMode(nextMode);
+    setCreatives([]);
+    setGenerationError('');
+    setGenerating(false);
   };
 
   const generate = async () => {
@@ -148,19 +165,48 @@ export function CreativeGenerator() {
           <div className="workspace-view workspace-view-upload">
             <div className="generator-grid">
               <div className="generator-main">
-                <CreativeComposer
-                  value={context}
-                  onChange={setContext}
-                  onUploadStart={handleUploadStart}
-                  onUploaded={handleUploaded}
-                  uploadMode={uploadMode}
-                  onUploadModeChange={setUploadMode}
-                  variationCount={variationCount}
-                  onVariationCountChange={setVariationCount}
-                  onSubmit={generate}
-                  ready={ready}
-                  generating={generating}
-                />
+                <div className={createStyles.modeSwitch} aria-label="Creative source">
+                  <button
+                    type="button"
+                    className={`${createStyles.modeButton} ${
+                      creationMode === 'generate' ? createStyles.modeButtonActive : ''
+                    }`}
+                    onClick={() => switchCreationMode('generate')}
+                  >
+                    Generate with AI
+                  </button>
+                  <button
+                    type="button"
+                    className={`${createStyles.modeButton} ${
+                      creationMode === 'direct-upload' ? createStyles.modeButtonActive : ''
+                    }`}
+                    onClick={() => switchCreationMode('direct-upload')}
+                  >
+                    Upload finished creatives
+                  </button>
+                </div>
+
+                {creationMode === 'generate' ? (
+                  <CreativeComposer
+                    value={context}
+                    onChange={setContext}
+                    onUploadStart={handleUploadStart}
+                    onUploaded={handleUploaded}
+                    uploadMode={uploadMode}
+                    onUploadModeChange={setUploadMode}
+                    variationCount={variationCount}
+                    onVariationCountChange={setVariationCount}
+                    onSubmit={generate}
+                    ready={ready}
+                    generating={generating}
+                  />
+                ) : (
+                  <DirectCreativeUploader
+                    onUploadStart={handleUploadStart}
+                    onUploaded={handleDirectUploaded}
+                  />
+                )}
+
                 {generationError ? (
                   <p className="error-message generation-error">{generationError}</p>
                 ) : null}
@@ -169,7 +215,7 @@ export function CreativeGenerator() {
 
             <CreativeResults
               creatives={creatives}
-              generating={generating}
+              generating={creationMode === 'generate' && generating}
               requestedCount={variationCount}
             />
           </div>
