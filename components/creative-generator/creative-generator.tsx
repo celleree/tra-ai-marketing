@@ -8,10 +8,17 @@ import { CreativeResults } from '@/components/creative-generator/creative-result
 import { GenerateControls } from '@/components/creative-generator/generate-controls';
 import { ImageUpload } from '@/components/creative-generator/image-upload';
 
+interface GenerationResponse {
+  creatives?: GeneratedCreative[];
+  error?: string;
+  stage?: string;
+  detail?: string;
+}
+
 export function CreativeGenerator() {
   const [media, setMedia] = useState<MediaAsset | null>(null);
   const [context, setContext] = useState('');
-  const [variationCount, setVariationCount] = useState(4);
+  const [variationCount, setVariationCount] = useState(5);
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState('');
@@ -41,13 +48,27 @@ export function CreativeGenerator() {
           variationCount,
         }),
       });
-      const payload = await response.json();
+      const responseText = await response.text();
+      let payload: GenerationResponse = {};
 
-      if (!response.ok) {
-        throw new Error(payload.error || 'Creative generation failed.');
+      if (responseText) {
+        try {
+          payload = JSON.parse(responseText) as GenerationResponse;
+        } catch {
+          if (!response.ok) {
+            throw new Error(`Creative generation request failed with status ${response.status}.`);
+          }
+        }
       }
 
-      setCreatives((payload.creatives || []) as GeneratedCreative[]);
+      if (!response.ok) {
+        const parts = [payload.error || 'Creative generation failed.'];
+        if (payload.stage) parts.push(`Stage: ${payload.stage}.`);
+        if (payload.detail) parts.push(payload.detail);
+        throw new Error(parts.join(' '));
+      }
+
+      setCreatives(payload.creatives || []);
     } catch (error) {
       setGenerationError(
         error instanceof Error ? error.message : 'Creative generation failed.'
