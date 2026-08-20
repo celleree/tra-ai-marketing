@@ -6,7 +6,6 @@ import type { MediaAsset } from '@/lib/media/types';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
-import { GenerateControls } from '@/components/creative-generator/generate-controls';
 import { ReferenceLibrary } from '@/components/reference-library/reference-library';
 
 type WorkspaceSection = 'upload' | 'company' | 'reference-images';
@@ -46,7 +45,7 @@ export function CreativeGenerator() {
   };
 
   const generate = async () => {
-    if (!media || !context.trim()) return;
+    if (!media || !context.trim() || generating) return;
 
     setGenerating(true);
     setGenerationError('');
@@ -135,20 +134,16 @@ export function CreativeGenerator() {
                   onChange={setContext}
                   onUploadStart={handleUploadStart}
                   onUploaded={handleUploaded}
-                />
-              </div>
-              <aside className="generator-controls-column">
-                <GenerateControls
                   variationCount={variationCount}
                   onVariationCountChange={setVariationCount}
-                  onGenerate={generate}
+                  onSubmit={generate}
                   ready={ready}
                   generating={generating}
                 />
                 {generationError ? (
                   <p className="error-message generation-error">{generationError}</p>
                 ) : null}
-              </aside>
+              </div>
             </div>
 
             <CreativeResults creatives={creatives} />
