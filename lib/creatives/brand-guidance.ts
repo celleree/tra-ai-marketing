@@ -14,16 +14,20 @@ export interface StoredBrandGuidance {
   logo: { url: string; mediaId: string } | null;
   colors: string[];
   fonts: BrandFontAsset[];
-  fontNames: string[];
-  fontSpecimenMediaIds: string[];
+  fontGuidance: string[];
 }
+
+const emptyGuidance = (): StoredBrandGuidance => ({
+  logo: null,
+  colors: [],
+  fonts: [],
+  fontGuidance: [],
+});
 
 export function readStoredBrandGuidance(): StoredBrandGuidance {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return { logo: null, colors: [], fonts: [], fontNames: [], fontSpecimenMediaIds: [] };
-    }
+    if (!raw) return emptyGuidance();
 
     const parsed = JSON.parse(raw) as {
       brandGuidelines?: {
@@ -52,12 +56,14 @@ export function readStoredBrandGuidance(): StoredBrandGuidance {
       logo: logoMatch ? { url: logoUrl, mediaId: logoMatch[1] } : null,
       colors,
       fonts,
-      fontNames: fonts.map(brandFontLabel),
-      fontSpecimenMediaIds: fonts
-        .map((font) => font.specimenMediaId)
-        .filter((value): value is string => Boolean(value)),
+      fontGuidance: fonts.map((font) => {
+        const name = brandFontLabel(font);
+        return font.styleDescription
+          ? `${name}: ${font.styleDescription}`
+          : `${name}: approved uploaded brand font`;
+      }),
     };
   } catch {
-    return { logo: null, colors: [], fonts: [], fontNames: [], fontSpecimenMediaIds: [] };
+    return emptyGuidance();
   }
 }
