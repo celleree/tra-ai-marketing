@@ -16,6 +16,7 @@ export interface BrandFontAsset {
   url: string;
   specimenMediaId?: string;
   specimenUrl?: string;
+  styleDescription?: string;
 }
 
 const MIME_BY_EXTENSION: Record<string, BrandFontMimeType> = {
@@ -62,6 +63,10 @@ export const parseBrandFontAssets = (value: string): BrandFontAsset[] => {
           typeof item.specimenMediaId === 'string' ? item.specimenMediaId : undefined,
         specimenUrl:
           typeof item.specimenUrl === 'string' ? item.specimenUrl : undefined,
+        styleDescription:
+          typeof item.styleDescription === 'string'
+            ? item.styleDescription.slice(0, 500)
+            : undefined,
       }))
       .filter(
         (item) =>
