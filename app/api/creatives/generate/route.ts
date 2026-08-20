@@ -5,7 +5,7 @@ import {
   generateReferenceCreativeImage,
 } from '@/lib/ai/openai';
 import {
-  buildCreativeFormatPlan,
+  buildCreativePlan,
   validateGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
@@ -21,10 +21,6 @@ export async function POST(request: Request) {
 
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
-    }
-
-    if (!parsed.data.context) {
-      return NextResponse.json({ error: 'context is required' }, { status: 400 });
     }
 
     if (!process.env.OPENAI_API_KEY) {
@@ -43,20 +39,20 @@ export async function POST(request: Request) {
       );
     }
 
-    const formatPlan = buildCreativeFormatPlan(parsed.data);
+    const creativePlan = buildCreativePlan(parsed.data);
     const analysis = await analyzeReferenceCreative(
       source,
       parsed.data.context
     );
     const copyByIndex = await generateCreativeCopy(
-      formatPlan,
+      creativePlan,
       parsed.data.context,
       analysis
     );
     const creatives: GeneratedCreative[] = [];
 
-    for (let offset = 0; offset < formatPlan.length; offset += 2) {
-      const batch = formatPlan.slice(offset, offset + 2);
+    for (let offset = 0; offset < creativePlan.length; offset += 2) {
+      const batch = creativePlan.slice(offset, offset + 2);
       const generated = await Promise.all(
         batch.map(async (item): Promise<GeneratedCreative> => {
           const copy = copyByIndex.get(item.index);
@@ -66,8 +62,8 @@ export async function POST(request: Request) {
 
           const imageBuffer = await generateReferenceCreativeImage({
             source,
-            primaryFormat: item.primaryFormat,
-            secondaryFormat: item.secondaryFormat,
+            category: item.category,
+            format: item.format,
             context: parsed.data.context,
             copy,
             analysis,
@@ -81,8 +77,8 @@ export async function POST(request: Request) {
 
           return {
             index: item.index,
-            primaryFormat: item.primaryFormat,
-            secondaryFormat: item.secondaryFormat,
+            category: item.category,
+            format: item.format,
             image,
             copy,
           };
@@ -93,7 +89,7 @@ export async function POST(request: Request) {
     }
 
     creatives.sort((a, b) => a.index - b.index);
-    return NextResponse.json({ creatives, formatPlan, analysis });
+    return NextResponse.json({ creatives, creativePlan, analysis });
   } catch (error) {
     console.error('Creative generation failed', error);
     return NextResponse.json(
