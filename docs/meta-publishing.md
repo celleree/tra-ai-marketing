@@ -68,6 +68,19 @@ CTA is chosen automatically from the generated copy:
 - `CONTACT_US` when the copy centers on contacting, calling, speaking, or consulting
 - otherwise `LEARN_MORE`
 
+## External ROI attribution requirement
+
+TRA calculates ROI in an external system rather than relying on an ROI field inside Meta. Every generated image creative therefore needs a **unique, persistent creative URL** that identifies the exact persisted image asset.
+
+The system should:
+- create or expose one stable URL for every generated image creative
+- keep that URL associated with the internal creative ID and R2 media ID
+- carry the same creative record forward when Meta image hashes, Meta creative IDs, and Meta ad IDs are created
+- make the unique creative URL available to TRA's external ROI/reporting workflow so revenue and ROI can be joined back to the exact creative
+- avoid using temporary browser URLs or other short-lived links as the attribution key
+
+When the external ROI data source is connected, the unique creative URL should serve as a durable creative-level reference so TRA can compare spend and Meta delivery data against externally calculated revenue/ROI for that exact image.
+
 ## Safety boundary
 
 The system may create new Meta objects, but it never activates them automatically.
@@ -154,4 +167,5 @@ Ads:
 - Native Meta lead-form campaigns require additional Page/form selection and lead-generation-specific promoted-object/creative fields; add those after the basic one-click creation flow is verified.
 - The automatic campaign/ad-set policy is a safe deterministic MVP policy, not yet a performance-aware media-buyer agent.
 - Meta IDs/statuses are shown in the current generated-results session; there is not yet a persistent TRA creative-history database.
+- The persistent per-creative URL and external ROI data join described above are requirements for the attribution layer and are not yet implemented end-to-end.
 - Facebook Page identity is supported first. If an Instagram placement requires an explicit Instagram identity, add that identity to the same Meta service.
