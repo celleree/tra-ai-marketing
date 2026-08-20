@@ -1,5 +1,5 @@
-import { CreativeGenerator } from '@/components/creative-generator/creative-generator';
+import { AppWorkspace } from '@/components/app-workspace';
 
 export default function HomePage() {
-  return <CreativeGenerator />;
+  return <AppWorkspace />;
 }
