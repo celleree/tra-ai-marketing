@@ -19,6 +19,18 @@ A vendor-neutral workspace for building AI-assisted Meta advertising workflows f
 5. Media-buyer assistant
 6. Scale, automation, and future integrations
 
+## Branch and Deployment Rule
+
+**Feature branches = temporary work / preview deployments.**
+
+**`main` = the complete, combined version of the TRA app.**
+
+Each separate AI session or feature should work on its own feature branch. Feature-branch deployments are previews only and may contain only that branch's work. Completed work should be merged into `main`, and production should deploy from `main` only. Do not manually promote a feature-branch preview to production.
+
+If `main` changes while a feature branch is still being worked on, sync the feature branch with the latest `main` before the final merge when needed. If branches touch the same files, resolve conflicts by preserving the intended work from both branches rather than silently replacing another agent's changes.
+
+See `AGENTS.md` for the mandatory AI-agent workflow rules.
+
 ## Creative App Status
 
 The first working image-first creative workflow is implemented with Next.js + TypeScript.
