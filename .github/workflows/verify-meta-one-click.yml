@@ -1,0 +1,26 @@
+name: Verify Meta one-click MVP
+
+on:
+  push:
+    branches:
+      - feature/meta-one-click-mvp
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+        env:
+          OPENAI_API_KEY: build-placeholder
+          META_ACCESS_TOKEN: build-placeholder
+          R2_ACCOUNT_ID: build-placeholder
+          R2_ACCESS_KEY_ID: build-placeholder
+          R2_SECRET_ACCESS_KEY: build-placeholder
+          R2_BUCKET_NAME: build-placeholder
