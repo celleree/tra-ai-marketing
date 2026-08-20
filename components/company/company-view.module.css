@@ -1,0 +1,49 @@
+.shell {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 38px 0 72px;
+}
+
+.tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid #dfe4ea;
+}
+
+.tabs button {
+  position: relative;
+  border: 0;
+  background: transparent;
+  padding: 0 0 14px;
+  color: #71808f;
+  font-weight: 750;
+}
+
+.tabs button:hover {
+  color: #17212b;
+}
+
+.tabs .activeTab {
+  color: #244fd3;
+}
+
+.tabs .activeTab::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: #244fd3;
+  content: '';
+}
+
+.panel {
+  min-height: 480px;
+}
+
+@media (max-width: 920px) {
+  .shell {
+    width: min(100% - 32px, 760px);
+    padding: 30px 0 56px;
+  }
+}
