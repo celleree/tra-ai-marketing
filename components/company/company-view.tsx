@@ -1,6 +1,12 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   BRAND_GUIDELINE_FIELDS,
   DEFAULT_COMPANY_PROFILE,
@@ -22,6 +28,11 @@ type WebsiteAnalysisResponse = {
   pagesRead: string[];
   sections: Partial<Record<CompanySectionId, CompanyFields>>;
   notes: string[];
+  error?: string;
+};
+
+type MediaUploadResponse = {
+  url?: string;
   error?: string;
 };
 
@@ -51,6 +62,8 @@ export function CompanyView() {
   const [websiteInput, setWebsiteInput] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisMessage, setAnalysisMessage] = useState('');
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoUploadMessage, setLogoUploadMessage] = useState('');
   const [hasLoadedSavedProfile, setHasLoadedSavedProfile] = useState(false);
 
   useEffect(() => {
@@ -93,6 +106,40 @@ export function CompanyView() {
     }));
   };
 
+  const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || isUploadingLogo) return;
+
+    setIsUploadingLogo(true);
+    setLogoUploadMessage('');
+
+    try {
+      const formData = new FormData();
+      formData.set('file', file);
+
+      const response = await fetch('/api/media/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const payload = (await response.json()) as MediaUploadResponse;
+
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.error || 'The logo could not be uploaded.');
+      }
+
+      updateField('brandGuidelines', 'logo', payload.url);
+      setLogoUploadMessage('Logo uploaded.');
+    } catch (error) {
+      setLogoUploadMessage(
+        error instanceof Error ? error.message : 'The logo could not be uploaded.'
+      );
+    } finally {
+      setIsUploadingLogo(false);
+      input.value = '';
+    }
+  };
+
   const analyzeWebsite = async (event: FormEvent) => {
     event.preventDefault();
     const websiteUrl = websiteInput.trim();
@@ -133,6 +180,7 @@ export function CompanyView() {
 
   const activeFields = FIELD_SETS[activeTab];
   const activeValues = profile[activeTab];
+  const logoValue = profile.brandGuidelines.logo?.trim() || '';
 
   return (
     <div className={styles.shell}>
@@ -208,27 +256,77 @@ export function CompanyView() {
         </div>
 
         <div className={styles.fieldGrid}>
-          {activeFields.map((field) => (
-            <label key={field.key} className={field.multiline ? styles.fullField : styles.field}>
-              <span>{field.label}</span>
-              <small className={styles.fieldHelp}>{field.description}</small>
-              {field.multiline ? (
-                <textarea
-                  rows={5}
-                  value={activeValues[field.key] || ''}
-                  placeholder="Not yet verified"
-                  onChange={(event) => updateField(activeTab, field.key, event.target.value)}
-                />
-              ) : (
-                <input
-                  type="text"
-                  value={activeValues[field.key] || ''}
-                  placeholder="Not yet verified"
-                  onChange={(event) => updateField(activeTab, field.key, event.target.value)}
-                />
-              )}
-            </label>
-          ))}
+          {activeFields.map((field) => {
+            if (activeTab === 'brandGuidelines' && field.key === 'logo') {
+              return (
+                <div key={field.key} className={styles.fullField}>
+                  <span>{field.label}</span>
+                  <small className={styles.fieldHelp}>{field.description}</small>
+                  <div className={styles.logoEditor}>
+                    <div className={styles.logoPreview}>
+                      {logoValue ? (
+                        <img src={logoValue} alt="Company logo preview" />
+                      ) : (
+                        <span>No logo uploaded</span>
+                      )}
+                    </div>
+                    <div className={styles.logoActions}>
+                      <label className={styles.logoUploadButton}>
+                        {isUploadingLogo
+                          ? 'Uploading…'
+                          : logoValue
+                            ? 'Change logo'
+                            : 'Upload logo'}
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          disabled={isUploadingLogo}
+                          onChange={handleLogoUpload}
+                        />
+                      </label>
+                      {logoValue ? (
+                        <button
+                          type="button"
+                          className={styles.logoRemoveButton}
+                          onClick={() => {
+                            updateField('brandGuidelines', 'logo', '');
+                            setLogoUploadMessage('');
+                          }}
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                      {logoUploadMessage ? (
+                        <small className={styles.logoMessage}>{logoUploadMessage}</small>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <label key={field.key} className={field.multiline ? styles.fullField : styles.field}>
+                <span>{field.label}</span>
+                <small className={styles.fieldHelp}>{field.description}</small>
+                {field.multiline ? (
+                  <textarea
+                    rows={5}
+                    value={activeValues[field.key] || ''}
+                    placeholder="Not yet verified"
+                    onChange={(event) => updateField(activeTab, field.key, event.target.value)}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={activeValues[field.key] || ''}
+                    placeholder="Not yet verified"
+                    onChange={(event) => updateField(activeTab, field.key, event.target.value)}
+                  />
+                )}
+              </label>
+            );
+          })}
         </div>
       </section>
     </div>
