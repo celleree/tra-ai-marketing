@@ -1,27 +1,52 @@
-# Send to Meta — first version
+# Send to Meta — one-click MVP
 
 ## Purpose
 
-Extend the generated-static-creative workflow so selected TRA creatives can be created in an existing Meta ad set without manual download/upload/copy-paste work.
+Turn selected generated TRA creatives into a complete, reviewable Meta Ads Manager structure with minimal user input.
 
-Flow:
+After one-time setup, the intended flow is:
 
-`generate creatives -> select creatives -> Send to Meta -> choose account/campaign/ad set/Page -> create one Meta ad per creative as PAUSED -> show per-creative result`
+`generate creatives -> select creatives -> Send to Meta -> create new PAUSED campaign -> create new PAUSED ad set -> create one PAUSED ad per creative -> show Meta IDs/results`
 
-## Safety boundary
+The user should be able to open Ads Manager immediately afterward and see the campaign, ad set, images, primary text, headlines, descriptions, CTAs, and destination URL already populated.
 
-This first version may only create new ads and always sends `status=PAUSED` when creating the ad.
+## One-time browser setup
 
-It does not:
-- activate or publish ads
-- change campaign budgets
-- change ad set budgets
-- change bid strategies
-- pause existing ads
-- delete ads
-- edit existing campaigns or ad sets
+The generated-results UI stores non-secret defaults in browser localStorage:
+- default Meta ad account
+- default Facebook Page
+- destination URL (a website or externally hosted form URL)
+- daily budget that would apply if the ad set were later activated
 
-## Existing TRA data reused
+The Meta access token remains server-side in `META_ACCESS_TOKEN`; it is never stored in localStorage or returned to the browser.
+
+## Automatic MVP campaign/ad-set policy
+
+This version intentionally uses a deterministic automatic policy so the one-click flow is predictable and easy to verify in Ads Manager. A later performance-aware agent can replace this policy without changing the publishing surface.
+
+Each send creates:
+
+### Campaign
+- objective: `OUTCOME_TRAFFIC`
+- buying type: `AUCTION`
+- special ad categories: none
+- status: `PAUSED`
+- ad-set budget sharing: disabled
+
+### Ad set
+- status: `PAUSED`
+- optimization goal: `LANDING_PAGE_VIEWS`
+- billing event: `IMPRESSIONS`
+- bid strategy: `LOWEST_COST_WITHOUT_CAP`
+- destination type: `WEBSITE`
+- daily budget: saved one-time default, represented in the ad account's minor currency units
+- broad US targeting, ages 25–65
+- placements are left to Meta's automatic/default delivery behavior rather than manually constraining placements
+- `is_dynamic_creative=false`
+
+For this MVP, every generated concept is created as a separate ad. That makes the generated image/copy pairs easy to inspect and later measure individually. Dynamic/multi-asset creative selection can be added after the basic create-and-review loop is proven.
+
+## Automatic ad content
 
 Each generated creative already carries:
 - internal creative ID
@@ -32,22 +57,54 @@ Each generated creative already carries:
 - headline
 - description
 
-The Meta publishing route reads the generated image from the existing media-storage abstraction and uploads those same bytes to the Meta ad account. No second media-storage system is introduced.
+The publishing route:
+1. reads the generated image bytes from existing media storage
+2. uploads the image to Meta
+3. creates a Meta ad creative with the generated primary text, headline, description, Page identity, destination URL, and CTA
+4. creates the final ad as `PAUSED`
+
+CTA is chosen automatically from the generated copy:
+- `APPLY_NOW` when the copy explicitly centers on applying/application language
+- `CONTACT_US` when the copy centers on contacting, calling, speaking, or consulting
+- otherwise `LEARN_MORE`
+
+## Safety boundary
+
+The system may create new Meta objects, but it never activates them automatically.
+
+This MVP may:
+- create a new PAUSED campaign
+- create a new PAUSED ad set with a configured budget/bidding/targeting policy
+- upload generated images
+- create new ad creatives
+- create new ads as PAUSED
+
+It does not:
+- activate campaigns, ad sets, or ads
+- modify budgets or bids on existing campaigns/ad sets
+- edit existing campaigns/ad sets
+- pause or delete existing ads
+- change existing targeting
+- spend money without a later explicit Meta-side activation
+
+The budget on a newly created ad set is therefore configuration only until a human activates that structure in Meta Ads Manager.
 
 ## Meta API shape
 
 The integration is isolated in `lib/meta/client.ts`.
 
-The first version uses:
+It uses:
 - `/me/adaccounts` to list accessible ad accounts
-- `/{ad-account}/campaigns` to list existing campaigns
-- `/{campaign}/adsets` to list existing ad sets
 - `/me/accounts` to list Facebook Pages available to the token
+- `/{ad-account}/campaigns` to create the PAUSED campaign
+- `/{ad-account}/adsets` to create the PAUSED ad set
 - `/{ad-account}/adimages` to upload generated images
 - `/{ad-account}/adcreatives` to create link/image ad creatives
-- `/{ad-account}/ads` to create the final ads with `status=PAUSED`
+- `/{ad-account}/ads` to create the final PAUSED ads
 
-The Graph/Marketing API version is configurable with `META_GRAPH_API_VERSION` and defaults to `v25.0`, the current version when this feature was implemented in August 2026.
+Existing campaign/ad-set listing endpoints remain available for diagnostics and future support for choosing an existing structure.
+
+The Graph/Marketing API version is configurable with `META_GRAPH_API_VERSION` and defaults to `v25.0`.
 
 ## Required server secret
 
@@ -57,42 +114,44 @@ Do not expose this token to the browser and do not commit it to the repository.
 
 For preview testing, store `META_ACCESS_TOKEN` in the Vercel Preview environment and create a fresh preview deployment after adding or changing the value so the deployment receives the updated secret.
 
-For the demo account, the token must belong to a Meta user/system user with access to the chosen ad account and Page and with the permissions needed for the operations above. The practical first-version permission set is:
-- `ads_management` for creating ad images, creatives, and ads
-- `pages_show_list` for listing Pages available to the token
-- `pages_manage_ads` for creating ads/creatives tied to the selected Facebook Page
-- `ads_read` may also be requested for read-only advertising access; `ads_management` is still required for creation
-- `business_management` is only needed when the selected Business Manager/system-user setup requires business-asset access; do not require it globally when the demo account does not need it
-- `pages_read_engagement` is not required by this first-version workflow unless we later read or reuse existing Page posts/content
-
-Use Meta's Access Token Debugger / Business settings to verify the token's scopes and asset access. User access tokens expire; for a durable internal integration, move to the appropriate Business Manager system-user/token setup once TRA's real Meta Business is connected.
+For the demo account, the token must belong to a Meta user/system user with access to the chosen ad account and Page and with the permissions needed for the operations above. The practical permission set remains centered on `ads_management` plus Page/business asset access required by the selected identity.
 
 ## Partial failure behavior
 
-Publishing is intentionally processed one creative at a time. A failure for one creative does not roll back or mark the entire batch failed.
+Campaign and ad-set creation happen once per selected batch. Ads are then processed one creative at a time.
 
-Each result returns:
+A failure for one ad does not discard successful ads. Each creative result returns:
 - TRA creative ID
 - success/failed status
 - Meta image hash when successful
 - Meta creative ID when successful
 - Meta ad ID when successful
+- selected CTA when successful
 - `PAUSED` ad status when successful
 - error message when failed
 
-After a batch, successfully created ads are deselected and failed creatives remain selected so they can be retried without intentionally duplicating successful ads.
+The batch response also returns the new Meta campaign ID and ad-set ID.
+
+Successfully created ads are deselected. Failed creatives remain selected so they can be retried.
 
 ## Naming
 
-The first version names ads using:
+Campaign:
+
+`TRA AI | Creative Batch | [UTC timestamp]`
+
+Ad set:
+
+`TRA AI | Broad US | Landing Page Views | [UTC timestamp]`
+
+Ads:
 
 `TRA | AI | [category label] | [format label] | [creative ID]`
 
-This is generated server-side and can be changed later without changing the Meta client architecture.
+## Known MVP limits
 
-## Known first-version limits
-
+- This version creates a Traffic/Landing Page Views structure because a website/form URL can be configured without requiring a Meta Pixel or Meta Instant Form ID.
+- Native Meta lead-form campaigns require additional Page/form selection and lead-generation-specific promoted-object/creative fields; add those after the basic one-click creation flow is verified.
+- The automatic campaign/ad-set policy is a safe deterministic MVP policy, not yet a performance-aware media-buyer agent.
 - Meta IDs/statuses are shown in the current generated-results session; there is not yet a persistent TRA creative-history database.
-- The selected existing ad set controls budget, targeting, optimization, placements, and bid strategy. This feature does not modify those settings.
-- Facebook Page identity is supported first. If a particular Instagram placement/ad set requires an explicit Instagram identity, add that identity selection to the same Meta service rather than changing the creative-generation flow.
-- The final end-to-end verification requires a real Meta token, demo ad account, existing campaign/ad set, and Page.
+- Facebook Page identity is supported first. If an Instagram placement requires an explicit Instagram identity, add that identity to the same Meta service.

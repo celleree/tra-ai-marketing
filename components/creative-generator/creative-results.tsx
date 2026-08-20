@@ -4,10 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
-import {
-  META_CTA_TYPES,
-  type MetaCtaType,
-  type MetaPublishCreativeResult,
+import type {
+  MetaPublishBatchResult,
+  MetaPublishCreativeResult,
 } from '@/lib/meta/types';
 import styles from '@/components/creative-generator/creative-results.module.css';
 
@@ -22,12 +21,23 @@ interface MetaItem {
   name: string;
   status?: string;
   effectiveStatus?: string;
+  currency?: string;
+  accountStatus?: number;
+}
+
+interface MetaDefaults {
+  adAccountId: string;
+  pageId: string;
+  destinationUrl: string;
+  dailyBudget: number;
 }
 
 type PublishState =
   | { status: 'uploading' }
   | ({ status: 'success' } & MetaPublishCreativeResult)
   | ({ status: 'failed' } & MetaPublishCreativeResult);
+
+const META_DEFAULTS_KEY = 'tra-meta-one-click-defaults-v1';
 
 const readItems = async (response: Response) => {
   const payload = await response.json();
@@ -37,38 +47,76 @@ const readItems = async (response: Response) => {
   return (payload.items || []) as MetaItem[];
 };
 
+const isValidUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
+const readSavedDefaults = (): MetaDefaults | null => {
+  try {
+    const raw = window.localStorage.getItem(META_DEFAULTS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<MetaDefaults>;
+    if (
+      typeof parsed.adAccountId !== 'string' ||
+      typeof parsed.pageId !== 'string' ||
+      typeof parsed.destinationUrl !== 'string' ||
+      typeof parsed.dailyBudget !== 'number' ||
+      !parsed.adAccountId ||
+      !parsed.pageId ||
+      !isValidUrl(parsed.destinationUrl) ||
+      !Number.isFinite(parsed.dailyBudget)
+    ) {
+      return null;
+    }
+    return parsed as MetaDefaults;
+  } catch {
+    return null;
+  }
+};
+
 export function CreativeResults({
   creatives,
   generating = false,
   requestedCount = 0,
 }: CreativeResultsProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [sendOpen, setSendOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [sendAfterSetup, setSendAfterSetup] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(false);
   const [metaError, setMetaError] = useState('');
   const [accounts, setAccounts] = useState<MetaItem[]>([]);
-  const [campaigns, setCampaigns] = useState<MetaItem[]>([]);
-  const [adSets, setAdSets] = useState<MetaItem[]>([]);
   const [pages, setPages] = useState<MetaItem[]>([]);
   const [adAccountId, setAdAccountId] = useState('');
-  const [campaignId, setCampaignId] = useState('');
-  const [adSetId, setAdSetId] = useState('');
   const [pageId, setPageId] = useState('');
   const [destinationUrl, setDestinationUrl] = useState('');
-  const [ctaType, setCtaType] = useState<MetaCtaType | ''>('LEARN_MORE');
+  const [dailyBudget, setDailyBudget] = useState('20');
+  const [metaDefaults, setMetaDefaults] = useState<MetaDefaults | null>(null);
   const [publishState, setPublishState] = useState<Record<string, PublishState>>({});
+  const [batchResult, setBatchResult] = useState<MetaPublishBatchResult | null>(null);
 
   useEffect(() => {
     setSelectedIds([]);
     setPublishState({});
+    setBatchResult(null);
   }, [creatives]);
+
+  useEffect(() => {
+    setMetaDefaults(readSavedDefaults());
+  }, []);
 
   const selectedCreatives = useMemo(
     () => creatives.filter((creative) => selectedIds.includes(creative.id)),
     [creatives, selectedIds]
   );
   const allSelected = creatives.length > 0 && selectedIds.length === creatives.length;
+  const selectedAccount = accounts.find((item) => item.id === adAccountId);
+  const budgetCurrency = selectedAccount?.currency || 'account currency';
 
   const toggleCreative = (creativeId: string) => {
     setSelectedIds((current) =>
@@ -78,28 +126,28 @@ export function CreativeResults({
     );
   };
 
-  const openMetaDialog = async () => {
-    if (!selectedCreatives.length) return;
-    setSendOpen(true);
-    setMetaError('');
+  const loadMetaOptions = async () => {
     if (accounts.length && pages.length) return;
-
     setLoadingMeta(true);
+    setMetaError('');
     try {
       const [accountResponse, pageResponse] = await Promise.all([
         fetch('/api/meta/ad-accounts', { cache: 'no-store' }),
         fetch('/api/meta/pages', { cache: 'no-store' }),
       ]);
-      const [nextAccounts, nextPages] = await Promise.all([
+      const [allAccounts, nextPages] = await Promise.all([
         readItems(accountResponse),
         readItems(pageResponse),
       ]);
-      setAccounts(nextAccounts);
+      const activeAccounts = allAccounts.filter(
+        (item) => item.accountStatus === undefined || item.accountStatus === 1
+      );
+      setAccounts(activeAccounts);
       setPages(nextPages);
-      if (nextAccounts.length === 1) {
-        setAdAccountId(nextAccounts[0].id);
+      if (!adAccountId && activeAccounts.length === 1) {
+        setAdAccountId(activeAccounts[0].id);
       }
-      if (nextPages.length === 1) {
+      if (!pageId && nextPages.length === 1) {
         setPageId(nextPages[0].id);
       }
     } catch (error) {
@@ -109,65 +157,29 @@ export function CreativeResults({
     }
   };
 
-  const chooseAccount = async (nextId: string) => {
-    setAdAccountId(nextId);
-    setCampaignId('');
-    setAdSetId('');
-    setCampaigns([]);
-    setAdSets([]);
+  const openMetaSetup = async (shouldSendAfterSave: boolean) => {
+    setSendAfterSetup(shouldSendAfterSave);
     setMetaError('');
-    if (!nextId) return;
-
-    setLoadingMeta(true);
-    try {
-      const response = await fetch(`/api/meta/campaigns?adAccountId=${encodeURIComponent(nextId)}`, {
-        cache: 'no-store',
-      });
-      setCampaigns(await readItems(response));
-    } catch (error) {
-      setMetaError(error instanceof Error ? error.message : 'Unable to load campaigns.');
-    } finally {
-      setLoadingMeta(false);
+    if (metaDefaults) {
+      setAdAccountId(metaDefaults.adAccountId);
+      setPageId(metaDefaults.pageId);
+      setDestinationUrl(metaDefaults.destinationUrl);
+      setDailyBudget(String(metaDefaults.dailyBudget));
     }
+    setSetupOpen(true);
+    await loadMetaOptions();
   };
 
-  useEffect(() => {
-    if (sendOpen && adAccountId && !campaigns.length && !campaignId) {
-      void chooseAccount(adAccountId);
-    }
-    // chooseAccount is intentionally triggered only by dialog/account state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sendOpen, adAccountId]);
-
-  const chooseCampaign = async (nextId: string) => {
-    setCampaignId(nextId);
-    setAdSetId('');
-    setAdSets([]);
-    setMetaError('');
-    if (!nextId) return;
-
-    setLoadingMeta(true);
-    try {
-      const response = await fetch(`/api/meta/ad-sets?campaignId=${encodeURIComponent(nextId)}`, {
-        cache: 'no-store',
-      });
-      setAdSets(await readItems(response));
-    } catch (error) {
-      setMetaError(error instanceof Error ? error.message : 'Unable to load ad sets.');
-    } finally {
-      setLoadingMeta(false);
-    }
-  };
-
-  const publishToMeta = async () => {
-    if (!adAccountId || !campaignId || !adSetId || !pageId || !destinationUrl.trim()) {
-      setMetaError('Choose an ad account, campaign, ad set, Page, and destination URL.');
+  const publishToMeta = async (config: MetaDefaults | null = metaDefaults) => {
+    if (!selectedCreatives.length || publishing) return;
+    if (!config) {
+      await openMetaSetup(true);
       return;
     }
-    if (!selectedCreatives.length || publishing) return;
 
     setPublishing(true);
     setMetaError('');
+    setBatchResult(null);
     setPublishState((current) => {
       const next = { ...current };
       selectedCreatives.forEach((creative) => {
@@ -181,11 +193,10 @@ export function CreativeResults({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          adAccountId,
-          adSetId,
-          pageId,
-          destinationUrl: destinationUrl.trim(),
-          ctaType,
+          adAccountId: config.adAccountId,
+          pageId: config.pageId,
+          destinationUrl: config.destinationUrl,
+          dailyBudgetCents: Math.round(config.dailyBudget * 100),
           creatives: selectedCreatives.map((creative) => ({
             id: creative.id,
             imageId: creative.image.id,
@@ -197,14 +208,18 @@ export function CreativeResults({
       });
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.error || 'Meta publishing failed.');
+        const suffix = payload.campaignId
+          ? ` Paused campaign ${payload.campaignId} was created before the failure.`
+          : '';
+        throw new Error(`${payload.error || 'Meta publishing failed.'}${suffix}`);
       }
 
-      const results = (payload.results || []) as MetaPublishCreativeResult[];
+      const batch = payload as MetaPublishBatchResult;
+      setBatchResult(batch);
       const failedIds: string[] = [];
       setPublishState((current) => {
         const next = { ...current };
-        results.forEach((result) => {
+        batch.results.forEach((result) => {
           next[result.creativeId] = result.status === 'success'
             ? { ...result, status: 'success' }
             : { ...result, status: 'failed' };
@@ -213,7 +228,6 @@ export function CreativeResults({
         return next;
       });
       setSelectedIds(failedIds);
-      setSendOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Meta publishing failed.';
       setMetaError(message);
@@ -230,6 +244,33 @@ export function CreativeResults({
       });
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const saveMetaSetup = async () => {
+    const budget = Number(dailyBudget);
+    if (!adAccountId || !pageId || !isValidUrl(destinationUrl.trim())) {
+      setMetaError('Choose an active ad account, Facebook Page, and valid destination URL.');
+      return;
+    }
+    if (!Number.isFinite(budget) || budget < 5 || budget > 1000) {
+      setMetaError('Daily budget must be between 5 and 1000 in the ad account currency.');
+      return;
+    }
+
+    const nextDefaults: MetaDefaults = {
+      adAccountId,
+      pageId,
+      destinationUrl: destinationUrl.trim(),
+      dailyBudget: budget,
+    };
+    window.localStorage.setItem(META_DEFAULTS_KEY, JSON.stringify(nextDefaults));
+    setMetaDefaults(nextDefaults);
+    setSetupOpen(false);
+    setMetaError('');
+
+    if (sendAfterSetup) {
+      await publishToMeta(nextDefaults);
     }
   };
 
@@ -268,6 +309,8 @@ export function CreativeResults({
 
   if (!creatives.length) return null;
 
+  const successfulAds = batchResult?.results.filter((result) => result.status === 'success').length || 0;
+
   return (
     <section className={styles.section}>
       <div className={styles.heading}>
@@ -280,19 +323,40 @@ export function CreativeResults({
             type="button"
             className={styles.secondaryButton}
             onClick={() => setSelectedIds(allSelected ? [] : creatives.map((creative) => creative.id))}
+            disabled={publishing}
           >
             {allSelected ? 'Clear selection' : 'Select all'}
           </button>
           <button
             type="button"
-            className={styles.primaryButton}
-            disabled={!selectedCreatives.length}
-            onClick={() => void openMetaDialog()}
+            className={styles.secondaryButton}
+            onClick={() => void openMetaSetup(false)}
+            disabled={publishing}
           >
-            Send to Meta{selectedCreatives.length ? ` (${selectedCreatives.length})` : ''}
+            {metaDefaults ? 'Meta setup' : 'Set up Meta'}
+          </button>
+          <button
+            type="button"
+            className={styles.primaryButton}
+            disabled={!selectedCreatives.length || publishing}
+            onClick={() => void publishToMeta()}
+          >
+            {publishing
+              ? 'Sending to Meta…'
+              : `Send to Meta${selectedCreatives.length ? ` (${selectedCreatives.length})` : ''}`}
           </button>
         </div>
       </div>
+
+      {batchResult ? (
+        <div className={styles.batchStatus}>
+          <strong>Created in Meta · PAUSED</strong>
+          <span>
+            Campaign {batchResult.campaignId} · Ad set {batchResult.adSetId} · {successfulAds}/{batchResult.results.length} ads created
+          </span>
+        </div>
+      ) : null}
+      {metaError && !setupOpen ? <p className={styles.inlineError}>{metaError}</p> : null}
 
       <div className={styles.grid}>
         {creatives.map((creative) => {
@@ -308,6 +372,7 @@ export function CreativeResults({
                   type="checkbox"
                   checked={selected}
                   onChange={() => toggleCreative(creative.id)}
+                  disabled={publishing}
                 />
                 <span>Select</span>
               </label>
@@ -340,11 +405,12 @@ export function CreativeResults({
                           : styles.publishUploading
                     }`}
                   >
-                    {state.status === 'uploading' ? 'Uploading to Meta…' : null}
+                    {state.status === 'uploading' ? 'Creating in Meta…' : null}
                     {state.status === 'success' ? (
                       <>
                         Created in Meta · PAUSED
                         {state.metaAdId ? <span>Ad ID: {state.metaAdId}</span> : null}
+                        {state.ctaType ? <span>CTA: {state.ctaType.replaceAll('_', ' ')}</span> : null}
                       </>
                     ) : null}
                     {state.status === 'failed' ? (
@@ -361,18 +427,18 @@ export function CreativeResults({
         })}
       </div>
 
-      {sendOpen ? (
+      {setupOpen ? (
         <div className={styles.modalBackdrop} role="presentation">
-          <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="meta-send-title">
+          <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="meta-setup-title">
             <div className={styles.modalHeader}>
               <div>
                 <p className="eyebrow">Meta Ads Manager</p>
-                <h2 id="meta-send-title">Send {selectedCreatives.length} creative{selectedCreatives.length === 1 ? '' : 's'}</h2>
+                <h2 id="meta-setup-title">One-time Meta setup</h2>
               </div>
               <button
                 type="button"
                 className={styles.closeButton}
-                onClick={() => setSendOpen(false)}
+                onClick={() => setSetupOpen(false)}
                 disabled={publishing}
                 aria-label="Close"
               >
@@ -381,64 +447,86 @@ export function CreativeResults({
             </div>
 
             <p className={styles.safetyNote}>
-              Every ad created by TRA will be created as PAUSED. This workflow does not change budgets or activate ads.
+              These defaults stay in this browser. Each send creates a new PAUSED Traffic campaign, a PAUSED broad-US Landing Page Views ad set, and one PAUSED ad per selected creative. Nothing activates automatically.
             </p>
 
             <div className={styles.formGrid}>
               <label>
-                <span>Ad account</span>
-                <select value={adAccountId} onChange={(event) => void chooseAccount(event.target.value)} disabled={loadingMeta || publishing}>
-                  <option value="">Select an ad account</option>
-                  {accounts.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.id})</option>)}
+                <span>Default ad account</span>
+                <select
+                  value={adAccountId}
+                  onChange={(event) => setAdAccountId(event.target.value)}
+                  disabled={loadingMeta || publishing}
+                >
+                  <option value="">Select an active ad account</option>
+                  {accounts.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} ({item.id}){item.currency ? ` · ${item.currency}` : ''}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>
-                <span>Campaign</span>
-                <select value={campaignId} onChange={(event) => void chooseCampaign(event.target.value)} disabled={!adAccountId || loadingMeta || publishing}>
-                  <option value="">Select a campaign</option>
-                  {campaigns.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>Ad set</span>
-                <select value={adSetId} onChange={(event) => setAdSetId(event.target.value)} disabled={!campaignId || loadingMeta || publishing}>
-                  <option value="">Select an ad set</option>
-                  {adSets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>Facebook Page</span>
-                <select value={pageId} onChange={(event) => setPageId(event.target.value)} disabled={loadingMeta || publishing}>
+                <span>Default Facebook Page</span>
+                <select
+                  value={pageId}
+                  onChange={(event) => setPageId(event.target.value)}
+                  disabled={loadingMeta || publishing}
+                >
                   <option value="">Select a Page</option>
-                  {pages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  {pages.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
                 </select>
               </label>
               <label className={styles.fullWidth}>
                 <span>Destination URL</span>
                 <input
                   type="url"
-                  placeholder="https://..."
+                  placeholder="https://your-landing-page-or-form.com"
                   value={destinationUrl}
                   onChange={(event) => setDestinationUrl(event.target.value)}
                   disabled={publishing}
                 />
               </label>
               <label>
-                <span>CTA</span>
-                <select value={ctaType} onChange={(event) => setCtaType(event.target.value as MetaCtaType | '')} disabled={publishing}>
-                  <option value="">No CTA button</option>
-                  {META_CTA_TYPES.map((type) => <option key={type} value={type}>{type.replaceAll('_', ' ')}</option>)}
-                </select>
+                <span>Daily budget if activated ({budgetCurrency})</span>
+                <input
+                  type="number"
+                  min="5"
+                  max="1000"
+                  step="1"
+                  value={dailyBudget}
+                  onChange={(event) => setDailyBudget(event.target.value)}
+                  disabled={publishing}
+                />
               </label>
             </div>
 
+            <p className={styles.setupHint}>
+              CTA is chosen automatically from each creative's copy. This MVP uses separate ads rather than dynamic creative so every generated concept is easy to inspect in Ads Manager.
+            </p>
             {loadingMeta ? <p className={styles.modalMessage}>Loading Meta options…</p> : null}
             {metaError ? <p className={styles.modalError}>{metaError}</p> : null}
 
             <div className={styles.modalActions}>
-              <button type="button" className={styles.secondaryButton} onClick={() => setSendOpen(false)} disabled={publishing}>Cancel</button>
-              <button type="button" className={styles.primaryButton} onClick={() => void publishToMeta()} disabled={publishing || loadingMeta}>
-                {publishing ? 'Sending…' : `Create ${selectedCreatives.length} paused ad${selectedCreatives.length === 1 ? '' : 's'}`}
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={() => setSetupOpen(false)}
+                disabled={publishing}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={() => void saveMetaSetup()}
+                disabled={publishing || loadingMeta}
+              >
+                {sendAfterSetup
+                  ? `Save & create ${selectedCreatives.length} paused ad${selectedCreatives.length === 1 ? '' : 's'}`
+                  : 'Save setup'}
               </button>
             </div>
           </div>

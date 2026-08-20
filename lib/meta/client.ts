@@ -95,6 +95,25 @@ const request = async <T>(
   return (await response.json()) as T;
 };
 
+const createAccountObject = async (
+  adAccountId: string,
+  edge: string,
+  fields: Record<string, string>
+) => {
+  const accountId = normalizeAdAccountId(adAccountId);
+  const body = new URLSearchParams(fields);
+  const payload = await request<{ id?: string }>(`${accountId}/${edge}`, {
+    method: 'POST',
+    body,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
+
+  if (!payload.id) {
+    throw new MetaApiError(`Meta returned no ${edge.replace(/s$/, '')} ID.`);
+  }
+  return payload.id;
+};
+
 export const listMetaAdAccounts = async (): Promise<MetaAdAccount[]> => {
   const payload = await request<
     MetaCollection<{ id: string; name: string; currency?: string; account_status?: number }>
@@ -153,6 +172,51 @@ export const listMetaPages = async (): Promise<MetaListItem[]> => {
   );
 
   return (payload.data || []).map((item) => ({ id: item.id, name: item.name }));
+};
+
+export const createPausedMetaCampaign = async (args: {
+  adAccountId: string;
+  name: string;
+}) =>
+  createAccountObject(args.adAccountId, 'campaigns', {
+    name: args.name,
+    objective: 'OUTCOME_TRAFFIC',
+    buying_type: 'AUCTION',
+    special_ad_categories: JSON.stringify([]),
+    is_adset_budget_sharing_enabled: 'false',
+    status: 'PAUSED',
+  });
+
+export const createPausedMetaAdSet = async (args: {
+  adAccountId: string;
+  campaignId: string;
+  name: string;
+  dailyBudgetCents: number;
+}) => {
+  const campaignId = assertGraphId(args.campaignId, 'Meta campaign ID');
+  if (!Number.isInteger(args.dailyBudgetCents) || args.dailyBudgetCents < 500) {
+    throw new MetaApiError('Meta daily budget must be at least 500 minor currency units.');
+  }
+
+  return createAccountObject(args.adAccountId, 'adsets', {
+    name: args.name,
+    campaign_id: campaignId,
+    status: 'PAUSED',
+    daily_budget: String(args.dailyBudgetCents),
+    billing_event: 'IMPRESSIONS',
+    optimization_goal: 'LANDING_PAGE_VIEWS',
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    destination_type: 'WEBSITE',
+    is_dynamic_creative: 'false',
+    targeting: JSON.stringify({
+      age_min: 25,
+      age_max: 65,
+      geo_locations: {
+        countries: ['US'],
+        location_types: ['home', 'recent'],
+      },
+    }),
+  });
 };
 
 export const uploadMetaAdImage = async (

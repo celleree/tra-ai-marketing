@@ -37,5 +37,16 @@ export interface MetaPublishCreativeResult {
   metaCreativeId?: string;
   metaImageHash?: string;
   adStatus?: 'PAUSED';
+  ctaType?: MetaCtaType;
   error?: string;
+}
+
+export interface MetaPublishBatchResult {
+  campaignId: string;
+  adSetId: string;
+  campaignStatus: 'PAUSED';
+  adSetStatus: 'PAUSED';
+  objective: 'OUTCOME_TRAFFIC';
+  optimizationGoal: 'LANDING_PAGE_VIEWS';
+  results: MetaPublishCreativeResult[];
 }
