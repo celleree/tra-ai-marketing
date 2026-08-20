@@ -1,0 +1,121 @@
+.workspace-brand-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  background-color: #ffffff;
+  background-image: url('/tra-logo-sidebar.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 92% 92%;
+  color: transparent;
+  text-indent: -9999px;
+  overflow: hidden;
+}
+
+.workspace-nav-item {
+  gap: 0;
+  padding: 0 14px;
+}
+
+.workspace-nav-icon {
+  display: none;
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) {
+  min-height: 172px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 30px 28px 46px;
+  cursor: pointer;
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > input[type='file'][multiple] {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 0 !important;
+  pointer-events: auto !important;
+  cursor: pointer;
+  z-index: 3;
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > div:nth-of-type(1) {
+  position: relative;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #293440;
+  font-size: 0;
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > div:nth-of-type(1)::before {
+  content: '↑';
+  font-size: 1.65rem;
+  font-weight: 500;
+  line-height: 1;
+  transform: translateY(-2px);
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > div:nth-of-type(1)::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  width: 21px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > div:nth-of-type(2) {
+  display: block;
+  min-width: 0;
+  text-align: center;
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > div:nth-of-type(2) > strong {
+  display: block;
+  color: #17212b;
+  font-size: 1rem;
+  font-weight: 750;
+  text-transform: capitalize;
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > div:nth-of-type(2) > span,
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > button {
+  display: none !important;
+}
+
+.workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > span {
+  bottom: 17px;
+  color: #9aa3ad;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .workspace-brand-mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) {
+    min-height: 156px;
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .workspace-content .workspace-view div:has(> input[type='file'][multiple][accept*='image/png']) > span {
+    max-width: calc(100% - 24px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
