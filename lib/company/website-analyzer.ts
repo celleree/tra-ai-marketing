@@ -1,10 +1,12 @@
 import { resolve4, resolve6 } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import type { CompanyFields, CompanySectionId } from '@/lib/company/profile';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const MAX_PAGES = 6;
 const MAX_PAGE_CHARS = 18000;
 const MAX_TOTAL_CHARS = 70000;
+const MAX_REDIRECTS = 4;
 
 export interface WebsiteCompanyAnalysis {
   websiteUrl: string;
@@ -13,11 +15,7 @@ export interface WebsiteCompanyAnalysis {
   notes: string[];
 }
 
-type CrawledPage = {
-  url: string;
-  title: string;
-  text: string;
-};
+type CrawledPage = { url: string; title: string; text: string };
 
 const getApiKey = () => {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -34,7 +32,6 @@ const extractOutputText = (payload: unknown) => {
     if (!item || typeof item !== 'object') continue;
     const content = (item as { content?: unknown }).content;
     if (!Array.isArray(content)) continue;
-
     for (const part of content) {
       if (
         part &&
@@ -46,19 +43,15 @@ const extractOutputText = (payload: unknown) => {
       }
     }
   }
-
   return '';
 };
 
 const isPrivateIpv4 = (address: string) => {
   const parts = address.split('.').map(Number);
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return true;
-
+  if (parts.length !== 4 || parts.some(Number.isNaN)) return true;
   const [a, b] = parts;
   return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
+    a === 0 || a === 10 || a === 127 ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
@@ -67,57 +60,51 @@ const isPrivateIpv4 = (address: string) => {
 };
 
 const isPrivateIpv6 = (address: string) => {
-  const normalized = address.toLowerCase();
+  const value = address.toLowerCase();
   return (
-    normalized === '::' ||
-    normalized === '::1' ||
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    normalized.startsWith('fe8') ||
-    normalized.startsWith('fe9') ||
-    normalized.startsWith('fea') ||
-    normalized.startsWith('feb')
+    value === '::' || value === '::1' || value.startsWith('fc') ||
+    value.startsWith('fd') || value.startsWith('fe8') || value.startsWith('fe9') ||
+    value.startsWith('fea') || value.startsWith('feb')
   );
 };
 
 const assertPublicHostname = async (hostname: string) => {
-  const normalized = hostname.toLowerCase();
-  if (
-    normalized === 'localhost' ||
-    normalized.endsWith('.local') ||
-    normalized.endsWith('.internal')
-  ) {
+  const normalized = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (normalized === 'localhost' || normalized.endsWith('.local') || normalized.endsWith('.internal')) {
     throw new Error('Private or local website URLs are not allowed.');
   }
 
-  const [ipv4, ipv6] = await Promise.all([
-    resolve4(hostname).catch(() => [] as string[]),
-    resolve6(hostname).catch(() => [] as string[]),
-  ]);
-
-  if (ipv4.length === 0 && ipv6.length === 0) {
-    throw new Error('The website hostname could not be resolved.');
+  const ipVersion = isIP(normalized);
+  if (ipVersion === 4) {
+    if (isPrivateIpv4(normalized)) throw new Error('Private or local website URLs are not allowed.');
+    return;
+  }
+  if (ipVersion === 6) {
+    if (isPrivateIpv6(normalized)) throw new Error('Private or local website URLs are not allowed.');
+    return;
   }
 
+  const [ipv4, ipv6] = await Promise.all([
+    resolve4(normalized).catch(() => [] as string[]),
+    resolve6(normalized).catch(() => [] as string[]),
+  ]);
+  if (ipv4.length === 0 && ipv6.length === 0) throw new Error('The website hostname could not be resolved.');
   if (ipv4.some(isPrivateIpv4) || ipv6.some(isPrivateIpv6)) {
     throw new Error('Private or local website URLs are not allowed.');
   }
 };
 
-export const normalizeCompanyWebsiteUrl = async (rawUrl: string) => {
-  const withProtocol = /^https?:\/\//i.test(rawUrl.trim())
-    ? rawUrl.trim()
-    : `https://${rawUrl.trim()}`;
-  const url = new URL(withProtocol);
-
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error('Only http and https website URLs are supported.');
-  }
-
-  url.username = '';
-  url.password = '';
-  url.hash = '';
+const assertPublicUrl = async (url: URL) => {
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only http and https website URLs are supported.');
+  if (url.username || url.password) throw new Error('Website URLs with embedded credentials are not allowed.');
   await assertPublicHostname(url.hostname);
+};
+
+export const normalizeCompanyWebsiteUrl = async (rawUrl: string) => {
+  const withProtocol = /^https?:\/\//i.test(rawUrl.trim()) ? rawUrl.trim() : `https://${rawUrl.trim()}`;
+  const url = new URL(withProtocol);
+  url.hash = '';
+  await assertPublicUrl(url);
   return url;
 };
 
@@ -149,8 +136,7 @@ const extractInternalLinks = (html: string, baseUrl: URL) => {
   while ((match = regex.exec(html))) {
     try {
       const url = new URL(match[1], baseUrl);
-      if (url.origin !== baseUrl.origin) continue;
-      if (!['http:', 'https:'].includes(url.protocol)) continue;
+      if (url.origin !== baseUrl.origin || !['http:', 'https:'].includes(url.protocol)) continue;
       url.hash = '';
       if (!priority.test(`${url.pathname}${url.search}`)) continue;
       links.add(url.toString());
@@ -158,38 +144,44 @@ const extractInternalLinks = (html: string, baseUrl: URL) => {
       // Ignore malformed links.
     }
   }
-
   return [...links];
 };
 
-const fetchPage = async (url: string): Promise<{ page: CrawledPage; links: string[] }> => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-
-  try {
-    const response = await fetch(url, {
-      redirect: 'follow',
-      signal: controller.signal,
+const fetchWithSafeRedirects = async (initialUrl: URL, signal: AbortSignal) => {
+  let current = initialUrl;
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+    await assertPublicUrl(current);
+    const response = await fetch(current, {
+      redirect: 'manual',
+      signal,
       headers: {
         'User-Agent': 'TRA-AI-Marketing-Company-Profile/1.0',
         Accept: 'text/html,application/xhtml+xml',
       },
     });
 
+    if (![301, 302, 303, 307, 308].includes(response.status)) return { response, finalUrl: current };
+    const location = response.headers.get('location');
+    if (!location) throw new Error('Website redirect was missing a destination.');
+    current = new URL(location, current);
+  }
+  throw new Error('Website redirected too many times.');
+};
+
+const fetchPage = async (url: URL): Promise<{ page: CrawledPage; links: string[] }> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const { response, finalUrl } = await fetchWithSafeRedirects(url, controller.signal);
     if (!response.ok) throw new Error(`Website returned ${response.status}.`);
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
       throw new Error('The URL did not return a readable web page.');
     }
-
     const html = await response.text();
     return {
-      page: {
-        url: response.url || url,
-        title: extractTitle(html),
-        text: stripHtml(html).slice(0, MAX_PAGE_CHARS),
-      },
-      links: extractInternalLinks(html, new URL(response.url || url)),
+      page: { url: finalUrl.toString(), title: extractTitle(html), text: stripHtml(html).slice(0, MAX_PAGE_CHARS) },
+      links: extractInternalLinks(html, finalUrl),
     };
   } finally {
     clearTimeout(timeout);
@@ -200,29 +192,27 @@ const crawlWebsite = async (root: URL) => {
   const queue = [root.toString()];
   const seen = new Set<string>();
   const pages: CrawledPage[] = [];
+  let allowedOrigin = root.origin;
   let totalChars = 0;
 
   while (queue.length > 0 && pages.length < MAX_PAGES && totalChars < MAX_TOTAL_CHARS) {
     const next = queue.shift();
     if (!next || seen.has(next)) continue;
     seen.add(next);
-
     const target = new URL(next);
-    if (target.origin !== root.origin) continue;
-    await assertPublicHostname(target.hostname);
+    if (pages.length > 0 && target.origin !== allowedOrigin) continue;
 
     try {
-      const { page, links } = await fetchPage(target.toString());
+      const { page, links } = await fetchPage(target);
+      const pageOrigin = new URL(page.url).origin;
+      if (pages.length === 0) allowedOrigin = pageOrigin;
+      if (pageOrigin !== allowedOrigin) continue;
       if (page.text) {
         pages.push(page);
         totalChars += page.text.length;
       }
-
-      for (const link of links) {
-        if (!seen.has(link) && queue.length < 20) queue.push(link);
-      }
+      for (const link of links) if (!seen.has(link) && queue.length < 20) queue.push(link);
     } catch {
-      // A secondary page failing should not invalidate the whole website scan.
       if (pages.length === 0 && target.toString() === root.toString()) throw new Error('The website could not be read.');
     }
   }
@@ -252,13 +242,9 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
   const root = await normalizeCompanyWebsiteUrl(rawUrl);
   const pages = await crawlWebsite(root);
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-5.6-terra';
-
   const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${getApiKey()}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
       store: false,
@@ -266,14 +252,10 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
         { role: 'developer', content: [{ type: 'input_text', text: ANALYZER_RULES }] },
         {
           role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text: `Website: ${root.toString()}\n\nPages read:\n${pages
-                .map((page, index) => `\n--- PAGE ${index + 1}: ${page.url}\nTITLE: ${page.title}\n${page.text}`)
-                .join('\n')}`,
-            },
-          ],
+          content: [{
+            type: 'input_text',
+            text: `Website: ${root.toString()}\n\nPages read:\n${pages.map((page, index) => `\n--- PAGE ${index + 1}: ${page.url}\nTITLE: ${page.title}\n${page.text}`).join('\n')}`,
+          }],
         },
       ],
       text: {
@@ -284,43 +266,12 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
           schema: {
             type: 'object',
             properties: {
-              brandGuidelines: fieldSchema([
-                'brandName',
-                'shortName',
-                'brandVoice',
-                'tonePrinciples',
-                'visualIdentity',
-                'colors',
-                'typography',
-                'logoUsage',
-              ]),
-              knowledgeBase: fieldSchema([
-                'companyOverview',
-                'services',
-                'audiences',
-                'customerProblems',
-                'desiredOutcomes',
-                'objections',
-                'proofThemes',
-                'customerLanguage',
-                'differentiators',
-                'trustSignals',
-                'offers',
-                'creativeFormats',
-              ]),
-              guardrails: fieldSchema([
-                'prohibitedClaims',
-                'testimonialRules',
-                'outcomeRules',
-                'customerPrivacy',
-                'governmentAffiliation',
-                'competitorClaims',
-                'requiredDisclaimers',
-                'approvalNotes',
-              ]),
+              brandGuidelines: fieldSchema(['brandName','shortName','brandVoice','tonePrinciples','visualIdentity','colors','typography','logoUsage']),
+              knowledgeBase: fieldSchema(['companyOverview','services','audiences','customerProblems','desiredOutcomes','objections','proofThemes','customerLanguage','differentiators','trustSignals','offers','creativeFormats']),
+              guardrails: fieldSchema(['prohibitedClaims','testimonialRules','outcomeRules','customerPrivacy','governmentAffiliation','competitorClaims','requiredDisclaimers','approvalNotes']),
               notes: { type: 'array', items: { type: 'string' } },
             },
-            required: ['brandGuidelines', 'knowledgeBase', 'guardrails', 'notes'],
+            required: ['brandGuidelines','knowledgeBase','guardrails','notes'],
             additionalProperties: false,
           },
         },
@@ -331,7 +282,6 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
   if (!response.ok) throw new Error(`Website analysis failed with ${response.status}.`);
   const text = extractOutputText(await response.json());
   if (!text) throw new Error('The website analyzer returned no profile data.');
-
   const parsed = JSON.parse(text) as {
     brandGuidelines: CompanyFields;
     knowledgeBase: CompanyFields;
@@ -340,7 +290,7 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
   };
 
   return {
-    websiteUrl: root.toString(),
+    websiteUrl: pages[0]?.url || root.toString(),
     pagesRead: pages.map((page) => page.url),
     sections: {
       brandGuidelines: parsed.brandGuidelines,
