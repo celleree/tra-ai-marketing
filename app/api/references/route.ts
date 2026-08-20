@@ -14,6 +14,7 @@ import {
 import {
   addToReferenceLibrary,
   listReferenceLibrary,
+  removeFromReferenceLibrary,
   updateReferenceAngle,
   type ReferenceLibraryAddition,
 } from '@/lib/references/storage';
@@ -173,6 +174,57 @@ export async function PATCH(request: Request) {
     console.error('Could not move reference image', error);
     return NextResponse.json(
       { error: 'The reference image could not be moved.' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const body = (await request.json()) as Record<string, unknown>;
+    const rawIds = Array.isArray(body.ids) ? body.ids : [];
+    const ids = rawIds.filter(
+      (value): value is string => typeof value === 'string' && isSafeMediaId(value)
+    );
+
+    if (!ids.length || ids.length !== rawIds.length) {
+      return NextResponse.json(
+        { error: 'Select at least one valid reference image.' },
+        { status: 400 }
+      );
+    }
+
+    if (ids.length > 100) {
+      return NextResponse.json(
+        { error: 'Delete no more than 100 reference images at a time.' },
+        { status: 400 }
+      );
+    }
+
+    const uniqueIds = [...new Set(ids)];
+    const result = await removeFromReferenceLibrary(uniqueIds);
+    const storage = getMediaStorage();
+    const deletions = await Promise.allSettled(
+      result.removed.map((item) => storage.deleteImage(item.fileName))
+    );
+
+    deletions.forEach((outcome, index) => {
+      if (outcome.status === 'rejected') {
+        console.error(
+          `Could not delete stored reference ${result.removed[index]?.fileName}`,
+          outcome.reason
+        );
+      }
+    });
+
+    return NextResponse.json({
+      items: result.items,
+      deleted: result.removed.length,
+    });
+  } catch (error) {
+    console.error('Could not delete reference images', error);
+    return NextResponse.json(
+      { error: 'The selected reference images could not be deleted.' },
       { status: 500 }
     );
   }
