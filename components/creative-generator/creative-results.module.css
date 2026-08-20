@@ -79,6 +79,87 @@
   font-size: 0.88rem;
 }
 
+.skeletonCard {
+  pointer-events: none;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #edf1f4;
+}
+
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.72),
+    transparent
+  );
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+.skeletonPills {
+  display: flex;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.skeletonPill,
+.skeletonPillShort,
+.skeletonTitle,
+.skeletonLine,
+.skeletonLineShort {
+  display: block;
+  border-radius: 999px;
+}
+
+.skeletonPill {
+  width: 108px;
+  height: 27px;
+}
+
+.skeletonPillShort {
+  width: 78px;
+  height: 27px;
+}
+
+.skeletonTitle {
+  width: 58%;
+  height: 20px;
+  margin-bottom: 12px;
+  border-radius: 7px;
+}
+
+.skeletonLine {
+  width: 92%;
+  height: 13px;
+  margin-bottom: 9px;
+  border-radius: 5px;
+}
+
+.skeletonLineShort {
+  width: 68%;
+  height: 13px;
+  border-radius: 5px;
+}
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+  }
+}
+
 @media (max-width: 820px) {
   .grid {
     grid-template-columns: 1fr;
