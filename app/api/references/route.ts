@@ -1,4 +1,10 @@
 import { NextResponse } from 'next/server';
+import { classifyReferenceCreativeAngle } from '@/lib/ai/reference-angle';
+import {
+  isCreativeCategory,
+  type CreativeCategoryId,
+} from '@/lib/creative-categories';
+import { getMediaStorage } from '@/lib/media/local-storage';
 import type { MediaAsset } from '@/lib/media/types';
 import {
   getStoredImageMimeType,
@@ -8,9 +14,12 @@ import {
 import {
   addToReferenceLibrary,
   listReferenceLibrary,
+  updateReferenceAngle,
+  type ReferenceLibraryAddition,
 } from '@/lib/references/storage';
 
 export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 const normalizeMediaAsset = (value: unknown): MediaAsset | null => {
   if (!value || typeof value !== 'object') return null;
@@ -37,6 +46,57 @@ const normalizeMediaAsset = (value: unknown): MediaAsset | null => {
     size,
     url: `/api/media/files/${fileName}`,
   };
+};
+
+const classifyReferences = async (
+  items: MediaAsset[]
+): Promise<ReferenceLibraryAddition[]> => {
+  const storage = getMediaStorage();
+  const results = new Array<ReferenceLibraryAddition>(items.length);
+  let cursor = 0;
+
+  const classifyOne = async (media: MediaAsset): Promise<ReferenceLibraryAddition> => {
+    if (!process.env.OPENAI_API_KEY) {
+      return {
+        media,
+        angle: 'customer-problems',
+        angleSource: 'fallback',
+      };
+    }
+
+    try {
+      const source = await storage.readImageById(media.id);
+      if (!source) {
+        throw new Error('Uploaded reference could not be read for classification.');
+      }
+
+      return {
+        media,
+        angle: await classifyReferenceCreativeAngle(source),
+        angleSource: 'ai',
+      };
+    } catch (error) {
+      console.error(`Reference angle classification failed for ${media.id}`, error);
+      return {
+        media,
+        angle: 'customer-problems',
+        angleSource: 'fallback',
+      };
+    }
+  };
+
+  const worker = async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await classifyOne(items[index]);
+    }
+  };
+
+  const workerCount = Math.min(3, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 };
 
 export async function GET() {
@@ -81,11 +141,38 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ items: await addToReferenceLibrary(items) });
+    const classified = await classifyReferences(items);
+    return NextResponse.json({ items: await addToReferenceLibrary(classified) });
   } catch (error) {
     console.error('Could not update reference library', error);
     return NextResponse.json(
       { error: 'The reference library could not be updated.' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = (await request.json()) as Record<string, unknown>;
+    const id = typeof body.id === 'string' ? body.id : '';
+    const angle = typeof body.angle === 'string' ? body.angle : '';
+
+    if (!isSafeMediaId(id)) {
+      return NextResponse.json({ error: 'Invalid reference image.' }, { status: 400 });
+    }
+
+    if (!isCreativeCategory(angle)) {
+      return NextResponse.json({ error: 'Invalid reference angle.' }, { status: 400 });
+    }
+
+    return NextResponse.json({
+      items: await updateReferenceAngle(id, angle as CreativeCategoryId),
+    });
+  } catch (error) {
+    console.error('Could not move reference image', error);
+    return NextResponse.json(
+      { error: 'The reference image could not be moved.' },
       { status: 500 }
     );
   }
