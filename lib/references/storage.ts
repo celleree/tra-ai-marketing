@@ -33,6 +33,11 @@ export interface ReferenceLibraryAddition {
   angleSource: ReferenceAngleSource;
 }
 
+export interface ReferenceLibraryRemoval {
+  items: ReferenceLibraryItem[];
+  removed: ReferenceLibraryItem[];
+}
+
 const emptyIndex = (): ReferenceLibraryIndex => ({ version: 2, items: [] });
 const ANGLE_SOURCES: ReferenceAngleSource[] = [
   'ai',
@@ -240,4 +245,20 @@ export const updateReferenceAngle = async (
 
   await writeIndex({ version: 2, items });
   return items;
+};
+
+export const removeFromReferenceLibrary = async (
+  ids: string[]
+): Promise<ReferenceLibraryRemoval> => {
+  const index = await readIndex();
+  const selected = new Set(ids);
+  const removed = index.items.filter((item) => selected.has(item.id));
+  const items = index.items.filter((item) => !selected.has(item.id));
+
+  if (!removed.length) {
+    return { items: index.items, removed: [] };
+  }
+
+  await writeIndex({ version: 2, items });
+  return { items, removed };
 };
