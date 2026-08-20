@@ -1,8 +1,8 @@
 # Creative Categories
 
-These are the primary static-image ad categories the system should generate for TRA.
+These 15 categories are the primary static-image ad directions the TRA system should use to create meaningful creative diversity.
 
-## Main Image Categories
+## Canonical Categories
 
 1. Different customer problems
 2. Different desired outcomes
@@ -22,16 +22,17 @@ These are the primary static-image ad categories the system should generate for 
 
 ## Purpose
 
-The system should use these categories as core creative directions when generating static image ads.
+Categories describe **what the ad is saying**. They are the main mechanism for generating genuinely different advertising ideas rather than minor variations of the same concept.
 
-This list exists to support both:
-- creative volume
-- creative diversity
-
-The goal is not just to produce more ads, but to produce ads across clearly different concepts, angles, and messaging approaches.
+Formats describe **how the ad is presented** and are intentionally kept simpler. See `docs/knowledge-base/creative-formats.md`.
 
 ## Usage
 
-- Use these categories when generating new image concepts from scratch.
-- Use them when adapting reference ads into TRA-specific creatives.
-- Over time, use performance data to identify which categories, angles, and formats work best for TRA and feed those learnings into future generations.
+- Prioritize category diversity when generating batches of static ads.
+- Use categories when adapting reference ads into TRA-specific concepts.
+- A generated creative should have one primary category.
+- The AI may choose an appropriate format and visual execution for that category.
+- Visual executions can vary freely without becoming new canonical categories or formats.
+- Over time, connect performance data to categories so the system can learn which messaging directions deserve more testing.
+
+The goal is both high production volume and a broad mix of distinct concepts, hooks, angles, layouts, messaging approaches, and visual styles—not large numbers of near-duplicate ads.

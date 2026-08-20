@@ -1,33 +1,45 @@
 import {
-  CREATIVE_FORMATS,
-  isCreativeFormat,
-  type CreativeFormatId,
-} from '@/lib/creative-formats';
-
-export type GenerateFormatMode = 'diverse' | 'specific';
+  CREATIVE_CATEGORIES,
+  type CreativeCategoryId,
+} from '@/lib/creative-categories';
+import type { CreativeFormatId } from '@/lib/creative-formats';
 
 export type GenerateCreativeRequest = {
   mediaId: string;
   context: string;
   variationCount: number;
-  formatMode?: GenerateFormatMode;
-  primaryFormats?: CreativeFormatId[];
-  allowSecondaryFormats?: boolean;
 };
 
-export type ValidGenerateCreativeRequest = {
-  mediaId: string;
-  context: string;
-  variationCount: number;
-  formatMode: GenerateFormatMode;
-  primaryFormats: CreativeFormatId[];
-  allowSecondaryFormats: boolean;
-};
+export type ValidGenerateCreativeRequest = GenerateCreativeRequest;
 
-export type PlannedCreativeFormat = {
+export type PlannedCreative = {
   index: number;
+  category: CreativeCategoryId;
+  format: CreativeFormatId;
   primaryFormat: CreativeFormatId;
   secondaryFormat?: CreativeFormatId;
+};
+
+// Compatibility alias for the existing AI provider contract while the app
+// transitions from format-led planning to category-led planning.
+export type PlannedCreativeFormat = PlannedCreative;
+
+const FORMAT_BY_CATEGORY: Record<CreativeCategoryId, CreativeFormatId> = {
+  'customer-problems': 'direct-response',
+  'desired-outcomes': 'direct-response',
+  objections: 'educational',
+  'testimonials-proof': 'proof',
+  statistics: 'proof',
+  comparisons: 'comparison-transformation',
+  'price-offer-positioning': 'direct-response',
+  'feature-led': 'educational',
+  emotional: 'direct-response',
+  educational: 'educational',
+  'aspirational-lifestyle': 'direct-response',
+  curiosity: 'educational',
+  urgency: 'direct-response',
+  'before-after': 'comparison-transformation',
+  'customer-personas': 'native-social',
 };
 
 export function validateGenerateCreativeRequest(input: unknown):
@@ -44,91 +56,45 @@ export function validateGenerateCreativeRequest(input: unknown):
     typeof body.variationCount === 'number'
       ? body.variationCount
       : Number(body.variationCount);
-  const formatMode: GenerateFormatMode =
-    body.formatMode === 'specific' ? 'specific' : 'diverse';
-  const allowSecondaryFormats =
-    typeof body.allowSecondaryFormats === 'boolean'
-      ? body.allowSecondaryFormats
-      : true;
 
   if (!mediaId) {
     return { success: false, error: 'mediaId is required' };
   }
 
+  if (!context) {
+    return { success: false, error: 'context is required' };
+  }
+
   if (
     !Number.isInteger(variationCount) ||
     variationCount < 1 ||
-    variationCount > 12
+    variationCount > 15
   ) {
     return {
       success: false,
-      error: 'variationCount must be an integer between 1 and 12',
-    };
-  }
-
-  const rawPrimaryFormats = Array.isArray(body.primaryFormats)
-    ? body.primaryFormats
-    : [];
-  const primaryFormats = rawPrimaryFormats
-    .filter((value): value is string => typeof value === 'string')
-    .map((value) => value.trim())
-    .filter(isCreativeFormat);
-
-  const uniquePrimaryFormats = [...new Set(primaryFormats)];
-
-  if (formatMode === 'specific' && uniquePrimaryFormats.length === 0) {
-    return {
-      success: false,
-      error: "At least one primary format is required when formatMode is 'specific'",
+      error: 'variationCount must be an integer between 1 and 15',
     };
   }
 
   return {
     success: true,
-    data: {
-      mediaId,
-      context,
-      variationCount,
-      formatMode,
-      primaryFormats: uniquePrimaryFormats,
-      allowSecondaryFormats,
-    },
+    data: { mediaId, context, variationCount },
   };
 }
 
-export function buildCreativeFormatPlan(
+export function buildCreativePlan(
   request: ValidGenerateCreativeRequest
-): PlannedCreativeFormat[] {
-  const available = [...CREATIVE_FORMATS];
-  const pool =
-    request.formatMode === 'specific' && request.primaryFormats.length > 0
-      ? request.primaryFormats
-      : available;
-
-  const plan: PlannedCreativeFormat[] = [];
-
-  for (let index = 0; index < request.variationCount; index += 1) {
-    const primaryFormat = pool[index % pool.length];
-    let secondaryFormat: CreativeFormatId | undefined;
-
-    if (
-      request.allowSecondaryFormats &&
-      available.length > 1 &&
-      index % 2 === 1
-    ) {
-      const secondaryCandidates = available.filter(
-        (format) => format !== primaryFormat
-      );
-      secondaryFormat =
-        secondaryCandidates[index % secondaryCandidates.length];
-    }
-
-    plan.push({
-      index: index + 1,
-      primaryFormat,
-      secondaryFormat,
-    });
-  }
-
-  return plan;
+): PlannedCreative[] {
+  return Array.from({ length: request.variationCount }, (_, offset) => {
+    const category = CREATIVE_CATEGORIES[offset % CREATIVE_CATEGORIES.length];
+    const format = FORMAT_BY_CATEGORY[category];
+    return {
+      index: offset + 1,
+      category,
+      format,
+      primaryFormat: format,
+    };
+  });
 }
+
+export const buildCreativeFormatPlan = buildCreativePlan;
