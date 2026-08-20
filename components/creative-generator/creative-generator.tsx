@@ -30,7 +30,7 @@ export function CreativeGenerator() {
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState('');
 
-  const ready = Boolean(media && context.trim());
+  const ready = Boolean(context.trim());
 
   const handleUploadStart = () => {
     setMedia(null);
@@ -45,7 +45,7 @@ export function CreativeGenerator() {
   };
 
   const generate = async () => {
-    if (!media || !context.trim() || generating) return;
+    if (!context.trim() || generating) return;
 
     setGenerating(true);
     setGenerationError('');
@@ -56,7 +56,7 @@ export function CreativeGenerator() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mediaId: media.id,
+          ...(media ? { mediaId: media.id } : {}),
           context: context.trim(),
           variationCount,
         }),
@@ -146,7 +146,11 @@ export function CreativeGenerator() {
               </div>
             </div>
 
-            <CreativeResults creatives={creatives} />
+            <CreativeResults
+              creatives={creatives}
+              generating={generating}
+              requestedCount={variationCount}
+            />
           </div>
         ) : activeSection === 'company' ? (
           <div className="workspace-view">
