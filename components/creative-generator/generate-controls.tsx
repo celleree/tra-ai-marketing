@@ -54,9 +54,9 @@ export function GenerateControls({
       </button>
       <p className="muted control-note">
         {generating
-          ? 'Creating distinct TRA concepts from the source image.'
+          ? 'Creating distinct TRA concepts across different categories.'
           : ready
-            ? 'Each variation uses a different approved creative format.'
+            ? 'Categories drive the main idea; formats are presentation variations.'
             : 'Upload an image and add context first.'}
       </p>
     </section>
