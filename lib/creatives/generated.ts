@@ -1,3 +1,4 @@
+import type { CreativeCategoryId } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import type { MediaAsset } from '@/lib/media/types';
 
@@ -9,8 +10,8 @@ export interface CreativeCopy {
 
 export interface GeneratedCreative {
   index: number;
-  primaryFormat: CreativeFormatId;
-  secondaryFormat?: CreativeFormatId;
+  category: CreativeCategoryId;
+  format: CreativeFormatId;
   image: MediaAsset;
   copy: CreativeCopy;
 }
