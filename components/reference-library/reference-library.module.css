@@ -142,12 +142,59 @@
   line-height: 1.5;
 }
 
+.selectionBar {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+  border-bottom: 1px solid #e5e8ec;
+  padding: 0 2px 10px;
+}
+
+.selectionBar > span {
+  color: #7a8591;
+  font-size: 0.8rem;
+}
+
+.deleteButton {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #e0e4e9;
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 0 10px;
+  color: #9a2e2e;
+  font-size: 0.76rem;
+  font-weight: 750;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.deleteButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.deleteButton:hover:not(:disabled) {
+  border-color: #efc7c7;
+  background: #fff7f7;
+  color: #b42318;
+}
+
+.deleteButton:disabled {
+  color: #a8b0b8;
+  opacity: 0.55;
+}
+
 .libraryLayout {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 20px;
   align-items: start;
-  margin-top: 34px;
+  margin-top: 18px;
 }
 
 .folderPanel {
@@ -217,9 +264,17 @@
 }
 
 .folderIcon {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
   color: currentColor;
-  font-size: 1rem;
-  opacity: 0.75;
+  opacity: 0.82;
+}
+
+.folderIcon svg {
+  width: 18px;
+  height: 18px;
 }
 
 .folderName {
@@ -280,11 +335,18 @@
 }
 
 .card {
+  position: relative;
   overflow: hidden;
   border: 1px solid #e0e4e9;
   border-radius: 14px;
   background: #ffffff;
   box-shadow: 0 5px 20px rgba(23, 33, 43, 0.035);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.cardSelected {
+  border-color: #5575da;
+  box-shadow: 0 0 0 2px rgba(36, 79, 211, 0.1), 0 5px 20px rgba(23, 33, 43, 0.035);
 }
 
 .card img {
@@ -293,6 +355,60 @@
   aspect-ratio: 1 / 1;
   background: #f0f2f5;
   object-fit: contain;
+}
+
+.cardCheckbox {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 10px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 2px 8px rgba(23, 33, 43, 0.12);
+  cursor: pointer;
+}
+
+.cardCheckbox input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cardCheckbox span {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid #9da7b2;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.cardCheckbox input:checked + span {
+  border-color: #244fd3;
+  background: #244fd3;
+}
+
+.cardCheckbox input:checked + span::after {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  width: 4px;
+  height: 7px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.cardCheckbox:focus-within {
+  outline: 3px solid rgba(53, 97, 232, 0.16);
+  outline-offset: 2px;
 }
 
 .cardFooter {
@@ -365,9 +481,17 @@
 }
 
 .emptyIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
   margin-bottom: 3px;
-  color: #a3acb6;
-  font-size: 1.7rem;
+  place-items: center;
+  color: #9ca6b0;
+}
+
+.emptyIcon svg {
+  width: 28px;
+  height: 28px;
 }
 
 @media (max-width: 1080px) {
@@ -426,8 +550,13 @@
     grid-template-columns: 1fr;
   }
 
-  .libraryHeader {
+  .libraryHeader,
+  .selectionBar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .selectionBar {
+    padding-bottom: 12px;
   }
 }
