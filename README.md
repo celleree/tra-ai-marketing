@@ -21,13 +21,17 @@ A vendor-neutral workspace for building AI-assisted Meta advertising workflows f
 
 ## Branch and Deployment Rule
 
-**Feature branches = temporary work / preview deployments.**
+**Feature branches = temporary isolated work / preview deployments.**
 
-**`main` = the complete, combined version of the TRA app.**
+**`staging` = the complete, combined future version of the TRA app.**
 
-Each separate AI session or feature should work on its own feature branch. Feature-branch deployments are previews only and may contain only that branch's work. Completed work should be merged into `main`, and production should deploy from `main` only. Do not manually promote a feature-branch preview to production.
+**`main` = the current live production version of the TRA app.**
 
-If `main` changes while a feature branch is still being worked on, sync the feature branch with the latest `main` before the final merge when needed. If branches touch the same files, resolve conflicts by preserving the intended work from both branches rather than silently replacing another agent's changes.
+Normal feature work should branch from the latest `staging`, not from `main`. Completed feature branches should merge back into `staging` so the staging preview always represents the combined future version of the app. `main` may intentionally remain behind while future work is being assembled and tested.
+
+Feature-branch deployments are temporary previews only. Do not manually promote them to production. Production should deploy from `main` only, and `staging` should move into `main` only when the combined future version is explicitly approved for release.
+
+If `staging` changes while a feature branch is still being worked on, sync the feature branch with the latest `staging` before the final merge when needed. If branches touch the same files, resolve conflicts by preserving the intended work from both branches rather than silently replacing another agent's changes.
 
 See `AGENTS.md` for the mandatory AI-agent workflow rules.
 
