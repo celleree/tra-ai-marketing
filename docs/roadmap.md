@@ -44,6 +44,12 @@ Connect approved Meta reporting data so the AI can answer questions such as:
 - Which creatives should we test more?
 - Which ads are spending without enough results?
 
+Measurement requirement:
+- Every generated image creative must have a unique, persistent creative URL tied to its internal creative record.
+- Preserve the relationship between that URL, the R2 media object, and any later Meta image hash, creative ID, and ad ID.
+- TRA calculates ROI in an external system rather than from a Meta ROI field, so the unique creative URL must be available as a durable creative-level reference for joining external revenue/ROI data back to the exact image creative.
+- Do not use temporary browser URLs or expiring links as the attribution key.
+
 Start read-only.
 
 ## Phase 5 - Media-Buyer Assistant
