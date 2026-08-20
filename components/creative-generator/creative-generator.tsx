@@ -6,6 +6,7 @@ import type { MediaAsset } from '@/lib/media/types';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { GenerateControls } from '@/components/creative-generator/generate-controls';
+import { ReferenceLibrary } from '@/components/reference-library/reference-library';
 
 type WorkspaceSection =
   | 'upload'
@@ -155,6 +156,10 @@ export function CreativeGenerator() {
             </div>
 
             <CreativeResults creatives={creatives} />
+          </div>
+        ) : activeSection === 'reference-images' ? (
+          <div className="workspace-view">
+            <ReferenceLibrary />
           </div>
         ) : (
           <div className="workspace-view workspace-empty-view" aria-label={`${activeLabel} workspace`} />
