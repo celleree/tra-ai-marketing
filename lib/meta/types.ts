@@ -37,6 +37,9 @@ export interface MetaPublishCreativeResult {
   metaAdId?: string;
   metaCreativeId?: string;
   metaImageHash?: string;
+  creativeUrl?: string;
+  attributionSaved?: boolean;
+  attributionWarning?: string;
   adStatus?: 'PAUSED';
   ctaType?: MetaCtaType;
   error?: string;
