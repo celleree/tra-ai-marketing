@@ -126,48 +126,110 @@ export function CreativeResults({
     );
   };
 
-  const loadMetaOptions = async () => {
-    if (accounts.length && pages.length) return;
+  const loadMetaAccounts = async () => {
+    if (accounts.length) return accounts;
+
     setLoadingMeta(true);
     setMetaError('');
     try {
-      const [accountResponse, pageResponse] = await Promise.all([
-        fetch('/api/meta/ad-accounts', { cache: 'no-store' }),
-        fetch('/api/meta/pages', { cache: 'no-store' }),
-      ]);
-      const [allAccounts, nextPages] = await Promise.all([
-        readItems(accountResponse),
-        readItems(pageResponse),
-      ]);
+      const accountResponse = await fetch('/api/meta/ad-accounts', {
+        cache: 'no-store',
+      });
+      const allAccounts = await readItems(accountResponse);
       const activeAccounts = allAccounts.filter(
         (item) => item.accountStatus === undefined || item.accountStatus === 1
       );
       setAccounts(activeAccounts);
-      setPages(nextPages);
-      if (!adAccountId && activeAccounts.length === 1) {
-        setAdAccountId(activeAccounts[0].id);
-      }
-      if (!pageId && nextPages.length === 1) {
-        setPageId(nextPages[0].id);
-      }
+      return activeAccounts;
     } catch (error) {
-      setMetaError(error instanceof Error ? error.message : 'Unable to load Meta setup.');
+      setMetaError(
+        error instanceof Error ? error.message : 'Unable to load Meta ad accounts.'
+      );
+      return [];
     } finally {
       setLoadingMeta(false);
     }
   };
 
+  const loadPagesForAccount = async (
+    nextAccountId: string,
+    preferredPageId = ''
+  ) => {
+    setPages([]);
+    setPageId('');
+    if (!nextAccountId) return [];
+
+    setLoadingMeta(true);
+    setMetaError('');
+    try {
+      const response = await fetch(
+        `/api/meta/pages?adAccountId=${encodeURIComponent(nextAccountId)}`,
+        { cache: 'no-store' }
+      );
+      const nextPages = await readItems(response);
+      setPages(nextPages);
+
+      if (preferredPageId && nextPages.some((item) => item.id === preferredPageId)) {
+        setPageId(preferredPageId);
+      } else if (nextPages.length === 1) {
+        setPageId(nextPages[0].id);
+      }
+
+      if (!nextPages.length) {
+        setMetaError(
+          'This ad account has no Facebook Pages it can promote with the current Meta access.'
+        );
+      }
+      return nextPages;
+    } catch (error) {
+      setMetaError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to load Facebook Pages for this ad account.'
+      );
+      return [];
+    } finally {
+      setLoadingMeta(false);
+    }
+  };
+
+  const chooseAdAccount = async (nextId: string) => {
+    setAdAccountId(nextId);
+    setMetaError('');
+    await loadPagesForAccount(nextId);
+  };
+
   const openMetaSetup = async (shouldSendAfterSave: boolean) => {
     setSendAfterSetup(shouldSendAfterSave);
     setMetaError('');
-    if (metaDefaults) {
-      setAdAccountId(metaDefaults.adAccountId);
-      setPageId(metaDefaults.pageId);
-      setDestinationUrl(metaDefaults.destinationUrl);
-      setDailyBudget(String(metaDefaults.dailyBudget));
+    const saved = metaDefaults;
+
+    if (saved) {
+      setDestinationUrl(saved.destinationUrl);
+      setDailyBudget(String(saved.dailyBudget));
     }
+
     setSetupOpen(true);
-    await loadMetaOptions();
+    const activeAccounts = await loadMetaAccounts();
+    const savedAccountIsActive = Boolean(
+      saved && activeAccounts.some((item) => item.id === saved.adAccountId)
+    );
+    const accountToLoad = savedAccountIsActive
+      ? saved!.adAccountId
+      : activeAccounts.length === 1
+        ? activeAccounts[0].id
+        : '';
+
+    setAdAccountId(accountToLoad);
+    if (accountToLoad) {
+      await loadPagesForAccount(
+        accountToLoad,
+        savedAccountIsActive ? saved!.pageId : ''
+      );
+    } else {
+      setPages([]);
+      setPageId('');
+    }
   };
 
   const publishToMeta = async (config: MetaDefaults | null = metaDefaults) => {
@@ -228,6 +290,12 @@ export function CreativeResults({
         return next;
       });
       setSelectedIds(failedIds);
+
+      if (failedIds.length) {
+        setMetaError(
+          `${failedIds.length} of ${batch.results.length} ads failed to create. The exact Meta stage/error is shown on each failed creative below.`
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Meta publishing failed.';
       setMetaError(message);
@@ -250,7 +318,9 @@ export function CreativeResults({
   const saveMetaSetup = async () => {
     const budget = Number(dailyBudget);
     if (!adAccountId || !pageId || !isValidUrl(destinationUrl.trim())) {
-      setMetaError('Choose an active ad account, Facebook Page, and valid destination URL.');
+      setMetaError(
+        'Choose an active ad account, a Page that account can promote, and a valid destination URL.'
+      );
       return;
     }
     if (!Number.isFinite(budget) || budget < 5 || budget > 1000) {
@@ -309,7 +379,8 @@ export function CreativeResults({
 
   if (!creatives.length) return null;
 
-  const successfulAds = batchResult?.results.filter((result) => result.status === 'success').length || 0;
+  const successfulAds =
+    batchResult?.results.filter((result) => result.status === 'success').length || 0;
 
   return (
     <section className={styles.section}>
@@ -322,7 +393,9 @@ export function CreativeResults({
           <button
             type="button"
             className={styles.secondaryButton}
-            onClick={() => setSelectedIds(allSelected ? [] : creatives.map((creative) => creative.id))}
+            onClick={() =>
+              setSelectedIds(allSelected ? [] : creatives.map((creative) => creative.id))
+            }
             disabled={publishing}
           >
             {allSelected ? 'Clear selection' : 'Select all'}
@@ -343,20 +416,29 @@ export function CreativeResults({
           >
             {publishing
               ? 'Sending to Meta…'
-              : `Send to Meta${selectedCreatives.length ? ` (${selectedCreatives.length})` : ''}`}
+              : `Send to Meta${
+                  selectedCreatives.length ? ` (${selectedCreatives.length})` : ''
+                }`}
           </button>
         </div>
       </div>
 
       {batchResult ? (
         <div className={styles.batchStatus}>
-          <strong>Created in Meta · PAUSED</strong>
+          <strong>
+            {successfulAds
+              ? 'Created in Meta · PAUSED'
+              : 'Campaign and ad set created · ads failed'}
+          </strong>
           <span>
-            Campaign {batchResult.campaignId} · Ad set {batchResult.adSetId} · {successfulAds}/{batchResult.results.length} ads created
+            Campaign {batchResult.campaignId} · Ad set {batchResult.adSetId} ·{' '}
+            {successfulAds}/{batchResult.results.length} ads created
           </span>
         </div>
       ) : null}
-      {metaError && !setupOpen ? <p className={styles.inlineError}>{metaError}</p> : null}
+      {metaError && !setupOpen ? (
+        <p className={styles.inlineError}>{metaError}</p>
+      ) : null}
 
       <div className={styles.grid}>
         {creatives.map((creative) => {
@@ -384,7 +466,9 @@ export function CreativeResults({
               />
               <div className={styles.body}>
                 <div className={styles.pills}>
-                  <span className={styles.pill}>{CREATIVE_CATEGORY_LABELS[creative.category]}</span>
+                  <span className={styles.pill}>
+                    {CREATIVE_CATEGORY_LABELS[creative.category]}
+                  </span>
                   <span className={`${styles.pill} ${styles.secondary}`}>
                     {CREATIVE_FORMAT_LABELS[creative.format]}
                   </span>
@@ -410,7 +494,9 @@ export function CreativeResults({
                       <>
                         Created in Meta · PAUSED
                         {state.metaAdId ? <span>Ad ID: {state.metaAdId}</span> : null}
-                        {state.ctaType ? <span>CTA: {state.ctaType.replaceAll('_', ' ')}</span> : null}
+                        {state.ctaType ? (
+                          <span>CTA: {state.ctaType.replaceAll('_', ' ')}</span>
+                        ) : null}
                       </>
                     ) : null}
                     {state.status === 'failed' ? (
@@ -429,7 +515,12 @@ export function CreativeResults({
 
       {setupOpen ? (
         <div className={styles.modalBackdrop} role="presentation">
-          <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="meta-setup-title">
+          <div
+            className={styles.modal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meta-setup-title"
+          >
             <div className={styles.modalHeader}>
               <div>
                 <p className="eyebrow">Meta Ads Manager</p>
@@ -447,7 +538,9 @@ export function CreativeResults({
             </div>
 
             <p className={styles.safetyNote}>
-              These defaults stay in this browser. Each send creates a new PAUSED Traffic campaign, a PAUSED broad-US Landing Page Views ad set, and one PAUSED ad per selected creative. Nothing activates automatically.
+              These defaults stay in this browser. Each send creates a new PAUSED Traffic
+              campaign, a PAUSED broad-US Landing Page Views ad set, and one PAUSED ad per
+              selected creative. Nothing activates automatically.
             </p>
 
             <div className={styles.formGrid}>
@@ -455,13 +548,14 @@ export function CreativeResults({
                 <span>Default ad account</span>
                 <select
                   value={adAccountId}
-                  onChange={(event) => setAdAccountId(event.target.value)}
+                  onChange={(event) => void chooseAdAccount(event.target.value)}
                   disabled={loadingMeta || publishing}
                 >
                   <option value="">Select an active ad account</option>
                   {accounts.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.name} ({item.id}){item.currency ? ` · ${item.currency}` : ''}
+                      {item.name} ({item.id})
+                      {item.currency ? ` · ${item.currency}` : ''}
                     </option>
                   ))}
                 </select>
@@ -471,11 +565,15 @@ export function CreativeResults({
                 <select
                   value={pageId}
                   onChange={(event) => setPageId(event.target.value)}
-                  disabled={loadingMeta || publishing}
+                  disabled={!adAccountId || loadingMeta || publishing}
                 >
-                  <option value="">Select a Page</option>
+                  <option value="">
+                    {adAccountId ? 'Select a promotable Page' : 'Select an ad account first'}
+                  </option>
                   {pages.map((item) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -504,9 +602,14 @@ export function CreativeResults({
             </div>
 
             <p className={styles.setupHint}>
-              CTA is chosen automatically from each creative's copy. This MVP uses separate ads rather than dynamic creative so every generated concept is easy to inspect in Ads Manager.
+              Only Facebook Pages that the selected ad account can actually promote are shown.
+              CTA is chosen automatically from each creative's copy. This MVP uses separate ads
+              rather than dynamic creative so every generated concept is easy to inspect in Ads
+              Manager.
             </p>
-            {loadingMeta ? <p className={styles.modalMessage}>Loading Meta options…</p> : null}
+            {loadingMeta ? (
+              <p className={styles.modalMessage}>Loading Meta options…</p>
+            ) : null}
             {metaError ? <p className={styles.modalError}>{metaError}</p> : null}
 
             <div className={styles.modalActions}>
@@ -525,7 +628,9 @@ export function CreativeResults({
                 disabled={publishing || loadingMeta}
               >
                 {sendAfterSetup
-                  ? `Save & create ${selectedCreatives.length} paused ad${selectedCreatives.length === 1 ? '' : 's'}`
+                  ? `Save & create ${selectedCreatives.length} paused ad${
+                      selectedCreatives.length === 1 ? '' : 's'
+                    }`
                   : 'Save setup'}
               </button>
             </div>

@@ -174,6 +174,19 @@ export const listMetaPages = async (): Promise<MetaListItem[]> => {
   return (payload.data || []).map((item) => ({ id: item.id, name: item.name }));
 };
 
+export const listMetaPromotablePages = async (
+  adAccountId: string
+): Promise<MetaListItem[]> => {
+  const accountId = normalizeAdAccountId(adAccountId);
+  const payload = await request<MetaCollection<{ id: string; name: string }>>(
+    `${accountId}/promote_pages`,
+    {},
+    { fields: 'id,name', limit: '100' }
+  );
+
+  return (payload.data || []).map((item) => ({ id: item.id, name: item.name }));
+};
+
 export const createPausedMetaCampaign = async (args: {
   adAccountId: string;
   name: string;
