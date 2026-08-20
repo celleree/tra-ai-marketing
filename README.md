@@ -32,15 +32,19 @@ Implemented:
 - persistent R2 media storage in production
 - context input and variation-count controls
 - controlled primary/secondary creative-format labels for diversity
-- source-image-conditioned GPT Image generation
-- Meta ad copy generation
+- GPT-5.6 Terra reference-creative analysis before generation
+- GPT-5.6 Terra Meta ad copy generation
+- source-image-conditioned GPT Image 2 generation
 - generated image + copy result cards
 - TRA claim/testimonial/statistic guardrails in the generation prompt
+
+Generation flow:
+
+`uploaded image -> GPT-5.6 Terra analysis -> creative-format plan -> GPT-5.6 Terra copy -> GPT Image 2 image variations -> R2 -> results`
 
 Still to build:
 - deeper creative QA and scoring
 - richer TRA brand/offer/compliance knowledge retrieval
-- optional reference-image analysis before generation
 - generation history/library
 - Meta performance data connection
 - media-buyer assistant workflows
@@ -80,8 +84,11 @@ Required server-only environment variables:
 - `OPENAI_API_KEY`
 
 Optional model overrides:
+- `OPENAI_ANALYSIS_MODEL` (defaults to `gpt-5.6-terra`)
+- `OPENAI_TEXT_MODEL` (defaults to `gpt-5.6-terra`)
 - `OPENAI_IMAGE_MODEL` (defaults to `gpt-image-2`)
-- `OPENAI_TEXT_MODEL` (defaults to `gpt-5.6-luna`)
+
+One OpenAI API key is used for all three model calls. The key is not model-specific.
 
 The R2 bucket also needs a CORS policy allowing PUT requests from the live app origin. See `docs/r2-browser-upload.md`.
 
