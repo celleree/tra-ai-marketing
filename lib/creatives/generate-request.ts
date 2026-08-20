@@ -16,7 +16,13 @@ export type PlannedCreative = {
   index: number;
   category: CreativeCategoryId;
   format: CreativeFormatId;
+  primaryFormat: CreativeFormatId;
+  secondaryFormat?: CreativeFormatId;
 };
+
+// Compatibility alias for the existing AI provider contract while the app
+// transitions from format-led planning to category-led planning.
+export type PlannedCreativeFormat = PlannedCreative;
 
 const FORMAT_BY_CATEGORY: Record<CreativeCategoryId, CreativeFormatId> = {
   'customer-problems': 'direct-response',
@@ -81,10 +87,14 @@ export function buildCreativePlan(
 ): PlannedCreative[] {
   return Array.from({ length: request.variationCount }, (_, offset) => {
     const category = CREATIVE_CATEGORIES[offset % CREATIVE_CATEGORIES.length];
+    const format = FORMAT_BY_CATEGORY[category];
     return {
       index: offset + 1,
       category,
-      format: FORMAT_BY_CATEGORY[category],
+      format,
+      primaryFormat: format,
     };
   });
 }
+
+export const buildCreativeFormatPlan = buildCreativePlan;
