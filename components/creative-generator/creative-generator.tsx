@@ -40,6 +40,7 @@ export function CreativeGenerator() {
   const [generationError, setGenerationError] = useState('');
   const [handoffGenerate, setHandoffGenerate] = useState(false);
   const handoffConsumedRef = useRef(false);
+  const handoffGenerationStartedRef = useRef(false);
 
   const ready = Boolean(context.trim());
 
@@ -135,8 +136,16 @@ export function CreativeGenerator() {
   };
 
   useEffect(() => {
-    if (!handoffGenerate || !context.trim() || generating) return;
+    if (
+      !handoffGenerate ||
+      !context.trim() ||
+      generating ||
+      handoffGenerationStartedRef.current
+    ) {
+      return;
+    }
 
+    handoffGenerationStartedRef.current = true;
     setHandoffGenerate(false);
     void generate();
   }, [handoffGenerate, context, media, uploadMode, variationCount]);
