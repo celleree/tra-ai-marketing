@@ -8,7 +8,7 @@ interface GenerateControlsProps {
   generating: boolean;
 }
 
-const VARIATION_OPTIONS = [2, 4, 6, 8];
+const VARIATION_OPTIONS = [2, 5, 10, 20, 30];
 
 export function GenerateControls({
   variationCount,
@@ -56,7 +56,7 @@ export function GenerateControls({
         {generating
           ? 'Creating distinct TRA concepts across different categories.'
           : ready
-            ? 'Categories drive the main idea; formats are presentation variations.'
+            ? 'Generate up to 30 category-led creative variations in one run.'
             : 'Upload an image and add context first.'}
       </p>
     </section>
