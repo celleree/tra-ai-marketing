@@ -12,64 +12,52 @@ export interface CompanyProfile {
   guardrails: CompanyFields;
 }
 
-export const BRAND_GUIDELINE_FIELDS = [
-  { key: 'brandName', label: 'Brand name', multiline: false },
-  { key: 'shortName', label: 'Short name', multiline: false },
-  { key: 'brandVoice', label: 'Brand voice', multiline: true },
-  { key: 'tonePrinciples', label: 'Tone principles', multiline: true },
-  { key: 'visualIdentity', label: 'Visual identity', multiline: true },
-  { key: 'colors', label: 'Colors', multiline: true },
-  { key: 'typography', label: 'Typography', multiline: true },
-  { key: 'logoUsage', label: 'Logo usage', multiline: true },
-] as const;
-
 export const KNOWLEDGE_BASE_FIELDS = [
-  { key: 'companyOverview', label: 'Company overview', multiline: true },
-  { key: 'services', label: 'Services', multiline: true },
-  { key: 'audiences', label: 'Audience', multiline: true },
+  { key: 'companySummary', label: 'Company summary', multiline: true },
+  { key: 'servicesOffers', label: 'Services & offers', multiline: true },
+  { key: 'targetCustomers', label: 'Target customers', multiline: true },
   { key: 'customerProblems', label: 'Customer problems', multiline: true },
   { key: 'desiredOutcomes', label: 'Desired outcomes', multiline: true },
-  { key: 'objections', label: 'Objections and concerns', multiline: true },
-  { key: 'proofThemes', label: 'Proof and trust themes', multiline: true },
-  { key: 'customerLanguage', label: 'Customer language', multiline: true },
   { key: 'differentiators', label: 'Differentiators', multiline: true },
-  { key: 'trustSignals', label: 'Trust signals', multiline: true },
-  { key: 'offers', label: 'Offers', multiline: true },
-  { key: 'creativeFormats', label: 'Approved creative formats', multiline: true },
+  { key: 'proof', label: 'Proof', multiline: true },
+  { key: 'faqsFacts', label: 'FAQs & important facts', multiline: true },
+] as const;
+
+export const BRAND_GUIDELINE_FIELDS = [
+  { key: 'logo', label: 'Logo', multiline: false },
+  { key: 'brandColors', label: 'Brand colors', multiline: true },
+  { key: 'fonts', label: 'Fonts', multiline: true },
+  { key: 'voiceTone', label: 'Voice & tone', multiline: true },
+  { key: 'visualStyle', label: 'Visual style', multiline: true },
+  { key: 'copyStyle', label: 'Copy style', multiline: true },
 ] as const;
 
 export const GUARDRAIL_FIELDS = [
-  { key: 'prohibitedClaims', label: 'Prohibited / unsupported claims', multiline: true },
-  { key: 'testimonialRules', label: 'Testimonials and reviews', multiline: true },
-  { key: 'outcomeRules', label: 'Outcome and result claims', multiline: true },
-  { key: 'customerPrivacy', label: 'Customer privacy', multiline: true },
-  { key: 'governmentAffiliation', label: 'Government / IRS affiliation', multiline: true },
-  { key: 'competitorClaims', label: 'Competitor claims', multiline: true },
+  { key: 'neverSay', label: 'Never say', multiline: true },
+  { key: 'approvedClaims', label: 'Approved claims', multiline: true },
+  { key: 'claimsRequiringProof', label: 'Claims requiring proof/review', multiline: true },
   { key: 'requiredDisclaimers', label: 'Required disclaimers', multiline: true },
-  { key: 'approvalNotes', label: 'Approval notes', multiline: true },
+  {
+    key: 'testimonialsStatisticsRules',
+    label: 'Testimonials & statistics rules',
+    multiline: true,
+  },
+  {
+    key: 'industryComplianceRules',
+    label: 'Industry/compliance rules',
+    multiline: true,
+  },
 ] as const;
 
 const lines = (values: string[]) => values.join('\n');
 
 export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   websiteUrl: '',
-  brandGuidelines: {
-    brandName: 'Tax Relief Advocates',
-    shortName: 'TRA',
-    brandVoice:
-      'Clear, professional, reassuring, patient, straightforward, approachable, and no-pressure.',
-    tonePrinciples:
-      'Explain things clearly. Reduce confusion rather than adding urgency. Sound competent and supportive. Prefer plain consumer language over jargon.',
-    visualIdentity: '',
-    colors: '',
-    typography: '',
-    logoUsage: '',
-  },
   knowledgeBase: {
-    companyOverview:
+    companySummary:
       'Tax Relief Advocates (TRA) is a tax-relief service business that helps people dealing with IRS and tax problems.',
-    services: '',
-    audiences:
+    servicesOffers: '',
+    targetCustomers:
       'People dealing with IRS or tax problems, including overwhelmed taxpayers, skeptical buyers, people who tried handling a tax issue themselves, people who received an unexpected IRS notice, and people seeking clearer next steps.',
     customerProblems: lines([
       'Stress, fear, and uncertainty around IRS or tax problems.',
@@ -85,77 +73,38 @@ export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
       'Confidence that the situation is being handled by a competent team.',
       'Feeling informed rather than confused or pressured.',
     ]),
-    objections: lines([
-      'Skepticism about tax-relief companies.',
-      'Fear of high-pressure sales tactics.',
-      'Concern about hidden or excessive fees.',
-      'Concern about poor communication or lack of updates.',
-      'Uncertainty about whether the company is legitimate.',
-    ]),
-    proofThemes: lines([
-      'Knowledgeable representatives.',
-      'Clear explanations.',
-      'Responsiveness and timely follow-up.',
-      'Professionalism and patience.',
-      'Straightforward, no-pressure communication.',
-      'Feeling genuinely cared for rather than treated like a transaction.',
-    ]),
-    customerLanguage: lines([
-      'peace of mind',
-      'explained everything clearly',
-      'answered all of my questions',
-      'knowledgeable',
-      'professional',
-      'responsive',
-      'made me feel reassured',
-      'smooth process',
-      'no pressure',
-      'straightforward help',
-    ]),
     differentiators: '',
-    trustSignals:
-      'TRA five-star reviews repeatedly emphasize knowledgeable representatives, clear explanations, responsiveness, professionalism, patience, reassurance, and no-pressure interactions.',
-    offers: '',
-    creativeFormats: lines([
-      'Problem → solution',
-      'Simple headline',
-      'Statistics / data',
-      'Comparison / us-vs-them',
-      'Editorial / magazine',
-      'Testimonial / review',
-      'Native Instagram Story',
-      'Offer-first',
-      'FAQ / objection',
-      'Reasons why',
-      'Before / after concept',
-      'Meme / native social',
-      'Authority / expert',
-      'News-style',
-      'Contrarian claim',
-    ]),
+    proof:
+      'TRA five-star reviews supplied to the project repeatedly emphasize knowledgeable representatives, clear explanations, responsiveness, professionalism, patience, reassurance, and no-pressure interactions.',
+    faqsFacts: '',
+  },
+  brandGuidelines: {
+    logo: '',
+    brandColors: '',
+    fonts: '',
+    voiceTone:
+      'Clear, professional, reassuring, patient, straightforward, approachable, empathetic, and no-pressure.',
+    visualStyle: '',
+    copyStyle:
+      'Use plain, clear consumer language. Explain things directly, avoid unnecessary jargon, and favor straightforward headlines and calls to action over hype.',
   },
   guardrails: {
-    prohibitedClaims:
-      'Never fabricate a statistic, dollar amount, customer result, expert endorsement, guarantee, government affiliation, or competitor claim. Treat unapproved factual claims as unsupported.',
-    testimonialRules:
-      'Never create a fake testimonial. Never combine multiple customer stories and present the result as one real person. Do not use a customer name or quote in advertising unless TRA has confirmed permission for that specific use.',
-    outcomeRules:
-      'Never imply every customer gets the same result. Do not turn an individual statement such as “resolved my debt” into a general guarantee. Financial and outcome-specific claims require approved TRA source material.',
-    customerPrivacy:
-      'Raw reviews are research inputs, not automatic permission to use a customer name, quote, story, or claimed outcome in advertising.',
-    governmentAffiliation:
-      'Do not imply TRA is affiliated with the IRS or another government agency unless that claim is explicitly approved and sourced.',
-    competitorClaims:
-      'Do not make unsupported claims about competitors or imply comparative superiority without approved evidence.',
+    neverSay:
+      'Do not fabricate guarantees, customer outcomes, dollar amounts, statistics, expert endorsements, government affiliation, or competitor claims. Do not imply every customer gets the same result.',
+    approvedClaims: '',
+    claimsRequiringProof:
+      'Financial, legal, tax-resolution, savings, settlement, outcome-specific, comparative, statistical, and performance claims require approved source material or human review before use.',
     requiredDisclaimers: '',
-    approvalNotes:
-      'AI output is not automatically approved. Factual, financial, legal, compliance, and outcome-specific claims must be grounded in approved TRA source material.',
+    testimonialsStatisticsRules:
+      'Never create a fake testimonial or combine multiple customer stories into one person. Do not use customer names, quotes, stories, claimed outcomes, or statistics in advertising unless TRA has confirmed the evidence and permission required for that specific use.',
+    industryComplianceRules:
+      'Do not imply TRA is affiliated with the IRS or another government agency unless that claim is explicitly approved and sourced. AI output is not automatically approved; tax-relief-specific factual, financial, legal, compliance, and outcome claims must be grounded in approved TRA source material.',
   },
 };
 
 export const SECTION_FIELDS = {
-  brandGuidelines: BRAND_GUIDELINE_FIELDS,
   knowledgeBase: KNOWLEDGE_BASE_FIELDS,
+  brandGuidelines: BRAND_GUIDELINE_FIELDS,
   guardrails: GUARDRAIL_FIELDS,
 } as const;
 
@@ -168,7 +117,7 @@ export function getSectionCompletion(fields: CompanyFields) {
 }
 
 export function getOverallCompletion(profile: CompanyProfile) {
-  const values = (['brandGuidelines', 'knowledgeBase', 'guardrails'] as const).map(
+  const values = (['knowledgeBase', 'brandGuidelines', 'guardrails'] as const).map(
     (section) => getSectionCompletion(profile[section])
   );
 
@@ -183,12 +132,12 @@ export function mergeWebsiteProfile(
   const next: CompanyProfile = {
     ...current,
     websiteUrl,
-    brandGuidelines: { ...current.brandGuidelines },
     knowledgeBase: { ...current.knowledgeBase },
+    brandGuidelines: { ...current.brandGuidelines },
     guardrails: { ...current.guardrails },
   };
 
-  for (const section of ['brandGuidelines', 'knowledgeBase', 'guardrails'] as const) {
+  for (const section of ['knowledgeBase', 'brandGuidelines', 'guardrails'] as const) {
     const incoming = websiteProfile[section];
     if (!incoming) continue;
 
