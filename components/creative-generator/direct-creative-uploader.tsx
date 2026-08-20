@@ -137,35 +137,33 @@ export function DirectCreativeUploader({
     setProgress('Preparing uploads…');
     onUploadStart();
 
-    const successful: Array<{ media: MediaAsset; sourceFile: File }> = [];
+    const successful: MediaAsset[] = [];
     const failed: File[] = [];
 
     for (let index = 0; index < files.length; index += 1) {
       const sourceFile = files[index];
       setProgress(`Uploading ${index + 1} of ${files.length}…`);
       try {
-        successful.push({ media: await uploadFile(sourceFile), sourceFile });
+        successful.push(await uploadFile(sourceFile));
       } catch {
         failed.push(sourceFile);
       }
     }
 
     if (successful.length) {
-      const nextCreatives: GeneratedCreative[] = successful.map(
-        ({ media, sourceFile }, index) => ({
-          id: `upload_${media.id.replace(/^media_/, '')}`,
-          index: index + 1,
-          category: 'feature-led',
-          format: 'direct-response',
-          source: 'uploaded',
-          image: media,
-          copy: {
-            primaryText: primaryText.trim(),
-            headline: headline.trim(),
-            description: description.trim(),
-          },
-        })
-      );
+      const nextCreatives: GeneratedCreative[] = successful.map((media, index) => ({
+        id: `upload_${media.id.replace(/^media_/, '')}`,
+        index: index + 1,
+        category: 'feature-led',
+        format: 'direct-response',
+        source: 'uploaded',
+        image: media,
+        copy: {
+          primaryText: primaryText.trim(),
+          headline: headline.trim(),
+          description: description.trim(),
+        },
+      }));
       onUploaded(nextCreatives);
     }
 
