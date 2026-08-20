@@ -7,6 +7,7 @@ import type {
   DragEvent,
   KeyboardEvent,
 } from 'react';
+import type { UploadMode } from '@/lib/creatives/generate-request';
 import type { MediaAsset } from '@/lib/media/types';
 import styles from './creative-composer.module.css';
 
@@ -15,6 +16,8 @@ interface CreativeComposerProps {
   onChange: (value: string) => void;
   onUploadStart: () => void;
   onUploaded: (media: MediaAsset) => void;
+  uploadMode: UploadMode;
+  onUploadModeChange: (mode: UploadMode) => void;
   variationCount: number;
   onVariationCountChange: (value: number) => void;
   onSubmit: () => void;
@@ -39,6 +42,8 @@ export function CreativeComposer({
   onChange,
   onUploadStart,
   onUploaded,
+  uploadMode,
+  onUploadModeChange,
   variationCount,
   onVariationCountChange,
   onSubmit,
@@ -216,6 +221,12 @@ export function CreativeComposer({
     '--slider-progress': `${sliderProgress}%`,
   } as CSSProperties;
 
+  const sourceHint = localPreview
+    ? uploadMode === 'tra'
+      ? 'TRA ad · uses the reference library'
+      : 'Reference ad · adapts the concept to TRA'
+    : 'Add an image (optional) or drag it here';
+
   return (
     <section
       className={`${styles.composer} ${dragActive ? styles.dragging : ''}`}
@@ -233,18 +244,45 @@ export function CreativeComposer({
       />
 
       {localPreview ? (
-        <div className={styles.attachment}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={localPreview} alt="Selected source creative" />
-          <div className={styles.attachmentCopy}>
-            <strong>{fileName}</strong>
-            <span>
-              {uploading ? 'Uploading…' : uploadReady ? 'Ready' : 'Upload failed'}
-            </span>
+        <div className={styles.attachmentRow}>
+          <div className={styles.attachment}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={localPreview} alt="Selected source creative" />
+            <div className={styles.attachmentCopy}>
+              <strong>{fileName}</strong>
+              <span>
+                {uploading ? 'Uploading…' : uploadReady ? 'Ready' : 'Upload failed'}
+              </span>
+            </div>
+            {uploadReady ? (
+              <span className={styles.readyDot} aria-label="Upload ready" />
+            ) : null}
           </div>
-          {uploadReady ? (
-            <span className={styles.readyDot} aria-label="Upload ready" />
-          ) : null}
+
+          <div className={styles.modeToggle} role="group" aria-label="Uploaded image type">
+            <button
+              type="button"
+              className={`${styles.modeButton} ${
+                uploadMode === 'tra' ? styles.modeButtonActive : ''
+              }`}
+              aria-pressed={uploadMode === 'tra'}
+              onClick={() => onUploadModeChange('tra')}
+              disabled={generating}
+            >
+              TRA ad
+            </button>
+            <button
+              type="button"
+              className={`${styles.modeButton} ${
+                uploadMode === 'reference' ? styles.modeButtonActive : ''
+              }`}
+              aria-pressed={uploadMode === 'reference'}
+              onClick={() => onUploadModeChange('reference')}
+              disabled={generating}
+            >
+              Reference ad
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -293,11 +331,7 @@ export function CreativeComposer({
             +
           </button>
           <span className={styles.hint}>
-            {uploading
-              ? 'Uploading source creative…'
-              : localPreview
-                ? 'Source creative attached'
-                : 'Add an image (optional) or drag it here'}
+            {uploading ? 'Uploading source creative…' : sourceHint}
           </span>
         </div>
 

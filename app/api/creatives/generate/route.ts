@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import {
   analyzeReferenceCreative,
+  analyzeTraSourceCreative,
   generateCreativeCopy,
   generateReferenceCreativeImage,
+  generateTraCreativeFromLibraryReference,
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
@@ -10,14 +12,24 @@ import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import {
   buildCreativePlan,
   validateGenerateCreativeRequest,
+  type PlannedCreative,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
 import { getMediaStorage } from '@/lib/media/local-storage';
+import type { MediaStorage } from '@/lib/media/storage';
+import type { StoredMediaFile } from '@/lib/media/types';
+import { listReferenceLibrary } from '@/lib/references/storage';
+import type { ReferenceLibraryItem } from '@/lib/references/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+
+interface SelectedLibraryReference {
+  item: ReferenceLibraryItem;
+  source: StoredMediaFile;
+}
 
 const getOpenAIError = async (response: Response) => {
   try {
@@ -30,8 +42,11 @@ const getOpenAIError = async (response: Response) => {
   }
 };
 
-const buildPromptOnlyAnalysis = (context: string): CreativeReferenceAnalysis => ({
-  summary: 'No reference image was supplied. Create an original TRA concept from the user direction.',
+const buildPromptOnlyAnalysis = (
+  context: string,
+  plan: PlannedCreative[]
+): CreativeReferenceAnalysis => ({
+  summary: 'No source image was supplied. Create original TRA concepts from the user direction.',
   visibleText: [],
   visualStructure: 'Choose an original mobile-first static ad composition appropriate to the assigned category and format.',
   hookOrAngle: context,
@@ -46,6 +61,7 @@ const buildPromptOnlyAnalysis = (context: string): CreativeReferenceAnalysis => 
     'third-party brands or trademarks',
   ],
   unknowns: [],
+  dominantCategory: plan[0]?.category || 'customer-problems',
 });
 
 const generatePromptOnlyCreativeImage = async (args: {
@@ -110,6 +126,60 @@ TRA guardrails:
   return Buffer.from(base64, 'base64');
 };
 
+const selectLibraryReferences = async (
+  plan: PlannedCreative[],
+  storage: MediaStorage,
+  library: ReferenceLibraryItem[]
+): Promise<Map<number, SelectedLibraryReference>> => {
+  const selections = new Map<number, SelectedLibraryReference>();
+  if (!library.length) return selections;
+
+  const rotation = Math.floor(Math.random() * library.length);
+  const orderedLibrary = [
+    ...library.slice(rotation),
+    ...library.slice(0, rotation),
+  ];
+  const usedIds = new Set<string>();
+  const sourceCache = new Map<string, Promise<StoredMediaFile | null>>();
+
+  const readSource = (id: string) => {
+    const existing = sourceCache.get(id);
+    if (existing) return existing;
+    const pending = storage.readImageById(id);
+    sourceCache.set(id, pending);
+    return pending;
+  };
+
+  for (const creative of plan) {
+    const groups = [
+      orderedLibrary.filter(
+        (item) => item.angle === creative.category && !usedIds.has(item.id)
+      ),
+      orderedLibrary.filter((item) => !usedIds.has(item.id)),
+      orderedLibrary.filter((item) => item.angle === creative.category),
+      orderedLibrary,
+    ];
+    const seen = new Set<string>();
+    const candidates = groups
+      .flat()
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+
+    for (const candidate of candidates) {
+      const source = await readSource(candidate.id);
+      if (!source) continue;
+      selections.set(creative.index, { item: candidate, source });
+      usedIds.add(candidate.id);
+      break;
+    }
+  }
+
+  return selections;
+};
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -138,18 +208,51 @@ export async function POST(request: Request) {
       );
     }
 
-    const creativePlan = buildCreativePlan(parsed.data);
+    let analysis: CreativeReferenceAnalysis;
+    let creativePlan: PlannedCreative[];
+
+    if (source && parsed.data.uploadMode === 'reference') {
+      analysis = await analyzeReferenceCreative(source, parsed.data.context);
+      creativePlan = buildCreativePlan(parsed.data, analysis.dominantCategory);
+    } else {
+      creativePlan = buildCreativePlan(parsed.data);
+      analysis = source
+        ? await analyzeTraSourceCreative(source, parsed.data.context)
+        : buildPromptOnlyAnalysis(parsed.data.context, creativePlan);
+    }
+
     const categoryDirections = creativePlan
       .map(
         (item) =>
           `Variation ${item.index}: ${CREATIVE_CATEGORY_LABELS[item.category]}`
       )
       .join('\n');
-    const generationContext = `${parsed.data.context}\n\nPrimary creative categories:\n${categoryDirections}\n\nTreat each category as the main messaging direction. The format is only the presentation structure.`;
+    const modeDirection = source
+      ? parsed.data.uploadMode === 'tra'
+        ? 'TRA ad mode: the uploaded image is the TRA brand/content anchor. Use the reference library for fresh creative execution and do not repeat the uploaded ad layout.'
+        : `Reference ad mode: the uploaded image is creative inspiration. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the concept into original TRA ads.`
+      : 'No-image mode: create original TRA ads from the user direction.';
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\nPrimary creative categories:\n${categoryDirections}\n\nTreat each category as the main messaging direction. The format is only the presentation structure.`;
 
-    const analysis = source
-      ? await analyzeReferenceCreative(source, generationContext)
-      : buildPromptOnlyAnalysis(parsed.data.context);
+    let librarySelections = new Map<number, SelectedLibraryReference>();
+    if (source && parsed.data.uploadMode === 'tra') {
+      const library = await listReferenceLibrary();
+      librarySelections = await selectLibraryReferences(
+        creativePlan,
+        storage,
+        library
+      );
+
+      if (librarySelections.size !== creativePlan.length) {
+        return NextResponse.json(
+          {
+            error:
+              'TRA ad mode needs at least one usable image in the Reference Images library. Add or re-upload a reference image and try again.',
+          },
+          { status: 409 }
+        );
+      }
+    }
 
     const copyByIndex = await generateCreativeCopy(
       creativePlan,
@@ -168,19 +271,38 @@ export async function POST(request: Request) {
           }
 
           const itemContext = `${parsed.data.context}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.`;
-          const imageBuffer = source
-            ? await generateReferenceCreativeImage({
-                source,
-                primaryFormat: item.format,
-                context: itemContext,
-                copy,
-                analysis,
-              })
-            : await generatePromptOnlyCreativeImage({
-                primaryFormat: item.format,
-                context: itemContext,
-                copy,
-              });
+          let imageBuffer: Buffer;
+
+          if (!source) {
+            imageBuffer = await generatePromptOnlyCreativeImage({
+              primaryFormat: item.format,
+              context: itemContext,
+              copy,
+            });
+          } else if (parsed.data.uploadMode === 'reference') {
+            imageBuffer = await generateReferenceCreativeImage({
+              source,
+              primaryFormat: item.format,
+              context: itemContext,
+              copy,
+              analysis,
+            });
+          } else {
+            const selectedReference = librarySelections.get(item.index);
+            if (!selectedReference) {
+              throw new Error(
+                `Missing library reference for variation ${item.index}.`
+              );
+            }
+            imageBuffer = await generateTraCreativeFromLibraryReference({
+              traSource: source,
+              creativeReference: selectedReference.source,
+              primaryFormat: item.format,
+              context: itemContext,
+              copy,
+              traAnalysis: analysis,
+            });
+          }
 
           const generatedFile = new File(
             [new Uint8Array(imageBuffer)],
@@ -208,7 +330,15 @@ export async function POST(request: Request) {
       creatives,
       creativePlan,
       analysis,
+      uploadMode: source ? parsed.data.uploadMode : null,
       usedReferenceImage: Boolean(source),
+      referenceLibrarySelections: Array.from(librarySelections.entries()).map(
+        ([index, selection]) => ({
+          index,
+          referenceId: selection.item.id,
+          referenceCategory: selection.item.angle,
+        })
+      ),
     });
   } catch (error) {
     console.error('Creative generation failed', error);

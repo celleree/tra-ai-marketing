@@ -1,16 +1,17 @@
-# TRA Creative Workflow — Initial Architecture
+# TRA Creative Workflow Architecture
 
 ## Goal
 
-Build the smallest useful TRA creative app:
+Build a focused TRA static-creative system that can:
 
-1. Upload an image.
-2. Add context/instructions.
-3. Generate multiple image-ad variations.
-4. Generate Meta ad copy alongside each variation.
-5. Run lightweight QA before showing results.
+1. Accept an optional uploaded image and explicit instructions.
+2. Let the user identify the upload as either a `TRA ad` or a `Reference ad`.
+3. Generate multiple original TRA static ads with Meta copy.
+4. Use the 15 canonical categories to create meaningful creative diversity.
+5. Use the persistent reference library as creative inspiration when a TRA ad is uploaded.
+6. Run lightweight QA before showing results.
 
-The first version is intentionally image-first. Video support should fit later without changing the core workflow.
+The workflow remains image-first. Video support can enter later by extracting useful source frames without changing the core creative pipeline.
 
 ## Architecture choice
 
@@ -18,225 +19,186 @@ Use a small full-stack **Next.js + TypeScript** application in this repository.
 
 Why:
 - one codebase for the UI and API
-- simple deployment
-- easy file upload handling
-- easy integration with AI/image providers
-- no need to inherit the larger Postiz/Publish Everywhere monorepo
+- simple deployment on Vercel
+- direct browser-to-R2 uploads for media
+- server-side access to persistent R2 media and reference metadata
+- straightforward AI/image-provider integration
 
-We can reuse the useful design patterns from Publish Everywhere while implementing the small pieces we need directly in this repo.
+## Source roles
 
-## Proposed repository structure
+The two upload modes deliberately give uploaded images different jobs.
 
-```text
-tra-ai-marketing/
-├── app/
-│   ├── page.tsx                         # Initial creative generator page
-│   └── api/
-│       ├── media/
-│       │   └── upload/route.ts          # Upload source image
-│       └── creatives/
-│           └── generate/route.ts        # Generate images + copy
-│
-├── components/
-│   └── creative-generator/
-│       ├── image-upload.tsx
-│       ├── context-input.tsx
-│       ├── generate-controls.tsx
-│       └── creative-results.tsx
-│
-├── lib/
-│   ├── media/
-│   │   ├── storage.ts                   # Storage interface
-│   │   ├── local-storage.ts             # Local development implementation
-│   │   └── types.ts
-│   │
-│   ├── ai/
-│   │   ├── image-analysis.ts            # Understand uploaded image
-│   │   ├── creative-brief.ts            # Image + context + TRA knowledge
-│   │   ├── image-generation.ts          # Image provider interface
-│   │   ├── copy-generation.ts           # Meta copy generation
-│   │   └── creative-qa.ts               # Lightweight output checks
-│   │
-│   └── tra/
-│       └── knowledge-base.ts             # Reads approved TRA context
-│
-├── data/
-│   ├── uploads/                          # Local source uploads; gitignored
-│   └── generated/                        # Local generated assets; gitignored
-│
-├── docs/
-│   └── knowledge-base/                   # Existing TRA knowledge base
-│
-├── prompts/                              # Existing reusable prompts
-├── assets/brand/                         # Existing TRA brand assets
-└── references/ads/                       # Existing curated references
-```
+### TRA ad mode
 
-## Endpoint 1: image upload
+The uploaded image is the **TRA brand/content anchor**.
 
-`POST /api/media/upload`
+Use it for:
+- advertiser identity
+- TRA logo/company-name treatment when visible
+- useful brand colors and visual identity cues
+- service/message context
+- approved offer/CTA cues that are actually visible or supplied
 
-Input:
-- multipart image file
+Do **not** use it as the required composition template.
 
-Initial accepted types:
-- PNG
-- JPEG
-- WebP
+For every planned variation, the generator selects a usable item from the persistent reference library. It prefers a reference in the same canonical creative category and avoids reusing the same reference until needed.
 
-Output:
+The selected reference is the **creative-execution anchor**.
 
-```json
-{
-  "id": "media_...",
-  "fileName": "source.png",
-  "mimeType": "image/png",
-  "path": "/uploads/media_...png"
-}
-```
+Use it for:
+- layout logic
+- composition
+- visual hierarchy
+- spacing and rhythm
+- presentation mechanism
+- high-level design treatment
 
-Rules:
-- validate MIME type and file size
-- generate our own safe file name
-- never trust the uploaded file name as a storage path
-- keep raw uploads out of git
+Do not transfer third-party brand names, logos, trademarks, people, exact wording, testimonials, statistics, results, or unsupported claims from the reference.
 
-The storage call sits behind an interface so local storage can later be replaced with R2/S3 without changing the generation route.
-
-## Endpoint 2: generate creatives
-
-`POST /api/creatives/generate`
-
-Input:
-
-```json
-{
-  "mediaId": "media_...",
-  "context": "Adapt this concept into a TRA Facebook/Instagram tax-relief ad.",
-  "variationCount": 4
-}
-```
-
-Later inputs can include:
-- selected TRA brand assets
-- campaign objective
-- audience
-- offer
-- aspect ratio
-- specific knowledge-base sections
-
-Output:
-
-```json
-{
-  "creativeBrief": {},
-  "creatives": [
-    {
-      "id": "creative_...",
-      "imagePath": "/generated/creative_...png",
-      "primaryText": "...",
-      "headline": "...",
-      "description": "...",
-      "cta": "...",
-      "qa": {
-        "status": "pass",
-        "warnings": []
-      }
-    }
-  ]
-}
-```
-
-## Generation pipeline
+Pipeline:
 
 ```text
-Uploaded image
+Uploaded TRA ad
     ↓
-Image analysis
+TRA brand/content analysis (once per batch)
+    +
+15-category creative plan
+    +
+Reference library selection per variation
     ↓
+TRA copy per category
+    ↓
+GPT Image receives:
+  image 1 = TRA brand/content anchor
+  image 2 = library creative-execution anchor
+    ↓
+NEW TRA ad
+    ↓
+R2 + results
+```
+
+The output must be meaningfully different from the uploaded TRA ad. Recoloring, moving one text block, swapping one photograph, or changing only a headline does not count as a distinct creative.
+
+### Reference ad mode
+
+The uploaded image is **creative inspiration**, not the advertiser identity.
+
+The source analysis also classifies the reference into one dominant canonical category. The batch normally stays inside that category while producing original TRA adaptations of the concept.
+
+Pipeline:
+
+```text
+Uploaded reference ad
+    ↓
+Reference analysis + dominant category (one analysis call)
+    ↓
+Same-category TRA variation plan
+    ↓
+TRA copy
+    ↓
+GPT Image receives the uploaded reference
+    ↓
+Original TRA adaptations
+    ↓
+R2 + results
+```
+
+This mode does not need to pull extra reference-library images because the uploaded image itself is already the creative reference.
+
+### No-image mode
+
+If no image is uploaded, the system can still create original TRA ads from the user's text direction.
+
+```text
 User context
-    +
-TRA knowledge base
     ↓
-Creative brief
+15-category creative plan
     ↓
-Create N distinct concepts
+TRA copy
     ↓
-Generate N images
-    +
-Generate copy for each
+Original image generation
     ↓
-Lightweight QA
-    ↓
-Results grid
+R2 + results
 ```
 
-## Image analysis
+## Creative diversity
 
-Adapt the useful pattern already proven in Publish Everywhere:
-- summarize what the image visibly contains
-- identify concrete visual facts
-- identify readable text when reliable
-- identify unknowns instead of guessing
-- identify the main creative idea
+The canonical categories describe **what the ad is saying** and remain the primary diversity system. See `docs/creative-categories.md`.
 
-The analysis is an intermediate brief, not the final ad.
+Formats describe **how the ad is presented** and remain intentionally simpler. See `docs/knowledge-base/creative-formats.md`.
 
-## Image generation
+For TRA ad mode:
+- rotate through categories for broad messaging diversity
+- prefer a library reference from the same category
+- avoid repeating a reference until necessary
+- if the matching folder has no unused reference, use another unused library item for visual execution while keeping the planned category as the messaging direction
 
-Do **not** bring over Publish Everywhere's current text-only image rendering implementation as the final solution.
+For Reference ad mode:
+- detect one dominant category from the uploaded reference
+- keep the batch within that category by default
+- allow multiple original executions without pretending they are different marketing angles
 
-Use a provider interface so the first working generator can be swapped later:
+## Reference library and R2
 
-```ts
-interface ImageGenerationProvider {
-  generate(input: {
-    sourceImagePath: string;
-    prompt: string;
-    aspectRatio: string;
-  }): Promise<GeneratedImage>;
-}
-```
+The reference-image library is implemented and persistent.
 
-The provider should be capable of receiving the source/reference image when we implement the first real generator. This avoids the current Publish Everywhere limitation where the final renderer receives only text.
+Production reference images use the same R2-backed media storage as other uploaded/generated media. Reference metadata is stored in R2 at:
+
+`_metadata/reference-library.json`
+
+Each library item records its canonical creative category. The generation endpoint reads this index server-side, selects references, then reads the chosen image objects from R2. No additional browser CORS permissions are required for these server-side reads.
+
+Direct browser uploads still use short-lived presigned PUT URLs and the CORS policy documented in `docs/r2-browser-upload.md`.
 
 ## Copy generation
 
-For each visual concept, produce:
+For each planned creative, produce:
 - Meta primary text
 - headline
 - optional description
-- CTA recommendation
+- CTA recommendation when applicable
 
-Copy must use the TRA knowledge base as the factual source of truth once populated.
+Copy uses the assigned canonical category as the main messaging direction. The user's context is direction, not proof of claims.
 
-## QA for version 1
+## Guardrails
 
-Run simple deterministic/model checks for:
+Do not fabricate:
+- testimonials or review quotes
+- statistics or percentages
+- dollar amounts or customer results
+- expert endorsements
+- government affiliation
+- competitor claims
+- guarantees
+
+Do not imply universal tax-debt results. Do not import unsupported claims or identity elements from reference ads.
+
+## QA direction
+
+Continue hardening checks for:
 - unsupported claims
 - incorrect or unapproved offer language
 - spelling/grammar problems
 - generic AI language
-- obvious duplication between variations
+- duplicate or near-duplicate concepts
+- brand mismatch
 - missing required disclaimer when applicable
 
-QA returns warnings rather than silently changing important claims.
+QA should return warnings rather than silently rewriting important claims.
 
-## What we are intentionally not building yet
+## Not building in this step
 
 - social scheduling/publishing
-- Meta campaign management
-- reference-image library/database
+- full Meta campaign management
 - full Postiz editor
 - Stripe/billing
 - account/team system
 - video transcription pipeline
-- background-job infrastructure
 - autonomous media buying
 
 ## Video-ready extension
 
-Later, video should enter the same pipeline by converting it into useful source frames:
+Later, video can enter by converting it into useful source frames:
 
 ```text
 Uploaded video
@@ -245,24 +207,15 @@ Sample/extract frames
     ↓
 Select useful visual source
     ↓
-Existing image analysis + creative generation pipeline
+Existing TRA/reference upload modes
+    ↓
+Creative generation pipeline
 ```
 
-This means the image-first implementation does not need to be thrown away when video is added.
+## Definition of done
 
-## Implementation order
-
-1. Scaffold Next.js + TypeScript app.
-2. Implement local storage abstraction.
-3. Implement `/api/media/upload`.
-4. Build upload + context UI.
-5. Implement image analysis.
-6. Implement creative brief contract.
-7. Connect a source-image-capable image generation provider.
-8. Generate multiple image variations.
-9. Generate Meta copy for each variation.
-10. Add lightweight QA and results grid.
-
-## Definition of done for first working version
-
-A TRA marketer can open one page, upload one image, add short context, choose a number of variations, click Generate, and receive multiple image ads plus Meta copy without using any Publish Everywhere scheduling or publishing functionality.
+A TRA marketer can:
+- upload an existing TRA ad, mark it as `TRA ad`, and receive genuinely new TRA ads driven by the reference library across multiple categories
+- upload an outside/example ad, mark it as `Reference ad`, and receive original TRA adaptations that stay within the reference's main angle
+- generate from text alone when no image is needed
+- receive generated image ads plus Meta copy without using any Publish Everywhere scheduling or publishing functionality

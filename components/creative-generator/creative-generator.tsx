@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
+import type { UploadMode } from '@/lib/creatives/generate-request';
 import type { MediaAsset } from '@/lib/media/types';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
@@ -24,6 +25,7 @@ const NAV_ITEMS: Array<{
 export function CreativeGenerator() {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
   const [media, setMedia] = useState<MediaAsset | null>(null);
+  const [uploadMode, setUploadMode] = useState<UploadMode>('tra');
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
@@ -57,6 +59,7 @@ export function CreativeGenerator() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(media ? { mediaId: media.id } : {}),
+          uploadMode,
           context: context.trim(),
           variationCount,
         }),
@@ -134,6 +137,8 @@ export function CreativeGenerator() {
                   onChange={setContext}
                   onUploadStart={handleUploadStart}
                   onUploaded={handleUploaded}
+                  uploadMode={uploadMode}
+                  onUploadModeChange={setUploadMode}
                   variationCount={variationCount}
                   onVariationCountChange={setVariationCount}
                   onSubmit={generate}
