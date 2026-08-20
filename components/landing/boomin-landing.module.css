@@ -1,0 +1,232 @@
+.page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #f4f8fd;
+  color: #101820;
+}
+
+.backdrop {
+  position: absolute;
+  inset: -18vh -6vw;
+  overflow: hidden;
+  transform: rotate(-2deg) scale(1.04);
+}
+
+.floatTrack {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  gap: 22px;
+  width: 112%;
+  animation: drift 34s linear infinite;
+}
+
+.placeholder {
+  aspect-ratio: 4 / 5;
+  transform: translateY(var(--offset));
+  border: 1px solid rgba(73, 105, 140, 0.16);
+  border-radius: 18px;
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.96), rgba(221, 233, 246, 0.94));
+  box-shadow: 0 18px 42px rgba(35, 63, 93, 0.12);
+  opacity: 0.58;
+  animation: bob 9s ease-in-out infinite;
+  animation-delay: var(--delay);
+}
+
+.placeholder:nth-child(3n + 2) {
+  background: linear-gradient(155deg, #0b1624, #153968);
+}
+
+.placeholder:nth-child(4n) {
+  background: linear-gradient(155deg, #ffffff, #dce9fa 62%, #bfd4ef);
+}
+
+.placeholder span {
+  display: inline-block;
+  margin: 16px;
+  color: #1267d7;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.placeholder:nth-child(3n + 2) span {
+  color: #45a0ff;
+}
+
+.fade {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at center, rgba(244, 248, 253, 0.3) 0, rgba(244, 248, 253, 0.74) 34%, rgba(244, 248, 253, 0.93) 67%, #f4f8fd 100%);
+  backdrop-filter: blur(1.5px);
+}
+
+.hero {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  padding: 64px 24px;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(4rem, 11vw, 9rem);
+  font-weight: 950;
+  line-height: 0.88;
+  letter-spacing: -0.075em;
+}
+
+.composer {
+  width: min(760px, calc(100vw - 36px));
+  min-height: 220px;
+  overflow: hidden;
+  border: 1px solid rgba(177, 190, 204, 0.72);
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 18px;
+  box-shadow: 0 24px 70px rgba(30, 52, 77, 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 144px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 7px 6px 12px;
+  color: #17212b;
+  font: inherit;
+  font-size: 1.03rem;
+  line-height: 1.55;
+}
+
+.composer textarea::placeholder {
+  color: #929ca7;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.addButton,
+.sendButton {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.addButton {
+  border: 1px solid #d6dde5;
+  background: #f5f7f9;
+  color: #25313d;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.sendButton {
+  border: 0;
+  background: #17212b;
+  color: #ffffff;
+}
+
+.sendButton svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.addButton:hover,
+.sendButton:hover {
+  transform: translateY(-1px);
+}
+
+.addButton:hover {
+  border-color: #bac4cf;
+  background: #edf1f4;
+}
+
+.sendButton:hover {
+  background: #0d141b;
+}
+
+.addButton:focus-visible,
+.sendButton:focus-visible,
+.composer textarea:focus-visible {
+  outline: 3px solid rgba(28, 115, 229, 0.2);
+  outline-offset: 3px;
+}
+
+@keyframes drift {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-46%);
+  }
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -12px;
+  }
+}
+
+@media (max-width: 780px) {
+  .backdrop {
+    inset: -10vh -32vw;
+  }
+
+  .floatTrack {
+    grid-template-columns: repeat(4, minmax(130px, 1fr));
+    gap: 16px;
+  }
+
+  .hero {
+    gap: 24px;
+  }
+
+  .hero h1 {
+    font-size: clamp(4rem, 23vw, 6.2rem);
+  }
+
+  .composer {
+    min-height: 205px;
+    border-radius: 22px;
+    padding: 15px;
+  }
+
+  .composer textarea {
+    min-height: 132px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floatTrack,
+  .placeholder {
+    animation: none;
+  }
+}
