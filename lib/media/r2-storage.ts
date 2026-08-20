@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   NoSuchKey,
   PutObjectCommand,
@@ -100,5 +101,18 @@ export class R2MediaStorage implements MediaStorage {
     }
 
     return null;
+  }
+
+  async deleteImage(fileName: string): Promise<void> {
+    if (!getStoredImageMimeType(fileName)) {
+      return;
+    }
+
+    await this.client.send(
+      new DeleteObjectCommand({
+        Bucket: this.bucketName,
+        Key: fileName,
+      })
+    );
   }
 }
