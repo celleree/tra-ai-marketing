@@ -14,6 +14,7 @@ import {
   type BrandFontAsset,
 } from '@/lib/company/brand-fonts';
 import {
+  analyzeBrandFontSpecimen,
   createBrandFontSpecimen,
   loadBrandFontFace,
   removeBrandFontFile,
@@ -123,10 +124,17 @@ export function BrandAssetsEditor({
 
       try {
         const specimen = await createBrandFontSpecimen(file, uploaded);
+        let styleDescription = '';
+        try {
+          styleDescription = await analyzeBrandFontSpecimen(specimen.id);
+        } catch {
+          // The exact font file and specimen remain saved even if AI analysis is unavailable.
+        }
         nextAsset = {
           ...uploaded,
           specimenMediaId: specimen.id,
           specimenUrl: specimen.url,
+          ...(styleDescription ? { styleDescription } : {}),
         };
       } catch {
         // Keep the actual font file even if the visual specimen cannot be generated.
@@ -134,9 +142,11 @@ export function BrandAssetsEditor({
 
       onChange('fonts', serializeBrandFontAssets([...fontAssets, nextAsset]));
       setFontMessage(
-        nextAsset.specimenMediaId
-          ? 'Font saved and added to the creative typography references.'
-          : 'Font saved. The preview reference could not be generated, so re-upload if you want it used as a visual typography reference.'
+        nextAsset.styleDescription
+          ? 'Font saved, analyzed, and added to creative typography guidance.'
+          : nextAsset.specimenMediaId
+            ? 'Font saved with an exact visual specimen for brand reference.'
+            : 'Font saved. Re-upload if you want a visual typography reference generated.'
       );
     } catch (error) {
       setFontMessage(error instanceof Error ? error.message : 'The font could not be uploaded.');
@@ -224,7 +234,7 @@ export function BrandAssetsEditor({
         <div className={styles.fieldHeading}>
           <div>
             <strong>Fonts</strong>
-            <span>Upload actual WOFF2, WOFF, TTF, or OTF brand fonts. Saved fonts are previewed here and referenced during creative generation.</span>
+            <span>Upload actual WOFF2, WOFF, TTF, or OTF brand fonts. The app saves the file, renders it exactly for preview, and uses an analyzed specimen as creative typography guidance.</span>
           </div>
           <span className={styles.count}>{fontAssets.length}/{MAX_BRAND_FONTS}</span>
         </div>
@@ -238,8 +248,11 @@ export function BrandAssetsEditor({
                   <span>{asset.originalName}</span>
                 </div>
                 <FontPreview asset={asset} />
+                {asset.styleDescription ? (
+                  <p className={styles.emptyText}>{asset.styleDescription}</p>
+                ) : null}
                 <div className={styles.fontStatus}>
-                  <span>{asset.specimenMediaId ? 'Creative reference ready' : 'Font file saved'}</span>
+                  <span>{asset.styleDescription ? 'Creative guidance ready' : asset.specimenMediaId ? 'Visual specimen saved' : 'Font file saved'}</span>
                   <button type="button" onClick={() => removeFont(asset)}>Remove</button>
                 </div>
               </div>
