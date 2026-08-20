@@ -126,15 +126,6 @@ export function CreativeGenerator() {
 
         {activeSection === 'upload' ? (
           <div className="workspace-view workspace-view-upload">
-            <div className="workspace-intro">
-              <p className="workspace-kicker">Creative generator</p>
-              <h2>Turn one TRA creative into the next batch.</h2>
-              <p>
-                Upload a source creative, add direction, and generate new concepts
-                across different ad formats.
-              </p>
-            </div>
-
             {media ? (
               <section className="uploaded-banner">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
