@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import type { MediaAsset } from '@/lib/media/types';
+import styles from './creative-composer.module.css';
 
 interface CreativeComposerProps {
   value: string;
@@ -28,6 +29,7 @@ export function CreativeComposer({
   onUploaded,
 }: CreativeComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
   const [localPreview, setLocalPreview] = useState('');
   const [fileName, setFileName] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -152,55 +154,64 @@ export function CreativeComposer({
     acceptFile(nextFile);
   };
 
+  const handleDragEnter = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    if (!uploading) setDragActive(true);
+  };
+
   const handleDragOver = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
-    if (!uploading) setDragActive(true);
   };
 
   const handleDragLeave = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
-    setDragActive(false);
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragActive(false);
   };
 
   const handleDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
+    dragDepthRef.current = 0;
     setDragActive(false);
     acceptFile(event.dataTransfer.files?.[0] || null);
   };
 
   return (
     <section
-      className={`creative-composer ${dragActive ? 'creative-composer-dragging' : ''}`}
-      onDragEnter={handleDragOver}
+      className={`${styles.composer} ${dragActive ? styles.dragging : ''}`}
+      onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <input
         ref={fileInputRef}
-        className="composer-file-input"
+        className={styles.fileInput}
         type="file"
         accept="image/png,image/jpeg,image/webp"
         onChange={handleFileChange}
       />
 
       {localPreview ? (
-        <div className="composer-attachment">
+        <div className={styles.attachment}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={localPreview} alt="Selected source creative" />
-          <div className="composer-attachment-copy">
+          <div className={styles.attachmentCopy}>
             <strong>{fileName}</strong>
             <span>
               {uploading ? 'Uploading…' : uploadReady ? 'Ready' : 'Upload failed'}
             </span>
           </div>
-          {uploadReady ? <span className="composer-ready-dot" aria-label="Upload ready" /> : null}
+          {uploadReady ? (
+            <span className={styles.readyDot} aria-label="Upload ready" />
+          ) : null}
         </div>
       ) : null}
 
       <textarea
-        className="composer-textarea"
+        className={styles.textarea}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         rows={7}
@@ -208,10 +219,10 @@ export function CreativeComposer({
         placeholder="Tell TRA AI what you want to create…"
       />
 
-      <div className="composer-toolbar">
-        <div className="composer-tools">
+      <div className={styles.toolbar}>
+        <div className={styles.tools}>
           <button
-            className="composer-plus-button"
+            className={styles.plusButton}
             type="button"
             aria-label="Add source creative"
             title="Add source creative"
@@ -220,7 +231,7 @@ export function CreativeComposer({
           >
             +
           </button>
-          <span className="composer-hint">
+          <span className={styles.hint}>
             {uploading
               ? 'Uploading source creative…'
               : localPreview
@@ -228,17 +239,17 @@ export function CreativeComposer({
                 : 'Add an image or drag it here'}
           </span>
         </div>
-        <span className="composer-count">{value.length}/4000</span>
+        <span className={styles.count}>{value.length}/4000</span>
       </div>
 
       {dragActive ? (
-        <div className="composer-drop-overlay" aria-hidden="true">
+        <div className={styles.dropOverlay} aria-hidden="true">
           <strong>Drop to attach</strong>
           <span>The file will upload automatically.</span>
         </div>
       ) : null}
 
-      {error ? <p className="error-message composer-error">{error}</p> : null}
+      {error ? <p className={`error-message ${styles.error}`}>{error}</p> : null}
     </section>
   );
 }
