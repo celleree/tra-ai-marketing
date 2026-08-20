@@ -33,6 +33,7 @@ export interface MediaStorage {
   saveImage(file: File): Promise<MediaAsset>;
   readImage(fileName: string): Promise<StoredMediaFile | null>;
   readImageById(mediaId: string): Promise<StoredMediaFile | null>;
+  deleteImage(fileName: string): Promise<void>;
 }
 
 export interface PreparedMediaImage extends MediaAsset {
