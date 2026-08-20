@@ -309,7 +309,18 @@ export async function POST(request: Request) {
         ? 'TRA ad mode: the uploaded TRA image supplies brand/content context through analysis only. Every generated image uses a category-matched library reference as its visual execution anchor. The uploaded TRA ad itself is not passed into final image generation, so its old layout cannot overpower the reference.'
         : `Reference ad mode: the uploaded image is creative inspiration. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the concept into original TRA ads.`
       : 'No-image mode: create original TRA ads from the user direction.';
-    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\nPrimary creative categories:\n${categoryDirections}\n\nTreat each category as the main messaging direction. The format is only the presentation structure.`;
+
+    const colorDirection = parsed.data.brandColors?.length
+      ? `Approved TRA brand palette from the uploaded logo: ${parsed.data.brandColors.join(', ')}. Use these as the primary design colors. Neutral black, white, and gray may be used for legibility, but do not substitute an unrelated dominant palette.`
+      : '';
+    const fontDirection = parsed.data.brandFontNames?.length
+      ? `Approved typography guidance derived from actual uploaded TRA font files:\n${parsed.data.brandFontNames.map((font) => `- ${font}`).join('\n')}\nUse these descriptions to match the approved typography character as closely as the image model allows. Do not introduce a conflicting type style just because it appears in a third-party reference image.`
+      : '';
+    const brandDirection = [colorDirection, fontDirection]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}\n\nTreat each category as the main messaging direction. The format is only the presentation structure.`;
 
     const copyByIndex = await generateCreativeCopy(
       creativePlan,
@@ -327,7 +338,7 @@ export async function POST(request: Request) {
             throw new Error(`Missing copy for creative ${item.index}.`);
           }
 
-          const itemContext = `${parsed.data.context}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.`;
+          const itemContext = `${parsed.data.context}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.`;
           let imageBuffer: Buffer;
 
           if (!source) {
@@ -393,6 +404,8 @@ export async function POST(request: Request) {
       uploadMode: source ? parsed.data.uploadMode : null,
       usedReferenceImage: Boolean(source),
       usedBrandLogo: reserveLogoArea,
+      usedBrandColors: parsed.data.brandColors?.length || 0,
+      usedBrandFonts: parsed.data.brandFontNames?.length || 0,
       referenceLibrarySelections: Array.from(librarySelections.entries()).map(
         ([index, selection]) => ({
           index,
