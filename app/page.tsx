@@ -1,5 +1,5 @@
-import { BoominLanding } from '@/components/landing/boomin-landing';
+import { MomentumLanding } from '@/components/landing/momentum-landing';
 
 export default function HomePage() {
-  return <BoominLanding />;
+  return <MomentumLanding />;
 }
