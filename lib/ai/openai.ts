@@ -363,9 +363,12 @@ const logoSafeAreaRules = (reserveLogoArea: boolean) =>
   reserveLogoArea
     ? `
 Approved-logo placement:
-- Do NOT draw, imitate, typeset, or invent a TRA logo in the generated image.
-- Leave the upper-left area clear of important text, faces, CTA buttons, and essential imagery: approximately the left 27% of the canvas and top 13% of the canvas.
-- The exact approved TRA logo asset will be composited into that reserved space after image generation. Treat that space as a deliberate brand lockup area.
+- Do NOT draw, imitate, typeset, invent, or approximate a TRA logo in the generated image.
+- Compose the ad with a deliberate quiet brand-lockup zone in the upper-left corner.
+- Keep roughly the left 28% and top 14% of the canvas free of headlines, body copy, faces, CTA buttons, borders, badges, and visually important imagery.
+- Make the quiet area feel intentional and integrated into the composition rather than like an accidental hole.
+- Do not draw a fake logo box, placeholder badge, white card, or decorative panel there solely for the logo.
+- The exact approved TRA logo asset will be composited into that space after image generation and may be proportionally resized to fit.
 `
     : '';
 
@@ -488,7 +491,7 @@ const generateImageEdit = async (
   formData.set('model', model);
   formData.set('prompt', prompt);
   formData.set('size', '1024x1024');
-  formData.set('quality', 'medium');
+  formData.set('quality', 'high');
   formData.set('output_format', 'png');
 
   for (const image of images) {
