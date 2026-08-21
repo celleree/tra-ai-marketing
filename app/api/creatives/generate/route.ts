@@ -30,6 +30,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const IMAGE_GENERATION_CONCURRENCY = 4;
 
 interface SelectedLibraryReference extends SelectedReferenceCreative {
   source: StoredMediaFile;
@@ -313,8 +314,15 @@ export async function POST(request: Request) {
     );
     const creatives: GeneratedCreative[] = [];
 
-    for (let offset = 0; offset < creativePlan.length; offset += 2) {
-      const batch = creativePlan.slice(offset, offset + 2);
+    for (
+      let offset = 0;
+      offset < creativePlan.length;
+      offset += IMAGE_GENERATION_CONCURRENCY
+    ) {
+      const batch = creativePlan.slice(
+        offset,
+        offset + IMAGE_GENERATION_CONCURRENCY
+      );
       const generated = await Promise.all(
         batch.map(async (item): Promise<GeneratedCreative> => {
           const copy = copyByIndex.get(item.index);
