@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import type { UploadMode } from '@/lib/creatives/generate-request';
+import { consumeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
 import type { MediaAsset } from '@/lib/media/types';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
@@ -37,8 +38,29 @@ export function CreativeGenerator() {
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState('');
+  const [handoffGenerate, setHandoffGenerate] = useState(false);
+  const handoffConsumedRef = useRef(false);
+  const handoffGenerationStartedRef = useRef(false);
 
   const ready = Boolean(context.trim());
+
+  useEffect(() => {
+    if (handoffConsumedRef.current) return;
+    handoffConsumedRef.current = true;
+
+    const draft = consumeLandingCreativeDraft();
+    if (!draft) return;
+
+    setActiveSection('upload');
+    setCreationMode('generate');
+    setMedia(draft.media);
+    setUploadMode(draft.uploadMode);
+    setContext(draft.context);
+    setVariationCount(draft.variationCount);
+    setCreatives([]);
+    setGenerationError('');
+    setHandoffGenerate(draft.generateOnOpen);
+  }, []);
 
   const handleUploadStart = () => {
     setMedia(null);
@@ -112,6 +134,21 @@ export function CreativeGenerator() {
       setGenerating(false);
     }
   };
+
+  useEffect(() => {
+    if (
+      !handoffGenerate ||
+      !context.trim() ||
+      generating ||
+      handoffGenerationStartedRef.current
+    ) {
+      return;
+    }
+
+    handoffGenerationStartedRef.current = true;
+    setHandoffGenerate(false);
+    void generate();
+  }, [handoffGenerate, context, media, uploadMode, variationCount]);
 
   const activeLabel =
     NAV_ITEMS.find((item) => item.id === activeSection)?.label || 'Create';
@@ -192,6 +229,7 @@ export function CreativeGenerator() {
                     onChange={setContext}
                     onUploadStart={handleUploadStart}
                     onUploaded={handleUploaded}
+                    initialMedia={media}
                     uploadMode={uploadMode}
                     onUploadModeChange={setUploadMode}
                     variationCount={variationCount}

@@ -83,3 +83,28 @@ Additional scale steps:
 - Automate recurring analysis.
 - Connect CRM and revenue data.
 - Prepare for higher-quality AI video workflows when TRA decides the quality/risk is acceptable.
+
+## Production Security Readiness
+
+Complete this checklist before the TRA app is treated as production-ready or exposed broadly.
+
+### Release blockers
+
+- **Application authentication and authorization:** protect `/studio` and all privileged API routes. Meta account/page access, Meta publishing, OpenAI-backed generation/analysis, R2 uploads, reference-library mutation, company data mutation, and font mutation must require an authenticated and authorized TRA user. Do not rely on a private GitHub repository as application access control. Verify whether Vercel Deployment Protection is enabled, but do not treat platform preview protection as a replacement for application authorization.
+- **Rate limits and usage quotas:** add server-side rate limiting/quotas to expensive or privileged endpoints, especially creative generation, website analysis, reference classification, uploads, and Meta publishing. Enforce the existing 4,000-character creative-context limit server-side as well as in the browser. Keep server-side caps on creative counts/batch sizes.
+- **R2 direct-upload size enforcement:** do not trust the browser-declared upload size alone. Ensure the actual object size is bounded before reading the full object into application memory during confirmation/validation. Keep short-lived presigned URLs and signed content types.
+
+### Hardening before production
+
+- **Website-analyzer DNS rebinding defense:** current SSRF controls reject private/local IPv4 and IPv6 addresses, validate redirects, limit crawl size, and use timeouts. Harden further so the address actually connected to cannot change from an approved public DNS result to a private/internal address between validation and fetch.
+- **Security headers:** add an explicit production header policy, including an appropriate Content Security Policy, clickjacking protection (`frame-ancestors` and/or equivalent), Referrer-Policy, Permissions-Policy, and other relevant browser-security headers. Verify HTTPS/HSTS behavior at the deployment layer.
+- **Font content validation:** brand-font uploads currently have generated safe filenames and size/extension validation. Add file-signature/structure validation so uploaded content must actually match an allowed WOFF2/WOFF/TTF/OTF format.
+
+### Production verification
+
+- Keep GitHub repository visibility private.
+- Keep OpenAI, Meta, and R2 credentials server-only; never expose them through `NEXT_PUBLIC_*` variables or browser payloads.
+- Keep `.env`/credential files excluded from source control and rotate credentials if any secret is ever committed or exposed.
+- Keep production R2 CORS limited to exact approved app origins; do not use wildcard origins for the production bucket.
+- Use least-privilege Meta and R2 credentials where practical.
+- Re-run dependency/security-advisory checks before production releases and keep Next.js/React/AWS SDK dependencies on patched versions.

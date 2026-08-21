@@ -16,6 +16,7 @@ interface CreativeComposerProps {
   onChange: (value: string) => void;
   onUploadStart: () => void;
   onUploaded: (media: MediaAsset) => void;
+  initialMedia?: MediaAsset | null;
   uploadMode: UploadMode;
   onUploadModeChange: (mode: UploadMode) => void;
   variationCount: number;
@@ -42,6 +43,7 @@ export function CreativeComposer({
   onChange,
   onUploadStart,
   onUploaded,
+  initialMedia = null,
   uploadMode,
   onUploadModeChange,
   variationCount,
@@ -221,7 +223,11 @@ export function CreativeComposer({
     '--slider-progress': `${sliderProgress}%`,
   } as CSSProperties;
 
-  const sourceHint = localPreview
+  const previewUrl = localPreview || initialMedia?.url || '';
+  const previewFileName =
+    fileName || initialMedia?.originalName || initialMedia?.fileName || '';
+  const previewReady = uploadReady || Boolean(initialMedia && !localPreview);
+  const sourceHint = previewUrl
     ? uploadMode === 'tra'
       ? 'TRA ad · uses the reference library'
       : 'Reference ad · adapts the concept to TRA'
@@ -243,18 +249,18 @@ export function CreativeComposer({
         onChange={handleFileChange}
       />
 
-      {localPreview ? (
+      {previewUrl ? (
         <div className={styles.attachmentRow}>
           <div className={styles.attachment}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={localPreview} alt="Selected source creative" />
+            <img src={previewUrl} alt="Selected source creative" />
             <div className={styles.attachmentCopy}>
-              <strong>{fileName}</strong>
+              <strong>{previewFileName}</strong>
               <span>
-                {uploading ? 'Uploading…' : uploadReady ? 'Ready' : 'Upload failed'}
+                {uploading ? 'Uploading…' : previewReady ? 'Ready' : 'Upload failed'}
               </span>
             </div>
-            {uploadReady ? (
+            {previewReady ? (
               <span className={styles.readyDot} aria-label="Upload ready" />
             ) : null}
           </div>
