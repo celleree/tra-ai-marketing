@@ -9,16 +9,107 @@ export interface DiscoveredCreative {
 }
 
 const DEFAULT_SEARCH_TERMS = [
-  'tax relief',
-  'tax debt',
-  'IRS debt',
-  'back taxes',
+  'tax debt relief',
+  'IRS tax debt',
+  'owe the IRS',
+  'back taxes help',
   'tax resolution',
+  'IRS tax relief',
+  'settle tax debt',
 ];
 
 const DEFAULT_ACTOR_ID = 'apify~facebook-ads-scraper';
 const RESULTS_PER_SEARCH = 12;
 const MAX_CANDIDATES = 30;
+
+const STRONG_TAX_RELIEF_PHRASES = [
+  'tax relief',
+  'tax debt',
+  'irs debt',
+  'back taxes',
+  'tax resolution',
+  'tax settlement',
+  'tax forgiveness',
+  'tax problems',
+  'tax problem',
+  'irs problems',
+  'irs problem',
+  'owe the irs',
+  'owing the irs',
+  'unpaid taxes',
+  'delinquent taxes',
+  'irs notice',
+  'irs lien',
+  'irs levy',
+  'tax lien',
+  'tax levy',
+  'offer in compromise',
+  'fresh start program',
+  'tax attorney',
+  'tax lawyer',
+];
+
+const TAX_DISTRESS_TERMS = [
+  'debt',
+  'back taxes',
+  'owe',
+  'owing',
+  'unpaid',
+  'delinquent',
+  'lien',
+  'levy',
+  'garnishment',
+  'collections',
+  'penalties',
+  'notice',
+  'audit',
+];
+
+const TAX_RESOLUTION_TERMS = [
+  'relief',
+  'resolution',
+  'resolve',
+  'settlement',
+  'settle',
+  'forgiveness',
+  'representation',
+  'represent',
+  'attorney',
+  'lawyer',
+  'negotiate',
+  'consultation',
+  'help',
+  'fresh start',
+  'offer in compromise',
+];
+
+const OFF_TARGET_PHRASES = [
+  'property tax',
+  'property taxes',
+  'real estate',
+  'realtor',
+  'homebuyer',
+  'home buyer',
+  'sell your house',
+  'land for sale',
+  'tax preparation',
+  'tax prep',
+  'file your taxes',
+  'tax return',
+  'tax returns',
+  'bookkeeping',
+  'accounting services',
+  'tax professional',
+  'tax professionals',
+  'tax practice',
+  'practice owner',
+  'success summit',
+  'live virtual event',
+  'training',
+  'webinar',
+  'course',
+  'continuing education',
+];
 
 const asString = (value: unknown) =>
   typeof value === 'string' ? value.trim() : '';
@@ -35,6 +126,19 @@ const firstString = (...values: unknown[]) => {
   }
   return '';
 };
+
+const normalizeText = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const includesPhrase = (text: string, phrase: string) =>
+  ` ${text} `.includes(` ${normalizeText(phrase)} `);
+
+const includesAny = (text: string, phrases: string[]) =>
+  phrases.some((phrase) => includesPhrase(text, phrase));
 
 const buildSearchUrl = (term: string) => {
   const url = new URL('https://www.facebook.com/ads/library/');
@@ -87,22 +191,41 @@ const collectCreativeText = (item: Record<string, unknown>) => {
     }
   }
 
-  return parts
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalizeText(parts.filter(Boolean).join(' '));
 };
 
 const hasTaxReliefSignal = (item: Record<string, unknown>) => {
-  const text = ` ${collectCreativeText(item)} `;
+  const text = collectCreativeText(item);
+  if (!text) return false;
+
+  const hasTaxOrIrs =
+    includesPhrase(text, 'tax') ||
+    includesPhrase(text, 'taxes') ||
+    includesPhrase(text, 'irs') ||
+    includesPhrase(text, 'internal revenue service');
+  if (!hasTaxOrIrs) return false;
+
+  const hasStrongSignal = includesAny(text, STRONG_TAX_RELIEF_PHRASES);
+  const hasDistressSignal = includesAny(text, TAX_DISTRESS_TERMS);
+  const hasResolutionSignal = includesAny(text, TAX_RESOLUTION_TERMS);
+  const hasIrsSignal =
+    includesPhrase(text, 'irs') || includesPhrase(text, 'internal revenue service');
+  const hasOffTargetSignal = includesAny(text, OFF_TARGET_PHRASES);
+
+  // General tax-prep, accounting, real-estate/property-tax and tax-pro training
+  // ads are common false positives in Meta search. Only keep one of those when
+  // the ad also contains clear consumer tax-debt distress plus resolution intent.
+  if (
+    hasOffTargetSignal &&
+    !(hasDistressSignal && (hasResolutionSignal || hasIrsSignal))
+  ) {
+    return false;
+  }
+
   return (
-    text.includes(' tax ') ||
-    text.includes(' taxes ') ||
-    text.includes(' irs ') ||
-    text.includes(' internal revenue service ')
+    hasStrongSignal ||
+    (hasDistressSignal && hasResolutionSignal) ||
+    (hasIrsSignal && hasResolutionSignal)
   );
 };
 
