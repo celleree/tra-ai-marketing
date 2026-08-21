@@ -16,6 +16,10 @@ import { ReferenceLibrary } from '@/components/reference-library/reference-libra
 
 type WorkspaceSection = 'upload' | 'company' | 'reference-images';
 type CreationMode = 'generate' | 'direct-upload';
+type CreativeGenerationPayload = {
+  creatives?: GeneratedCreative[];
+  error?: string;
+};
 
 const NAV_ITEMS: Array<{
   id: WorkspaceSection;
@@ -27,6 +31,27 @@ const NAV_ITEMS: Array<{
   { id: 'company', label: 'Company', shortLabel: 'Company', icon: 'C' },
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
 ];
+
+const parseGenerationResponse = async (
+  response: Response
+): Promise<CreativeGenerationPayload> => {
+  const raw = await response.text();
+  if (!raw.trim()) {
+    return {
+      error: `Creative generation returned an empty server response (HTTP ${response.status}).`,
+    };
+  }
+
+  try {
+    return JSON.parse(raw) as CreativeGenerationPayload;
+  } catch {
+    return {
+      error: response.ok
+        ? 'Creative generation returned an invalid server response.'
+        : `Creative generation was interrupted by the server before it could return a normal response (HTTP ${response.status}).`,
+    };
+  }
+};
 
 export function CreativeGenerator() {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
@@ -111,13 +136,19 @@ export function CreativeGenerator() {
           variationCount,
         }),
       });
-      const payload = await response.json();
+      const payload = await parseGenerationResponse(response);
 
       if (!response.ok) {
         throw new Error(payload.error || 'Creative generation failed.');
       }
 
-      let nextCreatives = (payload.creatives || []) as GeneratedCreative[];
+      if (!Array.isArray(payload.creatives)) {
+        throw new Error(
+          payload.error || 'Creative generation returned an invalid response.'
+        );
+      }
+
+      let nextCreatives = payload.creatives;
       if (brand.logo && nextCreatives.length) {
         nextCreatives = await applyBrandLogoToCreatives(
           nextCreatives,
