@@ -24,13 +24,12 @@ The approved TRA logo is a protected brand asset and must never be generated, re
 Required implementation behavior:
 - image generation must reserve appropriate logo-safe space but must not generate a substitute logo
 - the approved TRA logo asset must be composited onto the finished static ad after AI image generation using deterministic code
-- the logo artwork itself must remain exactly approved; only placement is allowed
-- if any runtime resizing would change the approved artwork, use approved pre-sized logo overlays for each supported output size and composite them 1:1 rather than resampling the logo at runtime
+- the approved logo may be resized larger or smaller as needed for the composition, but resizing must remain proportional and preserve the logo's aspect ratio, colors, shapes, spacing, and artwork exactly
 - logo placement must use a defined safe area, consistent margins, appropriate clear space, and visually correct scale for each supported ad size
 - do not add an arbitrary badge, panel, effect, background treatment, or decoration behind the logo unless that treatment is explicitly part of the approved TRA brand system
 - if the generated composition does not leave a valid location for the exact approved logo, the creative fails QA and should be regenerated rather than modifying the logo to make it fit
 
-P1 is complete only when repeated generation tests show consistently strong static ads and the exact approved logo can be placed correctly every time without altering the logo artwork.
+P1 is complete only when repeated generation tests show consistently strong static ads and the exact approved logo can be placed correctly every time without altering the logo artwork beyond proportional resizing.
 
 ## Phase 1 - Foundation
 
