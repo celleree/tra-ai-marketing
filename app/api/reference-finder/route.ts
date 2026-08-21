@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { classifyReferenceCreativeAngle } from '@/lib/ai/reference-angle';
+import {
+  classifyReferenceCreativeAngle,
+  isTaxReliefReferenceCreative,
+} from '@/lib/ai/reference-angle';
 import type { CreativeCategoryId } from '@/lib/creative-categories';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import {
@@ -83,6 +86,7 @@ export async function POST() {
         items: existingItems,
         imported: 0,
         discovered: candidates.length,
+        rejected: 0,
         failures: [],
       });
     }
@@ -90,6 +94,7 @@ export async function POST() {
     const storage = getMediaStorage();
     const additions: ReferenceLibraryAddition[] = [];
     const failures: string[] = [];
+    let rejected = 0;
 
     for (const candidate of newCandidates) {
       try {
@@ -101,12 +106,19 @@ export async function POST() {
           try {
             const source = await storage.readImageById(media.id);
             if (source) {
+              const relevant = await isTaxReliefReferenceCreative(source);
+              if (!relevant) {
+                rejected += 1;
+                await storage.deleteImage(media.fileName);
+                continue;
+              }
+
               angle = await classifyReferenceCreativeAngle(source);
               angleSource = 'ai';
             }
           } catch (classificationError) {
             console.error(
-              `Reference finder classification failed for ${media.id}`,
+              `Reference finder AI validation failed for ${media.id}`,
               classificationError
             );
           }
@@ -139,6 +151,7 @@ export async function POST() {
       items,
       imported: additions.length,
       discovered: candidates.length,
+      rejected,
       failures: failures.slice(0, 10),
     });
   } catch (error) {
