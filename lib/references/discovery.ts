@@ -43,8 +43,67 @@ const buildSearchUrl = (term: string) => {
   url.searchParams.set('country', 'US');
   url.searchParams.set('media_type', 'image');
   url.searchParams.set('q', term);
-  url.searchParams.set('search_type', 'keyword_unordered');
+  url.searchParams.set('search_type', 'keyword_exact_phrase');
   return url.toString();
+};
+
+const readText = (value: unknown) => {
+  if (typeof value === 'string') return value.trim();
+  const record = asRecord(value);
+  if (!record) return '';
+  return firstString(record.text, record.body, record.value, record.title);
+};
+
+const collectCreativeText = (item: Record<string, unknown>) => {
+  const snapshot = asRecord(item.snapshot) || {};
+  const pageInfo = asRecord(item.pageInfo);
+  const page = asRecord(pageInfo?.page);
+  const parts = [
+    firstString(item.pageName, snapshot.pageName, page?.name),
+    readText(snapshot.body),
+    firstString(snapshot.title),
+    firstString(snapshot.caption),
+    firstString(snapshot.linkDescription),
+    firstString(snapshot.linkUrl),
+  ];
+
+  if (Array.isArray(snapshot.cards)) {
+    for (const value of snapshot.cards) {
+      const card = asRecord(value);
+      if (!card) continue;
+      parts.push(
+        readText(card.body),
+        firstString(card.title),
+        firstString(card.caption),
+        firstString(card.linkDescription),
+        firstString(card.linkUrl)
+      );
+    }
+  }
+
+  if (Array.isArray(snapshot.extraTexts)) {
+    for (const value of snapshot.extraTexts) {
+      parts.push(readText(value));
+    }
+  }
+
+  return parts
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const hasTaxReliefSignal = (item: Record<string, unknown>) => {
+  const text = ` ${collectCreativeText(item)} `;
+  return (
+    text.includes(' tax ') ||
+    text.includes(' taxes ') ||
+    text.includes(' irs ') ||
+    text.includes(' internal revenue service ')
+  );
 };
 
 const readMediaUrl = (value: unknown) => {
@@ -140,7 +199,7 @@ const searchTermFromInput = (item: Record<string, unknown>) => {
 
 const normalizeItem = (value: unknown): DiscoveredCreative[] => {
   const item = asRecord(value);
-  if (!item || !isStaticImageAd(item)) return [];
+  if (!item || !isStaticImageAd(item) || !hasTaxReliefSignal(item)) return [];
 
   const snapshot = asRecord(item.snapshot) || {};
   const pageInfo = asRecord(item.pageInfo);
