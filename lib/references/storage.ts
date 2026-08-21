@@ -13,7 +13,9 @@ import {
 import type { MediaAsset } from '@/lib/media/types';
 import type {
   ReferenceAngleSource,
+  ReferenceDiscoveryMetadata,
   ReferenceLibraryItem,
+  ReferenceOrigin,
 } from '@/lib/references/types';
 
 const INDEX_KEY = '_metadata/reference-library.json';
@@ -31,6 +33,8 @@ export interface ReferenceLibraryAddition {
   media: MediaAsset;
   angle: CreativeCategoryId;
   angleSource: ReferenceAngleSource;
+  origin?: ReferenceOrigin;
+  discovery?: ReferenceDiscoveryMetadata;
 }
 
 export interface ReferenceLibraryRemoval {
@@ -54,6 +58,28 @@ const isMissingObjectError = (error: unknown) =>
       ('Code' in error && error.Code === 'NoSuchKey') ||
       ('code' in error && error.code === 'NoSuchKey')));
 
+const normalizeDiscovery = (value: unknown): ReferenceDiscoveryMetadata | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const discovery = value as Record<string, unknown>;
+  if (discovery.provider !== 'apify-meta-ad-library') return undefined;
+
+  const advertiser = typeof discovery.advertiser === 'string' ? discovery.advertiser : '';
+  const sourceUrl = typeof discovery.sourceUrl === 'string' ? discovery.sourceUrl : '';
+  const adId = typeof discovery.adId === 'string' ? discovery.adId : '';
+  const discoveredAt = typeof discovery.discoveredAt === 'string' ? discovery.discoveredAt : '';
+  if (!advertiser || !sourceUrl || !adId || !discoveredAt) return undefined;
+
+  return {
+    provider: 'apify-meta-ad-library',
+    advertiser,
+    sourceUrl,
+    adId,
+    discoveredAt,
+    startDate: typeof discovery.startDate === 'string' ? discovery.startDate : undefined,
+    searchTerm: typeof discovery.searchTerm === 'string' ? discovery.searchTerm : undefined,
+  };
+};
+
 const normalizeItem = (value: unknown): ReferenceLibraryItem | null => {
   if (!value || typeof value !== 'object') return null;
   const item = value as Record<string, unknown>;
@@ -76,6 +102,11 @@ const normalizeItem = (value: unknown): ReferenceLibraryItem | null => {
     ANGLE_SOURCES.includes(item.angleSource as ReferenceAngleSource)
       ? (item.angleSource as ReferenceAngleSource)
       : 'legacy';
+  const origin: ReferenceOrigin | undefined =
+    item.origin === 'ai-found' || item.origin === 'manual'
+      ? item.origin
+      : undefined;
+  const discovery = normalizeDiscovery(item.discovery);
 
   if (!id || !fileName || !mimeType || !url || !Number.isFinite(size)) {
     return null;
@@ -91,6 +122,8 @@ const normalizeItem = (value: unknown): ReferenceLibraryItem | null => {
     addedAt,
     angle,
     angleSource,
+    origin,
+    discovery,
   };
 };
 
@@ -207,14 +240,28 @@ export const addToReferenceLibrary = async (
 ): Promise<ReferenceLibraryItem[]> => {
   const index = await readIndex();
   const existingIds = new Set(index.items.map((item) => item.id));
+  const existingSourceKeys = new Set(
+    index.items
+      .filter((item) => item.discovery)
+      .map((item) => `${item.discovery!.adId}|${item.discovery!.sourceUrl}`)
+  );
   const addedAt = new Date().toISOString();
   const nextItems = additions
-    .filter(({ media }) => !existingIds.has(media.id))
-    .map(({ media, angle, angleSource }) => ({
+    .filter(({ media, discovery }) => {
+      if (existingIds.has(media.id)) return false;
+      if (!discovery) return true;
+      const sourceKey = `${discovery.adId}|${discovery.sourceUrl}`;
+      if (existingSourceKeys.has(sourceKey)) return false;
+      existingSourceKeys.add(sourceKey);
+      return true;
+    })
+    .map(({ media, angle, angleSource, origin, discovery }) => ({
       ...media,
       addedAt,
       angle,
       angleSource,
+      origin,
+      discovery,
     }));
 
   const nextIndex: ReferenceLibraryIndex = {
