@@ -5,6 +5,7 @@ import {
   generateCreativeCopy,
   generateReferenceCreativeImage,
   generateTraCreativeFromLibraryReference,
+  sanitizeImagePromptText,
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
 import {
@@ -84,24 +85,28 @@ const generatePromptOnlyCreativeImage = async (args: {
   const logoDirection = args.reserveLogoArea
     ? `
 Approved-logo placement:
-- Do NOT draw, imitate, typeset, invent, or approximate a TRA logo in the generated image.
+- Do NOT render any logo, wordmark, monogram, brand initials, company name, seal, badge, icon, or placeholder branding anywhere in the generated image.
+- Do NOT attempt to recreate or approximate the advertiser's branding from the prompt.
 - Compose the entire ad with a deliberate quiet brand-lockup zone in the upper-left corner.
 - Keep roughly the left 28% and top 14% of the canvas free of headlines, body copy, faces, CTA buttons, borders, badges, and visually important imagery.
 - The quiet area should look intentional and integrated into the composition, not like an empty accidental hole.
 - Do not draw a white card, badge, placeholder, fake logo box, or decorative panel in that area unless the overall ad concept independently requires it.
-- The exact approved TRA logo asset will be composited into that space after generation and may be proportionally resized to fit.
+- The exact approved brand logo asset will be composited into that space after generation and may be proportionally resized to fit.
+- The composited logo must be the ONLY branding mark in the finished ad.
 `
     : '';
   const prompt = `
-Create a finished, production-quality square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+Create a finished, production-quality square static Facebook/Instagram ad for a tax-relief service advertiser.
+
+The exact approved brand logo will be added after image generation. Do not generate branding yourself.
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
-User direction: ${args.context}
+User direction: ${sanitizeImagePromptText(args.context)}
 
-Use this approved ad copy as the messaging source:
-Headline: ${args.copy.headline}
-Primary text idea: ${args.copy.primaryText}
-Description: ${args.copy.description}
+Use this approved ad copy as the messaging source, but do not render any advertiser name or initials if they appear in the source copy:
+Headline: ${sanitizeImagePromptText(args.copy.headline)}
+Primary text idea: ${sanitizeImagePromptText(args.copy.primaryText)}
+Description: ${sanitizeImagePromptText(args.copy.description)}
 
 ${logoDirection}
 P1 creative-quality requirements:
@@ -115,14 +120,14 @@ P1 creative-quality requirements:
 - Do not add decorative elements merely to fill space.
 - The finished image should be credible enough to spend real Meta ad budget on without manual design cleanup.
 
-TRA guardrails:
+Ad guardrails:
 - This request has no reference image. Invent the visual composition from scratch.
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
 - Do not imply universal tax-debt results.
 - Keep the design credible, consumer-friendly, and readable on a phone.
 - Use strong visual hierarchy and avoid tiny text or clutter.
-- The only company or brand name that may appear is Tax Relief Advocates or TRA.
+- Do not render any company name, brand name, brand initials, or logo anywhere in the image.
 `;
 
   const response = await fetch(`${OPENAI_BASE_URL}/images/generations`, {
