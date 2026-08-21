@@ -16,11 +16,17 @@ const DEFAULT_SEARCH_TERMS = [
   'tax resolution',
 ];
 
-const DEFAULT_ACTOR_ID = 'bovi~meta-ads-library-scraper';
+const DEFAULT_ACTOR_ID = 'apify~facebook-ads-scraper';
+const RESULTS_PER_SEARCH = 12;
 const MAX_CANDIDATES = 30;
 
 const asString = (value: unknown) =>
   typeof value === 'string' ? value.trim() : '';
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 
 const firstString = (...values: unknown[]) => {
   for (const value of values) {
@@ -30,59 +36,145 @@ const firstString = (...values: unknown[]) => {
   return '';
 };
 
+const buildSearchUrl = (term: string) => {
+  const url = new URL('https://www.facebook.com/ads/library/');
+  url.searchParams.set('active_status', 'active');
+  url.searchParams.set('ad_type', 'all');
+  url.searchParams.set('country', 'US');
+  url.searchParams.set('media_type', 'image');
+  url.searchParams.set('q', term);
+  url.searchParams.set('search_type', 'keyword_unordered');
+  return url.toString();
+};
+
+const readMediaUrl = (value: unknown) => {
+  if (typeof value === 'string') return value.trim();
+  const media = asRecord(value);
+  if (!media) return '';
+
+  const nestedImage = asRecord(media.image);
+  return firstString(
+    media.originalImageUrl,
+    media.resizedImageUrl,
+    media.watermarkedResizedImageUrl,
+    media.original_image_url,
+    media.resized_image_url,
+    media.watermarked_resized_image_url,
+    media.imageUrl,
+    media.image_url,
+    media.url,
+    media.src,
+    nestedImage?.originalImageUrl,
+    nestedImage?.resizedImageUrl,
+    nestedImage?.url
+  );
+};
+
 const getImageUrls = (item: Record<string, unknown>) => {
-  const raw = Array.isArray(item.snapshot_images) ? item.snapshot_images : [];
+  const snapshot = asRecord(item.snapshot) || {};
+  const groups = [snapshot.images, snapshot.extraImages, snapshot.cards, item.images];
   const urls: string[] = [];
 
-  for (const entry of raw) {
-    if (typeof entry === 'string') {
-      urls.push(entry);
-      continue;
-    }
-
-    if (entry && typeof entry === 'object') {
-      const image = entry as Record<string, unknown>;
-      const url = firstString(
-        image.original_image_url,
-        image.image_url,
-        image.url,
-        image.src
-      );
+  for (const group of groups) {
+    if (!Array.isArray(group)) continue;
+    for (const entry of group) {
+      const url = readMediaUrl(entry);
       if (url) urls.push(url);
     }
   }
 
-  return urls;
+  return [...new Set(urls)];
+};
+
+const hasVideoMedia = (item: Record<string, unknown>) => {
+  const snapshot = asRecord(item.snapshot) || {};
+  const videos = [snapshot.videos, snapshot.extraVideos, item.videos];
+  if (videos.some((value) => Array.isArray(value) && value.length > 0)) return true;
+
+  if (Array.isArray(snapshot.cards)) {
+    for (const value of snapshot.cards) {
+      const card = asRecord(value);
+      if (!card) continue;
+      if (
+        firstString(
+          card.videoHdUrl,
+          card.videoSdUrl,
+          card.watermarkedVideoHdUrl,
+          card.watermarkedVideoSdUrl,
+          card.video_hd_url,
+          card.video_sd_url
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 };
 
 const isStaticImageAd = (item: Record<string, unknown>) => {
-  const videos = Array.isArray(item.snapshot_videos) ? item.snapshot_videos : [];
-  if (videos.length) return false;
+  if (item.isActive === false) return false;
 
-  const format = asString(item.display_format).toUpperCase();
-  if (format.includes('VIDEO')) return false;
+  const snapshot = asRecord(item.snapshot) || {};
+  const format = firstString(
+    snapshot.displayFormat,
+    item.displayFormat,
+    item.display_format
+  ).toUpperCase();
 
+  if (format.includes('VIDEO') || hasVideoMedia(item)) return false;
   return getImageUrls(item).length > 0;
 };
 
-const normalizeItem = (
-  value: unknown,
-  fallbackSearchTerm = ''
-): DiscoveredCreative[] => {
-  if (!value || typeof value !== 'object') return [];
-  const item = value as Record<string, unknown>;
-  if (!isStaticImageAd(item)) return [];
+const searchTermFromInput = (item: Record<string, unknown>) => {
+  const inputUrl = firstString(item.inputUrl, item.originalInputUrl, item.sourceUrl);
+  if (!inputUrl) return '';
 
-  const adId = firstString(item.ad_archive_id, item.ad_id, item.id);
-  const advertiser = firstString(item.page_name, item.advertiser_name, 'Unknown advertiser');
-  const sourceUrl = firstString(
-    item.ad_snapshot_url,
-    item.ad_library_url,
-    item.url,
-    adId ? `https://www.facebook.com/ads/library/?id=${encodeURIComponent(adId)}` : ''
+  try {
+    return new URL(inputUrl).searchParams.get('q')?.trim() || '';
+  } catch {
+    return '';
+  }
+};
+
+const normalizeItem = (value: unknown): DiscoveredCreative[] => {
+  const item = asRecord(value);
+  if (!item || !isStaticImageAd(item)) return [];
+
+  const snapshot = asRecord(item.snapshot) || {};
+  const pageInfo = asRecord(item.pageInfo);
+  const page = asRecord(pageInfo?.page);
+  const adId = firstString(
+    item.adArchiveID,
+    item.adArchiveId,
+    item.ad_archive_id,
+    item.adId,
+    item.ad_id,
+    item.id
   );
-  const startDate = firstString(item.ad_delivery_start_date, item.start_date);
-  const searchTerm = firstString(item.search_term, item.searchTerm, fallbackSearchTerm);
+  const advertiser = firstString(
+    item.pageName,
+    snapshot.pageName,
+    page?.name,
+    item.advertiserName,
+    item.advertiser_name,
+    'Unknown advertiser'
+  );
+  const sourceUrl = firstString(
+    item.adLibraryURL,
+    item.adLibraryUrl,
+    item.ad_snapshot_url,
+    item.adSnapshotUrl,
+    adId ? `https://www.facebook.com/ads/library/?id=${encodeURIComponent(adId)}` : '',
+    item.inputUrl
+  );
+  const startDate = firstString(
+    item.startDateFormatted,
+    item.ad_delivery_start_date,
+    item.start_date
+  );
+  const searchTerm = searchTermFromInput(item);
 
   return getImageUrls(item).map((imageUrl) => ({
     provider: 'apify-meta-ad-library' as const,
@@ -114,18 +206,17 @@ export const findWinningCreativeCandidates = async (): Promise<DiscoveredCreativ
     `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/run-sync-get-dataset-items`
   );
   endpoint.searchParams.set('token', token);
-  endpoint.searchParams.set('timeout', '120');
+  endpoint.searchParams.set('timeout', '180');
   endpoint.searchParams.set('clean', 'true');
 
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      searchTerms,
-      countries: ['US'],
-      adType: 'all',
+      startUrls: searchTerms.map((term) => ({ url: buildSearchUrl(term) })),
+      resultsLimit: RESULTS_PER_SEARCH,
       activeStatus: 'active',
-      maxResults: 12,
+      includeAboutPage: false,
     }),
     cache: 'no-store',
   });
@@ -142,10 +233,12 @@ export const findWinningCreativeCandidates = async (): Promise<DiscoveredCreativ
   const candidates = rows.flatMap((row) => normalizeItem(row));
   const seen = new Set<string>();
 
-  return candidates.filter((candidate) => {
-    const key = `${candidate.adId}|${candidate.imageUrl}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, MAX_CANDIDATES);
+  return candidates
+    .filter((candidate) => {
+      const key = `${candidate.adId}|${candidate.imageUrl}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_CANDIDATES);
 };
