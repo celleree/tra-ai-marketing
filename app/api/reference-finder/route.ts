@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { classifyReferenceCreativeAngle } from '@/lib/ai/reference-angle';
+import type { CreativeCategoryId } from '@/lib/creative-categories';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import {
   detectImageMimeType,
@@ -7,7 +8,12 @@ import {
 } from '@/lib/media/storage';
 import type { AllowedImageMimeType } from '@/lib/media/types';
 import { findWinningCreativeCandidates } from '@/lib/references/discovery';
-import { addToReferenceLibrary } from '@/lib/references/storage';
+import {
+  addToReferenceLibrary,
+  listReferenceLibrary,
+  type ReferenceLibraryAddition,
+} from '@/lib/references/storage';
+import type { ReferenceAngleSource } from '@/lib/references/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -24,11 +30,13 @@ const safeName = (value: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 70) || 'advertiser';
 
-const downloadCandidate = async (candidate: Awaited<ReturnType<typeof findWinningCreativeCandidates>>[number]) => {
+const downloadCandidate = async (
+  candidate: Awaited<ReturnType<typeof findWinningCreativeCandidates>>[number]
+) => {
   const response = await fetch(candidate.imageUrl, {
     headers: {
       'User-Agent': 'TRA-AI-Marketing/1.0',
-      Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5',
+      Accept: 'image/webp,image/png,image/jpeg,*/*;q=0.5',
     },
     cache: 'no-store',
   });
@@ -53,31 +61,41 @@ const downloadCandidate = async (candidate: Awaited<ReturnType<typeof findWinnin
   }
 
   const originalName = `ai-found-${safeName(candidate.advertiser)}-${safeName(candidate.adId)}.${extensionForMime[mimeType]}`;
-  const file = new File([buffer], originalName, { type: mimeType });
+  const file = new File([new Uint8Array(buffer)], originalName, { type: mimeType });
   return getMediaStorage().saveImage(file);
 };
 
 export async function POST() {
   try {
     const candidates = await findWinningCreativeCandidates();
-    if (!candidates.length) {
+    const existingItems = await listReferenceLibrary();
+    const existingAds = new Set(
+      existingItems
+        .filter((item) => item.discovery)
+        .map((item) => `${item.discovery!.adId}|${item.discovery!.sourceUrl}`)
+    );
+    const newCandidates = candidates.filter(
+      (candidate) => !existingAds.has(`${candidate.adId}|${candidate.sourceUrl}`)
+    );
+
+    if (!newCandidates.length) {
       return NextResponse.json({
-        items: await addToReferenceLibrary([]),
+        items: existingItems,
         imported: 0,
-        discovered: 0,
+        discovered: candidates.length,
         failures: [],
       });
     }
 
     const storage = getMediaStorage();
-    const additions = [];
+    const additions: ReferenceLibraryAddition[] = [];
     const failures: string[] = [];
 
-    for (const candidate of candidates) {
+    for (const candidate of newCandidates) {
       try {
         const media = await downloadCandidate(candidate);
-        let angle = 'customer-problems' as const;
-        let angleSource = 'fallback' as const | 'ai';
+        let angle: CreativeCategoryId = 'customer-problems';
+        let angleSource: ReferenceAngleSource = 'fallback';
 
         if (process.env.OPENAI_API_KEY) {
           try {
@@ -87,7 +105,10 @@ export async function POST() {
               angleSource = 'ai';
             }
           } catch (classificationError) {
-            console.error(`Reference finder classification failed for ${media.id}`, classificationError);
+            console.error(
+              `Reference finder classification failed for ${media.id}`,
+              classificationError
+            );
           }
         }
 
@@ -95,7 +116,7 @@ export async function POST() {
           media,
           angle,
           angleSource,
-          origin: 'ai-found' as const,
+          origin: 'ai-found',
           discovery: {
             provider: candidate.provider,
             advertiser: candidate.advertiser,
