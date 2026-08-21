@@ -6,20 +6,24 @@ import {
   parseBrandFontAssets,
   type BrandFontAsset,
 } from '@/lib/company/brand-fonts';
+import {
+  TRA_BRAND_COLORS,
+  TRA_CANONICAL_LOGO_URL,
+} from '@/lib/company/tra-brand';
 
 const STORAGE_KEY = 'tra-company-profile-v2';
 const STORED_MEDIA_URL = /\/api\/media\/files\/(media_[a-f0-9]{32})\.(?:png|jpg|webp)(?:\?.*)?$/;
 
 export interface StoredBrandGuidance {
-  logo: { url: string; mediaId: string } | null;
+  logo: { url: string; mediaId: string | null };
   colors: string[];
   fonts: BrandFontAsset[];
   fontGuidance: string[];
 }
 
-const emptyGuidance = (): StoredBrandGuidance => ({
-  logo: null,
-  colors: [],
+const defaultGuidance = (): StoredBrandGuidance => ({
+  logo: { url: TRA_CANONICAL_LOGO_URL, mediaId: null },
+  colors: [...TRA_BRAND_COLORS],
   fonts: [],
   fontGuidance: [],
 });
@@ -27,7 +31,7 @@ const emptyGuidance = (): StoredBrandGuidance => ({
 export function readStoredBrandGuidance(): StoredBrandGuidance {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyGuidance();
+    if (!raw) return defaultGuidance();
 
     const parsed = JSON.parse(raw) as {
       brandGuidelines?: {
@@ -41,7 +45,7 @@ export function readStoredBrandGuidance(): StoredBrandGuidance {
         ? parsed.brandGuidelines.logo.trim()
         : '';
     const logoMatch = logoUrl ? STORED_MEDIA_URL.exec(logoUrl) : null;
-    const colors = parseBrandColors(
+    const parsedColors = parseBrandColors(
       typeof parsed.brandGuidelines?.brandColors === 'string'
         ? parsed.brandGuidelines.brandColors
         : ''
@@ -53,8 +57,10 @@ export function readStoredBrandGuidance(): StoredBrandGuidance {
     );
 
     return {
-      logo: logoMatch ? { url: logoUrl, mediaId: logoMatch[1] } : null,
-      colors,
+      logo: logoMatch
+        ? { url: logoUrl, mediaId: logoMatch[1] }
+        : { url: TRA_CANONICAL_LOGO_URL, mediaId: null },
+      colors: parsedColors.length ? parsedColors : [...TRA_BRAND_COLORS],
       fonts,
       fontGuidance: fonts.map((font) => {
         const name = brandFontLabel(font);
@@ -64,6 +70,6 @@ export function readStoredBrandGuidance(): StoredBrandGuidance {
       }),
     };
   } catch {
-    return emptyGuidance();
+    return defaultGuidance();
   }
 }
