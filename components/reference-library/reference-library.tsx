@@ -18,6 +18,15 @@ interface UploadPlan {
   error?: string;
 }
 
+interface FinderResponse {
+  items?: ReferenceLibraryItem[];
+  imported?: number;
+  discovered?: number;
+  failures?: string[];
+  error?: string;
+  needsSetup?: boolean;
+}
+
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
@@ -70,6 +79,8 @@ export function ReferenceLibrary() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [finding, setFinding] = useState(false);
+  const [finderMessage, setFinderMessage] = useState('');
   const [movingId, setMovingId] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -92,6 +103,52 @@ export function ReferenceLibrary() {
 
     void load();
   }, []);
+
+  const findWinningCreatives = async () => {
+    if (finding) return;
+    setFinding(true);
+    setError('');
+    setFinderMessage('Searching active tax-relief ads…');
+
+    try {
+      const response = await fetch('/api/reference-finder', { method: 'POST' });
+      const payload = (await response.json()) as FinderResponse;
+      if (!response.ok) throw new Error(payload.error || 'Creative search failed.');
+
+      const nextItems = (payload.items || []) as ReferenceLibraryItem[];
+      setItems(nextItems);
+      setSelectedIds([]);
+
+      const imported = payload.imported || 0;
+      const discovered = payload.discovered || 0;
+      if (imported > 0) {
+        const firstImported = nextItems.find((item) => item.origin === 'ai-found');
+        if (firstImported?.angle) setSelectedAngle(firstImported.angle);
+        setFinderMessage(
+          `Added ${imported} AI-found reference${imported === 1 ? '' : 's'} from ${discovered} candidate${discovered === 1 ? '' : 's'}.`
+        );
+      } else {
+        setFinderMessage(
+          discovered
+            ? 'Candidates were found, but none could be newly imported.'
+            : 'No usable static-image candidates were found in this search.'
+        );
+      }
+
+      if (payload.failures?.length) {
+        setError(`${payload.failures.length} candidate import${payload.failures.length === 1 ? '' : 's'} failed. The successful imports were kept.`);
+      }
+    } catch (finderError) {
+      setFinderMessage('');
+      setError(
+        finderError instanceof Error
+          ? finderError.message
+          : 'Creative search failed.'
+      );
+    } finally {
+      setFinding(false);
+    }
+  };
 
   const uploadThroughServer = async (file: File) => {
     const formData = new FormData();
@@ -146,6 +203,7 @@ export function ReferenceLibrary() {
     if (!fileList.length || uploading) return;
 
     setError('');
+    setFinderMessage('');
     const valid: File[] = [];
     const rejected: string[] = [];
 
@@ -305,13 +363,25 @@ export function ReferenceLibrary() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.intro}>
-        <h2>Reference library</h2>
-        <p>
-          Add strong ad examples here. AI automatically sorts every upload into one
-          of the 15 fixed creative angles below.
-        </p>
+      <div className={styles.introRow}>
+        <div className={styles.intro}>
+          <h2>Reference library</h2>
+          <p>
+            Add strong ad examples here. AI automatically sorts every upload into one
+            of the 15 fixed creative angles below.
+          </p>
+        </div>
+        <button
+          className={styles.findButton}
+          type="button"
+          disabled={finding || uploading}
+          onClick={() => void findWinningCreatives()}
+        >
+          {finding ? 'Finding creatives…' : 'Find Winning Creatives'}
+        </button>
       </div>
+
+      {finderMessage ? <p className={styles.finderMessage}>{finderMessage}</p> : null}
 
       <div
         className={`${styles.uploader} ${dragActive ? styles.dragging : ''}`}
@@ -434,12 +504,25 @@ export function ReferenceLibrary() {
                       />
                       <span aria-hidden="true" />
                     </label>
+                    {item.origin === 'ai-found' ? (
+                      <span className={styles.aiFoundBadge}>AI Found</span>
+                    ) : null}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={item.url} alt={item.originalName} />
                     <div className={styles.cardFooter}>
                       <div className={styles.fileName} title={item.originalName}>
-                        {item.originalName}
+                        {item.discovery?.advertiser || item.originalName}
                       </div>
+                      {item.discovery?.sourceUrl ? (
+                        <a
+                          className={styles.sourceLink}
+                          href={item.discovery.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View source ad
+                        </a>
+                      ) : null}
                       <label className={styles.angleControl}>
                         <span>Angle</span>
                         <select
@@ -467,7 +550,7 @@ export function ReferenceLibrary() {
                 <ImageIcon />
               </div>
               <strong>No references in this angle yet</strong>
-              <span>Upload references above and AI will sort them automatically.</span>
+              <span>Upload references above or use Find Winning Creatives.</span>
             </div>
           )}
         </div>
