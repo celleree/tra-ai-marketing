@@ -94,11 +94,20 @@ const uploadMediaFile = async (file: File): Promise<MediaAsset> => {
     throw new Error('Branded creative upload could not be prepared.');
   }
 
-  const putResponse = await fetch(plan.uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type },
-    body: file,
-  });
+  let putResponse: Response;
+  try {
+    putResponse = await fetch(plan.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+  } catch {
+    // Preview deployments can have a different browser origin than the R2 CORS
+    // allow-list. Keep branding reliable by falling back to the same-origin
+    // server upload path instead of surfacing a generic browser fetch error.
+    return uploadThroughServer(file);
+  }
+
   if (!putResponse.ok) {
     throw new Error('Direct branded creative upload failed.');
   }
@@ -118,13 +127,31 @@ const uploadMediaFile = async (file: File): Promise<MediaAsset> => {
   return plan.media;
 };
 
+const toSameOriginMediaUrl = (url: string) => {
+  try {
+    const resolved = new URL(url, window.location.origin);
+    if (resolved.pathname.startsWith('/api/media/files/')) {
+      return `${resolved.pathname}${resolved.search}`;
+    }
+  } catch {
+    // Keep non-media relative URLs such as the canonical public logo unchanged.
+  }
+  return url;
+};
+
 const fetchDrawableImage = async (
   url: string,
   label: string
 ): Promise<DrawableImage> => {
-  const response = await fetch(url, { cache: 'no-store' });
+  let response: Response;
+  try {
+    response = await fetch(url, { cache: 'no-store' });
+  } catch {
+    throw new Error(`${label} could not be fetched from this deployment.`);
+  }
+
   if (!response.ok) {
-    throw new Error(`${label} could not be loaded.`);
+    throw new Error(`${label} could not be loaded (HTTP ${response.status}).`);
   }
 
   const blob = await response.blob();
@@ -176,9 +203,14 @@ const brandOneCreative = async (
   creative: GeneratedCreative,
   logoUrl: string
 ): Promise<GeneratedCreative> => {
+  // MediaAsset.url is intentionally stable for attribution and may point at
+  // production. For browser-side compositing, read the same R2 object through
+  // this deployment's media proxy so preview origins never cross-fetch prod.
+  const creativeUrl = `/api/media/files/${creative.image.fileName}`;
+  const safeLogoUrl = toSameOriginMediaUrl(logoUrl);
   const [creativeSource, logoSource] = await Promise.all([
-    fetchDrawableImage(creative.image.url, 'Generated creative'),
-    fetchDrawableImage(logoUrl, 'TRA logo'),
+    fetchDrawableImage(creativeUrl, 'Generated creative'),
+    fetchDrawableImage(safeLogoUrl, 'TRA logo'),
   ]);
 
   try {
