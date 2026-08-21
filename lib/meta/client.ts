@@ -281,6 +281,7 @@ export const createMetaAdCreative = async (args: {
   headline: string;
   description?: string;
   ctaType?: MetaCtaType;
+  urlTags?: string;
 }) => {
   const accountId = normalizeAdAccountId(args.adAccountId);
   const pageId = assertGraphId(args.pageId, 'Facebook Page ID');
@@ -299,10 +300,16 @@ export const createMetaAdCreative = async (args: {
     linkData.call_to_action = { type: args.ctaType };
   }
 
-  const body = new URLSearchParams({
+  const creativeFields: Record<string, string> = {
     name: args.name,
     object_story_spec: JSON.stringify({ page_id: pageId, link_data: linkData }),
-  });
+  };
+  const urlTags = (args.urlTags || '').trim().replace(/^\?/, '');
+  if (urlTags) {
+    creativeFields.url_tags = urlTags;
+  }
+
+  const body = new URLSearchParams(creativeFields);
   const payload = await request<{ id?: string }>(`${accountId}/adcreatives`, {
     method: 'POST',
     body,
