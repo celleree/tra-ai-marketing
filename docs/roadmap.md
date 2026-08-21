@@ -1,5 +1,37 @@
 # Roadmap
 
+## Current P1 - Static Creative Quality and Exact Logo Fidelity
+
+This is the top product priority. Until this P1 is closed, lower-priority product expansion should not take focus away from static creative quality.
+
+### P1A - Static image quality
+
+Generated static ads must consistently look production-ready before the workflow is treated as ready for broader rollout.
+
+Acceptance bar:
+- each output has one clear creative idea and one clear visual system
+- reference-driven generation follows one individual reference per creative rather than blending multiple references into a mashup
+- composition, spacing, hierarchy, typography, contrast, imagery, CTA treatment, and mobile readability are intentionally designed rather than merely acceptable
+- outputs should look like finished paid-social ads, not AI drafts
+- TRA brand colors, typography guidance, approved claims, and other brand rules remain intact
+- obvious AI artifacts, malformed text, awkward spacing, conflicting layouts, visual clutter, or low-quality imagery fail QA and should be regenerated or rejected
+- visual validation with small batches remains mandatory while this P1 is being tuned
+
+### P1B - Exact TRA logo fidelity and placement
+
+The approved TRA logo is a protected brand asset and must never be generated, recreated, interpreted, redrawn, recolored, stylized, cropped, stretched, distorted, or otherwise modified by an AI model.
+
+Required implementation behavior:
+- image generation must reserve appropriate logo-safe space but must not generate a substitute logo
+- the approved TRA logo asset must be composited onto the finished static ad after AI image generation using deterministic code
+- the logo artwork itself must remain exactly approved; only placement is allowed
+- if any runtime resizing would change the approved artwork, use approved pre-sized logo overlays for each supported output size and composite them 1:1 rather than resampling the logo at runtime
+- logo placement must use a defined safe area, consistent margins, appropriate clear space, and visually correct scale for each supported ad size
+- do not add an arbitrary badge, panel, effect, background treatment, or decoration behind the logo unless that treatment is explicitly part of the approved TRA brand system
+- if the generated composition does not leave a valid location for the exact approved logo, the creative fails QA and should be regenerated rather than modifying the logo to make it fit
+
+P1 is complete only when repeated generation tests show consistently strong static ads and the exact approved logo can be placed correctly every time without altering the logo artwork.
+
 ## Phase 1 - Foundation
 
 Build the TRA knowledge base from approved internal material.
