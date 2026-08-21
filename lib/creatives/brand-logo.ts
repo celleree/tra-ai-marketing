@@ -6,6 +6,10 @@ import type { MediaAsset } from '@/lib/media/types';
 const COMPANY_PROFILE_STORAGE_KEY = 'tra-company-profile-v2';
 const STORED_MEDIA_URL = /\/api\/media\/files\/(media_[a-f0-9]{32})\.(?:png|jpg|webp)(?:\?.*)?$/;
 const BRAND_BATCH_SIZE = 3;
+const LOGO_LEFT_RATIO = 0.04;
+const LOGO_TOP_RATIO = 0.04;
+const LOGO_MAX_WIDTH_RATIO = 0.24;
+const LOGO_MAX_HEIGHT_RATIO = 0.09;
 
 interface UploadPlan {
   direct: boolean;
@@ -153,37 +157,26 @@ const brandOneCreative = async (
 
     const width = canvas.width;
     const height = canvas.height;
-    const maxLogoWidth = width * 0.23;
-    const maxLogoHeight = height * 0.085;
+    const maxLogoWidth = width * LOGO_MAX_WIDTH_RATIO;
+    const maxLogoHeight = height * LOGO_MAX_HEIGHT_RATIO;
     const scale = Math.min(
       maxLogoWidth / logoBitmap.width,
       maxLogoHeight / logoBitmap.height
     );
     const logoWidth = Math.max(1, Math.round(logoBitmap.width * scale));
     const logoHeight = Math.max(1, Math.round(logoBitmap.height * scale));
-    const margin = Math.round(width * 0.03);
-    const paddingX = Math.round(width * 0.014);
-    const paddingY = Math.round(height * 0.012);
-    const panelWidth = logoWidth + paddingX * 2;
-    const panelHeight = logoHeight + paddingY * 2;
+    const logoX = Math.round(width * LOGO_LEFT_RATIO);
+    const logoY = Math.round(height * LOGO_TOP_RATIO);
 
-    context.save();
-    context.fillStyle = 'rgba(255, 255, 255, 0.94)';
-    context.beginPath();
-    context.roundRect(
-      margin,
-      margin,
-      panelWidth,
-      panelHeight,
-      Math.round(width * 0.012)
-    );
-    context.fill();
-    context.restore();
-
+    // The approved logo is the only branding layer added here. Keep the
+    // source artwork intact: proportional resize only, no panel, crop,
+    // recolor, opacity change, effects, or AI recreation.
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
     context.drawImage(
       logoBitmap,
-      margin + paddingX,
-      margin + paddingY,
+      logoX,
+      logoY,
       logoWidth,
       logoHeight
     );
