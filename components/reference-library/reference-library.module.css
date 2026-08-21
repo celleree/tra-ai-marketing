@@ -4,9 +4,16 @@
   padding: 40px 0 72px;
 }
 
+.introRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
 .intro {
   max-width: 680px;
-  margin-bottom: 24px;
 }
 
 .intro h2 {
@@ -21,6 +28,41 @@
   margin: 0;
   color: #66717e;
   line-height: 1.6;
+}
+
+.findButton {
+  min-height: 42px;
+  flex: 0 0 auto;
+  border: 1px solid #244fd3;
+  border-radius: 12px;
+  background: #244fd3;
+  padding: 0 16px;
+  color: #ffffff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 750;
+  cursor: pointer;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.findButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.findButton:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.finderMessage {
+  margin: -10px 0 14px;
+  border: 1px solid #dce4ff;
+  border-radius: 10px;
+  background: #f6f8ff;
+  padding: 9px 11px;
+  color: #3653a8;
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .uploader {
@@ -382,6 +424,22 @@
   cursor: pointer;
 }
 
+.aiFoundBadge {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  right: 10px;
+  border: 1px solid rgba(36, 79, 211, 0.16);
+  border-radius: 999px;
+  background: rgba(246, 248, 255, 0.96);
+  padding: 5px 8px;
+  color: #244fd3;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 .cardCheckbox input {
   position: absolute;
   width: 1px;
@@ -433,6 +491,18 @@
   font-size: 0.78rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sourceLink {
+  width: fit-content;
+  color: #244fd3;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.sourceLink:hover {
+  text-decoration: underline;
 }
 
 .angleControl {
@@ -512,6 +582,15 @@
 }
 
 @media (max-width: 860px) {
+  .introRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .findButton {
+    width: fit-content;
+  }
+
   .libraryLayout {
     grid-template-columns: 1fr;
   }
@@ -557,6 +636,10 @@
 }
 
 @media (max-width: 560px) {
+  .findButton {
+    width: 100%;
+  }
+
   .folderList,
   .grid {
     grid-template-columns: 1fr;
