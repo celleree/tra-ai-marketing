@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
+import { recordCreativeMetaAttribution } from '@/lib/creatives/attribution';
 import { getMediaStorage } from '@/lib/media/local-storage';
+import { getPublicMediaUrl } from '@/lib/media/storage';
 import {
   createMetaAdCreative,
   createPausedMetaAd,
@@ -182,12 +184,49 @@ export async function POST(request: Request) {
           name: adName,
         });
 
+        const creativeUrl = getPublicMediaUrl(image.fileName);
+        let attributionSaved = true;
+        let attributionWarning = '';
+
+        try {
+          await recordCreativeMetaAttribution({
+            creativeId,
+            mediaId: creative.imageId,
+            fileName: image.fileName,
+            creativeUrl,
+            source: uploaded ? 'uploaded' : 'generated',
+            category: creative.category,
+            format: creative.format,
+            adAccountId,
+            campaignId,
+            adSetId,
+            metaAdId,
+            metaCreativeId,
+            metaImageHash: imageHash,
+          });
+        } catch (error) {
+          attributionSaved = false;
+          attributionWarning =
+            error instanceof Error
+              ? error.message
+              : 'Creative attribution could not be persisted.';
+          console.error('Creative attribution save failed', {
+            creativeId,
+            metaAdId,
+            metaCreativeId,
+            error: attributionWarning,
+          });
+        }
+
         results.push({
           creativeId,
           status: 'success',
           metaAdId,
           metaCreativeId,
           metaImageHash: imageHash,
+          creativeUrl,
+          attributionSaved,
+          ...(attributionWarning ? { attributionWarning } : {}),
           adStatus: 'PAUSED',
           ctaType,
         });

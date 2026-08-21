@@ -68,6 +68,32 @@ CTA is chosen automatically from the generated copy:
 - `CONTACT_US` when the copy centers on contacting, calling, speaking, or consulting
 - otherwise `LEARN_MORE`
 
+## External ROI attribution requirement
+
+TRA calculates ROI in an external system rather than relying on an ROI field inside Meta. Every generated image creative therefore needs a **unique, persistent creative URL** that identifies the exact persisted image asset.
+
+The system should:
+- create or expose one stable URL for every generated image creative
+- keep that URL associated with the internal creative ID and R2 media ID
+- carry the same creative record forward when Meta image hashes, Meta creative IDs, and Meta ad IDs are created
+- make the unique creative URL available to TRA's external ROI/reporting workflow so revenue and ROI can be joined back to the exact creative
+- avoid using temporary browser URLs or other short-lived links as the attribution key
+
+When the external ROI data source is connected, the unique creative URL should serve as a durable creative-level reference so TRA can compare spend and Meta delivery data against externally calculated revenue/ROI for that exact image.
+
+### Implemented attribution behavior
+
+The attribution mapping layer is implemented.
+
+- Newly saved creative images use the existing unique R2 media filename as their durable identity.
+- `MediaAsset.url` is returned as a full stable URL when `CREATIVE_PUBLIC_BASE_URL` is configured. On Vercel, `VERCEL_PROJECT_PRODUCTION_URL` is used as the automatic fallback when available. Local development can continue using the relative `/api/media/files/...` route.
+- After a creative is successfully created in Meta, the app writes one attribution record per creative to R2 at `_metadata/creative-attribution/[creative ID].json`. Local development writes the same record shape under `data/creative-attribution/` by default.
+- Each record contains the TRA creative ID, R2 media ID/file name, creative URL, source/category/format, Meta ad account ID, campaign ID, ad-set ID, Meta image hash, Meta creative ID, Meta ad ID, and timestamps.
+- The Meta publish response also returns the creative URL and whether the attribution record was saved successfully.
+- If Meta successfully creates the ad but the attribution-record write fails afterward, the ad remains reported as successfully created and the response returns an attribution warning. This avoids retrying the whole Meta creation step and accidentally creating a duplicate ad.
+
+The remaining future integration is reading TRA's external revenue/ROI source and joining that data back to these records by the persistent creative URL.
+
 ## Safety boundary
 
 The system may create new Meta objects, but it never activates them automatically.
@@ -123,9 +149,11 @@ Campaign and ad-set creation happen once per selected batch. Ads are then proces
 A failure for one ad does not discard successful ads. Each creative result returns:
 - TRA creative ID
 - success/failed status
+- stable creative URL when the image can be resolved
 - Meta image hash when successful
 - Meta creative ID when successful
 - Meta ad ID when successful
+- attribution persistence status/warning when applicable
 - selected CTA when successful
 - `PAUSED` ad status when successful
 - error message when failed
@@ -153,5 +181,6 @@ Ads:
 - This version creates a Traffic/Landing Page Views structure because a website/form URL can be configured without requiring a Meta Pixel or Meta Instant Form ID.
 - Native Meta lead-form campaigns require additional Page/form selection and lead-generation-specific promoted-object/creative fields; add those after the basic one-click creation flow is verified.
 - The automatic campaign/ad-set policy is a safe deterministic MVP policy, not yet a performance-aware media-buyer agent.
-- Meta IDs/statuses are shown in the current generated-results session; there is not yet a persistent TRA creative-history database.
+- Meta IDs/statuses are shown in the current generated-results session; there is not yet a full persistent TRA creative-history UI/database beyond the R2 attribution records.
+- The persistent creative URL and Meta mapping layer are implemented; ingestion of the external ROI/revenue source itself is still a future integration.
 - Facebook Page identity is supported first. If an Instagram placement requires an explicit Instagram identity, add that identity to the same Meta service.

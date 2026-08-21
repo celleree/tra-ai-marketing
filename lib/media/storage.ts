@@ -80,6 +80,31 @@ export const getMaxUploadBytes = () => {
     : DEFAULT_MAX_UPLOAD_BYTES;
 };
 
+const getConfiguredPublicBaseUrl = () => {
+  const configured =
+    process.env.CREATIVE_PUBLIC_BASE_URL?.trim() ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
+    '';
+
+  if (!configured) return '';
+
+  const candidate = /^https?:\/\//i.test(configured)
+    ? configured
+    : `https://${configured}`;
+
+  try {
+    return new URL(candidate).origin;
+  } catch {
+    return '';
+  }
+};
+
+export const getPublicMediaUrl = (fileName: string) => {
+  const path = `/api/media/files/${fileName}`;
+  const baseUrl = getConfiguredPublicBaseUrl();
+  return baseUrl ? new URL(path, baseUrl).toString() : path;
+};
+
 export const validateStoredMediaImage = (stored: StoredMediaFile) => {
   if (stored.buffer.length > getMaxUploadBytes()) {
     throw new MediaValidationError('The image is larger than the upload limit.');
@@ -126,7 +151,7 @@ export const prepareMediaImage = async (
     originalName: basename(file.name || 'upload').slice(0, 200),
     mimeType: detectedMimeType,
     size: file.size,
-    url: `/api/media/files/${fileName}`,
+    url: getPublicMediaUrl(fileName),
     buffer,
   };
 };

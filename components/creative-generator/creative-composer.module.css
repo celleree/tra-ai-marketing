@@ -5,7 +5,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid #dde2e8;
-  border-radius: 22px;
+  border-radius: 18px;
   background: #ffffff;
   padding: 16px 18px;
   box-shadow: 0 10px 34px rgba(23, 33, 43, 0.055);
@@ -107,7 +107,7 @@
   padding: 7px 11px;
   color: #6d7884;
   font-size: 0.74rem;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1;
   transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
@@ -355,7 +355,7 @@
   place-content: center;
   gap: 5px;
   border: 2px dashed #3561e8;
-  border-radius: 17px;
+  border-radius: 14px;
   background: rgba(248, 250, 255, 0.96);
   color: #244fd3;
   pointer-events: none;
