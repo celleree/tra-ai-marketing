@@ -59,6 +59,84 @@ const getErrorMessage = async (response: Response) => {
   }
 };
 
+export async function isTaxReliefReferenceCreative(
+  source: StoredMediaFile
+): Promise<boolean> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not configured.');
+  }
+
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      store: false,
+      input: [
+        {
+          role: 'developer',
+          content: [
+            {
+              type: 'input_text',
+              text: 'Decide whether this Facebook ad creative is directly relevant as inspiration for a US consumer tax-relief company that helps people with IRS or tax debt, back taxes, liens, levies, tax resolution, settlements, or similar tax-debt problems. Be strict. Reject generic accounting/CPA ads, tax preparation or filing ads, property/real-estate tax ads, tax-industry training/webinars, unrelated lifestyle imagery, legal ads without a clear tax-debt context, and any creative where tax-relief relevance is unclear. Accept only when the visible creative itself clearly markets or discusses consumer IRS/tax-debt relief or resolution.',
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: 'Is this creative directly relevant to consumer IRS/tax-debt relief advertising?',
+            },
+            {
+              type: 'input_image',
+              image_url: `data:${source.mimeType};base64,${source.buffer.toString('base64')}`,
+              detail: 'low',
+            },
+          ],
+        },
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'tax_relief_relevance',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              relevant: { type: 'boolean' },
+            },
+            required: ['relevant'],
+            additionalProperties: false,
+          },
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  const text = extractOutputText(await response.json());
+  if (!text) {
+    throw new Error('OpenAI returned no relevance classification.');
+  }
+
+  const parsed = JSON.parse(text) as { relevant?: boolean };
+  if (typeof parsed.relevant !== 'boolean') {
+    throw new Error('OpenAI returned an invalid relevance classification.');
+  }
+
+  return parsed.relevant;
+}
+
 export async function classifyReferenceCreativeAngle(
   source: StoredMediaFile
 ): Promise<CreativeCategoryId> {
