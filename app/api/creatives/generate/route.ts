@@ -16,6 +16,10 @@ import {
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import {
+  TRA_BRAND_COLORS,
+  TRA_BRAND_COLOR_GUIDANCE,
+} from '@/lib/company/tra-brand';
+import {
   buildCreativePlan,
   validateGenerateCreativeRequest,
   type PlannedCreative,
@@ -240,7 +244,11 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
-    const reserveLogoArea = Boolean(brandLogo);
+
+    // Every TRA static ad receives a deterministic real logo after generation,
+    // so image composition must always reserve the logo-safe area. This must
+    // not depend on origin-specific browser storage or an uploaded logo media ID.
+    const reserveLogoArea = true;
 
     let analysis: CreativeReferenceAnalysis;
     let creativePlan: PlannedCreative[];
@@ -300,9 +308,10 @@ export async function POST(request: Request) {
         : `Reference ad mode: the uploaded image is creative inspiration. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the concept into original TRA ads.`
       : 'No-image mode: create original TRA ads from the user direction.';
 
-    const colorDirection = parsed.data.brandColors?.length
-      ? `Approved TRA brand palette from the uploaded logo: ${parsed.data.brandColors.join(', ')}. Use these as the primary design colors. Neutral black, white, and gray may be used for legibility, but do not substitute an unrelated dominant palette.`
-      : '';
+    const effectiveBrandColors = parsed.data.brandColors?.length
+      ? parsed.data.brandColors
+      : [...TRA_BRAND_COLORS];
+    const colorDirection = `${TRA_BRAND_COLOR_GUIDANCE}\nApproved palette for this request: ${effectiveBrandColors.join(', ')}. The palette rule overrides colors shown in any third-party reference creative.`;
     const fontDirection = parsed.data.brandFontNames?.length
       ? `Approved typography guidance derived from actual uploaded TRA font files:\n${parsed.data.brandFontNames.map((font) => `- ${font}`).join('\n')}\nUse these descriptions to match the approved typography character as closely as the image model allows. Do not introduce a conflicting type style just because it appears in a third-party reference image.`
       : '';
@@ -310,7 +319,7 @@ export async function POST(request: Request) {
       .filter(Boolean)
       .join('\n\n');
 
-    const generationContext = `${parsed.data.context}\n\n${modeDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as a separate creative blueprint. Do not blend references.\n\nP1 QUALITY BAR: every output must look like a finished professional paid-social ad, use one clear visual idea, render clean readable typography, avoid visible AI artifacts, and be strong enough to run without manual design cleanup.`;
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\nTRA brand system:\n${brandDirection}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as a separate creative blueprint. Do not blend references.\n\nP1 QUALITY BAR: every output must look like a finished professional paid-social ad, use one clear visual idea, render clean readable typography, avoid visible AI artifacts, and be strong enough to run without manual design cleanup.`;
 
     const copyByIndex = await generateCreativeCopy(
       creativePlan,
@@ -337,9 +346,9 @@ export async function POST(request: Request) {
 
           const selectedReference = librarySelections.get(item.index);
           const singleReferenceContract = selectedReference
-            ? `\n\nSINGLE-REFERENCE EXECUTION CONTRACT:\n- The attached image is the ONLY creative reference for this output.\n- Recreate one clean TRA version of THIS reference's composition, hierarchy, spacing, and main visual mechanism.\n- Do NOT combine it with another ad style, another reference, a collage, extra panels, unrelated decorative systems, or multiple competing concepts.\n- Preserve one dominant visual idea. Simpler is better.\n- If the reference does not contain an element, do not invent a second ad concept to fill space.\n- Adapt third-party branding/content into TRA branding and approved TRA copy without copying protected identity or unsupported claims.\n- AI selection reason: ${selectedReference.selectionReason}`
+            ? `\n\nSINGLE-REFERENCE EXECUTION CONTRACT:\n- The attached image is the ONLY creative reference for this output.\n- Recreate one clean TRA version of THIS reference's composition, hierarchy, spacing, and main visual mechanism.\n- Do NOT combine it with another ad style, another reference, a collage, extra panels, unrelated decorative systems, or multiple competing concepts.\n- Preserve one dominant visual idea. Simpler is better.\n- If the reference does not contain an element, do not invent a second ad concept to fill space.\n- Adapt third-party branding/content into TRA branding and approved TRA copy without copying protected identity or unsupported claims.\n- Preserve the reference structure but NOT its palette; all designed colors must follow the TRA palette above.\n- AI selection reason: ${selectedReference.selectionReason}`
             : '';
-          const itemContext = `${parsed.data.context}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}\n\nP1 QUALITY BAR: produce a clean, professional, mobile-readable paid-social execution with one dominant focal idea, intentional spacing, clean typography, no gibberish, no visible AI artifacts, and no unnecessary decorative filler.`;
+          const itemContext = `${parsed.data.context}\n\nTRA brand system:\n${brandDirection}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}\n\nP1 QUALITY BAR: produce a clean, professional, mobile-readable paid-social execution with one dominant focal idea, intentional spacing, clean typography, no gibberish, no visible AI artifacts, and no unnecessary decorative filler.`;
           let imageBuffer: Buffer;
 
           if (!source) {
@@ -411,8 +420,8 @@ export async function POST(request: Request) {
       analysis,
       uploadMode: source ? parsed.data.uploadMode : null,
       usedReferenceImage: Boolean(source),
-      usedBrandLogo: reserveLogoArea,
-      usedBrandColors: parsed.data.brandColors?.length || 0,
+      usedBrandLogo: true,
+      usedBrandColors: effectiveBrandColors.length,
       usedBrandFonts: parsed.data.brandFontNames?.length || 0,
       referenceSelectionMode:
         source && parsed.data.uploadMode === 'tra' ? 'ai-single-reference' : null,
