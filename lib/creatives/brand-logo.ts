@@ -23,6 +23,13 @@ export interface StoredBrandLogo {
   mediaId: string;
 }
 
+interface DrawableImage {
+  image: HTMLImageElement;
+  width: number;
+  height: number;
+  release: () => void;
+}
+
 export function readStoredBrandLogo(): StoredBrandLogo | null {
   try {
     const raw = window.localStorage.getItem(COMPANY_PROFILE_STORAGE_KEY);
@@ -111,13 +118,43 @@ const uploadMediaFile = async (file: File): Promise<MediaAsset> => {
   return plan.media;
 };
 
-const fetchBitmap = async (url: string, label: string) => {
+const fetchDrawableImage = async (
+  url: string,
+  label: string
+): Promise<DrawableImage> => {
   const response = await fetch(url, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`${label} could not be loaded.`);
   }
 
-  return createImageBitmap(await response.blob());
+  const blob = await response.blob();
+  if (!blob.size) {
+    throw new Error(`${label} returned an empty image.`);
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = objectUrl;
+
+  try {
+    await image.decode();
+  } catch {
+    URL.revokeObjectURL(objectUrl);
+    throw new Error(`${label} could not be decoded.`);
+  }
+
+  if (!image.naturalWidth || !image.naturalHeight) {
+    URL.revokeObjectURL(objectUrl);
+    throw new Error(`${label} has invalid dimensions.`);
+  }
+
+  return {
+    image,
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+    release: () => URL.revokeObjectURL(objectUrl),
+  };
 };
 
 const canvasToPngFile = (canvas: HTMLCanvasElement, fileName: string) =>
@@ -139,42 +176,39 @@ const brandOneCreative = async (
   creative: GeneratedCreative,
   logoUrl: string
 ): Promise<GeneratedCreative> => {
-  const [creativeBitmap, logoBitmap] = await Promise.all([
-    fetchBitmap(creative.image.url, 'Generated creative'),
-    fetchBitmap(logoUrl, 'TRA logo'),
+  const [creativeSource, logoSource] = await Promise.all([
+    fetchDrawableImage(creative.image.url, 'Generated creative'),
+    fetchDrawableImage(logoUrl, 'TRA logo'),
   ]);
 
   try {
     const canvas = document.createElement('canvas');
-    canvas.width = creativeBitmap.width;
-    canvas.height = creativeBitmap.height;
+    canvas.width = creativeSource.width;
+    canvas.height = creativeSource.height;
     const context = canvas.getContext('2d');
     if (!context) {
       throw new Error('The browser could not prepare the branded creative.');
     }
 
-    context.drawImage(creativeBitmap, 0, 0);
+    context.drawImage(creativeSource.image, 0, 0);
 
     const width = canvas.width;
     const height = canvas.height;
     const maxLogoWidth = width * LOGO_MAX_WIDTH_RATIO;
     const maxLogoHeight = height * LOGO_MAX_HEIGHT_RATIO;
     const scale = Math.min(
-      maxLogoWidth / logoBitmap.width,
-      maxLogoHeight / logoBitmap.height
+      maxLogoWidth / logoSource.width,
+      maxLogoHeight / logoSource.height
     );
-    const logoWidth = Math.max(1, Math.round(logoBitmap.width * scale));
-    const logoHeight = Math.max(1, Math.round(logoBitmap.height * scale));
+    const logoWidth = Math.max(1, Math.round(logoSource.width * scale));
+    const logoHeight = Math.max(1, Math.round(logoSource.height * scale));
     const logoX = Math.round(width * LOGO_LEFT_RATIO);
     const logoY = Math.round(height * LOGO_TOP_RATIO);
 
-    // The approved logo is the only branding layer added here. Keep the
-    // source artwork intact: proportional resize only, no panel, crop,
-    // recolor, opacity change, effects, or AI recreation.
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
     context.drawImage(
-      logoBitmap,
+      logoSource.image,
       logoX,
       logoY,
       logoWidth,
@@ -189,8 +223,8 @@ const brandOneCreative = async (
 
     return { ...creative, image };
   } finally {
-    creativeBitmap.close();
-    logoBitmap.close();
+    creativeSource.release();
+    logoSource.release();
   }
 };
 
