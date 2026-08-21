@@ -83,13 +83,16 @@ const generatePromptOnlyCreativeImage = async (args: {
   const logoDirection = args.reserveLogoArea
     ? `
 Approved-logo placement:
-- Do NOT draw, imitate, typeset, or invent a TRA logo in the generated image.
-- Leave the upper-left area clear of important text, faces, CTA buttons, and essential imagery: approximately the left 27% of the canvas and top 13% of the canvas.
-- The exact approved TRA logo asset will be composited into that reserved space after image generation.
+- Do NOT draw, imitate, typeset, invent, or approximate a TRA logo in the generated image.
+- Compose the entire ad with a deliberate quiet brand-lockup zone in the upper-left corner.
+- Keep roughly the left 28% and top 14% of the canvas free of headlines, body copy, faces, CTA buttons, borders, badges, and visually important imagery.
+- The quiet area should look intentional and integrated into the composition, not like an empty accidental hole.
+- Do not draw a white card, badge, placeholder, fake logo box, or decorative panel in that area unless the overall ad concept independently requires it.
+- The exact approved TRA logo asset will be composited into that space after generation and may be proportionally resized to fit.
 `
     : '';
   const prompt = `
-Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+Create a finished, production-quality square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
 User direction: ${args.context}
@@ -100,6 +103,17 @@ Primary text idea: ${args.copy.primaryText}
 Description: ${args.copy.description}
 
 ${logoDirection}
+P1 creative-quality requirements:
+- The result must look like a professionally art-directed paid-social creative, not a generic AI template or concept mockup.
+- Use one dominant visual idea with a clear focal point and intentional hierarchy.
+- Make the headline immediately legible at phone size.
+- Keep text concise enough to render cleanly; avoid tiny copy, dense paragraphs, unnecessary labels, and filler text.
+- Avoid malformed typography, gibberish characters, duplicated words, warped UI, extra limbs/fingers, distorted faces, impossible objects, and other visible AI artifacts.
+- Use clean spacing, strong alignment, deliberate contrast, and balanced negative space.
+- Keep important content comfortably inside the canvas edges.
+- Do not add decorative elements merely to fill space.
+- The finished image should be credible enough to spend real Meta ad budget on without manual design cleanup.
+
 TRA guardrails:
 - This request has no reference image. Invent the visual composition from scratch.
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
@@ -120,7 +134,7 @@ TRA guardrails:
       model,
       prompt,
       size: '1024x1024',
-      quality: 'medium',
+      quality: 'high',
       output_format: 'png',
     }),
   });
@@ -290,7 +304,7 @@ export async function POST(request: Request) {
       .filter(Boolean)
       .join('\n\n');
 
-    const generationContext = `${parsed.data.context}\n\n${modeDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as a separate creative blueprint. Do not blend references.`;
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as a separate creative blueprint. Do not blend references.\n\nP1 QUALITY BAR: every output must look like a finished professional paid-social ad, use one clear visual idea, render clean readable typography, avoid visible AI artifacts, and be strong enough to run without manual design cleanup.`;
 
     const copyByIndex = await generateCreativeCopy(
       creativePlan,
@@ -312,7 +326,7 @@ export async function POST(request: Request) {
           const singleReferenceContract = selectedReference
             ? `\n\nSINGLE-REFERENCE EXECUTION CONTRACT:\n- The attached image is the ONLY creative reference for this output.\n- Recreate one clean TRA version of THIS reference's composition, hierarchy, spacing, and main visual mechanism.\n- Do NOT combine it with another ad style, another reference, a collage, extra panels, unrelated decorative systems, or multiple competing concepts.\n- Preserve one dominant visual idea. Simpler is better.\n- If the reference does not contain an element, do not invent a second ad concept to fill space.\n- Adapt third-party branding/content into TRA branding and approved TRA copy without copying protected identity or unsupported claims.\n- AI selection reason: ${selectedReference.selectionReason}`
             : '';
-          const itemContext = `${parsed.data.context}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}`;
+          const itemContext = `${parsed.data.context}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}\n\nP1 QUALITY BAR: produce a clean, professional, mobile-readable paid-social execution with one dominant focal idea, intentional spacing, clean typography, no gibberish, no visible AI artifacts, and no unnecessary decorative filler.`;
           let imageBuffer: Buffer;
 
           if (!source) {
