@@ -1,4 +1,5 @@
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
+import { getMediaStorage } from '@/lib/media/local-storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -51,6 +52,17 @@ const extractOutputText = (payload: unknown) => {
   }
 
   return '';
+};
+
+const referenceImageDataUrl = async (candidate: ReferenceSelectionCandidate) => {
+  const stored = await getMediaStorage().readImageById(candidate.item.id);
+  if (!stored) {
+    throw new Error(
+      `Reference ${candidate.item.id} could not be loaded from media storage.`
+    );
+  }
+
+  return `data:${stored.mimeType};base64,${stored.buffer.toString('base64')}`;
 };
 
 const newestFirst = (a: ReferenceSelectionCandidate, b: ReferenceSelectionCandidate) =>
@@ -141,7 +153,7 @@ export async function selectBestReferenceCreatives(args: {
     });
     userContent.push({
       type: 'input_image',
-      image_url: candidate.imageUrl,
+      image_url: await referenceImageDataUrl(candidate),
       detail: 'low',
     });
   }
