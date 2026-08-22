@@ -364,22 +364,9 @@ export const sanitizeImagePromptText = (value: string) =>
     .replace(/Tax Relief Advocates/gi, 'the advertiser')
     .replace(/\bTRA\b/gi, 'the advertiser');
 
-const sanitizeList = (values: string[]) =>
-  values.map((value) => sanitizeImagePromptText(value));
-
 const logoSafeAreaRules = (reserveLogoArea: boolean) =>
   reserveLogoArea
-    ? `
-Approved-logo placement:
-- Do NOT render any logo, wordmark, monogram, brand initials, company name, seal, badge, icon, or placeholder branding anywhere in the generated image.
-- Do NOT attempt to recreate or approximate the advertiser's branding from context or from the reference image.
-- Compose the ad with a deliberate quiet brand-lockup zone in the upper-left corner.
-- Keep roughly the left 28% and top 14% of the canvas free of headlines, body copy, faces, CTA buttons, borders, badges, and visually important imagery.
-- Make the quiet area feel intentional and integrated into the composition rather than like an accidental hole.
-- Do not draw a fake logo box, placeholder badge, white card, or decorative panel there solely for branding.
-- The exact approved logo asset will be composited into that space after image generation and may be proportionally resized to fit.
-- The composited logo must be the ONLY branding mark in the finished ad.
-`
+    ? 'Do not render a logo or company name. Leave a natural quiet area in the upper-left (about 28% wide by 14% tall) for the real logo that will be added afterward.'
     : '';
 
 const buildReferenceImagePrompt = (
@@ -390,46 +377,19 @@ const buildReferenceImagePrompt = (
   analysis: CreativeReferenceAnalysis,
   reserveLogoArea: boolean
 ) => `
-Create an ORIGINAL square static Facebook/Instagram ad for a tax-relief service advertiser, using the attached image as CREATIVE INSPIRATION.
+Create a polished square Facebook/Instagram ad for a consumer tax-relief service using the attached ad as creative inspiration.
 
-The attached image is a reference ad, not the advertiser identity for the output. The exact approved brand logo will be added after image generation; do not generate branding yourself.
-
-Primary creative format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}
-${
-  secondaryFormat
-    ? `Secondary creative format: ${CREATIVE_FORMAT_LABELS[secondaryFormat]}`
-    : ''
+Direction: ${sanitizeImagePromptText(context)}
+Format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}${
+  secondaryFormat ? ` / ${CREATIVE_FORMAT_LABELS[secondaryFormat]}` : ''
 }
-User direction: ${sanitizeImagePromptText(context)}
-
-Reference analysis:
-Summary: ${sanitizeImagePromptText(analysis.summary)}
-Visual structure: ${sanitizeImagePromptText(analysis.visualStructure)}
-Hook/angle: ${sanitizeImagePromptText(analysis.hookOrAngle)}
-Style notes: ${sanitizeImagePromptText(analysis.styleNotes)}
-High-level ideas worth preserving: ${sanitizeList(analysis.preserve).join('; ') || 'none'}
-Elements to avoid copying: ${sanitizeList(analysis.avoid).join('; ') || 'none'}
-
-Use this approved ad copy as the messaging source, but do not render any advertiser name or initials if they appear in the source copy:
 Headline: ${sanitizeImagePromptText(copy.headline)}
-Primary text idea: ${sanitizeImagePromptText(copy.primaryText)}
-Description: ${sanitizeImagePromptText(copy.description)}
+Supporting message: ${sanitizeImagePromptText(copy.primaryText)}
+Creative idea: ${sanitizeImagePromptText(analysis.hookOrAngle)}
 
-Reference-ad rules:
-- Make the attached reference materially visible in the new execution through its high-level layout logic, hierarchy, spacing, visual mechanism, or presentation style.
-- Do not fall back to a generic direct-response template when the attached reference uses a distinct creative structure.
-- Do not recreate the reference verbatim.
-- Do not copy its company name, logo, trademarks, people, exact wording, testimonial, statistics, claims, or other brand identity.
-- Remove the reference advertiser identity entirely. Do NOT replace it with a generated company name, generated wordmark, generated initials, or generated logo.
-- Make the result clearly original and specific to the tax-relief offer while leaving branding to the deterministic post-generation compositor.
+Preserve the reference's overall composition, hierarchy, spacing, and visual mechanism, but make an original execution. Do not copy its brand identity, people, exact wording, testimonials, statistics, or factual claims. Use only the approved copy above.
 ${logoSafeAreaRules(reserveLogoArea)}
-Ad guardrails:
-- Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
-- If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
-- Do not imply universal tax-debt results.
-- Keep the design credible, consumer-friendly, and readable on a phone.
-- Strong visual hierarchy. Avoid tiny text and clutter.
-- Do not render any company name, brand name, brand initials, or logo anywhere in the image.
+Make the result professionally art-directed, clear on a phone, and visually strong.
 `;
 
 const buildTraLibraryImagePrompt = (
@@ -440,46 +400,19 @@ const buildTraLibraryImagePrompt = (
   traAnalysis: CreativeReferenceAnalysis,
   reserveLogoArea: boolean
 ) => `
-Create an ORIGINAL square static Facebook/Instagram ad for a tax-relief service advertiser.
+Create a polished square Facebook/Instagram ad for a consumer tax-relief service. The ONE attached image is the visual blueprint.
 
-The ONE attached image is the selected REFERENCE-LIBRARY CREATIVE and is the PRIMARY VISUAL-EXECUTION ANCHOR.
-The advertiser's source ad is intentionally NOT attached to this image-generation call because its old layout must not compete with the reference. Source information is provided below as text analysis only.
-The exact approved brand logo will be added after image generation; do not generate branding yourself.
-
-Primary creative format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}
-${
-  secondaryFormat
-    ? `Secondary creative format: ${CREATIVE_FORMAT_LABELS[secondaryFormat]}`
-    : ''
+Direction: ${sanitizeImagePromptText(context)}
+Format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}${
+  secondaryFormat ? ` / ${CREATIVE_FORMAT_LABELS[secondaryFormat]}` : ''
 }
-User direction: ${sanitizeImagePromptText(context)}
-
-Advertiser source analysis for content context only:
-Summary: ${sanitizeImagePromptText(traAnalysis.summary)}
-Identity/message cues worth preserving without reproducing branding: ${sanitizeList(traAnalysis.preserve).join('; ') || 'tax-relief service identity'}
-Source elements to avoid repeating or relying on: ${sanitizeList(traAnalysis.avoid).join('; ') || 'none'}
-
-Use this approved ad copy as the messaging source, but do not render any advertiser name or initials if they appear in the source copy:
 Headline: ${sanitizeImagePromptText(copy.headline)}
-Primary text idea: ${sanitizeImagePromptText(copy.primaryText)}
-Description: ${sanitizeImagePromptText(copy.description)}
+Supporting message: ${sanitizeImagePromptText(copy.primaryText)}
+Tax-relief context: ${sanitizeImagePromptText(traAnalysis.summary)}
 
-Reference-driven rules:
-- The attached library reference should materially drive the output's composition family, major visual blocks, hierarchy, spacing, visual mechanism, and presentation treatment.
-- Keep the recognizable high-level creative idea of the reference while rebuilding it as an original ad for the tax-relief offer.
-- Do NOT default back to the source ad's old composition or a generic direct-response layout.
-- Do not merely recolor the reference or swap a headline. Rebuild the execution with approved copy and brand colors while retaining the reference's useful structural logic.
-- Do not copy third-party company names, logos, people, exact wording, testimonials, statistics, results, or protected brand elements from the reference.
-- Remove the reference advertiser identity entirely. Do NOT replace it with a generated company name, generated wordmark, generated initials, or generated logo.
-- The reference does NOT define factual claims. Use only the approved copy and source analysis supplied here.
+Preserve the attached reference's overall composition, hierarchy, spacing, and main visual mechanism. Rebuild it as an original tax-relief ad with the approved copy and palette supplied in the direction. Do not copy the reference advertiser's identity, people, exact wording, testimonials, statistics, or claims.
 ${logoSafeAreaRules(reserveLogoArea)}
-Ad guardrails:
-- Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
-- If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
-- Do not imply universal tax-debt results.
-- Keep the design credible, consumer-friendly, and readable on a phone.
-- Strong visual hierarchy. Avoid tiny text and clutter.
-- Do not render any company name, brand name, brand initials, or logo anywhere in the image.
+Make the result professionally art-directed, clear on a phone, and visually strong.
 `;
 
 const appendImage = (
