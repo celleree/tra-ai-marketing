@@ -15,10 +15,7 @@ import {
 } from '@/lib/ai/reference-selector';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
-import {
-  TRA_BRAND_COLORS,
-  TRA_BRAND_COLOR_GUIDANCE,
-} from '@/lib/company/tra-brand';
+import { TRA_BRAND_COLORS } from '@/lib/company/tra-brand';
 import {
   buildCreativePlan,
   validateGenerateCreativeRequest,
@@ -87,51 +84,18 @@ const generatePromptOnlyCreativeImage = async (args: {
 
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const logoDirection = args.reserveLogoArea
-    ? `
-Approved-logo placement:
-- Do NOT render any logo, wordmark, monogram, brand initials, company name, seal, badge, icon, or placeholder branding anywhere in the generated image.
-- Do NOT attempt to recreate or approximate the advertiser's branding from the prompt.
-- Compose the entire ad with a deliberate quiet brand-lockup zone in the upper-left corner.
-- Keep roughly the left 28% and top 14% of the canvas free of headlines, body copy, faces, CTA buttons, borders, badges, and visually important imagery.
-- The quiet area should look intentional and integrated into the composition, not like an empty accidental hole.
-- Do not draw a white card, badge, placeholder, fake logo box, or decorative panel in that area unless the overall ad concept independently requires it.
-- The exact approved brand logo asset will be composited into that space after generation and may be proportionally resized to fit.
-- The composited logo must be the ONLY branding mark in the finished ad.
-`
+    ? 'Do not render a logo or company name. Leave a natural quiet area in the upper-left (about 28% wide by 14% tall) for the real logo that will be added afterward.'
     : '';
   const prompt = `
-Create a finished, production-quality square static Facebook/Instagram ad for a tax-relief service advertiser.
+Create a polished square Facebook/Instagram ad for a consumer tax-relief service.
 
-The exact approved brand logo will be added after image generation. Do not generate branding yourself.
-
-Primary creative format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
-User direction: ${sanitizeImagePromptText(args.context)}
-
-Use this approved ad copy as the messaging source, but do not render any advertiser name or initials if they appear in the source copy:
+Direction: ${sanitizeImagePromptText(args.context)}
+Format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
 Headline: ${sanitizeImagePromptText(args.copy.headline)}
-Primary text idea: ${sanitizeImagePromptText(args.copy.primaryText)}
-Description: ${sanitizeImagePromptText(args.copy.description)}
+Supporting message: ${sanitizeImagePromptText(args.copy.primaryText)}
 
 ${logoDirection}
-P1 creative-quality requirements:
-- The result must look like a professionally art-directed paid-social creative, not a generic AI template or concept mockup.
-- Use one dominant visual idea with a clear focal point and intentional hierarchy.
-- Make the headline immediately legible at phone size.
-- Keep text concise enough to render cleanly; avoid tiny copy, dense paragraphs, unnecessary labels, and filler text.
-- Avoid malformed typography, gibberish characters, duplicated words, warped UI, extra limbs/fingers, distorted faces, impossible objects, and other visible AI artifacts.
-- Use clean spacing, strong alignment, deliberate contrast, and balanced negative space.
-- Keep important content comfortably inside the canvas edges.
-- Do not add decorative elements merely to fill space.
-- The finished image should be credible enough to spend real Meta ad budget on without manual design cleanup.
-
-Ad guardrails:
-- This request has no reference image. Invent the visual composition from scratch.
-- Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
-- If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
-- Do not imply universal tax-debt results.
-- Keep the design credible, consumer-friendly, and readable on a phone.
-- Use strong visual hierarchy and avoid tiny text or clutter.
-- Do not render any company name, brand name, brand initials, or logo anywhere in the image.
+Use the headline prominently and only as much supporting text as improves the design. Make it feel professionally art-directed, clear on a phone, and visually strong. Do not invent factual claims, testimonials, statistics, guarantees, or government affiliation.
 `;
 
   const response = await fetch(`${OPENAI_BASE_URL}/images/generations`, {
@@ -245,9 +209,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Every TRA static ad receives a deterministic real logo after generation,
-    // so image composition must always reserve the logo-safe area. This must
-    // not depend on origin-specific browser storage or an uploaded logo media ID.
+    // Every TRA static ad receives the exact logo after generation.
     const reserveLogoArea = true;
 
     let analysis: CreativeReferenceAnalysis;
@@ -304,22 +266,22 @@ export async function POST(request: Request) {
       : '';
     const modeDirection = source
       ? parsed.data.uploadMode === 'tra'
-        ? 'TRA ad mode: AI has selected one individual library reference for each requested creative. Each output must be a separate TRA adaptation of its own single reference. Never combine, merge, collage, or borrow visual systems from multiple references. The uploaded TRA image supplies brand/content context through analysis only and is not passed into final image generation.'
-        : `Reference ad mode: the uploaded image is creative inspiration. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the concept into original TRA ads.`
+        ? 'TRA ad mode: use one selected reference per creative; do not blend references. The uploaded TRA ad supplies content context only.'
+        : `Reference ad mode: use the uploaded image as creative inspiration within ${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}.`
       : 'No-image mode: create original TRA ads from the user direction.';
 
     const effectiveBrandColors = parsed.data.brandColors?.length
       ? parsed.data.brandColors
       : [...TRA_BRAND_COLORS];
-    const colorDirection = `${TRA_BRAND_COLOR_GUIDANCE}\nApproved palette for this request: ${effectiveBrandColors.join(', ')}. The palette rule overrides colors shown in any third-party reference creative.`;
+    const colorDirection = `Brand palette: ${effectiveBrandColors.join(', ')}. Use these for designed graphic elements; natural photography may keep natural colors.`;
     const fontDirection = parsed.data.brandFontNames?.length
-      ? `Approved typography guidance derived from actual uploaded TRA font files:\n${parsed.data.brandFontNames.map((font) => `- ${font}`).join('\n')}\nUse these descriptions to match the approved typography character as closely as the image model allows. Do not introduce a conflicting type style just because it appears in a third-party reference image.`
+      ? `Typography direction: ${parsed.data.brandFontNames.join(', ')}.`
       : '';
     const brandDirection = [colorDirection, fontDirection]
       .filter(Boolean)
-      .join('\n\n');
+      .join(' ');
 
-    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\nTRA brand system:\n${brandDirection}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as a separate creative blueprint. Do not blend references.\n\nP1 QUALITY BAR: every output must look like a finished professional paid-social ad, use one clear visual idea, render clean readable typography, avoid visible AI artifacts, and be strong enough to run without manual design cleanup.`;
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n${brandDirection}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nReference assignments:\n${referenceDirections}` : ''}`;
 
     const copyByIndex = await generateCreativeCopy(
       creativePlan,
@@ -345,10 +307,10 @@ export async function POST(request: Request) {
           }
 
           const selectedReference = librarySelections.get(item.index);
-          const singleReferenceContract = selectedReference
-            ? `\n\nSINGLE-REFERENCE EXECUTION CONTRACT:\n- The attached image is the ONLY creative reference for this output.\n- Recreate one clean TRA version of THIS reference's composition, hierarchy, spacing, and main visual mechanism.\n- Do NOT combine it with another ad style, another reference, a collage, extra panels, unrelated decorative systems, or multiple competing concepts.\n- Preserve one dominant visual idea. Simpler is better.\n- If the reference does not contain an element, do not invent a second ad concept to fill space.\n- Adapt third-party branding/content into TRA branding and approved TRA copy without copying protected identity or unsupported claims.\n- Preserve the reference structure but NOT its palette; all designed colors must follow the TRA palette above.\n- AI selection reason: ${selectedReference.selectionReason}`
+          const referenceDirection = selectedReference
+            ? ` Use only the attached reference as the visual blueprint. Preserve its overall composition, hierarchy, spacing, and main visual mechanism, but rebuild it with the approved palette and copy.`
             : '';
-          const itemContext = `${parsed.data.context}\n\nTRA brand system:\n${brandDirection}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}\n\nP1 QUALITY BAR: produce a clean, professional, mobile-readable paid-social execution with one dominant focal idea, intentional spacing, clean typography, no gibberish, no visible AI artifacts, and no unnecessary decorative filler.`;
+          const itemContext = `${parsed.data.context}\n${brandDirection}\nCreative angle: ${CREATIVE_CATEGORY_LABELS[item.category]}.${referenceDirection}`;
           let imageBuffer: Buffer;
 
           if (!source) {
