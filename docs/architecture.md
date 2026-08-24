@@ -10,6 +10,36 @@ TRA AI Marketing is a Next.js + TypeScript application for creating and evaluati
 - Meta integration is server-side and may create new advertising objects only within the safety behavior implemented in code. Runtime behavior is authoritative in `lib/meta/` and the relevant API routes.
 - Generated creatives have persistent internal/media identity so later Meta delivery and external revenue data can be joined back to the exact creative.
 
+## Delivery boundary
+
+The system is intentionally built in two stages.
+
+### Stage 1: creative system
+
+Until TRA provides the required performance/revenue data, advertising-account access, and Claude access, implementation stays focused on producing high-quality static creatives rather than trying to optimize live advertising performance.
+
+The current system should support:
+
+- approved TRA knowledge, brand context, and compliance guardrails;
+- reference-driven and original creative strategy;
+- a `SO WHAT?` chain that connects surface messaging to meaningful customer outcomes;
+- dimensional variation across angles, personas, messages, formats, layouts, and visual direction;
+- image generation plus quality, compliance, and duplicate/similarity review;
+- persistent creative identity and structured metadata sufficient to attach future spend, delivery, and revenue outcomes to the exact creative.
+
+Do not treat winner prediction, custom ML training, autonomous media buying, budget optimization, automatic pause/scale decisions, or performance dashboards as current-stage requirements unless explicitly requested.
+
+### Stage 2: performance system
+
+After the required access exists, extend the creative system rather than replacing it:
+
+1. Join verified Meta delivery/spend data and TRA revenue outcomes to persistent creative IDs.
+2. Give Claude read-only access to verified data and experiment history for analysis, hypotheses, and recommendations.
+3. Add supervised execution only after recommendation quality and data integrity are validated.
+4. Add bounded automation only behind deterministic spending, compliance, attribution, and experimentation safeguards.
+
+The long-term strategic horizon is ongoing rather than time-boxed. The agent should optimize for verified attributable revenue over the long term within hard business constraints. CTR, CPL, CPC, CPA, ROAS, and similar intermediate metrics are diagnostic signals unless a specific business rule explicitly promotes one to a constraint.
+
 ## Creative workflow
 
 The app supports three generation paths:
