@@ -29,6 +29,21 @@ Current-phase goal: turn references plus approved TRA knowledge into high-qualit
 
 Once the required access exists, add the performance system in this order: verified Meta + TRA revenue attribution -> Claude read-only analysis/recommendations -> supervised execution -> bounded automation. The long-term agent objective is an ongoing acquisition system that maximizes verified attributable revenue within hard spending, compliance, and experimentation constraints; intermediate metrics are diagnostic signals, not the objective.
 
+Preserve these future-stage rules even while Stage 1 remains the only active implementation focus:
+
+- no artificial campaign end date; optimize as an ongoing acquisition system;
+- require `SO WHAT?` reasoning so creative messages connect to meaningful customer outcomes;
+- maximize verified attributable revenue over the long term, with spend/efficiency/compliance rules as constraints;
+- keep intermediate metrics diagnostic rather than letting them silently replace the revenue objective;
+- balance exploitation of winners with continued exploration of substantially different concepts;
+- use Claude as advertising strategist/orchestrator, GPT-5.6 Sol as creative director/visual QA, and GPT Image 2 as the image-generation engine;
+- keep financial, attribution, compliance, and execution safety rules in deterministic code outside the LLM;
+- verify/normalize metrics before Claude reasons from them;
+- preserve persistent creative IDs, structured metadata, and reusable learnings so future revenue can be tied back to exact hypotheses and creatives;
+- ground taste in references, brand context, and accumulated heuristics rather than assuming the base model has the right aesthetic by default.
+
+Detailed future-stage boundaries belong in `docs/architecture.md`; these rules do not authorize Stage 2 implementation before the required access exists.
+
 ## Decision capture
 
 When a chat or AI session establishes a durable project decision, constraint, architecture choice, external requirement, or important rationale that is not already represented in the canonical source of truth, update the appropriate canonical source.
