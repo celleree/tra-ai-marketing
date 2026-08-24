@@ -21,6 +21,14 @@ Keep normal AI/Codex context small. Read only the files needed for the task.
 
 If documentation conflicts with executable code/config, treat code/config as authoritative and correct or delete the stale documentation.
 
+## Current project direction
+
+Until TRA provides the required performance/revenue data, advertising-account access, and Claude access, keep implementation focused on the creative system. Do not expand into autonomous media buying, winner prediction, custom ML training, budget optimization, automatic pause/scale logic, or performance dashboards unless explicitly requested.
+
+Current-phase goal: turn references plus approved TRA knowledge into high-quality, compliant, meaningfully different static creatives that are saved with persistent identity and structured metadata. The creative pipeline should support reference/brand context, creative strategy including a `SO WHAT?` outcome chain, dimensional variation, image generation, quality/compliance checks, and storage of enough metadata to join future performance and revenue back to the exact creative.
+
+Once the required access exists, add the performance system in this order: verified Meta + TRA revenue attribution -> Claude read-only analysis/recommendations -> supervised execution -> bounded automation. The long-term agent objective is an ongoing acquisition system that maximizes verified attributable revenue within hard spending, compliance, and experimentation constraints; intermediate metrics are diagnostic signals, not the objective.
+
 ## Decision capture
 
 When a chat or AI session establishes a durable project decision, constraint, architecture choice, external requirement, or important rationale that is not already represented in the canonical source of truth, update the appropriate canonical source.
