@@ -21,6 +21,18 @@ Keep normal AI/Codex context small. Read only the files needed for the task.
 
 If documentation conflicts with executable code/config, treat code/config as authoritative and correct or delete the stale documentation.
 
+## Decision capture
+
+When a chat or AI session establishes a durable project decision, constraint, architecture choice, external requirement, or important rationale that is not already represented in the canonical source of truth, update the appropriate canonical source.
+
+- Record the final decision and only the rationale needed to understand it later; do not preserve raw conversation transcripts or step-by-step reasoning.
+- Runtime behavior or implementation decisions -> code/config.
+- Architecture changes or stable system boundaries -> `docs/architecture.md`.
+- Deployment or external platform requirements -> `docs/deployment.md`.
+- Future work discovered in chat -> GitHub Issue.
+- Temporary brainstorming, abandoned ideas, and routine debugging stay in chat/Git history unless they produce a durable decision.
+- When experiments establish a durable choice, document what was chosen and why, not the full sequence of failed approaches.
+
 ## Context limits
 
 - Do not recursively load the repository, `/docs`, Git history, old PRs, or external source material by default.
