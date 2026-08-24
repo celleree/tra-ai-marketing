@@ -46,3 +46,21 @@ When a chat or AI session establishes a durable project decision, constraint, ar
 - Delete obsolete code and docs instead of leaving tombstones, deprecated copies, changelogs, or `REMOVED.md` files.
 - Use descriptive commits/PRs for meaningful removal history; Git history is the archive.
 - Small documentation-only changes may be made directly when safe; app/code changes follow the feature-branch workflow above.
+
+## Learning and risk review
+
+Evaluate a meaningful failure, correction, or experiment for permanent capture only when future reuse justifies it: it escaped merge/deployment, exposed a durable incorrect assumption, repeated, caused substantial rework because a guard was missing, affected a high-risk invariant, or established a durable implementation choice. Do not capture routine syntax/type/build fixes, expected failed experiments, transient service failures, abandoned ideas, one-off debugging, or failures already covered by an adequate invariant unless they expose a deeper missing guard.
+
+Prefer the first feasible learning destination: regression test/eval; programmatic validation/guard; reusable helper/tool; code/config; existing canonical architecture/deployment documentation when the learning is genuinely a stable requirement or system boundary; GitHub Issue only when resulting work is deferred, out of scope, or future work; or a concise agent instruction only when mechanical or canonical enforcement is impractical. If the current change fully handles the learning, do not also create an Issue. Follow Decision capture above and preserve only the final conclusion and essential rationale, never chats, chain-of-thought, raw reviewer reasoning, or a failure journal. Reusable reviewer findings use the same triage.
+
+Classify each PR at its highest applicable risk:
+
+- LOW: documentation/copy, simple styling, additive tests that do not change runtime behavior or weaken safeguards, or similarly contained/reversible work.
+- MEDIUM: runtime/business logic, API behavior, data mappings or attribution, storage or creative behavior, non-severe external integration behavior, or meaningful dependency/infrastructure changes.
+- HIGH: advertising spend or publishing state; Meta campaign/ad-set/ad creation or mutation; auth/authz; secret or security-boundary handling; destructive production operations; deletion or mutation of persistent customer/company data or production assets; production storage safety; billing/payment; weakening CI, tests, or security controls; or similarly consequential behavior.
+
+Ordinary deletion of obsolete docs, tests, or unused source is classified by its actual effect. If uncertain, choose the higher risk.
+
+LOW needs normal verification. MEDIUM requires independent review before merge when runtime behavior or an integration boundary changes; otherwise state briefly why it is not required. HIGH always requires independent review before merge and is incomplete while review is pending or material findings remain.
+
+A reviewer may be human or AI, but must use a fresh context that did not implement the change. Provide only the acceptance criteria, relevant canonical requirements, final diff or reviewed commit, and verification results. The reviewer checks requirement alignment, regressions, missing edge cases or tests, safety/security, risk classification, and weakened safeguards, then returns findings/conclusion rather than implementation or private reasoning. Resolve findings, reverify, and re-review materially changed fixes.
