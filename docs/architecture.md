@@ -40,6 +40,23 @@ After the required access exists, extend the creative system rather than replaci
 
 The long-term strategic horizon is ongoing rather than time-boxed. The agent should optimize for verified attributable revenue over the long term within hard business constraints. CTR, CPL, CPC, CPA, ROAS, and similar intermediate metrics are diagnostic signals unless a specific business rule explicitly promotes one to a constraint.
 
+#### Preserved future-stage principles
+
+These are durable design rules to preserve now and implement later; they do not expand the active Stage 1 scope.
+
+- **Ongoing horizon, not a fixed end date.** The agent should behave as though it is building and improving a sustainable acquisition engine, not trying to maximize a short time-boxed experiment.
+- **Revenue is the north-star objective.** Optimize for verified attributable revenue over the long term. Spending, efficiency, compliance, attribution, and experimentation limits remain hard constraints.
+- **Intermediate metrics are diagnostic.** CTR, CPL, CPC, CPA, ROAS, conversion rate, and similar metrics help explain performance but should not silently replace the true business objective unless explicitly encoded as a business constraint.
+- **`SO WHAT?` reasoning is required early.** Creative strategy should trace surface claims through functional and emotional outcomes so concepts are built around meaningful customer impact rather than shallow benefits.
+- **Exploration and exploitation must coexist.** The system should build on demonstrated winners while continuously reserving capacity for substantially different angles, personas, messages, visual mechanisms, formats, and concepts.
+- **Model roles stay distinct.** Claude is the advertising strategist/orchestrator; GPT-5.6 Sol is the creative director and visual QA layer; GPT Image 2 is the image-generation engine.
+- **Hard rules live outside the LLM.** Financial controls, compliance rules, attribution checks, execution permissions, cooldowns, minimum-evidence requirements, and other safety constraints belong in deterministic code rather than depending on model judgment alone.
+- **Verify data before reasoning.** Metrics should be normalized and validated by code before Claude uses them for recommendations or decisions.
+- **Persistent identity connects creative to revenue.** Every creative, hypothesis, reference, and material generation attribute should remain tied to a persistent creative ID so future spend, delivery, and revenue can be joined back to the exact experiment.
+- **Autonomy is progressive.** The intended rollout is verified data connection -> Claude read-only analysis/recommendations -> supervised execution -> bounded automation. Do not skip directly to unrestricted execution.
+- **Taste is grounded externally.** Visual quality and brand taste should come from strong references, TRA brand context, accumulated winning patterns, and explicit heuristics rather than assuming a base model has the correct aesthetic by default.
+- **Learnings belong in persistent system state.** Reusable heuristics, experiment outcomes, and successful/failed patterns should be stored in durable records and retrieved when relevant instead of living only in temporary model conversation history.
+
 ## Creative workflow
 
 The app supports three generation paths:
