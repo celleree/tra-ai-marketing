@@ -11,10 +11,12 @@ import {
 import { R2MediaStorage } from '@/lib/media/r2-storage';
 
 export class LocalMediaStorage implements MediaStorage {
-  private readonly root = resolve(
-    process.cwd(),
-    process.env.MEDIA_STORAGE_DIR || 'data/uploads'
-  );
+  private readonly root = (() => {
+    const configuredRoot = process.env.MEDIA_STORAGE_DIR;
+    return configuredRoot
+      ? resolve(/* turbopackIgnore: true */ process.cwd(), configuredRoot)
+      : resolve(process.cwd(), 'data', 'uploads');
+  })();
 
   async saveImage(file: File): Promise<MediaAsset> {
     const { buffer, ...media } = await prepareMediaImage(file);

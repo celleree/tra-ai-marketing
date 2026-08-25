@@ -8,10 +8,13 @@ import {
 } from '@aws-sdk/client-s3';
 
 const ATTRIBUTION_PREFIX = '_metadata/creative-attribution';
-const LOCAL_ATTRIBUTION_DIR = resolve(
-  process.cwd(),
-  process.env.CREATIVE_ATTRIBUTION_DIR || 'data/creative-attribution'
-);
+const configuredAttributionDir = process.env.CREATIVE_ATTRIBUTION_DIR;
+const LOCAL_ATTRIBUTION_DIR = configuredAttributionDir
+  ? resolve(
+      /* turbopackIgnore: true */ process.cwd(),
+      configuredAttributionDir
+    )
+  : resolve(process.cwd(), 'data', 'creative-attribution');
 const SAFE_CREATIVE_ID = /^(creative|upload)_[a-f0-9]{32}$/;
 
 export interface CreativeMetaAttribution {
