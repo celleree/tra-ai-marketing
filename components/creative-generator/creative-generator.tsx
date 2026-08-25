@@ -8,13 +8,14 @@ import type { UploadMode } from '@/lib/creatives/generate-request';
 import { consumeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
 import type { MediaAsset } from '@/lib/media/types';
 import { CompanyView } from '@/components/company/company-view';
+import { CreativeLibrary } from '@/components/creative-library/creative-library';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
 import createStyles from '@/components/creative-generator/creative-create-mode.module.css';
 import { ReferenceLibrary } from '@/components/reference-library/reference-library';
 
-type WorkspaceSection = 'upload' | 'company' | 'reference-images';
+type WorkspaceSection = 'upload' | 'tra-creatives' | 'company' | 'reference-images';
 type CreationMode = 'generate' | 'direct-upload';
 
 const NAV_ITEMS: Array<{
@@ -24,6 +25,7 @@ const NAV_ITEMS: Array<{
   icon: string;
 }> = [
   { id: 'upload', label: 'Create', shortLabel: 'Create', icon: '+' },
+  { id: 'tra-creatives', label: 'TRA Creatives', shortLabel: 'Creatives', icon: 'T' },
   { id: 'company', label: 'Company', shortLabel: 'Company', icon: 'C' },
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
 ];
@@ -123,6 +125,26 @@ export function CreativeGenerator() {
           nextCreatives,
           brand.logo.url
         );
+      }
+
+      const saveResponse = await fetch('/api/creatives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creatives: nextCreatives.map((creative) => ({
+            id: creative.id,
+            image: creative.image,
+            category: creative.category,
+            copy: creative.copy,
+            ...(creative.referenceImageId
+              ? { referenceImageId: creative.referenceImageId }
+              : {}),
+          })),
+        }),
+      });
+      const savePayload = await saveResponse.json();
+      if (!saveResponse.ok) {
+        throw new Error(savePayload.error || 'Generated creatives could not be saved.');
       }
 
       setCreatives(nextCreatives);
@@ -256,6 +278,10 @@ export function CreativeGenerator() {
               generating={creationMode === 'generate' && generating}
               requestedCount={variationCount}
             />
+          </div>
+        ) : activeSection === 'tra-creatives' ? (
+          <div className="workspace-view">
+            <CreativeLibrary />
           </div>
         ) : activeSection === 'company' ? (
           <div className="workspace-view">

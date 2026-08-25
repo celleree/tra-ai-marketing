@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import {
   analyzeReferenceCreative,
@@ -354,9 +355,13 @@ export async function POST(request: Request) {
             { type: 'image/png' }
           );
           const image = await storage.saveImage(generatedFile);
+          const uploadedReferenceImageId =
+            parsed.data.uploadMode === 'reference'
+              ? parsed.data.mediaId
+              : undefined;
 
           return {
-            id: `creative_${image.id.slice('media_'.length)}`,
+            id: `creative_${randomUUID().replaceAll('-', '')}`,
             index: item.index,
             category: item.category,
             format: item.format,
@@ -369,6 +374,8 @@ export async function POST(request: Request) {
                   referenceCategory: selectedReference.item.angle,
                   referenceSelectionReason: selectedReference.selectionReason,
                 }
+              : uploadedReferenceImageId
+                ? { referenceImageId: uploadedReferenceImageId }
               : {}),
           };
         })

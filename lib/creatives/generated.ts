@@ -23,3 +23,12 @@ export interface GeneratedCreative {
   referenceCategory?: CreativeCategoryId;
   referenceSelectionReason?: string;
 }
+
+export interface CreativeRecord {
+  id: string;
+  createdAt: string;
+  image: MediaAsset;
+  category: CreativeCategoryId;
+  copy: CreativeCopy;
+  referenceImageId?: string;
+}
