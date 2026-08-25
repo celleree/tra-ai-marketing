@@ -17,10 +17,10 @@ import type {
 } from '@/lib/references/types';
 
 const INDEX_KEY = '_metadata/reference-library.json';
-const LOCAL_INDEX_PATH = resolve(
-  process.cwd(),
-  process.env.REFERENCE_LIBRARY_INDEX || 'data/reference-library.json'
-);
+const configuredIndexPath = process.env.REFERENCE_LIBRARY_INDEX;
+const LOCAL_INDEX_PATH = configuredIndexPath
+  ? resolve(/* turbopackIgnore: true */ process.cwd(), configuredIndexPath)
+  : resolve(process.cwd(), 'data', 'reference-library.json');
 
 interface ReferenceLibraryIndex {
   version: 2;
