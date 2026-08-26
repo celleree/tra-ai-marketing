@@ -6,7 +6,7 @@
 
 .intro {
   max-width: 680px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .intro h2 {
@@ -21,6 +21,56 @@
   margin: 0;
   color: #66717e;
   line-height: 1.6;
+}
+
+.libraryTabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  border: 1px solid #e0e4e9;
+  border-radius: 12px;
+  background: #f7f8fa;
+  padding: 4px;
+}
+
+.libraryTab {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  padding: 0 13px;
+  color: #66717e;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.libraryTab:hover {
+  color: #17212b;
+}
+
+.libraryTab span {
+  min-width: 22px;
+  border-radius: 999px;
+  background: #e8ebef;
+  padding: 2px 6px;
+  color: #7b8692;
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+.libraryTabActive {
+  background: #ffffff;
+  color: #244fd3;
+  box-shadow: 0 1px 4px rgba(23, 33, 43, 0.08);
+}
+
+.libraryTabActive span {
+  background: #e7ecff;
+  color: #244fd3;
 }
 
 .uploader {
@@ -203,6 +253,10 @@
   gap: 20px;
   align-items: start;
   margin-top: 20px;
+}
+
+.traLibraryLayout {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .folderPanel {
@@ -435,6 +489,18 @@
   white-space: nowrap;
 }
 
+.assetLabel {
+  width: fit-content;
+  border-radius: 999px;
+  background: #eef4f8;
+  padding: 5px 8px;
+  color: #607382;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 .angleControl {
   display: grid;
   gap: 5px;
@@ -533,6 +599,15 @@
   .page {
     width: min(100% - 32px, 760px);
     padding: 32px 0 56px;
+  }
+
+  .libraryTabs {
+    width: 100%;
+  }
+
+  .libraryTab {
+    flex: 1;
+    justify-content: center;
   }
 
   .uploader {

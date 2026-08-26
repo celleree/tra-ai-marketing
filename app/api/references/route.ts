@@ -13,11 +13,12 @@ import {
 } from '@/lib/media/storage';
 import {
   addToReferenceLibrary,
-  listReferenceLibrary,
+  listAllReferenceLibrary,
   removeFromReferenceLibrary,
   updateReferenceAngle,
   type ReferenceLibraryAddition,
 } from '@/lib/references/storage';
+import type { ReferenceLibraryType } from '@/lib/references/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -60,6 +61,7 @@ const classifyReferences = async (
     if (!process.env.OPENAI_API_KEY) {
       return {
         media,
+        referenceType: 'layout',
         angle: 'customer-problems',
         angleSource: 'fallback',
       };
@@ -73,6 +75,7 @@ const classifyReferences = async (
 
       return {
         media,
+        referenceType: 'layout',
         angle: await classifyReferenceCreativeAngle(source),
         angleSource: 'ai',
       };
@@ -80,6 +83,7 @@ const classifyReferences = async (
       console.error(`Reference angle classification failed for ${media.id}`, error);
       return {
         media,
+        referenceType: 'layout',
         angle: 'customer-problems',
         angleSource: 'fallback',
       };
@@ -100,9 +104,17 @@ const classifyReferences = async (
   return results;
 };
 
+const registerTraReferences = (items: MediaAsset[]): ReferenceLibraryAddition[] =>
+  items.map((media) => ({
+    media,
+    referenceType: 'tra',
+    angle: 'customer-problems',
+    angleSource: 'manual',
+  }));
+
 export async function GET() {
   try {
-    return NextResponse.json({ items: await listReferenceLibrary() });
+    return NextResponse.json({ items: await listAllReferenceLibrary() });
   } catch (error) {
     console.error('Could not load reference library', error);
     return NextResponse.json(
@@ -116,6 +128,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const rawItems = Array.isArray(body.items) ? body.items : [];
+    const referenceType: ReferenceLibraryType = body.referenceType === 'tra' ? 'tra' : 'layout';
 
     if (!rawItems.length) {
       return NextResponse.json(
@@ -142,8 +155,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const classified = await classifyReferences(items);
-    return NextResponse.json({ items: await addToReferenceLibrary(classified) });
+    const additions =
+      referenceType === 'tra' ? registerTraReferences(items) : await classifyReferences(items);
+    return NextResponse.json({ items: await addToReferenceLibrary(additions) });
   } catch (error) {
     console.error('Could not update reference library', error);
     return NextResponse.json(
@@ -173,7 +187,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     console.error('Could not move reference image', error);
     return NextResponse.json(
-      { error: 'The reference image could not be moved.' },
+      { error: error instanceof Error ? error.message : 'The reference image could not be moved.' },
       { status: 500 }
     );
   }

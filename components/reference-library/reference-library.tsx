@@ -8,7 +8,10 @@ import {
   type CreativeCategoryId,
 } from '@/lib/creative-categories';
 import type { MediaAsset } from '@/lib/media/types';
-import type { ReferenceLibraryItem } from '@/lib/references/types';
+import type {
+  ReferenceLibraryItem,
+  ReferenceLibraryType,
+} from '@/lib/references/types';
 import styles from './reference-library.module.css';
 
 interface UploadPlan {
@@ -65,6 +68,7 @@ export function ReferenceLibrary() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const [items, setItems] = useState<ReferenceLibraryItem[]>([]);
+  const [activeLibrary, setActiveLibrary] = useState<ReferenceLibraryType>('layout');
   const [selectedAngle, setSelectedAngle] =
     useState<CreativeCategoryId>('customer-problems');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -187,14 +191,17 @@ export function ReferenceLibrary() {
         const response = await fetch('/api/references', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: uploaded }),
+          body: JSON.stringify({ items: uploaded, referenceType: activeLibrary }),
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || 'Could not save references.');
         const nextItems = (payload.items || []) as ReferenceLibraryItem[];
         setItems(nextItems);
         setSelectedIds([]);
-        if (nextItems[0]?.angle) setSelectedAngle(nextItems[0].angle);
+        if (activeLibrary === 'layout') {
+          const newestLayout = nextItems.find((item) => item.referenceType === 'layout');
+          if (newestLayout?.angle) setSelectedAngle(newestLayout.angle);
+        }
       } catch (registerError) {
         failures.push(
           registerError instanceof Error ? registerError.message : 'Could not save references.'
@@ -301,16 +308,57 @@ export function ReferenceLibrary() {
     setSelectedIds([]);
   };
 
-  const visibleItems = items.filter((item) => item.angle === selectedAngle);
+  const changeLibrary = (library: ReferenceLibraryType) => {
+    setActiveLibrary(library);
+    setSelectedIds([]);
+    setError('');
+  };
+
+  const layoutItems = items.filter((item) => item.referenceType === 'layout');
+  const traItems = items.filter((item) => item.referenceType === 'tra');
+  const visibleItems =
+    activeLibrary === 'layout'
+      ? layoutItems.filter((item) => item.angle === selectedAngle)
+      : traItems;
+
+  const uploadTitle =
+    activeLibrary === 'layout' ? 'Add layout reference images' : 'Add TRA reference images';
+  const uploadDescription =
+    activeLibrary === 'layout'
+      ? 'Upload one image or a whole batch. AI will place them into angle folders.'
+      : 'Upload TRA-owned video frames, static ads, people, or other source imagery.';
 
   return (
     <div className={styles.page}>
       <div className={styles.intro}>
         <h2>Reference library</h2>
         <p>
-          Add strong ad examples here. AI automatically sorts every upload into one
-          of the 15 fixed creative angles below.
+          Keep external layout inspiration separate from TRA-owned source imagery used for
+          people, scenes, and existing creative assets.
         </p>
+      </div>
+
+      <div className={styles.libraryTabs} role="tablist" aria-label="Reference libraries">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeLibrary === 'layout'}
+          className={`${styles.libraryTab} ${activeLibrary === 'layout' ? styles.libraryTabActive : ''}`}
+          onClick={() => changeLibrary('layout')}
+        >
+          Layout References
+          <span>{layoutItems.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeLibrary === 'tra'}
+          className={`${styles.libraryTab} ${activeLibrary === 'tra' ? styles.libraryTabActive : ''}`}
+          onClick={() => changeLibrary('tra')}
+        >
+          TRA References
+          <span>{traItems.length}</span>
+        </button>
       </div>
 
       <div
@@ -330,8 +378,8 @@ export function ReferenceLibrary() {
         />
         <div className={styles.uploadIcon} aria-hidden="true">+</div>
         <div className={styles.uploadCopy}>
-          <strong>Add reference images</strong>
-          <span>Upload one image or a whole batch. AI will place them into angle folders.</span>
+          <strong>{uploadTitle}</strong>
+          <span>{uploadDescription}</span>
         </div>
         <button
           className={styles.chooseButton}
@@ -339,7 +387,11 @@ export function ReferenceLibrary() {
           disabled={uploading}
           onClick={() => inputRef.current?.click()}
         >
-          {uploading ? 'Uploading & sorting…' : 'Choose images'}
+          {uploading
+            ? activeLibrary === 'layout'
+              ? 'Uploading & sorting…'
+              : 'Uploading…'
+            : 'Choose images'}
         </button>
         <span className={styles.uploadMeta}>PNG, JPEG or WebP · up to 10 MB each · bulk upload supported</span>
 
@@ -360,7 +412,7 @@ export function ReferenceLibrary() {
         <span>
           {selectedIds.length
             ? `${selectedIds.length} selected`
-            : 'Select references to manage them'}
+            : `Select ${activeLibrary === 'layout' ? 'layout' : 'TRA'} references to manage them`}
         </span>
         <button
           className={styles.deleteButton}
@@ -375,41 +427,51 @@ export function ReferenceLibrary() {
         </button>
       </div>
 
-      <section className={styles.libraryLayout}>
-        <aside className={styles.folderPanel}>
-          <div className={styles.folderHeader}>
-            <strong>Creative angles</strong>
-            <span>15 folders</span>
-          </div>
+      <section
+        className={`${styles.libraryLayout} ${activeLibrary === 'tra' ? styles.traLibraryLayout : ''}`}
+      >
+        {activeLibrary === 'layout' ? (
+          <aside className={styles.folderPanel}>
+            <div className={styles.folderHeader}>
+              <strong>Creative angles</strong>
+              <span>15 folders</span>
+            </div>
 
-          <nav className={styles.folderList} aria-label="Reference angle folders">
-            {CREATIVE_CATEGORIES.map((angle) => {
-              const count = items.filter((item) => item.angle === angle).length;
-              return (
-                <button
-                  key={angle}
-                  type="button"
-                  className={`${styles.folderButton} ${
-                    selectedAngle === angle ? styles.folderButtonActive : ''
-                  }`}
-                  onClick={() => changeFolder(angle)}
-                >
-                  <span className={styles.folderIcon}>
-                    <FolderIcon />
-                  </span>
-                  <span className={styles.folderName}>{CREATIVE_CATEGORY_LABELS[angle]}</span>
-                  <span className={styles.folderCount}>{count}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
+            <nav className={styles.folderList} aria-label="Reference angle folders">
+              {CREATIVE_CATEGORIES.map((angle) => {
+                const count = layoutItems.filter((item) => item.angle === angle).length;
+                return (
+                  <button
+                    key={angle}
+                    type="button"
+                    className={`${styles.folderButton} ${
+                      selectedAngle === angle ? styles.folderButtonActive : ''
+                    }`}
+                    onClick={() => changeFolder(angle)}
+                  >
+                    <span className={styles.folderIcon}>
+                      <FolderIcon />
+                    </span>
+                    <span className={styles.folderName}>{CREATIVE_CATEGORY_LABELS[angle]}</span>
+                    <span className={styles.folderCount}>{count}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+        ) : null}
 
         <div className={styles.library}>
           <div className={styles.libraryHeader}>
             <div>
-              <span className={styles.libraryEyebrow}>Angle folder</span>
-              <h3>{CREATIVE_CATEGORY_LABELS[selectedAngle]}</h3>
+              <span className={styles.libraryEyebrow}>
+                {activeLibrary === 'layout' ? 'Angle folder' : 'TRA-owned assets'}
+              </span>
+              <h3>
+                {activeLibrary === 'layout'
+                  ? CREATIVE_CATEGORY_LABELS[selectedAngle]
+                  : 'TRA References'}
+              </h3>
             </div>
             <span>{visibleItems.length} {visibleItems.length === 1 ? 'reference' : 'references'}</span>
           </div>
@@ -440,22 +502,26 @@ export function ReferenceLibrary() {
                       <div className={styles.fileName} title={item.originalName}>
                         {item.originalName}
                       </div>
-                      <label className={styles.angleControl}>
-                        <span>Angle</span>
-                        <select
-                          value={item.angle}
-                          disabled={movingId === item.id}
-                          onChange={(event) =>
-                            void moveReference(item.id, event.target.value as CreativeCategoryId)
-                          }
-                        >
-                          {CREATIVE_CATEGORIES.map((angle) => (
-                            <option key={angle} value={angle}>
-                              {CREATIVE_CATEGORY_LABELS[angle]}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      {activeLibrary === 'layout' ? (
+                        <label className={styles.angleControl}>
+                          <span>Angle</span>
+                          <select
+                            value={item.angle}
+                            disabled={movingId === item.id}
+                            onChange={(event) =>
+                              void moveReference(item.id, event.target.value as CreativeCategoryId)
+                            }
+                          >
+                            {CREATIVE_CATEGORIES.map((angle) => (
+                              <option key={angle} value={angle}>
+                                {CREATIVE_CATEGORY_LABELS[angle]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <span className={styles.assetLabel}>TRA source asset</span>
+                      )}
                     </div>
                   </article>
                 );
@@ -466,8 +532,16 @@ export function ReferenceLibrary() {
               <div className={styles.emptyIcon}>
                 <ImageIcon />
               </div>
-              <strong>No references in this angle yet</strong>
-              <span>Upload references above and AI will sort them automatically.</span>
+              <strong>
+                {activeLibrary === 'layout'
+                  ? 'No references in this angle yet'
+                  : 'No TRA references yet'}
+              </strong>
+              <span>
+                {activeLibrary === 'layout'
+                  ? 'Upload layout references above and AI will sort them automatically.'
+                  : 'Upload TRA video frames, existing static ads, people, or other owned source imagery above.'}
+              </span>
             </div>
           )}
         </div>
