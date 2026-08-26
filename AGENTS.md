@@ -14,18 +14,21 @@ Keep normal AI/Codex context small. Read only the files needed for the task.
 
 - Runtime behavior, prompts, categories, formats, validation, defaults, and integration logic: source code.
 - Environment-variable names and examples: `.env.example`.
+- Staged product roadmap and ordering: `docs/roadmap.md`.
 - Stable system boundaries: `docs/architecture.md`.
 - External deployment/setup requirements: `docs/deployment.md`.
 - Customer research summary: `knowledge/customer-insights.md`.
-- Current work and future tasks: GitHub Issues.
+- Current implementation work and acceptance criteria: GitHub Issues.
 
 If documentation conflicts with executable code/config, treat code/config as authoritative and correct or delete the stale documentation.
 
 ## Current project direction
 
-Until TRA provides the required performance/revenue data, advertising-account access, and Claude access, keep implementation focused on the creative system. Do not expand into autonomous media buying, winner prediction, custom ML training, budget optimization, automatic pause/scale logic, or performance dashboards unless explicitly requested.
+Follow `docs/roadmap.md` for stage ordering. Until TRA provides the required performance/revenue data, advertising-account access, and Claude/API access, keep implementation focused on the Stage 1 creative system. Do not expand into autonomous media buying, winner prediction, custom ML training, budget optimization, automatic pause/scale logic, or performance dashboards unless explicitly requested.
 
-Current-phase goal: turn references plus approved TRA knowledge into high-quality, compliant, meaningfully different static creatives that are saved with persistent identity and structured metadata. The creative pipeline should support reference/brand context, creative strategy including a `SO WHAT?` outcome chain, dimensional variation, image generation, quality/compliance checks, and storage of enough metadata to join future performance and revenue back to the exact creative.
+Current-phase goal: turn references plus approved TRA knowledge into high-quality, compliant, meaningfully different static creatives that are saved with persistent identity and structured metadata. The creative pipeline should support reference/brand context, creative strategy including a `SO WHAT?` outcome chain, dimensional variation, placement-aware image generation, quality/compliance checks, and storage of enough metadata to join future performance and revenue back to the exact creative.
+
+Before paying for or wiring the final multi-model API chain, validate the intended Claude -> GPT-5.6 Sol -> GPT Image 2 workflow manually in the Claude and ChatGPT web apps where practical. Treat these web-app tests as prototype/behavior discovery for the future API architecture, capture durable conclusions only, and revalidate the behavior when it is later implemented through APIs. Do not spend personal API money merely to prove behavior that can be tested manually in the web apps.
 
 Once the required access exists, add the performance system in this order: verified Meta + TRA revenue attribution -> Claude read-only analysis/recommendations -> supervised execution -> bounded automation. The long-term agent objective is an ongoing acquisition system that maximizes verified attributable revenue within hard spending, compliance, and experimentation constraints; intermediate metrics are diagnostic signals, not the objective.
 
@@ -42,7 +45,7 @@ Preserve these future-stage rules even while Stage 1 remains the only active imp
 - preserve persistent creative IDs, structured metadata, and reusable learnings so future revenue can be tied back to exact hypotheses and creatives;
 - ground taste in references, brand context, and accumulated heuristics rather than assuming the base model has the right aesthetic by default.
 
-Detailed future-stage boundaries belong in `docs/architecture.md`; these rules do not authorize Stage 2 implementation before the required access exists.
+Detailed stage ordering belongs in `docs/roadmap.md`; stable future-stage boundaries belong in `docs/architecture.md`.
 
 ## Decision capture
 
@@ -50,9 +53,10 @@ When a chat or AI session establishes a durable project decision, constraint, ar
 
 - Record the final decision and only the rationale needed to understand it later; do not preserve raw conversation transcripts or step-by-step reasoning.
 - Runtime behavior or implementation decisions -> code/config.
+- Product stage/order changes -> `docs/roadmap.md`.
 - Architecture changes or stable system boundaries -> `docs/architecture.md`.
 - Deployment or external platform requirements -> `docs/deployment.md`.
-- Future work discovered in chat -> GitHub Issue.
+- Current/deferred implementation work -> GitHub Issue.
 - Temporary brainstorming, abandoned ideas, and routine debugging stay in chat/Git history unless they produce a durable decision.
 - When experiments establish a durable choice, document what was chosen and why, not the full sequence of failed approaches.
 
@@ -64,7 +68,7 @@ When a chat or AI session establishes a durable project decision, constraint, ar
 
 ## Documentation and deletion
 
-- Document only stable architecture, required external setup, or rules that materially help future work.
+- Document only stable architecture, staged product direction, required external setup, or rules that materially help future work.
 - Do not duplicate implementation details that are already clear in code/config.
 - Delete obsolete code and docs instead of leaving tombstones, deprecated copies, changelogs, or `REMOVED.md` files.
 - Use descriptive commits/PRs for meaningful removal history; Git history is the archive.
@@ -74,7 +78,7 @@ When a chat or AI session establishes a durable project decision, constraint, ar
 
 Evaluate a meaningful failure, correction, or experiment for permanent capture only when future reuse justifies it: it escaped merge/deployment, exposed a durable incorrect assumption, repeated, caused substantial rework because a guard was missing, affected a high-risk invariant, or established a durable implementation choice. Do not capture routine syntax/type/build fixes, expected failed experiments, transient service failures, abandoned ideas, one-off debugging, or failures already covered by an adequate invariant unless they expose a deeper missing guard.
 
-Prefer the first feasible learning destination: regression test/eval; programmatic validation/guard; reusable helper/tool; code/config; existing canonical architecture/deployment documentation when the learning is genuinely a stable requirement or system boundary; GitHub Issue only when resulting work is deferred, out of scope, or future work; or a concise agent instruction only when mechanical or canonical enforcement is impractical. If the current change fully handles the learning, do not also create an Issue. Follow Decision capture above and preserve only the final conclusion and essential rationale, never chats, chain-of-thought, raw reviewer reasoning, or a failure journal. Reusable reviewer findings use the same triage.
+Prefer the first feasible learning destination: regression test/eval; programmatic validation/guard; reusable helper/tool; code/config; existing canonical roadmap/architecture/deployment documentation when the learning is genuinely a stable requirement or system boundary; GitHub Issue only when resulting work is deferred, out of scope, or future work; or a concise agent instruction only when mechanical or canonical enforcement is impractical. If the current change fully handles the learning, do not also create an Issue. Follow Decision capture above and preserve only the final conclusion and essential rationale, never chats, chain-of-thought, raw reviewer reasoning, or a failure journal. Reusable reviewer findings use the same triage.
 
 Classify each PR at its highest applicable risk:
 
