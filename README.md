@@ -31,9 +31,10 @@ npm run build
 - `lib/` — runtime logic, integrations, creative planning, and storage
 - `assets/` / `public/` — approved static assets
 - `knowledge/` — concise business/customer knowledge intended for selective AI use
+- `docs/roadmap.md` — staged product roadmap and implementation ordering
 - `docs/architecture.md` — stable system boundaries
 - `docs/deployment.md` — external deployment/setup requirements
 - `.env.example` — canonical environment-variable names and examples
 - `AGENTS.md` — repository workflow and documentation/context rules for AI coding agents
 
-Runtime behavior is defined by code/config. Current priorities and future work are tracked in GitHub Issues rather than duplicated in repository roadmap files.
+Runtime behavior is defined by code/config. `docs/roadmap.md` defines the staged product direction; GitHub Issues contain current implementation work and acceptance criteria.
