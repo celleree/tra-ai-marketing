@@ -13,7 +13,7 @@ import {
 } from '@/lib/media/storage';
 import {
   addToReferenceLibrary,
-  listReferenceLibrary,
+  listAllReferenceLibrary,
   removeFromReferenceLibrary,
   updateReferenceAngle,
   type ReferenceLibraryAddition,
@@ -114,7 +114,7 @@ const registerTraReferences = (items: MediaAsset[]): ReferenceLibraryAddition[] 
 
 export async function GET() {
   try {
-    return NextResponse.json({ items: await listReferenceLibrary() });
+    return NextResponse.json({ items: await listAllReferenceLibrary() });
   } catch (error) {
     console.error('Could not load reference library', error);
     return NextResponse.json(
