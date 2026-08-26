@@ -204,11 +204,17 @@ const writeIndex = (index: ReferenceLibraryIndex) =>
     ? writeR2Index(index)
     : writeLocalIndex(index);
 
-export const listReferenceLibrary = async (): Promise<ReferenceLibraryItem[]> => {
+const newestFirst = (a: ReferenceLibraryItem, b: ReferenceLibraryItem) =>
+  new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
+
+export const listAllReferenceLibrary = async (): Promise<ReferenceLibraryItem[]> => {
   const index = await readIndex();
-  return [...index.items].sort(
-    (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()
-  );
+  return [...index.items].sort(newestFirst);
+};
+
+export const listReferenceLibrary = async (): Promise<ReferenceLibraryItem[]> => {
+  const items = await listAllReferenceLibrary();
+  return items.filter((item) => item.referenceType === 'layout');
 };
 
 export const addToReferenceLibrary = async (
