@@ -7,6 +7,8 @@ import {
   type CompanyProfile,
 } from '@/lib/company/profile';
 
+export const COMPANY_PROFILE_STORAGE_KEY = 'tra-company-profile-v2';
+
 export type RuntimeCompanyProfileSnapshot = Partial<{
   websiteUrl: string;
   knowledgeBase: CompanyFields;
@@ -39,6 +41,51 @@ export type CreativeCompanyContext = {
 
 const MAX_FIELD_LENGTH = 12000;
 const MAX_URL_LENGTH = 2048;
+
+const approvedBaseline: Partial<CompanyProfile> = {
+  knowledgeBase: {
+    servicesOffers: [
+      'Free/no-cost tax-debt consultation.',
+      'Review of tax hardship and IRS communications.',
+      'Assessment of eligibility for IRS debt-forgiveness programs, including the IRS Fresh Start Program.',
+      'Representation notification to tax authorities.',
+      'Research and comparison of available debt-forgiveness programs.',
+      'Negotiation with the IRS and state taxing authorities.',
+      'Assistance with tax audits, wage garnishments, bank levies, tax-liability negotiation, and tax-debt resolution.',
+    ].join('\n'),
+    differentiators: [
+      "TRA's stated process is Consultation, Research, Resolution.",
+      'TRA says it works directly with the IRS and develops a personalized strategy.',
+      'TRA says its team includes tax-relief experts, attorneys, and specialized licensed tax-resolution professionals.',
+    ].join('\n'),
+    faqsFacts: [
+      'TRA says a consultation is free/no-cost.',
+      'Services may not be available in all states.',
+      'Fees may vary by state.',
+      'Address: 16808 Armstrong Ave., Irvine, CA 92606.',
+      'Phone: 800-501-4249 / 800-575-2063.',
+      'Email: contact@tra.com.',
+    ].join('\n'),
+  },
+  brandGuidelines: {
+    brandColors: '#0577BF\n#6D6E71\n#FFFFFF\n#333333',
+    visualStyle: [
+      'Professionally art-directed, restrained, and intentional.',
+      'Favor one clear focal idea, strong hierarchy, deliberate whitespace, and clean image-to-text balance over information density.',
+      'Do not automatically add benefit sections, icons, trust badges, floating cards, extra text boxes, CTA bars, proof blocks, or decorative elements.',
+      'If the reference is visually simple, keep the TRA adaptation visually simple.',
+      'Reference creatives may guide composition, hierarchy, spacing, image treatment, and visual mechanism without transferring third-party identity or branding.',
+    ].join('\n'),
+  },
+  guardrails: {
+    approvedClaims: [
+      'TRA is a U.S. tax-relief service business that helps people dealing with IRS and tax problems.',
+      'TRA provides a free/no-cost tax-debt consultation.',
+      "TRA's stated process is Consultation, Research, Resolution.",
+      'TRA provides tax-debt and tax-resolution related services described in the approved company context.',
+    ].join('\n'),
+  },
+};
 
 const allowedKeys = {
   knowledgeBase: new Set(KNOWLEDGE_BASE_FIELDS.map((field) => field.key)),
@@ -90,11 +137,25 @@ export function normalizeRuntimeCompanyProfile(
   };
 }
 
+export function readStoredRuntimeCompanyProfile(): RuntimeCompanyProfileSnapshot | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const saved = window.localStorage.getItem(COMPANY_PROFILE_STORAGE_KEY);
+    return saved ? normalizeRuntimeCompanyProfile(JSON.parse(saved)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const mergeSection = (
   baseline: CompanyFields,
+  approved: CompanyFields | undefined,
   runtime: CompanyFields | undefined
 ): CompanyFields => {
   const merged = { ...baseline };
+  for (const [key, value] of Object.entries(approved || {})) {
+    if (value.trim() && !merged[key]?.trim()) merged[key] = value.trim();
+  }
   for (const [key, value] of Object.entries(runtime || {})) {
     if (value.trim()) merged[key] = value.trim();
   }
@@ -108,14 +169,17 @@ export function mergeRuntimeCompanyProfile(
     websiteUrl: runtime?.websiteUrl || DEFAULT_COMPANY_PROFILE.websiteUrl,
     knowledgeBase: mergeSection(
       DEFAULT_COMPANY_PROFILE.knowledgeBase,
+      approvedBaseline.knowledgeBase,
       runtime?.knowledgeBase
     ),
     brandGuidelines: mergeSection(
       DEFAULT_COMPANY_PROFILE.brandGuidelines,
+      approvedBaseline.brandGuidelines,
       runtime?.brandGuidelines
     ),
     guardrails: mergeSection(
       DEFAULT_COMPANY_PROFILE.guardrails,
+      approvedBaseline.guardrails,
       runtime?.guardrails
     ),
   };
