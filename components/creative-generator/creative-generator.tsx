@@ -1,6 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { CompanyView } from '@/components/company/company-view';
+import { CreativeLibrary } from '@/components/creative-library/creative-library';
+import { CreativeComposer } from '@/components/creative-generator/creative-composer';
+import { CreativeResults } from '@/components/creative-generator/creative-results';
+import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
+import createStyles from '@/components/creative-generator/creative-create-mode.module.css';
+import { ReferenceLibrary } from '@/components/reference-library/reference-library';
+import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
@@ -9,13 +17,6 @@ import type {
   CreativeSourceAsset,
   CreativeSourceRole,
 } from '@/lib/media/types';
-import { CompanyView } from '@/components/company/company-view';
-import { CreativeLibrary } from '@/components/creative-library/creative-library';
-import { CreativeComposer } from '@/components/creative-generator/creative-composer';
-import { CreativeResults } from '@/components/creative-generator/creative-results';
-import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
-import createStyles from '@/components/creative-generator/creative-create-mode.module.css';
-import { ReferenceLibrary } from '@/components/reference-library/reference-library';
 
 type WorkspaceSection = 'upload' | 'tra-creatives' | 'company' | 'reference-images';
 type CreationMode = 'generate' | 'direct-upload';
@@ -118,6 +119,7 @@ export function CreativeGenerator() {
 
     try {
       const brand = readStoredBrandGuidance();
+      const companyProfile = readStoredRuntimeCompanyProfile();
       const response = await fetch('/api/creatives/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,6 +133,7 @@ export function CreativeGenerator() {
           ...(brand.fontGuidance.length
             ? { brandFontNames: brand.fontGuidance }
             : {}),
+          ...(companyProfile ? { companyProfile } : {}),
           context: context.trim(),
           variationCount,
         }),
