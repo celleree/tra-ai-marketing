@@ -4,6 +4,8 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import {
+  buildCreativeCompanyContext,
+  formatCreativeCompanyContext,
   normalizeRuntimeCompanyProfile,
   type RuntimeCompanyProfileSnapshot,
 } from '@/lib/company/creative-context';
@@ -93,7 +95,7 @@ export function validateGenerateCreativeRequest(input: unknown):
     name.slice(0, 500)
   );
   const companyProfile = normalizeRuntimeCompanyProfile(body.companyProfile);
-  const context = typeof body.context === 'string' ? body.context.trim() : '';
+  const userContext = typeof body.context === 'string' ? body.context.trim() : '';
   const variationCount =
     typeof body.variationCount === 'number'
       ? body.variationCount
@@ -123,7 +125,7 @@ export function validateGenerateCreativeRequest(input: unknown):
     return { success: false, error: 'sourceAssets contains duplicate media IDs' };
   }
 
-  if (!context) {
+  if (!userContext) {
     return { success: false, error: 'context is required' };
   }
 
@@ -148,6 +150,11 @@ export function validateGenerateCreativeRequest(input: unknown):
   if (brandColors.some((color) => !SAFE_HEX_COLOR.test(color))) {
     return { success: false, error: 'brandColors contains an invalid color' };
   }
+
+  const companyContext = formatCreativeCompanyContext(
+    buildCreativeCompanyContext(companyProfile)
+  );
+  const context = `USER CREATIVE DIRECTION:\n${userContext}\n\n${companyContext}`;
 
   return {
     success: true,
