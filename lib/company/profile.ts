@@ -148,7 +148,15 @@ export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   knowledgeBase: {
     companySummary:
       'Tax Relief Advocates (TRA) is a U.S. tax-relief service business that helps people dealing with IRS and tax problems.',
-    servicesOffers: '',
+    servicesOffers: lines([
+      'Free/no-cost tax-debt consultation.',
+      'Review of tax hardship and IRS communications.',
+      'Assessment of eligibility for IRS debt-forgiveness programs, including the IRS Fresh Start Program.',
+      'Representation notification to tax authorities.',
+      'Research and comparison of available debt-forgiveness programs.',
+      'Negotiation with the IRS and state taxing authorities.',
+      'Assistance with tax audits, tax-liability negotiation, wage garnishments, bank levies, and tax-debt resolution.',
+    ]),
     targetCustomers:
       'People dealing with IRS or tax problems, including overwhelmed taxpayers, skeptical buyers, people who tried handling a tax issue themselves, people who received an unexpected IRS notice, and people seeking clearer next steps.',
     customerProblems: lines([
@@ -157,33 +165,57 @@ export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
       'Unexpected IRS notices or back taxes.',
       'Difficulty understanding the process or knowing what to do next.',
       'Skepticism about whether a tax-relief company is legitimate or trustworthy.',
+      'Frustration with poor communication or lack of updates.',
     ]),
     desiredOutcomes: lines([
       'Peace of mind.',
       'Clear next steps and a straightforward process.',
       'Relief from stress and uncertainty.',
       'Confidence that the situation is being handled by a competent team.',
+      'Responsive, professional, no-pressure communication.',
       'Feeling informed rather than confused or pressured.',
     ]),
-    differentiators: '',
+    differentiators: lines([
+      "TRA's stated process is Consultation, Research, Resolution.",
+      'TRA says it works directly with the IRS and develops a personalized strategy.',
+      'TRA says its team includes tax-relief experts, attorneys, and specialized licensed tax-resolution professionals.',
+    ]),
     proof:
-      'TRA five-star reviews supplied to the project repeatedly emphasize knowledgeable representatives, clear explanations, responsiveness, professionalism, patience, reassurance, and no-pressure interactions.',
-    faqsFacts: '',
+      'TRA five-star reviews supplied to the project repeatedly emphasize knowledgeable representatives, clear explanations, responsiveness, professionalism, patience, reassurance, and no-pressure interactions. Use these as service-quality themes, not invented quotations or outcome claims.',
+    faqsFacts: lines([
+      'TRA says a consultation is free/no-cost.',
+      'Services may not be available in all states.',
+      'Fees may vary by state.',
+      'Address: 16808 Armstrong Ave., Irvine, CA 92606.',
+      'Phone: 800-501-4249 / 800-575-2063.',
+      'Email: contact@tra.com.',
+    ]),
   },
   brandGuidelines: {
     logo: '',
-    brandColors: '',
+    brandColors: '#0577BF\n#6D6E71\n#FFFFFF\n#333333',
     fonts: '',
     voiceTone:
       'Clear, professional, reassuring, patient, straightforward, approachable, empathetic, and no-pressure.',
-    visualStyle: '',
+    visualStyle: lines([
+      'Professionally art-directed, restrained, and intentional.',
+      'Favor one clear focal idea, strong hierarchy, deliberate whitespace, and clean image-to-text balance over information density.',
+      'Do not automatically add benefit sections, icons, trust badges, floating cards, extra text boxes, CTA bars, proof blocks, or decorative elements.',
+      'If the reference is visually simple, keep the TRA adaptation visually simple.',
+      'Reference creatives may guide composition, hierarchy, spacing, image treatment, and visual mechanism without transferring third-party identity or branding.',
+    ]),
     copyStyle:
-      'Use plain, clear consumer language. Explain things directly, avoid unnecessary jargon, and favor straightforward headlines and calls to action over hype.',
+      'Use plain, clear consumer language. Explain things directly, avoid unnecessary jargon, favor straightforward headlines and calls to action over hype, and keep secondary copy subordinate to the primary idea.',
   },
   guardrails: {
     neverSay:
       'Do not fabricate guarantees, customer outcomes, dollar amounts, statistics, expert endorsements, government affiliation, or competitor claims. Do not imply every customer gets the same result.',
-    approvedClaims: '',
+    approvedClaims: lines([
+      'TRA is a U.S. tax-relief service business that helps people dealing with IRS and tax problems.',
+      'TRA provides a free/no-cost tax-debt consultation.',
+      "TRA's stated process is Consultation, Research, Resolution.",
+      'TRA provides the tax-debt and tax-resolution related services listed in the approved Company Profile.',
+    ]),
     claimsRequiringProof:
       'Financial, legal, tax-resolution, savings, settlement, outcome-specific, comparative, statistical, and performance claims require approved source material or human review before use.',
     requiredDisclaimers: '',
