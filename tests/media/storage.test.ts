@@ -8,6 +8,7 @@ import {
   prepareMedia,
   prepareMediaImage,
 } from '@/lib/media/storage';
+import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const JPEG_SIGNATURE = [0xff, 0xd8, 0xff];
@@ -36,7 +37,7 @@ const makeMp4 = (
   return Buffer.concat([isoBox('ftyp', brandPayload), ...mediaBoxes]);
 };
 
-const MP4_SIGNATURE = Array.from(makeMp4());
+const MP4_SIGNATURE = Array.from(REAL_ENCODED_MP4);
 
 const makeFile = (
   bytes: readonly number[],
@@ -100,11 +101,12 @@ describe('media validation contract', () => {
     }
   );
 
-  it('accepts a matching MP4 signature as video media', async () => {
+  it('accepts a real encoded MP4 as video media', async () => {
     const prepared = await prepareMedia(
       makeFile(MP4_SIGNATURE, 'video/mp4', 'approved-tra-video.mp4')
     );
 
+    expect(isSupportedMp4Container(REAL_ENCODED_MP4)).toBe(true);
     expect(prepared.id).toMatch(/^media_[a-f0-9]{32}$/);
     expect(prepared.fileName).toBe(`${prepared.id}.mp4`);
     expect(prepared.originalName).toBe('approved-tra-video.mp4');
@@ -127,8 +129,9 @@ describe('media validation contract', () => {
     ],
     ['QuickTime container', makeMp4('qt  ', ['qt  '])],
     ['AVIF container', makeMp4('avif', ['avif', 'mif1'])],
+    ['empty movie metadata shell', makeMp4()],
     ['missing movie metadata', makeMp4('isom', ['mp42'], [isoBox('mdat')])],
-    ['missing media data', makeMp4('isom', ['mp42'], [isoBox('moov')])],
+    ['missing media data', makeMp4('isom', ['mp42'], [isoBox('moov', Buffer.from([0x00]))])],
   ])('rejects an invalid or unsupported MP4: %s', async (_label, bytes) => {
     expect(isSupportedMp4Container(bytes)).toBe(false);
     await expect(
@@ -136,7 +139,7 @@ describe('media validation contract', () => {
     ).rejects.toBeInstanceOf(MediaValidationError);
   });
 
-  it('rejects a structurally valid MP4 whose declared MIME is an image', async () => {
+  it('rejects a real MP4 whose declared MIME is an image', async () => {
     await expect(
       prepareMedia(makeFile(MP4_SIGNATURE, 'image/png', 'source.png'))
     ).rejects.toBeInstanceOf(MediaValidationError);
