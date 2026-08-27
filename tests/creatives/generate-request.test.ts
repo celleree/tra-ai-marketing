@@ -18,6 +18,13 @@ const baseRequest = {
   variationCount: 4,
 };
 
+const expectGroundedContext = (value: unknown) => {
+  expect(value).toEqual(expect.stringContaining('USER CREATIVE DIRECTION:'));
+  expect(value).toEqual(expect.stringContaining(baseRequest.context));
+  expect(value).toEqual(expect.stringContaining('APPROVED TRA COMPANY CONTEXT'));
+  expect(value).toEqual(expect.stringContaining('Free/no-cost tax-debt consultation'));
+};
+
 describe('multi-source creative generation request', () => {
   it('preserves multiple typed image and video sources in request order', () => {
     const sourceAssets = [
@@ -31,19 +38,58 @@ describe('multi-source creative generation request', () => {
       sourceAssets,
     });
 
-    expect(result).toEqual({
-      success: true,
-      data: { ...baseRequest, sourceAssets },
-    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.sourceAssets).toEqual(sourceAssets);
+    expect(result.data.variationCount).toBe(baseRequest.variationCount);
+    expectGroundedContext(result.data.context);
   });
 
   it('normalizes an omitted source collection to an empty array', () => {
     const result = validateGenerateCreativeRequest(baseRequest);
 
-    expect(result).toMatchObject({
-      success: true,
-      data: { sourceAssets: [] },
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.sourceAssets).toEqual([]);
+    expectGroundedContext(result.data.context);
+  });
+
+  it('normalizes runtime company profile and grounds it into the AI context', () => {
+    const result = validateGenerateCreativeRequest({
+      ...baseRequest,
+      companyProfile: {
+        knowledgeBase: {
+          companySummary: 'Runtime approved TRA summary.',
+          servicesOffers: '   ',
+          injectedClaim: 'Unrecognized field must be dropped.',
+        },
+        guardrails: {
+          approvedClaims: 'Runtime approved claim.',
+          requiredDisclaimers: 'Runtime approved disclaimer.',
+        },
+      },
     });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.companyProfile).toEqual({
+      knowledgeBase: { companySummary: 'Runtime approved TRA summary.' },
+      guardrails: {
+        approvedClaims: 'Runtime approved claim.',
+        requiredDisclaimers: 'Runtime approved disclaimer.',
+      },
+    });
+    expect(result.data.context).toContain('Runtime approved TRA summary.');
+    expect(result.data.context).toContain('Runtime approved claim.');
+    expect(result.data.context).toContain('Runtime approved disclaimer.');
+    expect(result.data.context).toContain('Free/no-cost tax-debt consultation');
+    expect(result.data.context).not.toContain('Unrecognized field must be dropped.');
+  });
+
+  it.each([null, [], 'invalid'])('rejects malformed companyProfile %#', (companyProfile) => {
+    expect(
+      validateGenerateCreativeRequest({ ...baseRequest, companyProfile })
+    ).toEqual({ success: false, error: 'companyProfile must be an object' });
   });
 
   it.each(['INVALID', '', 'TRA-REFERENCE'])('rejects invalid roles', (role) => {
