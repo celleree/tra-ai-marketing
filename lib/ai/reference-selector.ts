@@ -1,5 +1,6 @@
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { getMediaStorage } from '@/lib/media/local-storage';
+import { validateStoredMediaImage } from '@/lib/media/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -61,6 +62,8 @@ const referenceImageDataUrl = async (candidate: ReferenceSelectionCandidate) => 
       `Reference ${candidate.item.id} could not be loaded from media storage.`
     );
   }
+
+  validateStoredMediaImage(stored);
 
   return `data:${stored.mimeType};base64,${stored.buffer.toString('base64')}`;
 };

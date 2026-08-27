@@ -3,9 +3,8 @@ import { NextResponse } from 'next/server';
 import {
   analyzeReferenceCreative,
   analyzeTraSourceCreative,
+  generateApprovedTraReferenceCreativeImage,
   generateCreativeCopy,
-  generateReferenceCreativeImage,
-  generateTraCreativeFromLibraryReference,
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
 import {
@@ -23,7 +22,13 @@ import {
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
 import { getMediaStorage } from '@/lib/media/local-storage';
-import type { StoredMediaFile } from '@/lib/media/types';
+import {
+  CreativeSourceHydrationError,
+  findEligibleProviderImageSource,
+  hydrateCreativeSourceSelections,
+  type HydratedCreativeSourceAsset,
+} from '@/lib/media/source-hydration';
+import { isUsableApprovedHumanSource } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 
@@ -31,10 +36,6 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
-
-interface SelectedLibraryReference extends SelectedReferenceCreative {
-  source: StoredMediaFile;
-}
 
 const getOpenAIError = async (response: Response) => {
   try {
@@ -64,6 +65,7 @@ const buildPromptOnlyAnalysis = (
     'guaranteed outcomes',
     'government affiliation',
     'third-party brands or trademarks',
+    'people, faces, spokespersons, or human figures without an attached approved TRA human source',
   ],
   unknowns: [],
   dominantCategory: plan[0]?.category || 'customer-problems',
@@ -103,6 +105,7 @@ Description: ${args.copy.description}
 ${logoDirection}
 TRA guardrails:
 - This request has no reference image. Invent the visual composition from scratch.
+- Do not depict a person, face, spokesperson, or human figure. No approved TRA human identity is attached to this image-generation call, so use a non-human concept.
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
 - Do not imply universal tax-debt results.
@@ -150,28 +153,9 @@ const buildReferenceCandidates = (
     imageUrl: new URL(item.url, requestUrl).toString(),
   }));
 
-const hydrateSelectedReferences = async (
-  selections: SelectedReferenceCreative[]
-): Promise<SelectedLibraryReference[]> => {
-  const storage = getMediaStorage();
-  const hydrated: SelectedLibraryReference[] = [];
-
-  for (const selection of selections) {
-    const source = await storage.readImageById(selection.item.id);
-    if (!source) {
-      throw new Error(
-        `Selected reference ${selection.item.id} could not be loaded from media storage.`
-      );
-    }
-    hydrated.push({ ...selection, source });
-  }
-
-  return hydrated;
-};
-
 const buildPlanFromSelectedReferences = (
   request: ValidGenerateCreativeRequest,
-  selections: SelectedLibraryReference[]
+  selections: SelectedReferenceCreative[]
 ): PlannedCreative[] =>
   selections.map((selection, offset) => {
     const [template] = buildCreativePlan(
@@ -180,6 +164,11 @@ const buildPlanFromSelectedReferences = (
     );
     return { ...template, index: offset + 1 };
   });
+
+const findGenerationSource = (
+  sources: HydratedCreativeSourceAsset[]
+): HydratedCreativeSourceAsset | undefined =>
+  sources.find((source) => source.media.mediaType === 'IMAGE');
 
 export async function POST(request: Request) {
   try {
@@ -198,16 +187,28 @@ export async function POST(request: Request) {
     }
 
     const storage = getMediaStorage();
-    const source = parsed.data.mediaId
-      ? await storage.readImageById(parsed.data.mediaId)
-      : null;
-
-    if (parsed.data.mediaId && !source) {
-      return NextResponse.json(
-        { error: 'The source image could not be found.' },
-        { status: 404 }
+    let sourceAssets: HydratedCreativeSourceAsset[];
+    try {
+      sourceAssets = await hydrateCreativeSourceSelections(
+        storage,
+        parsed.data.sourceAssets
       );
+    } catch (error) {
+      if (error instanceof CreativeSourceHydrationError) {
+        return NextResponse.json(
+          { error: error.message },
+          { status: error.status }
+        );
+      }
+      throw error;
     }
+
+    const generationSourceAsset = findGenerationSource(sourceAssets);
+    const source =
+      generationSourceAsset?.stored.mediaType === 'IMAGE'
+        ? generationSourceAsset.stored
+        : null;
+    const providerImageSource = findEligibleProviderImageSource(sourceAssets);
 
     const brandLogo = parsed.data.brandLogoMediaId
       ? await storage.readImageById(parsed.data.brandLogoMediaId)
@@ -225,13 +226,13 @@ export async function POST(request: Request) {
 
     let analysis: CreativeReferenceAnalysis;
     let creativePlan: PlannedCreative[];
-    let selectedReferences: SelectedLibraryReference[] = [];
-    let librarySelections = new Map<number, SelectedLibraryReference>();
+    let selectedReferences: SelectedReferenceCreative[] = [];
+    let librarySelections = new Map<number, SelectedReferenceCreative>();
 
-    if (source && parsed.data.uploadMode === 'reference') {
+    if (source && generationSourceAsset?.role === 'LAYOUT_REFERENCE') {
       analysis = await analyzeReferenceCreative(source, parsed.data.context);
       creativePlan = buildCreativePlan(parsed.data, analysis.dominantCategory);
-    } else if (source && parsed.data.uploadMode === 'tra') {
+    } else if (source && generationSourceAsset?.role === 'TRA_REFERENCE') {
       analysis = await analyzeTraSourceCreative(source, parsed.data.context);
 
       const library = await listReferenceLibrary();
@@ -251,7 +252,7 @@ export async function POST(request: Request) {
         traSummary: analysis.summary,
         traPreserve: analysis.preserve,
       });
-      selectedReferences = await hydrateSelectedReferences(chosen);
+      selectedReferences = chosen;
       creativePlan = buildPlanFromSelectedReferences(parsed.data, selectedReferences);
       librarySelections = new Map(
         selectedReferences.map((selection, index) => [index + 1, selection])
@@ -276,10 +277,23 @@ export async function POST(request: Request) {
           .join('\n')
       : '';
     const modeDirection = source
-      ? parsed.data.uploadMode === 'tra'
-        ? 'TRA ad mode: AI has selected one individual library reference for each requested creative. Each output must be a separate TRA adaptation of its own single reference. Never combine, merge, collage, or borrow visual systems from multiple references. The uploaded TRA image supplies brand/content context through analysis only and is not passed into final image generation.'
-        : `Reference ad mode: the uploaded image is creative inspiration. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the concept into original TRA ads.`
-      : 'No-image mode: create original TRA ads from the user direction.';
+      ? generationSourceAsset?.role === 'TRA_REFERENCE'
+        ? 'TRA ad mode: AI has selected one individual library reference for each requested creative. Each output must be a separate TRA adaptation of its own single reference. Never combine, merge, collage, or borrow visual systems from multiple references. The validated uploaded TRA reference may be the only raw image attached to final generation; library references are analysis-only.'
+        : `Layout-reference mode: the uploaded image is analysis-only design guidance. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the structure into original TRA ads. Its raw pixels and any person in it must never reach final image generation.`
+      : parsed.data.sourceAssets.some((item) => item.role === 'TRA_VIDEO')
+        ? 'Video-source boundary mode: preserve the uploaded TRA video provenance, but this batch does not extract or pass video frames into static image generation. Create a non-human concept.'
+        : 'No-image mode: create original TRA ads from the user direction.';
+
+    const sourceSuppliedToImageGeneration = Boolean(providerImageSource);
+    const hasUsableApprovedHumanSource = providerImageSource
+      ? isUsableApprovedHumanSource(
+          providerImageSource,
+          sourceSuppliedToImageGeneration
+        )
+      : false;
+    const humanSourceDirection = hasUsableApprovedHumanSource
+      ? 'Use only the attached approved TRA human identity when depicting a person.'
+      : 'Current generation boundary: no approved TRA human source is attached to final image generation. Do not depict any person, face, spokesperson, body, or human figure; use a non-human visual concept. Layout-reference and library-reference people are never approved human sources.';
 
     const colorDirection = parsed.data.brandColors?.length
       ? `Approved TRA brand palette from the uploaded logo: ${parsed.data.brandColors.join(', ')}. Use these as the primary design colors. Neutral black, white, and gray may be used for legibility, but do not substitute an unrelated dominant palette.`
@@ -291,7 +305,11 @@ export async function POST(request: Request) {
       .filter(Boolean)
       .join('\n\n');
 
-    const generationContext = `${parsed.data.context}\n\n${modeDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as a separate creative blueprint. Do not blend references.`;
+    const analysisDirection = source
+      ? `Analysis-only source guidance (raw layout/library pixels are not attached unless the source is the validated TRA reference explicitly allowed at the final provider boundary):\nSummary: ${analysis.summary}\nVisual structure: ${analysis.visualStructure}\nStyle notes: ${analysis.styleNotes}\nPreserve at a high level: ${analysis.preserve.join('; ') || 'none'}\nAvoid: ${analysis.avoid.join('; ') || 'none'}`
+      : '';
+
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as separate analysis-only creative guidance. Do not blend references.`;
 
     const copyByIndex = await generateCreativeCopy(
       creativePlan,
@@ -311,40 +329,24 @@ export async function POST(request: Request) {
 
           const selectedReference = librarySelections.get(item.index);
           const singleReferenceContract = selectedReference
-            ? `\n\nSINGLE-REFERENCE EXECUTION CONTRACT:\n- The attached image is the ONLY creative reference for this output.\n- Recreate one clean TRA version of THIS reference's composition, hierarchy, spacing, and main visual mechanism.\n- Do NOT combine it with another ad style, another reference, a collage, extra panels, unrelated decorative systems, or multiple competing concepts.\n- Preserve one dominant visual idea. Simpler is better.\n- If the reference does not contain an element, do not invent a second ad concept to fill space.\n- Adapt third-party branding/content into TRA branding and approved TRA copy without copying protected identity or unsupported claims.\n- AI selection reason: ${selectedReference.selectionReason}`
+            ? `\n\nANALYSIS-ONLY SINGLE-REFERENCE GUIDANCE:\n- Selected external reference: ${selectedReference.item.id} (${CREATIVE_CATEGORY_LABELS[selectedReference.item.angle]}).\n- Its raw pixels are NOT attached to final generation.\n- Use only its category and AI selection reason as high-level direction; do not claim or recreate an exact unseen blueprint.\n- Do NOT combine it with another ad style, another reference, a collage, extra panels, unrelated decorative systems, or multiple competing concepts.\n- Preserve one dominant visual idea. Simpler is better.\n- Do not copy third-party identity or unsupported claims.\n- AI selection reason: ${selectedReference.selectionReason}`
             : '';
-          const itemContext = `${parsed.data.context}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}`;
+          const itemContext = `${parsed.data.context}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}`;
           let imageBuffer: Buffer;
 
-          if (!source) {
+          if (!providerImageSource) {
             imageBuffer = await generatePromptOnlyCreativeImage({
               primaryFormat: item.format,
               context: itemContext,
               copy,
               reserveLogoArea,
             });
-          } else if (parsed.data.uploadMode === 'reference') {
-            imageBuffer = await generateReferenceCreativeImage({
-              source,
-              primaryFormat: item.format,
-              context: itemContext,
-              copy,
-              analysis,
-              reserveLogoArea,
-            });
           } else {
-            if (!selectedReference) {
-              throw new Error(
-                `Missing AI-selected library reference for creative ${item.index}.`
-              );
-            }
-
-            imageBuffer = await generateTraCreativeFromLibraryReference({
-              creativeReference: selectedReference.source,
+            imageBuffer = await generateApprovedTraReferenceCreativeImage({
+              source: providerImageSource.stored,
               primaryFormat: item.format,
               context: itemContext,
               copy,
-              traAnalysis: analysis,
               reserveLogoArea,
             });
           }
@@ -356,8 +358,8 @@ export async function POST(request: Request) {
           );
           const image = await storage.saveImage(generatedFile);
           const uploadedReferenceImageId =
-            parsed.data.uploadMode === 'reference'
-              ? parsed.data.mediaId
+            generationSourceAsset?.role === 'LAYOUT_REFERENCE'
+              ? generationSourceAsset.media.id
               : undefined;
 
           return {
@@ -389,13 +391,18 @@ export async function POST(request: Request) {
       creatives,
       creativePlan,
       analysis,
-      uploadMode: source ? parsed.data.uploadMode : null,
+      sourceAssets: sourceAssets.map(({ stored: _stored, ...sourceAsset }) =>
+        sourceAsset
+      ),
+      generationSourceRole: generationSourceAsset?.role || null,
       usedReferenceImage: Boolean(source),
       usedBrandLogo: reserveLogoArea,
       usedBrandColors: parsed.data.brandColors?.length || 0,
       usedBrandFonts: parsed.data.brandFontNames?.length || 0,
       referenceSelectionMode:
-        source && parsed.data.uploadMode === 'tra' ? 'ai-single-reference' : null,
+        source && generationSourceAsset?.role === 'TRA_REFERENCE'
+          ? 'ai-single-reference'
+          : null,
       referenceLibrarySelections: Array.from(librarySelections.entries()).map(
         ([index, selection]) => ({
           index,

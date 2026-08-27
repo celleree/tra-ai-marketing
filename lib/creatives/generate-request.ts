@@ -3,24 +3,23 @@ import {
   type CreativeCategoryId,
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
-
-export type UploadMode = 'tra' | 'reference';
+import type { CreativeSourceSelection } from '@/lib/media/types';
+import { parseCreativeSourceSelection } from '@/lib/media/source-contract';
 
 export type GenerateCreativeRequest = {
-  mediaId?: string;
+  sourceAssets?: CreativeSourceSelection[];
   brandLogoMediaId?: string;
   brandColors?: string[];
   brandFontNames?: string[];
   context: string;
   variationCount: number;
-  uploadMode?: UploadMode;
 };
 
 export type ValidGenerateCreativeRequest = Omit<
   GenerateCreativeRequest,
-  'uploadMode'
+  'sourceAssets'
 > & {
-  uploadMode: UploadMode;
+  sourceAssets: CreativeSourceSelection[];
 };
 
 export type PlannedCreative = {
@@ -73,7 +72,15 @@ export function validateGenerateCreativeRequest(input: unknown):
   }
 
   const body = input as Record<string, unknown>;
-  const mediaId = typeof body.mediaId === 'string' ? body.mediaId.trim() : '';
+
+  if (body.mediaId !== undefined || body.uploadMode !== undefined) {
+    return {
+      success: false,
+      error: 'Use sourceAssets with explicit source roles instead of mediaId/uploadMode',
+    };
+  }
+
+  const sourceValues = Array.isArray(body.sourceAssets) ? body.sourceAssets : [];
   const brandLogoMediaId =
     typeof body.brandLogoMediaId === 'string'
       ? body.brandLogoMediaId.trim()
@@ -87,8 +94,21 @@ export function validateGenerateCreativeRequest(input: unknown):
     typeof body.variationCount === 'number'
       ? body.variationCount
       : Number(body.variationCount);
-  const uploadMode =
-    typeof body.uploadMode === 'string' ? body.uploadMode.trim() : 'tra';
+
+  if (body.sourceAssets !== undefined && !Array.isArray(body.sourceAssets)) {
+    return { success: false, error: 'sourceAssets must be an array' };
+  }
+
+  const sourceAssets: CreativeSourceSelection[] = [];
+  for (const sourceValue of sourceValues) {
+    const validated = parseCreativeSourceSelection(sourceValue);
+    if (!validated.success) return validated;
+    sourceAssets.push(validated.data);
+  }
+
+  if (new Set(sourceAssets.map((source) => source.mediaId)).size !== sourceAssets.length) {
+    return { success: false, error: 'sourceAssets contains duplicate media IDs' };
+  }
 
   if (!context) {
     return { success: false, error: 'context is required' };
@@ -102,13 +122,6 @@ export function validateGenerateCreativeRequest(input: unknown):
     return {
       success: false,
       error: 'variationCount must be an integer between 2 and 30',
-    };
-  }
-
-  if (uploadMode !== 'tra' && uploadMode !== 'reference') {
-    return {
-      success: false,
-      error: 'uploadMode must be either tra or reference',
     };
   }
 
@@ -126,13 +139,12 @@ export function validateGenerateCreativeRequest(input: unknown):
   return {
     success: true,
     data: {
-      ...(mediaId ? { mediaId } : {}),
+      sourceAssets,
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),
       context,
       variationCount,
-      uploadMode,
     },
   };
 }

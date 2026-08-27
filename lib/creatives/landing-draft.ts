@@ -1,35 +1,21 @@
-import type { UploadMode } from '@/lib/creatives/generate-request';
-import type { MediaAsset } from '@/lib/media/types';
+import type { CreativeSourceAsset } from '@/lib/media/types';
+import { parseCreativeSourceAsset } from '@/lib/media/source-contract';
 
 const STORAGE_KEY = 'tra-ai-marketing:landing-creative-draft';
+const SCHEMA_VERSION = 2;
 const MIN_VARIATIONS = 2;
 const MAX_VARIATIONS = 30;
 
 export interface LandingCreativeDraft {
+  version: typeof SCHEMA_VERSION;
   context: string;
-  media: MediaAsset | null;
-  uploadMode: UploadMode;
+  sourceAsset: CreativeSourceAsset | null;
   variationCount: number;
   generateOnOpen: boolean;
 }
 
-const isMediaAsset = (value: unknown): value is MediaAsset => {
-  if (!value || typeof value !== 'object') return false;
-
-  const media = value as Partial<MediaAsset>;
-  return Boolean(
-    media.id &&
-      media.fileName &&
-      media.originalName &&
-      media.url &&
-      typeof media.size === 'number' &&
-      ['image/png', 'image/jpeg', 'image/webp'].includes(media.mimeType || '')
-  );
-};
-
 export function storeLandingCreativeDraft(draft: LandingCreativeDraft) {
   if (typeof window === 'undefined') return;
-
   window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
 }
 
@@ -38,21 +24,28 @@ export function consumeLandingCreativeDraft(): LandingCreativeDraft | null {
 
   const rawDraft = window.sessionStorage.getItem(STORAGE_KEY);
   if (!rawDraft) return null;
-
   window.sessionStorage.removeItem(STORAGE_KEY);
 
   try {
-    const parsed = JSON.parse(rawDraft) as Partial<LandingCreativeDraft>;
-    if (typeof parsed.context !== 'string' || !parsed.context.trim()) return null;
+    const parsed = JSON.parse(rawDraft) as Record<string, unknown>;
+    if (
+      parsed.version !== SCHEMA_VERSION ||
+      typeof parsed.context !== 'string' ||
+      !parsed.context.trim()
+    ) {
+      return null;
+    }
+
+    const source = parsed.sourceAsset
+      ? parseCreativeSourceAsset(parsed.sourceAsset)
+      : null;
+    if (source && !source.success) return null;
 
     const variationCount = Number(parsed.variationCount);
-    const uploadMode: UploadMode =
-      parsed.uploadMode === 'reference' ? 'reference' : 'tra';
-
     return {
+      version: SCHEMA_VERSION,
       context: parsed.context,
-      media: isMediaAsset(parsed.media) ? parsed.media : null,
-      uploadMode,
+      sourceAsset: source?.success ? source.data : null,
       variationCount: Number.isFinite(variationCount)
         ? Math.min(MAX_VARIATIONS, Math.max(MIN_VARIATIONS, variationCount))
         : 4,

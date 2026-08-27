@@ -7,7 +7,7 @@ export async function GET(
   context: { params: Promise<{ fileName: string }> }
 ) {
   const { fileName } = await context.params;
-  const stored = await getMediaStorage().readImage(fileName);
+  const stored = await getMediaStorage().readMedia(fileName);
 
   if (!stored) {
     return new Response('Not found', { status: 404 });

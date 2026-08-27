@@ -2,9 +2,11 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import type { UploadMode } from '@/lib/creatives/generate-request';
 import { storeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
-import type { MediaAsset } from '@/lib/media/types';
+import type {
+  CreativeSourceAsset,
+  CreativeSourceRole,
+} from '@/lib/media/types';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import styles from './momentum-landing.module.css';
 
@@ -14,20 +16,30 @@ const CARD_ITEMS = Array.from({ length: CARDS_PER_COLUMN }, (_, index) => index)
 
 export function MomentumLanding() {
   const router = useRouter();
-  const [media, setMedia] = useState<MediaAsset | null>(null);
-  const [uploadMode, setUploadMode] = useState<UploadMode>('tra');
+  const [sourceAsset, setSourceAsset] = useState<CreativeSourceAsset | null>(null);
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
   const [submitting, setSubmitting] = useState(false);
 
   const ready = Boolean(context.trim());
 
-  const handleUploadStart = () => {
-    setMedia(null);
+  const handleUploaded = (source: CreativeSourceAsset) => {
+    setSourceAsset(source);
   };
 
-  const handleUploaded = (nextMedia: MediaAsset) => {
-    setMedia(nextMedia);
+  const handleSourceRoleChange = (
+    mediaId: string,
+    role: CreativeSourceRole
+  ) => {
+    setSourceAsset((current) =>
+      current?.media.id === mediaId ? { ...current, role } : current
+    );
+  };
+
+  const handleSourceRemoved = (mediaId: string) => {
+    setSourceAsset((current) =>
+      current?.media.id === mediaId ? null : current
+    );
   };
 
   const openStudioAndGenerate = () => {
@@ -35,9 +47,9 @@ export function MomentumLanding() {
 
     setSubmitting(true);
     storeLandingCreativeDraft({
+      version: 2,
       context: context.trim(),
-      media,
-      uploadMode,
+      sourceAsset,
       variationCount,
       generateOnOpen: true,
     });
@@ -81,11 +93,12 @@ export function MomentumLanding() {
           <CreativeComposer
             value={context}
             onChange={setContext}
-            onUploadStart={handleUploadStart}
+            onUploadStart={() => setSourceAsset(null)}
             onUploaded={handleUploaded}
-            initialMedia={media}
-            uploadMode={uploadMode}
-            onUploadModeChange={setUploadMode}
+            sourceAssets={sourceAsset ? [sourceAsset] : []}
+            onSourceRoleChange={handleSourceRoleChange}
+            onSourceRemoved={handleSourceRemoved}
+            allowMultipleSources={false}
             variationCount={variationCount}
             onVariationCountChange={setVariationCount}
             onSubmit={openStudioAndGenerate}

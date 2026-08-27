@@ -7,18 +7,22 @@ import type {
   DragEvent,
   KeyboardEvent,
 } from 'react';
-import type { UploadMode } from '@/lib/creatives/generate-request';
-import type { MediaAsset } from '@/lib/media/types';
+import type {
+  CreativeSourceAsset,
+  CreativeSourceMediaAsset,
+  CreativeSourceRole,
+} from '@/lib/media/types';
 import styles from './creative-composer.module.css';
 
 interface CreativeComposerProps {
   value: string;
   onChange: (value: string) => void;
   onUploadStart: () => void;
-  onUploaded: (media: MediaAsset) => void;
-  initialMedia?: MediaAsset | null;
-  uploadMode: UploadMode;
-  onUploadModeChange: (mode: UploadMode) => void;
+  onUploaded: (source: CreativeSourceAsset) => void;
+  sourceAssets: CreativeSourceAsset[];
+  onSourceRoleChange: (mediaId: string, role: CreativeSourceRole) => void;
+  onSourceRemoved: (mediaId: string) => void;
+  allowMultipleSources?: boolean;
   variationCount: number;
   onVariationCountChange: (value: number) => void;
   onSubmit: () => void;
@@ -29,23 +33,37 @@ interface CreativeComposerProps {
 interface UploadPlan {
   direct: boolean;
   uploadUrl?: string;
-  media?: MediaAsset;
+  media?: CreativeSourceMediaAsset;
+  sourceRole?: CreativeSourceRole;
   error?: string;
 }
 
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+type ServerUploadResponse = CreativeSourceMediaAsset & {
+  sourceRole?: CreativeSourceRole;
+  error?: string;
+};
+
+const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const ALLOWED_VIDEO_TYPES = ['video/mp4'];
 const MIN_VARIATIONS = 2;
 const MAX_VARIATIONS = 30;
+
+const ROLE_LABELS: Record<CreativeSourceRole, string> = {
+  TRA_VIDEO: 'TRA_VIDEO',
+  TRA_REFERENCE: 'TRA_REFERENCE',
+  LAYOUT_REFERENCE: 'LAYOUT_REFERENCE',
+};
 
 export function CreativeComposer({
   value,
   onChange,
   onUploadStart,
   onUploaded,
-  initialMedia = null,
-  uploadMode,
-  onUploadModeChange,
+  sourceAssets,
+  onSourceRoleChange,
+  onSourceRemoved,
+  allowMultipleSources = true,
   variationCount,
   onVariationCountChange,
   onSubmit,
@@ -55,9 +73,8 @@ export function CreativeComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const [localPreview, setLocalPreview] = useState('');
-  const [fileName, setFileName] = useState('');
+  const [pendingName, setPendingName] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [uploadReady, setUploadReady] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState('');
 
@@ -67,115 +84,155 @@ export function CreativeComposer({
     };
   }, [localPreview]);
 
-  const uploadThroughServer = async (sourceFile: File) => {
+  const uploadThroughServer = async (
+    sourceFile: File,
+    sourceRole: CreativeSourceRole
+  ) => {
     const formData = new FormData();
     formData.append('file', sourceFile);
+    formData.append('sourceRole', sourceRole);
 
     const response = await fetch('/api/media/upload', {
       method: 'POST',
       body: formData,
     });
-    const payload = await response.json();
+    const payload = (await response.json()) as ServerUploadResponse;
 
     if (!response.ok) {
       throw new Error(payload.error || 'Upload failed.');
     }
+    if (payload.sourceRole && payload.sourceRole !== sourceRole) {
+      throw new Error('The uploaded source role could not be preserved.');
+    }
 
-    return payload as MediaAsset;
+    return payload as CreativeSourceMediaAsset;
   };
 
-  const uploadFile = async (sourceFile: File) => {
+  const uploadFile = async (
+    sourceFile: File,
+    sourceRole: CreativeSourceRole
+  ) => {
+    const planResponse = await fetch('/api/media/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: sourceFile.name,
+        mimeType: sourceFile.type,
+        size: sourceFile.size,
+        sourceRole,
+      }),
+    });
+    const plan = (await planResponse.json()) as UploadPlan;
+
+    if (!planResponse.ok) {
+      throw new Error(plan.error || 'Upload could not be prepared.');
+    }
+
+    if (!plan.direct) {
+      return uploadThroughServer(sourceFile, sourceRole);
+    }
+
+    if (!plan.uploadUrl || !plan.media) {
+      throw new Error('Upload could not be prepared.');
+    }
+    if (plan.sourceRole && plan.sourceRole !== sourceRole) {
+      throw new Error('The upload plan did not preserve the selected source role.');
+    }
+
+    const putResponse = await fetch(plan.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': sourceFile.type },
+      body: sourceFile,
+    });
+
+    if (!putResponse.ok) {
+      throw new Error('Direct media upload failed.');
+    }
+
+    const confirmResponse = await fetch('/api/media/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mediaId: plan.media.id,
+        mimeType: plan.media.mimeType,
+        mediaType: plan.media.mediaType,
+        sourceRole,
+      }),
+    });
+    const confirmation = await confirmResponse.json();
+
+    if (!confirmResponse.ok) {
+      throw new Error(
+        confirmation.error || 'Uploaded media could not be validated.'
+      );
+    }
+
+    return plan.media;
+  };
+
+  const validateFile = (file: File) => {
+    if (
+      !ALLOWED_IMAGE_TYPES.includes(file.type) &&
+      !ALLOWED_VIDEO_TYPES.includes(file.type)
+    ) {
+      return 'Upload PNG, JPEG, WebP, or MP4 files.';
+    }
+    if (
+      ALLOWED_IMAGE_TYPES.includes(file.type) &&
+      file.size > MAX_IMAGE_UPLOAD_BYTES
+    ) {
+      return `${file.name} is larger than the 10 MB image limit.`;
+    }
+    return '';
+  };
+
+  const acceptFiles = async (files: File[]) => {
+    if (!files.length || uploading) return;
+
+    const selectedFiles = allowMultipleSources ? files : files.slice(0, 1);
+    const previewFile = selectedFiles.find((file) =>
+      ALLOWED_IMAGE_TYPES.includes(file.type)
+    );
+    setLocalPreview(previewFile ? URL.createObjectURL(previewFile) : '');
+    setPendingName(previewFile?.name || '');
     setUploading(true);
-    setUploadReady(false);
     setError('');
     onUploadStart();
+    const failures: string[] = [];
 
     try {
-      const planResponse = await fetch('/api/media/upload-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: sourceFile.name,
-          mimeType: sourceFile.type,
-          size: sourceFile.size,
-        }),
-      });
-      const plan = (await planResponse.json()) as UploadPlan;
+      for (const file of selectedFiles) {
+        const validationError = validateFile(file);
+        if (validationError) {
+          failures.push(validationError);
+          continue;
+        }
 
-      if (!planResponse.ok) {
-        throw new Error(plan.error || 'Upload could not be prepared.');
+        const role: CreativeSourceRole = ALLOWED_VIDEO_TYPES.includes(file.type)
+          ? 'TRA_VIDEO'
+          : 'TRA_REFERENCE';
+
+        try {
+          const media = await uploadFile(file, role);
+          onUploaded({ role, media });
+        } catch (uploadError) {
+          failures.push(
+            uploadError instanceof Error ? uploadError.message : `${file.name} failed.`
+          );
+        }
       }
-
-      if (!plan.direct) {
-        const media = await uploadThroughServer(sourceFile);
-        onUploaded(media);
-        setUploadReady(true);
-        return;
-      }
-
-      if (!plan.uploadUrl || !plan.media) {
-        throw new Error('Upload could not be prepared.');
-      }
-
-      const putResponse = await fetch(plan.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': sourceFile.type },
-        body: sourceFile,
-      });
-
-      if (!putResponse.ok) {
-        throw new Error('Direct image upload failed.');
-      }
-
-      const confirmResponse = await fetch('/api/media/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mediaId: plan.media.id }),
-      });
-      const confirmation = await confirmResponse.json();
-
-      if (!confirmResponse.ok) {
-        throw new Error(
-          confirmation.error || 'Uploaded image could not be validated.'
-        );
-      }
-
-      onUploaded(plan.media);
-      setUploadReady(true);
-    } catch (uploadError) {
-      setError(
-        uploadError instanceof Error ? uploadError.message : 'Upload failed.'
-      );
     } finally {
       setUploading(false);
+      setLocalPreview('');
+      setPendingName('');
+      setError(failures.join(' '));
     }
-  };
-
-  const acceptFile = (nextFile: File | null) => {
-    if (!nextFile || uploading) return;
-
-    setError('');
-
-    if (!ALLOWED_TYPES.includes(nextFile.type)) {
-      setError('Upload a PNG, JPEG, or WebP image.');
-      return;
-    }
-
-    if (nextFile.size > MAX_UPLOAD_BYTES) {
-      setError('The image is larger than the 10 MB upload limit.');
-      return;
-    }
-
-    if (localPreview) URL.revokeObjectURL(localPreview);
-    setLocalPreview(URL.createObjectURL(nextFile));
-    setFileName(nextFile.name);
-    void uploadFile(nextFile);
   };
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextFile = event.target.files?.[0] || null;
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
-    acceptFile(nextFile);
+    void acceptFiles(files);
   };
 
   const handleDragEnter = (event: DragEvent<HTMLElement>) => {
@@ -199,7 +256,7 @@ export function CreativeComposer({
     event.preventDefault();
     dragDepthRef.current = 0;
     setDragActive(false);
-    acceptFile(event.dataTransfer.files?.[0] || null);
+    void acceptFiles(Array.from(event.dataTransfer.files || []));
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -223,16 +280,6 @@ export function CreativeComposer({
     '--slider-progress': `${sliderProgress}%`,
   } as CSSProperties;
 
-  const previewUrl = localPreview || initialMedia?.url || '';
-  const previewFileName =
-    fileName || initialMedia?.originalName || initialMedia?.fileName || '';
-  const previewReady = uploadReady || Boolean(initialMedia && !localPreview);
-  const sourceHint = previewUrl
-    ? uploadMode === 'tra'
-      ? 'TRA ad · uses the reference library'
-      : 'Reference ad · adapts the concept to TRA'
-    : 'Add an image (optional) or drag it here';
-
   return (
     <section
       className={`${styles.composer} ${dragActive ? styles.dragging : ''}`}
@@ -245,50 +292,76 @@ export function CreativeComposer({
         ref={fileInputRef}
         className={styles.fileInput}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept="image/png,image/jpeg,image/webp,video/mp4"
+        multiple={allowMultipleSources}
         onChange={handleFileChange}
       />
 
-      {previewUrl ? (
-        <div className={styles.attachmentRow}>
-          <div className={styles.attachment}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={previewUrl} alt="Selected source creative" />
-            <div className={styles.attachmentCopy}>
-              <strong>{previewFileName}</strong>
-              <span>
-                {uploading ? 'Uploading…' : previewReady ? 'Ready' : 'Upload failed'}
-              </span>
-            </div>
-            {previewReady ? (
-              <span className={styles.readyDot} aria-label="Upload ready" />
-            ) : null}
+      {localPreview && uploading ? (
+        <div className={styles.attachment}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={localPreview} alt="Selected source preview" />
+          <div className={styles.attachmentCopy}>
+            <strong>{pendingName}</strong>
+            <span>Uploading…</span>
           </div>
+        </div>
+      ) : null}
 
-          <div className={styles.modeToggle} role="group" aria-label="Uploaded image type">
-            <button
-              type="button"
-              className={`${styles.modeButton} ${
-                uploadMode === 'tra' ? styles.modeButtonActive : ''
-              }`}
-              aria-pressed={uploadMode === 'tra'}
-              onClick={() => onUploadModeChange('tra')}
-              disabled={generating}
-            >
-              TRA ad
-            </button>
-            <button
-              type="button"
-              className={`${styles.modeButton} ${
-                uploadMode === 'reference' ? styles.modeButtonActive : ''
-              }`}
-              aria-pressed={uploadMode === 'reference'}
-              onClick={() => onUploadModeChange('reference')}
-              disabled={generating}
-            >
-              Reference ad
-            </button>
-          </div>
+      {sourceAssets.length ? (
+        <div className={styles.attachmentList}>
+          {sourceAssets.map((source) => (
+            <div className={styles.attachmentRow} key={source.media.id}>
+              <div className={styles.attachment}>
+                {source.media.mediaType === 'IMAGE' ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={source.media.url} alt="Uploaded creative source" />
+                ) : (
+                  <div className={styles.videoBadge} aria-hidden="true">
+                    MP4
+                  </div>
+                )}
+                <div className={styles.attachmentCopy}>
+                  <strong>{source.media.originalName}</strong>
+                  <span>{ROLE_LABELS[source.role]} · Ready</span>
+                </div>
+                <span className={styles.readyDot} aria-label="Upload ready" />
+              </div>
+
+              <div className={styles.attachmentActions}>
+                <label>
+                  <select
+                    aria-label={`Source role for ${source.media.originalName}`}
+                    value={source.role}
+                    onChange={(event) =>
+                      onSourceRoleChange(
+                        source.media.id,
+                        event.target.value as CreativeSourceRole
+                      )
+                    }
+                    disabled={generating || source.media.mediaType === 'VIDEO'}
+                  >
+                    {source.media.mediaType === 'VIDEO' ? (
+                      <option value="TRA_VIDEO">TRA_VIDEO</option>
+                    ) : (
+                      <>
+                        <option value="TRA_REFERENCE">TRA_REFERENCE</option>
+                        <option value="LAYOUT_REFERENCE">LAYOUT_REFERENCE</option>
+                      </>
+                    )}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => onSourceRemoved(source.media.id)}
+                  disabled={generating}
+                  aria-label={`Remove ${source.media.originalName}`}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       ) : null}
 
@@ -329,15 +402,17 @@ export function CreativeComposer({
           <button
             className={styles.plusButton}
             type="button"
-            aria-label="Add optional source creative"
-            title="Add optional source creative"
+            aria-label="Add creative source assets"
+            title="Add creative source assets"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
           >
             +
           </button>
           <span className={styles.hint}>
-            {uploading ? 'Uploading source creative…' : sourceHint}
+            {uploading
+              ? 'Uploading source assets…'
+              : 'Images default to TRA_REFERENCE · MP4 uses TRA_VIDEO'}
           </span>
         </div>
 
@@ -348,7 +423,7 @@ export function CreativeComposer({
             type="button"
             aria-label={generating ? 'Generating creatives' : 'Generate creatives'}
             title="Generate creatives"
-            disabled={!ready || generating}
+            disabled={!ready || generating || uploading}
             onClick={onSubmit}
           >
             <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -361,7 +436,7 @@ export function CreativeComposer({
       {dragActive ? (
         <div className={styles.dropOverlay} aria-hidden="true">
           <strong>Drop to attach</strong>
-          <span>The file will upload automatically.</span>
+          <span>Images start as TRA_REFERENCE; MP4 files use TRA_VIDEO.</span>
         </div>
       ) : null}
 

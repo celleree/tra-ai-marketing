@@ -1,10 +1,20 @@
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { resolve } from 'path';
-import type { MediaAsset, StoredMediaFile } from '@/lib/media/types';
 import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  getMediaTypeForMimeType,
+  type CreativeSourceMediaAsset,
+  type MediaAsset,
+  type StoredCreativeSourceMediaFile,
+  type StoredMediaFile,
+} from '@/lib/media/types';
+import {
+  EXTENSION_BY_MIME,
+  getStoredMediaMimeType,
   getStoredImageMimeType,
   isSafeMediaId,
   MIME_BY_EXTENSION,
+  prepareMedia,
   prepareMediaImage,
   type MediaStorage,
 } from '@/lib/media/storage';
@@ -18,48 +28,78 @@ export class LocalMediaStorage implements MediaStorage {
       : resolve(process.cwd(), 'data', 'uploads');
   })();
 
-  async saveImage(file: File): Promise<MediaAsset> {
-    const { buffer, ...media } = await prepareMediaImage(file);
-
+  private async write(fileName: string, buffer: Buffer) {
     await mkdir(this.root, { recursive: true });
-    await writeFile(resolve(this.root, media.fileName), buffer, { flag: 'wx' });
+    await writeFile(resolve(this.root, fileName), buffer, { flag: 'wx' });
+  }
 
+  async saveMedia(file: File): Promise<CreativeSourceMediaAsset> {
+    const { buffer, ...media } = await prepareMedia(file);
+    await this.write(media.fileName, buffer);
     return media;
   }
 
-  async readImage(fileName: string): Promise<StoredMediaFile | null> {
-    const mimeType = getStoredImageMimeType(fileName);
-    if (!mimeType) {
-      return null;
-    }
+  async saveImage(file: File): Promise<MediaAsset> {
+    const { buffer, ...media } = await prepareMediaImage(file);
+    await this.write(media.fileName, buffer);
+    return media;
+  }
+
+  async readMedia(
+    fileName: string
+  ): Promise<StoredCreativeSourceMediaFile | null> {
+    const mimeType = getStoredMediaMimeType(fileName);
+    if (!mimeType) return null;
 
     try {
-      const buffer = await readFile(resolve(this.root, fileName));
-      return { fileName, buffer, mimeType };
+      return {
+        fileName,
+        buffer: await readFile(resolve(this.root, fileName)),
+        mimeType,
+        mediaType: getMediaTypeForMimeType(mimeType),
+      } as StoredCreativeSourceMediaFile;
     } catch {
       return null;
     }
   }
 
-  async readImageById(mediaId: string): Promise<StoredMediaFile | null> {
-    if (!isSafeMediaId(mediaId)) {
-      return null;
-    }
+  async readImage(fileName: string): Promise<StoredMediaFile | null> {
+    if (!getStoredImageMimeType(fileName)) return null;
+    const stored = await this.readMedia(fileName);
+    if (!stored || stored.mediaType !== 'IMAGE') return null;
+    const { mediaType: _mediaType, ...image } = stored;
+    return image;
+  }
 
-    for (const extension of Object.keys(MIME_BY_EXTENSION)) {
-      const stored = await this.readImage(`${mediaId}.${extension}`);
-      if (stored) {
-        return stored;
-      }
-    }
+  private async readById(
+    mediaId: string,
+    extensions: string[]
+  ): Promise<StoredCreativeSourceMediaFile | null> {
+    if (!isSafeMediaId(mediaId)) return null;
 
+    for (const extension of extensions) {
+      const stored = await this.readMedia(`${mediaId}.${extension}`);
+      if (stored) return stored;
+    }
     return null;
   }
 
+  async readMediaById(mediaId: string) {
+    return this.readById(mediaId, Object.keys(MIME_BY_EXTENSION));
+  }
+
+  async readImageById(mediaId: string): Promise<StoredMediaFile | null> {
+    const stored = await this.readById(
+      mediaId,
+      ALLOWED_IMAGE_MIME_TYPES.map((mimeType) => EXTENSION_BY_MIME[mimeType])
+    );
+    if (!stored || stored.mediaType !== 'IMAGE') return null;
+    const { mediaType: _mediaType, ...image } = stored;
+    return image;
+  }
+
   async deleteImage(fileName: string): Promise<void> {
-    if (!getStoredImageMimeType(fileName)) {
-      return;
-    }
+    if (!getStoredImageMimeType(fileName)) return;
 
     try {
       await unlink(resolve(this.root, fileName));
@@ -87,9 +127,7 @@ const REQUIRED_R2_VARIABLES = [
 ] as const;
 
 export const getMediaStorage = (): MediaStorage => {
-  if (storage) {
-    return storage;
-  }
+  if (storage) return storage;
 
   if (process.env.NODE_ENV !== 'production') {
     storage = new LocalMediaStorage();

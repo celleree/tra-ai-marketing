@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
-import type { UploadMode } from '@/lib/creatives/generate-request';
 import { consumeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
-import type { MediaAsset } from '@/lib/media/types';
+import type {
+  CreativeSourceAsset,
+  CreativeSourceRole,
+} from '@/lib/media/types';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
@@ -33,8 +35,7 @@ const NAV_ITEMS: Array<{
 export function CreativeGenerator() {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
   const [creationMode, setCreationMode] = useState<CreationMode>('generate');
-  const [media, setMedia] = useState<MediaAsset | null>(null);
-  const [uploadMode, setUploadMode] = useState<UploadMode>('tra');
+  const [sourceAssets, setSourceAssets] = useState<CreativeSourceAsset[]>([]);
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
@@ -55,8 +56,7 @@ export function CreativeGenerator() {
 
     setActiveSection('upload');
     setCreationMode('generate');
-    setMedia(draft.media);
-    setUploadMode(draft.uploadMode);
+    setSourceAssets(draft.sourceAsset ? [draft.sourceAsset] : []);
     setContext(draft.context);
     setVariationCount(draft.variationCount);
     setCreatives([]);
@@ -65,13 +65,33 @@ export function CreativeGenerator() {
   }, []);
 
   const handleUploadStart = () => {
-    setMedia(null);
     setCreatives([]);
     setGenerationError('');
   };
 
-  const handleUploaded = (nextMedia: MediaAsset) => {
-    setMedia(nextMedia);
+  const handleUploaded = (source: CreativeSourceAsset) => {
+    setSourceAssets((current) => [...current, source]);
+    setCreatives([]);
+    setGenerationError('');
+  };
+
+  const handleSourceRoleChange = (
+    mediaId: string,
+    role: CreativeSourceRole
+  ) => {
+    setSourceAssets((current) =>
+      current.map((source) =>
+        source.media.id === mediaId ? { ...source, role } : source
+      )
+    );
+    setCreatives([]);
+    setGenerationError('');
+  };
+
+  const handleSourceRemoved = (mediaId: string) => {
+    setSourceAssets((current) =>
+      current.filter((source) => source.media.id !== mediaId)
+    );
     setCreatives([]);
     setGenerationError('');
   };
@@ -102,13 +122,15 @@ export function CreativeGenerator() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...(media ? { mediaId: media.id } : {}),
+          sourceAssets: sourceAssets.map((source) => ({
+            mediaId: source.media.id,
+            role: source.role,
+          })),
           ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
           ...(brand.colors.length ? { brandColors: brand.colors } : {}),
           ...(brand.fontGuidance.length
             ? { brandFontNames: brand.fontGuidance }
             : {}),
-          uploadMode,
           context: context.trim(),
           variationCount,
         }),
@@ -170,7 +192,7 @@ export function CreativeGenerator() {
     handoffGenerationStartedRef.current = true;
     setHandoffGenerate(false);
     void generate();
-  }, [handoffGenerate, context, media, uploadMode, variationCount]);
+  }, [handoffGenerate, context, sourceAssets, variationCount]);
 
   const activeLabel =
     NAV_ITEMS.find((item) => item.id === activeSection)?.label || 'Create';
@@ -251,9 +273,9 @@ export function CreativeGenerator() {
                     onChange={setContext}
                     onUploadStart={handleUploadStart}
                     onUploaded={handleUploaded}
-                    initialMedia={media}
-                    uploadMode={uploadMode}
-                    onUploadModeChange={setUploadMode}
+                    sourceAssets={sourceAssets}
+                    onSourceRoleChange={handleSourceRoleChange}
+                    onSourceRemoved={handleSourceRemoved}
                     variationCount={variationCount}
                     onVariationCountChange={setVariationCount}
                     onSubmit={generate}
