@@ -61,39 +61,21 @@
   animation-delay: -20s;
 }
 
-.placeholder {
+.creativeCard {
   flex: 0 0 auto;
-  aspect-ratio: 4 / 5;
+  min-height: 180px;
+  overflow: hidden;
   border: 1px solid rgba(73, 105, 140, 0.15);
   border-radius: 18px;
-  background: linear-gradient(
-    155deg,
-    rgba(255, 255, 255, 0.97),
-    rgba(221, 233, 246, 0.95)
-  );
+  background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 18px 42px rgba(35, 63, 93, 0.11);
-  opacity: 0.58;
+  opacity: 0.72;
 }
 
-.placeholder:nth-child(3n + 2) {
-  background: linear-gradient(155deg, #0b1624, #153968);
-}
-
-.placeholder:nth-child(4n) {
-  background: linear-gradient(155deg, #ffffff, #dce9fa 62%, #bfd4ef);
-}
-
-.placeholder span {
-  display: inline-block;
-  margin: 16px;
-  color: #1267d7;
-  font-size: 0.82rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-}
-
-.placeholder:nth-child(3n + 2) span {
-  color: #45a0ff;
+.creativeImage {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .fade {
@@ -102,12 +84,12 @@
   background:
     radial-gradient(
       circle at center,
-      rgba(244, 248, 253, 0.28) 0,
-      rgba(244, 248, 253, 0.7) 32%,
-      rgba(244, 248, 253, 0.92) 68%,
-      #f4f8fd 100%
+      rgba(244, 248, 253, 0.24) 0,
+      rgba(244, 248, 253, 0.6) 34%,
+      rgba(244, 248, 253, 0.82) 68%,
+      rgba(244, 248, 253, 0.96) 100%
     );
-  backdrop-filter: blur(1.5px);
+  backdrop-filter: blur(1px);
 }
 
 .hero {
