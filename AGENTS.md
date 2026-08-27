@@ -10,6 +10,14 @@ Keep normal AI/Codex context small. Read only the files needed for the task.
 - Preserve intended work from parallel branches when resolving conflicts.
 - Promote `staging` to `main` only when explicitly approved for production.
 
+## Current threat model
+
+TRA AI Marketing is currently an internal team tool with a very small set of trusted users. For the current phase, optimize safeguards primarily for accidental misuse, malformed inputs, data integrity, hard product invariants, and preventing costly or irreversible mistakes by trusted operators.
+
+Do not automatically expand a bounded feature into hostile-client-grade infrastructure, adversarial multi-tenant controls, immutable provenance systems, or heavyweight security architecture unless the current task genuinely requires it. Prefer the smallest reliable safeguard appropriate to trusted internal use.
+
+This does not remove normal security hygiene or repository risk-review requirements. Auth, secrets, production storage safety, destructive actions, spend/publishing controls, and hard product/compliance invariants still require appropriate safeguards. Reassess and strengthen the threat model before materially broader, external, or untrusted-user access is introduced.
+
 ## ChatGPT <-> Codex handoff protocol
 
 When the user is manually relaying work between ChatGPT and Codex, optimize for direct structured handoff rather than explanatory prose.

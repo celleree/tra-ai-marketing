@@ -70,6 +70,64 @@ When a generated creative contains a human:
 
 This is a hard product requirement.
 
+## Reference preprocessing
+
+The three source roles do not all flow into final image generation in the same way.
+
+### Layout-reference analysis
+
+A `LAYOUT_REFERENCE` or external Reference Library ad is analysis-only source material. Its raw pixels may be inspected by a layout-analysis step, but must not be attached to final image generation as content source pixels when those pixels could carry a third-party person/model or other prohibited content.
+
+Planned architecture:
+
+`LAYOUT_REFERENCE -> low-cost vision/layout analyzer -> cached LayoutBlueprint -> GPT-5.6 Sol creative planning -> image generation`
+
+The layout analyzer should have a narrow job: identify what the design is doing. Prefer a lower-cost vision-capable model with low reasoning and strict structured output unless testing shows a stronger model is necessary.
+
+A `LayoutBlueprint` should describe reusable design mechanisms such as:
+- overall composition;
+- subject/person placeholder location without identity;
+- image/text split;
+- headline location and hierarchy;
+- CTA placement/treatment;
+- whitespace;
+- card/overlay positioning;
+- geometric/background mechanisms;
+- typography feel/hierarchy;
+- text density;
+- image/photography/illustration treatment;
+- spacing/alignment.
+
+It must not carry third-party person identity, logo/branding, exact copy, trademarks, unsupported claims, or other unapproved content downstream.
+
+Analyze each unchanged layout reference once and cache/reuse the blueprint by media identity and/or content hash where practical.
+
+Detailed deferred work is tracked in GitHub Issue #27.
+
+### TRA-video preprocessing
+
+A raw `TRA_VIDEO` is an approved source that may eventually supply a human, but raw video should not be treated as though its human pixels have already reached an image-only generation provider.
+
+Planned architecture:
+
+`TRA_VIDEO -> trusted video probe/validation -> stored approved video -> frame extraction -> representative approved frames -> Sol creative planning / image generation`
+
+Future video preprocessing should preserve:
+- frame timestamp;
+- source-video identity/provenance;
+- approved-human eligibility;
+- reusable/cached representative frames.
+
+Do not assume every frame should be persisted. Prefer a bounded representative set once frame-selection criteria are defined. Subtitle/caption extraction may be added later if it materially improves creative planning.
+
+Detailed deferred work is tracked in GitHub Issue #28.
+
+These preprocessing systems are separate:
+- `TRA_VIDEO -> approved human/reference frames`;
+- `LAYOUT_REFERENCE -> LayoutBlueprint`.
+
+Sol later combines approved TRA context, approved TRA source material, layout instructions, user direction, and variation requirements. The layout analyzer is not a second creative planner.
+
 ## Company and brand grounding
 
 Sol must receive the relevant approved TRA context automatically rather than relying only on logo/colors/fonts.
@@ -190,10 +248,11 @@ The current image workflow is ready when all of the following work end-to-end:
 
 1. Multi-source media/input foundation: TRA Video, TRA Reference, Layout Reference, multiple assets, role-preserving request contract.
 2. Company-profile/Sol context contract.
-3. Variation planner and small-batch selection.
-4. Placement-aware format generation.
-5. Save-to-library provenance/metadata.
-6. Editing and version history.
-7. Production hardening for this workflow.
+3. Reference preprocessing foundations: layout-reference -> cached `LayoutBlueprint` and TRA-video -> approved representative frames, without duplicating Sol's planning responsibility.
+4. Variation planner and small-batch selection.
+5. Placement-aware format generation.
+6. Save-to-library provenance/metadata.
+7. Editing and version history.
+8. Production hardening for this workflow.
 
-Do not skip to later items while the source-role contract is unresolved.
+Do not skip to later items while the source-role contract is unresolved. In particular, Issue #26 should establish only the safe source/media foundation; do not pull Issue #27 layout analysis or Issue #28 video frame extraction into that branch.
