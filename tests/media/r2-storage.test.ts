@@ -4,6 +4,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { R2MediaStorage } from '@/lib/media/r2-storage';
+import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
 const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
 
@@ -18,25 +19,7 @@ vi.mock('@aws-sdk/client-s3', async (importOriginal) => {
 });
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-const isoBox = (type: string, payload = Buffer.alloc(0)) => {
-  const box = Buffer.alloc(8 + payload.length);
-  box.writeUInt32BE(box.length, 0);
-  box.write(type, 4, 4, 'ascii');
-  payload.copy(box, 8);
-  return box;
-};
-const ftypPayload = Buffer.alloc(16);
-ftypPayload.write('isom', 0, 4, 'ascii');
-ftypPayload.writeUInt32BE(0x200, 4);
-ftypPayload.write('isom', 8, 4, 'ascii');
-ftypPayload.write('mp42', 12, 4, 'ascii');
-const MP4_SIGNATURE = Array.from(
-  Buffer.concat([
-    isoBox('ftyp', ftypPayload),
-    isoBox('moov'),
-    isoBox('mdat', Buffer.from([0x00])),
-  ])
-);
+const MP4_SIGNATURE = Array.from(REAL_ENCODED_MP4);
 const FILE_NAME = `media_${'a'.repeat(32)}.png`;
 
 const makeFile = (bytes: readonly number[], type: string): File => {
@@ -88,7 +71,7 @@ describe('R2 media storage observable contract', () => {
     expect(asset).not.toHaveProperty('buffer');
   });
 
-  it('writes MP4 video through the generic media path without treating it as an image', async () => {
+  it('writes real MP4 video through the generic media path without treating it as an image', async () => {
     sendMock.mockResolvedValueOnce({});
     const asset = await makeStorage().saveMedia(
       makeFile(MP4_SIGNATURE, 'video/mp4')
