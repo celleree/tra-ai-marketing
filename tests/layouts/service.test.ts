@@ -35,7 +35,7 @@ const blueprint = (): LayoutBlueprint => ({
       overlapsOtherRegions: false,
     },
   ],
-  whitespace: 'GENEROUS',
+  whitespace: 'SPARSE',
   textDensity: 'SPARSE',
   ctaTreatment: 'PILL',
   backgroundMechanisms: ['SOLID_COLOR'],
