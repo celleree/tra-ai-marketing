@@ -6,26 +6,10 @@ import {
 } from '@/lib/media/source-hydration';
 import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
+import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-const isoBox = (type: string, payload = Buffer.alloc(0)) => {
-  const box = Buffer.alloc(8 + payload.length);
-  box.writeUInt32BE(box.length, 0);
-  box.write(type, 4, 4, 'ascii');
-  payload.copy(box, 8);
-  return box;
-};
-const ftypPayload = Buffer.alloc(16);
-ftypPayload.write('isom', 0, 4, 'ascii');
-ftypPayload.writeUInt32BE(0x200, 4);
-ftypPayload.write('isom', 8, 4, 'ascii');
-ftypPayload.write('mp42', 12, 4, 'ascii');
-const MP4 = Buffer.concat([
-  isoBox('ftyp', ftypPayload),
-  isoBox('moov'),
-  isoBox('mdat', Buffer.from([0x00])),
-]);
+const MP4 = Buffer.from(REAL_ENCODED_MP4);
 
 const mediaId = (hex: string) => `media_${hex.repeat(32)}`;
 
