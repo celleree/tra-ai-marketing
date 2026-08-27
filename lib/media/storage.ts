@@ -131,8 +131,9 @@ export const isSupportedMp4Container = (buffer: Buffer) => {
     if (!end || end <= offset) return false;
 
     const type = buffer.subarray(offset + 4, offset + 8).toString('ascii');
-    hasMovieMetadata ||= type === 'moov' || type === 'moof';
-    hasMediaData ||= type === 'mdat';
+    const boxSize = end - offset;
+    hasMovieMetadata ||= (type === 'moov' || type === 'moof') && boxSize > 8;
+    hasMediaData ||= type === 'mdat' && boxSize > 8;
     offset = end;
   }
 
