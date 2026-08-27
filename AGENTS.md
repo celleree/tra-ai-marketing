@@ -10,6 +10,33 @@ Keep normal AI/Codex context small. Read only the files needed for the task.
 - Preserve intended work from parallel branches when resolving conflicts.
 - Promote `staging` to `main` only when explicitly approved for production.
 
+## ChatGPT <-> Codex handoff protocol
+
+When the user is manually relaying work between ChatGPT and Codex, optimize for direct structured handoff rather than explanatory prose.
+
+Incoming ChatGPT instructions may use this structure:
+
+- `TASK`: the concrete next task.
+- `CONTEXT`: only context not already available in canonical repo sources.
+- `SOURCE OF TRUTH`: exact files, Issue, code, or config to trust.
+- `SCOPE`: what may change.
+- `DO NOT`: explicit exclusions.
+- `INSTRUCTIONS`: the requested next actions.
+- `RETURN`: the required response fields.
+
+For plans, implementation results, reviews, or blockers, Codex should default to this concise return structure unless the task requires another format:
+
+- `STATUS`: complete, blocked, or approval needed.
+- `BRANCH`: current branch and relevant commit/SHA when useful.
+- `FILES INSPECTED/CHANGED`: only the files materially involved.
+- `IMPLEMENTATION`: concise description of what was found or changed.
+- `VERIFICATION`: exact checks run and results.
+- `BLOCKERS`: exact blocker, or `none`.
+- `DECISIONS NEEDED`: exact unresolved decision, or `none`.
+- `NEXT RECOMMENDED ACTION`: one concrete next step.
+
+Do not repeat repository context already documented in canonical sources. Do not include play-by-play reasoning or raw transcripts. If approval is required for a command or write, ask concisely and include the exact command/action being requested.
+
 ## Sources of truth
 
 - Runtime behavior, prompts, categories, formats, validation, defaults, and integration logic: source code.
