@@ -79,12 +79,16 @@ const libraryItem = (hex: string) => ({
   angleSource: 'manual' as const,
 });
 
-const generationRequest = (sourceAssets: Array<{ mediaId: string; role: string }>) =>
+const generationRequest = (
+  sourceAssets: Array<{ mediaId: string; role: string }>,
+  companyProfile?: object
+) =>
   new Request('http://localhost/api/creatives/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       sourceAssets,
+      ...(companyProfile ? { companyProfile } : {}),
       context: 'Create compliant TRA concepts.',
       variationCount: 2,
     }),
@@ -147,26 +151,36 @@ afterEach(() => {
 });
 
 describe('final image-provider source eligibility', () => {
-  it('keeps a layout reference analysis-only and uses prompt-only generation', async () => {
+  it('keeps a layout reference analysis-only and grounds prompt-only generation', async () => {
     const layoutId = mediaId('a');
     storedById[layoutId] = image('a');
 
     const response = await POST(
-      generationRequest([{ mediaId: layoutId, role: 'LAYOUT_REFERENCE' }])
+      generationRequest([{ mediaId: layoutId, role: 'LAYOUT_REFERENCE' }], {
+        knowledgeBase: { companySummary: 'Runtime approved TRA summary.' },
+        guardrails: { approvedClaims: 'Runtime approved claim.' },
+      })
     );
 
     expect(response.status).toBe(200);
     expect(mocks.analyzeReferenceCreative).toHaveBeenCalledWith(
       storedById[layoutId],
-      'Create compliant TRA concepts.'
+      expect.stringContaining('APPROVED TRA COMPANY CONTEXT')
+    );
+    expect(mocks.analyzeReferenceCreative.mock.calls[0][1]).toContain(
+      'Runtime approved TRA summary.'
+    );
+    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain(
+      'Runtime approved claim.'
     );
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(
-      (fetch as ReturnType<typeof vi.fn>).mock.calls.every(
-        ([url]) => url === 'https://api.openai.com/v1/images/generations'
-      )
-    ).toBe(true);
+    for (const [url, options] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(url).toBe('https://api.openai.com/v1/images/generations');
+      const body = JSON.parse(String(options?.body)) as { prompt?: string };
+      expect(body.prompt).toContain('APPROVED TRA COMPANY CONTEXT');
+      expect(body.prompt).toContain('Runtime approved TRA summary.');
+    }
   });
 
   it('keeps TRA video out of image-only code and preserves non-human prompt-only generation', async () => {
@@ -184,7 +198,7 @@ describe('final image-provider source eligibility', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('attaches only the validated TRA reference from mixed sources', async () => {
+  it('attaches only the validated TRA reference from mixed sources and grounds its prompt', async () => {
     const layoutId = mediaId('c');
     const videoId = mediaId('d');
     const traId = mediaId('e');
@@ -195,11 +209,14 @@ describe('final image-provider source eligibility', () => {
     };
 
     const response = await POST(
-      generationRequest([
-        { mediaId: layoutId, role: 'LAYOUT_REFERENCE' },
-        { mediaId: videoId, role: 'TRA_VIDEO' },
-        { mediaId: traId, role: 'TRA_REFERENCE' },
-      ])
+      generationRequest(
+        [
+          { mediaId: layoutId, role: 'LAYOUT_REFERENCE' },
+          { mediaId: videoId, role: 'TRA_VIDEO' },
+          { mediaId: traId, role: 'TRA_REFERENCE' },
+        ],
+        { brandGuidelines: { voiceTone: 'Runtime calm and direct.' } }
+      )
     );
 
     expect(response.status).toBe(200);
@@ -209,6 +226,8 @@ describe('final image-provider source eligibility', () => {
       expect(call.source).toBe(storedById[traId]);
       expect(call.source).not.toBe(storedById[layoutId]);
       expect(call.source.mediaType).toBe('IMAGE');
+      expect(call.context).toContain('APPROVED TRA COMPANY CONTEXT');
+      expect(call.context).toContain('Runtime calm and direct.');
     }
     expect(fetch).not.toHaveBeenCalled();
   });
