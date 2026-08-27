@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
 const mocks = vi.hoisted(() => ({
-  analyzeReferenceCreative: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
   generateApprovedTraReferenceCreativeImage: vi.fn(),
   generateCreativeCopy: vi.fn(),
   getMediaStorage: vi.fn(),
+  getOrAnalyzeLayoutBlueprint: vi.fn(),
   listReferenceLibrary: vi.fn(),
   selectBestReferenceCreatives: vi.fn(),
 }));
 
 vi.mock('@/lib/ai/openai', () => ({
-  analyzeReferenceCreative: mocks.analyzeReferenceCreative,
   analyzeTraSourceCreative: mocks.analyzeTraSourceCreative,
   generateApprovedTraReferenceCreativeImage:
     mocks.generateApprovedTraReferenceCreativeImage,
@@ -22,6 +22,10 @@ vi.mock('@/lib/ai/openai', () => ({
 
 vi.mock('@/lib/ai/reference-selector', () => ({
   selectBestReferenceCreatives: mocks.selectBestReferenceCreatives,
+}));
+
+vi.mock('@/lib/layouts/service', () => ({
+  getOrAnalyzeLayoutBlueprint: mocks.getOrAnalyzeLayoutBlueprint,
 }));
 
 vi.mock('@/lib/media/local-storage', () => ({
@@ -64,6 +68,71 @@ const analysis = {
   avoid: ['unsupported claims'],
   unknowns: [],
   dominantCategory: 'customer-problems' as const,
+};
+
+const layoutBlueprint: LayoutBlueprint = {
+  version: 1,
+  composition: {
+    flow: 'TEXT_LEFT_VISUAL_RIGHT',
+    balance: 'ASYMMETRIC',
+    imageTextBalance: 'BALANCED',
+  },
+  regions: [
+    {
+      role: 'HEADLINE',
+      xPct: 8,
+      yPct: 18,
+      widthPct: 44,
+      heightPct: 26,
+      alignment: 'LEFT',
+      emphasis: 'PRIMARY',
+      crop: 'NONE',
+      overlapsOtherRegions: false,
+    },
+    {
+      role: 'HUMAN_PLACEHOLDER',
+      xPct: 56,
+      yPct: 10,
+      widthPct: 42,
+      heightPct: 76,
+      alignment: 'CENTER',
+      emphasis: 'HIGH',
+      crop: 'WAIST_UP',
+      overlapsOtherRegions: false,
+    },
+  ],
+  whitespace: 'MODERATE',
+  textDensity: 'SPARSE',
+  ctaTreatment: 'ROUNDED_RECTANGLE',
+  backgroundMechanisms: ['ASYMMETRIC_COLOR_BLOCK'],
+  imageTreatments: ['CUTOUT'],
+  typography: {
+    headlineScale: 'EXTRA_LARGE',
+    headlineWeight: 'BOLD',
+    headlineAlignment: 'LEFT',
+    hierarchyLevels: 2,
+    contrast: 'HIGH',
+  },
+  spacing: {
+    outerMargin: 'GENEROUS',
+    regionGap: 'MODERATE',
+    alignmentGrid: 'LEFT_EDGE',
+  },
+  reusableMechanisms: ['ASYMMETRIC_SHAPE_DIVIDER'],
+  restrictedElementsPresent: {
+    humanIdentity: true,
+    thirdPartyLogoOrBranding: true,
+    exactCopy: true,
+    trademark: false,
+    claimOrProof: true,
+  },
+};
+
+const layoutResolution = {
+  blueprint: layoutBlueprint,
+  contentHash: 'layout-content-hash',
+  analyzerModel: 'gpt-5.6-terra',
+  cacheHit: false,
 };
 
 const libraryItem = (hex: string) => ({
@@ -119,7 +188,7 @@ beforeEach(() => {
     readImageById: vi.fn(async () => null),
     saveImage,
   });
-  mocks.analyzeReferenceCreative.mockResolvedValue(analysis);
+  mocks.getOrAnalyzeLayoutBlueprint.mockResolvedValue(layoutResolution);
   mocks.analyzeTraSourceCreative.mockResolvedValue(analysis);
   mocks.generateCreativeCopy.mockImplementation(async (plan: Array<{ index: number }>) =>
     new Map(
@@ -150,8 +219,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('final image-provider source eligibility', () => {
-  it('keeps a layout reference analysis-only and grounds prompt-only generation', async () => {
+describe('layout blueprint and final image-provider boundaries', () => {
+  it('reduces a layout reference to a blueprint, keeps its pixels analysis-only, and grounds Sol planning', async () => {
     const layoutId = mediaId('a');
     storedById[layoutId] = image('a');
 
@@ -161,25 +230,28 @@ describe('final image-provider source eligibility', () => {
         guardrails: { approvedClaims: 'Runtime approved claim.' },
       })
     );
+    const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(mocks.analyzeReferenceCreative).toHaveBeenCalledWith(
-      storedById[layoutId],
-      expect.stringContaining('APPROVED TRA COMPANY CONTEXT')
-    );
-    expect(mocks.analyzeReferenceCreative.mock.calls[0][1]).toContain(
-      'Runtime approved TRA summary.'
-    );
-    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain(
-      'Runtime approved claim.'
-    );
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
+    expect(payload.layoutBlueprint).toEqual(layoutResolution);
+    expect(payload.analysis.visibleText).toEqual([]);
+    expect(payload.analysis.hookOrAngle).toContain('Not supplied by the layout reference');
+    expect(payload.analysis.visualStructure).toContain('STRUCTURED LAYOUT BLUEPRINT');
+    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('APPROVED TRA COMPANY CONTEXT');
+    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('Runtime approved TRA summary.');
+    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('Runtime approved claim.');
+    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('STRUCTURED LAYOUT BLUEPRINT');
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
+
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, options] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
       expect(url).toBe('https://api.openai.com/v1/images/generations');
       const body = JSON.parse(String(options?.body)) as { prompt?: string };
       expect(body.prompt).toContain('APPROVED TRA COMPANY CONTEXT');
-      expect(body.prompt).toContain('Runtime approved TRA summary.');
+      expect(body.prompt).toContain('STRUCTURED LAYOUT BLUEPRINT');
+      expect(body.prompt).toContain('replace human placeholder geometry with a non-human');
+      expect(String(options?.body)).not.toContain(storedById[layoutId].buffer.toString('base64'));
     }
   });
 
@@ -192,13 +264,13 @@ describe('final image-provider source eligibility', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.analyzeReferenceCreative).not.toHaveBeenCalled();
+    expect(mocks.getOrAnalyzeLayoutBlueprint).not.toHaveBeenCalled();
     expect(mocks.analyzeTraSourceCreative).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('attaches only the validated TRA reference from mixed sources and grounds its prompt', async () => {
+  it('uses layout geometry for planning while attaching only the validated TRA reference from mixed sources', async () => {
     const layoutId = mediaId('c');
     const videoId = mediaId('d');
     const traId = mediaId('e');
@@ -211,9 +283,9 @@ describe('final image-provider source eligibility', () => {
     const response = await POST(
       generationRequest(
         [
-          { mediaId: layoutId, role: 'LAYOUT_REFERENCE' },
-          { mediaId: videoId, role: 'TRA_VIDEO' },
           { mediaId: traId, role: 'TRA_REFERENCE' },
+          { mediaId: videoId, role: 'TRA_VIDEO' },
+          { mediaId: layoutId, role: 'LAYOUT_REFERENCE' },
         ],
         { brandGuidelines: { voiceTone: 'Runtime calm and direct.' } }
       )
@@ -221,6 +293,8 @@ describe('final image-provider source eligibility', () => {
 
     expect(response.status).toBe(200);
     expect(readMediaById).toHaveBeenCalledTimes(3);
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
+    expect(mocks.analyzeTraSourceCreative).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
     for (const [call] of mocks.generateApprovedTraReferenceCreativeImage.mock.calls) {
       expect(call.source).toBe(storedById[traId]);
@@ -228,6 +302,7 @@ describe('final image-provider source eligibility', () => {
       expect(call.source.mediaType).toBe('IMAGE');
       expect(call.context).toContain('APPROVED TRA COMPANY CONTEXT');
       expect(call.context).toContain('Runtime calm and direct.');
+      expect(call.context).toContain('STRUCTURED LAYOUT BLUEPRINT');
     }
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -262,6 +337,7 @@ describe('final image-provider source eligibility', () => {
     expect(response.status).toBe(200);
     expect(readMediaById).toHaveBeenCalledTimes(1);
     expect(readMediaById).toHaveBeenCalledWith(traId);
+    expect(mocks.getOrAnalyzeLayoutBlueprint).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
     expect(
       mocks.generateApprovedTraReferenceCreativeImage.mock.calls.every(
