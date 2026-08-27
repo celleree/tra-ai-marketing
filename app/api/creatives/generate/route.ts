@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import {
-  analyzeReferenceCreative,
   analyzeTraSourceCreative,
   generateApprovedTraReferenceCreativeImage,
   generateCreativeCopy,
@@ -21,6 +20,14 @@ import {
   type ValidGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
+import {
+  formatLayoutBlueprintForPlanning,
+  type LayoutBlueprint,
+} from '@/lib/layouts/blueprint';
+import {
+  getOrAnalyzeLayoutBlueprint,
+  type ResolvedLayoutBlueprint,
+} from '@/lib/layouts/service';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import {
   CreativeSourceHydrationError,
@@ -66,6 +73,32 @@ const buildPromptOnlyAnalysis = (
     'government affiliation',
     'third-party brands or trademarks',
     'people, faces, spokespersons, or human figures without an attached approved TRA human source',
+  ],
+  unknowns: [],
+  dominantCategory: plan[0]?.category || 'customer-problems',
+});
+
+const buildLayoutReferenceAnalysis = (
+  blueprint: LayoutBlueprint,
+  plan: PlannedCreative[]
+): CreativeReferenceAnalysis => ({
+  summary:
+    'External layout reference reduced to a validated design-only LayoutBlueprint. It supplies no creative strategy, copy, claims, brand identity, trademark identity, or person identity.',
+  visibleText: [],
+  visualStructure: formatLayoutBlueprintForPlanning(blueprint),
+  hookOrAngle:
+    'Not supplied by the layout reference. Choose strategy only from approved TRA company context and user direction.',
+  offerOrCta:
+    'Not supplied by the layout reference. Use only approved TRA offers, claims, and CTA direction.',
+  styleNotes:
+    'Use only the validated blueprint geometry and controlled design mechanisms. Do not reconstruct restricted reference content.',
+  preserve: ['validated layout geometry and design mechanisms only'],
+  avoid: [
+    'third-party person identity',
+    'third-party logos or branding',
+    'third-party trademarks',
+    'reference ad copy',
+    'reference testimonials, statistics, claims, or proof content',
   ],
   unknowns: [],
   dominantCategory: plan[0]?.category || 'customer-problems',
@@ -168,7 +201,10 @@ const buildPlanFromSelectedReferences = (
 const findGenerationSource = (
   sources: HydratedCreativeSourceAsset[]
 ): HydratedCreativeSourceAsset | undefined =>
-  sources.find((source) => source.media.mediaType === 'IMAGE');
+  sources.find(
+    (source) =>
+      source.role === 'LAYOUT_REFERENCE' && source.media.mediaType === 'IMAGE'
+  ) || sources.find((source) => source.media.mediaType === 'IMAGE');
 
 export async function POST(request: Request) {
   try {
@@ -226,12 +262,14 @@ export async function POST(request: Request) {
 
     let analysis: CreativeReferenceAnalysis;
     let creativePlan: PlannedCreative[];
+    let layoutBlueprint: ResolvedLayoutBlueprint | null = null;
     let selectedReferences: SelectedReferenceCreative[] = [];
     let librarySelections = new Map<number, SelectedReferenceCreative>();
 
     if (source && generationSourceAsset?.role === 'LAYOUT_REFERENCE') {
-      analysis = await analyzeReferenceCreative(source, parsed.data.context);
-      creativePlan = buildCreativePlan(parsed.data, analysis.dominantCategory);
+      layoutBlueprint = await getOrAnalyzeLayoutBlueprint(source);
+      creativePlan = buildCreativePlan(parsed.data);
+      analysis = buildLayoutReferenceAnalysis(layoutBlueprint.blueprint, creativePlan);
     } else if (source && generationSourceAsset?.role === 'TRA_REFERENCE') {
       analysis = await analyzeTraSourceCreative(source, parsed.data.context);
 
@@ -279,7 +317,7 @@ export async function POST(request: Request) {
     const modeDirection = source
       ? generationSourceAsset?.role === 'TRA_REFERENCE'
         ? 'TRA ad mode: AI has selected one individual library reference for each requested creative. Each output must be a separate TRA adaptation of its own single reference. Never combine, merge, collage, or borrow visual systems from multiple references. The validated uploaded TRA reference may be the only raw image attached to final generation; library references are analysis-only.'
-        : `Layout-reference mode: the uploaded image is analysis-only design guidance. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the structure into original TRA ads. Its raw pixels and any person in it must never reach final image generation.`
+        : 'Layout-reference mode: the uploaded external image has already been reduced to a validated structured LayoutBlueprint. Use only that design mechanism plus approved TRA context. Its raw pixels and any person identity in it must never reach final image generation.'
       : parsed.data.sourceAssets.some((item) => item.role === 'TRA_VIDEO')
         ? 'Video-source boundary mode: preserve the uploaded TRA video provenance, but this batch does not extract or pass video frames into static image generation. Create a non-human concept.'
         : 'No-image mode: create original TRA ads from the user direction.';
@@ -378,7 +416,7 @@ export async function POST(request: Request) {
                 }
               : uploadedReferenceImageId
                 ? { referenceImageId: uploadedReferenceImageId }
-              : {}),
+                : {}),
           };
         })
       );
@@ -391,6 +429,7 @@ export async function POST(request: Request) {
       creatives,
       creativePlan,
       analysis,
+      layoutBlueprint,
       sourceAssets: sourceAssets.map(({ stored: _stored, ...sourceAsset }) =>
         sourceAsset
       ),
