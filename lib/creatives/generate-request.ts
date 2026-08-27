@@ -3,6 +3,10 @@ import {
   type CreativeCategoryId,
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
+import {
+  normalizeRuntimeCompanyProfile,
+  type RuntimeCompanyProfileSnapshot,
+} from '@/lib/company/creative-context';
 import type { CreativeSourceSelection } from '@/lib/media/types';
 import { parseCreativeSourceSelection } from '@/lib/media/source-contract';
 
@@ -11,6 +15,7 @@ export type GenerateCreativeRequest = {
   brandLogoMediaId?: string;
   brandColors?: string[];
   brandFontNames?: string[];
+  companyProfile?: RuntimeCompanyProfileSnapshot;
   context: string;
   variationCount: number;
 };
@@ -30,8 +35,6 @@ export type PlannedCreative = {
   secondaryFormat?: CreativeFormatId;
 };
 
-// Compatibility alias for the existing AI provider contract while the app
-// transitions from format-led planning to category-led planning.
 export type PlannedCreativeFormat = PlannedCreative;
 
 const FORMAT_BY_CATEGORY: Record<CreativeCategoryId, CreativeFormatId> = {
@@ -89,6 +92,7 @@ export function validateGenerateCreativeRequest(input: unknown):
   const brandFontNames = stringArray(body.brandFontNames, 6).map((name) =>
     name.slice(0, 500)
   );
+  const companyProfile = normalizeRuntimeCompanyProfile(body.companyProfile);
   const context = typeof body.context === 'string' ? body.context.trim() : '';
   const variationCount =
     typeof body.variationCount === 'number'
@@ -97,6 +101,15 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   if (body.sourceAssets !== undefined && !Array.isArray(body.sourceAssets)) {
     return { success: false, error: 'sourceAssets must be an array' };
+  }
+
+  if (
+    body.companyProfile !== undefined &&
+    (!body.companyProfile ||
+      typeof body.companyProfile !== 'object' ||
+      Array.isArray(body.companyProfile))
+  ) {
+    return { success: false, error: 'companyProfile must be an object' };
   }
 
   const sourceAssets: CreativeSourceSelection[] = [];
@@ -143,6 +156,7 @@ export function validateGenerateCreativeRequest(input: unknown):
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),
+      ...(companyProfile ? { companyProfile } : {}),
       context,
       variationCount,
     },
