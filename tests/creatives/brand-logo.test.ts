@@ -166,6 +166,25 @@ describe('applyBrandLogoToCreatives', () => {
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:logo');
   });
 
+  it('does not rewrite an external media-like URL that fails the stored-media contract', async () => {
+    const externalLogoUrl =
+      'https://external.example/api/media/files/not-approved';
+    fetchMock
+      .mockResolvedValueOnce(imageResponse())
+      .mockResolvedValueOnce(imageResponse())
+      .mockResolvedValueOnce(jsonResponse({ direct: false }))
+      .mockResolvedValueOnce(jsonResponse(uploadedMedia, true, 201));
+
+    await expect(
+      applyBrandLogoToCreatives([creative], externalLogoUrl)
+    ).resolves.toEqual([{ ...creative, image: uploadedMedia }]);
+
+    expect(fetchMock.mock.calls.slice(0, 2).map(([url]) => url)).toEqual([
+      `/api/media/files/${generatedFileName}`,
+      externalLogoUrl,
+    ]);
+  });
+
   it('falls back to server upload only when the browser direct PUT rejects', async () => {
     fetchMock
       .mockResolvedValueOnce(imageResponse())

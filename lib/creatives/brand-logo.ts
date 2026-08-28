@@ -122,8 +122,9 @@ const uploadMediaFile = async (file: File): Promise<MediaAsset> => {
 const toSameOriginMediaUrl = (url: string) => {
   try {
     const resolved = new URL(url, window.location.origin);
-    if (resolved.pathname.startsWith('/api/media/files/')) {
-      return `${resolved.pathname}${resolved.search}`;
+    const mediaPath = `${resolved.pathname}${resolved.search}`;
+    if (STORED_MEDIA_URL.exec(mediaPath)?.[0] === mediaPath) {
+      return mediaPath;
     }
   } catch {
     // Keep non-media relative URLs unchanged.
