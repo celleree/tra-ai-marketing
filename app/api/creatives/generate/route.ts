@@ -7,6 +7,10 @@ import {
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
 import {
+  analyzeApprovedTraVideoFrames,
+  generateApprovedTraVideoFrameCreativeImage,
+} from '@/lib/ai/video-frame-generation';
+import {
   selectBestReferenceCreatives,
   type ReferenceSelectionCandidate,
   type SelectedReferenceCreative,
@@ -38,6 +42,9 @@ import {
 import { isUsableApprovedHumanSource } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
+import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
+import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
+import type { ApprovedTraVideoFrameSet } from '@/lib/video/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -245,6 +252,24 @@ export async function POST(request: Request) {
         ? generationSourceAsset.stored
         : null;
     const providerImageSource = findEligibleProviderImageSource(sourceAssets);
+    const traVideoSource = sourceAssets.find(
+      (sourceAsset) => sourceAsset.role === 'TRA_VIDEO'
+    );
+    let videoFrameSet: ApprovedTraVideoFrameSet | null = null;
+
+    if (traVideoSource && !providerImageSource) {
+      try {
+        videoFrameSet = await getApprovedTraVideoFrames(traVideoSource);
+      } catch (error) {
+        if (error instanceof TraVideoProcessingError) {
+          return NextResponse.json(
+            { error: error.message },
+            { status: error.status }
+          );
+        }
+        throw error;
+      }
+    }
 
     const brandLogo = parsed.data.brandLogoMediaId
       ? await storage.readImageById(parsed.data.brandLogoMediaId)
@@ -295,6 +320,12 @@ export async function POST(request: Request) {
       librarySelections = new Map(
         selectedReferences.map((selection, index) => [index + 1, selection])
       );
+    } else if (videoFrameSet) {
+      analysis = await analyzeApprovedTraVideoFrames({
+        frames: videoFrameSet.frames,
+        context: parsed.data.context,
+      });
+      creativePlan = buildCreativePlan(parsed.data);
     } else {
       creativePlan = buildCreativePlan(parsed.data);
       analysis = buildPromptOnlyAnalysis(parsed.data.context, creativePlan);
@@ -318,20 +349,26 @@ export async function POST(request: Request) {
       ? generationSourceAsset?.role === 'TRA_REFERENCE'
         ? 'TRA ad mode: AI has selected one individual library reference for each requested creative. Each output must be a separate TRA adaptation of its own single reference. Never combine, merge, collage, or borrow visual systems from multiple references. The validated uploaded TRA reference may be the only raw image attached to final generation; library references are analysis-only.'
         : 'Layout-reference mode: the uploaded external image has already been reduced to a validated structured LayoutBlueprint. Use only that design mechanism plus approved TRA context. Its raw pixels and any person identity in it must never reach final image generation.'
-      : parsed.data.sourceAssets.some((item) => item.role === 'TRA_VIDEO')
-        ? 'Video-source boundary mode: preserve the uploaded TRA video provenance, but this batch does not extract or pass video frames into static image generation. Create a non-human concept.'
+      : videoFrameSet
+        ? `Video-source mode: the raw TRA video ${videoFrameSet.source.media.id} remains server-side and is never attached to the image provider. A bounded set of server-extracted approved still frames is available as TRA human/content source pixels. Do not treat old video framing, captions, or graphics as a required static-ad layout.`
         : 'No-image mode: create original TRA ads from the user direction.';
 
-    const sourceSuppliedToImageGeneration = Boolean(providerImageSource);
-    const hasUsableApprovedHumanSource = providerImageSource
+    const approvedHumanSource =
+      providerImageSource || videoFrameSet?.source || null;
+    const sourceSuppliedToImageGeneration = Boolean(
+      providerImageSource || videoFrameSet?.frames.length
+    );
+    const hasUsableApprovedHumanSource = approvedHumanSource
       ? isUsableApprovedHumanSource(
-          providerImageSource,
+          approvedHumanSource,
           sourceSuppliedToImageGeneration
         )
       : false;
-    const humanSourceDirection = hasUsableApprovedHumanSource
-      ? 'Use only the attached approved TRA human identity when depicting a person.'
-      : 'Current generation boundary: no approved TRA human source is attached to final image generation. Do not depict any person, face, spokesperson, body, or human figure; use a non-human visual concept. Layout-reference and library-reference people are never approved human sources.';
+    const humanSourceDirection = videoFrameSet
+      ? `Use only a person visibly grounded in the attached approved TRA video frames from source ${videoFrameSet.source.media.id}. Preserve that visible identity; do not invent, replace, blend, or add another person. Layout-reference and library-reference people remain forbidden human sources.`
+      : hasUsableApprovedHumanSource
+        ? 'Use only the attached approved TRA human identity when depicting a person.'
+        : 'Current generation boundary: no approved TRA human source is attached to final image generation. Do not depict any person, face, spokesperson, body, or human figure; use a non-human visual concept. Layout-reference and library-reference people are never approved human sources.';
 
     const colorDirection = parsed.data.brandColors?.length
       ? `Approved TRA brand palette from the uploaded logo: ${parsed.data.brandColors.join(', ')}. Use these as the primary design colors. Neutral black, white, and gray may be used for legibility, but do not substitute an unrelated dominant palette.`
@@ -345,7 +382,9 @@ export async function POST(request: Request) {
 
     const analysisDirection = source
       ? `Analysis-only source guidance (raw layout/library pixels are not attached unless the source is the validated TRA reference explicitly allowed at the final provider boundary):\nSummary: ${analysis.summary}\nVisual structure: ${analysis.visualStructure}\nStyle notes: ${analysis.styleNotes}\nPreserve at a high level: ${analysis.preserve.join('; ') || 'none'}\nAvoid: ${analysis.avoid.join('; ') || 'none'}`
-      : '';
+      : videoFrameSet
+        ? `Approved TRA video-frame source analysis:\nSummary: ${analysis.summary}\nVisible source structure/context: ${analysis.visualStructure}\nStyle notes: ${analysis.styleNotes}\nPreserve approved TRA cues: ${analysis.preserve.join('; ') || 'none'}\nAvoid: ${analysis.avoid.join('; ') || 'none'}`
+        : '';
 
     const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as separate analysis-only creative guidance. Do not blend references.`;
 
@@ -369,19 +408,27 @@ export async function POST(request: Request) {
           const singleReferenceContract = selectedReference
             ? `\n\nANALYSIS-ONLY SINGLE-REFERENCE GUIDANCE:\n- Selected external reference: ${selectedReference.item.id} (${CREATIVE_CATEGORY_LABELS[selectedReference.item.angle]}).\n- Its raw pixels are NOT attached to final generation.\n- Use only its category and AI selection reason as high-level direction; do not claim or recreate an exact unseen blueprint.\n- Do NOT combine it with another ad style, another reference, a collage, extra panels, unrelated decorative systems, or multiple competing concepts.\n- Preserve one dominant visual idea. Simpler is better.\n- Do not copy third-party identity or unsupported claims.\n- AI selection reason: ${selectedReference.selectionReason}`
             : '';
-          const itemContext = `${parsed.data.context}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}`;
+          const itemContext = `${parsed.data.context}${videoFrameSet ? `\n\n${modeDirection}` : ''}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}`;
           let imageBuffer: Buffer;
 
-          if (!providerImageSource) {
-            imageBuffer = await generatePromptOnlyCreativeImage({
+          if (providerImageSource) {
+            imageBuffer = await generateApprovedTraReferenceCreativeImage({
+              source: providerImageSource.stored,
+              primaryFormat: item.format,
+              context: itemContext,
+              copy,
+              reserveLogoArea,
+            });
+          } else if (videoFrameSet) {
+            imageBuffer = await generateApprovedTraVideoFrameCreativeImage({
+              frames: videoFrameSet.frames,
               primaryFormat: item.format,
               context: itemContext,
               copy,
               reserveLogoArea,
             });
           } else {
-            imageBuffer = await generateApprovedTraReferenceCreativeImage({
-              source: providerImageSource.stored,
+            imageBuffer = await generatePromptOnlyCreativeImage({
               primaryFormat: item.format,
               context: itemContext,
               copy,
@@ -433,8 +480,24 @@ export async function POST(request: Request) {
       sourceAssets: sourceAssets.map(({ stored: _stored, ...sourceAsset }) =>
         sourceAsset
       ),
-      generationSourceRole: generationSourceAsset?.role || null,
+      generationSourceRole:
+        generationSourceAsset?.role || (videoFrameSet ? 'TRA_VIDEO' : null),
+      providerSourceRole:
+        providerImageSource?.role || (videoFrameSet ? 'TRA_VIDEO' : null),
       usedReferenceImage: Boolean(source),
+      usedApprovedVideoFrames: Boolean(videoFrameSet),
+      approvedVideoFrames: videoFrameSet
+        ? {
+            sourceVideoMediaId: videoFrameSet.source.media.id,
+            sourceVideoFileName: videoFrameSet.source.media.fileName,
+            sourceVideoContentHash: videoFrameSet.sourceVideoContentHash,
+            durationMs: videoFrameSet.durationMs,
+            reused: videoFrameSet.reused,
+            frames: videoFrameSet.frames.map(
+              ({ buffer: _buffer, ...frame }) => frame
+            ),
+          }
+        : null,
       usedBrandLogo: reserveLogoArea,
       usedBrandColors: parsed.data.brandColors?.length || 0,
       usedBrandFonts: parsed.data.brandFontNames?.length || 0,
