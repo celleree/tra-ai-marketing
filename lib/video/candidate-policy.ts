@@ -1,9 +1,12 @@
 import type { VideoFrameCandidatePolicy } from '@/lib/video/candidate-types';
 
+export const HARD_MAX_INTERVAL_CANDIDATES = 360;
+export const HARD_MAX_TOTAL_CANDIDATES = 480;
+
 export const DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY: VideoFrameCandidatePolicy = {
   targetIntervalFps: 3,
-  maxIntervalCandidates: 360,
-  maxTotalCandidates: 480,
+  maxIntervalCandidates: HARD_MAX_INTERVAL_CANDIDATES,
+  maxTotalCandidates: HARD_MAX_TOTAL_CANDIDATES,
   maxWidth: 1280,
   imageFormat: 'jpeg',
   jpegQuality: 85,
@@ -18,8 +21,18 @@ export const validateVideoFrameCandidatePolicy = (
   if (!Number.isInteger(policy.maxIntervalCandidates) || policy.maxIntervalCandidates < 1) {
     throw new Error('Video candidate maxIntervalCandidates must be a positive integer.');
   }
+  if (policy.maxIntervalCandidates > HARD_MAX_INTERVAL_CANDIDATES) {
+    throw new Error(
+      `Video candidate maxIntervalCandidates must not exceed the hard system limit of ${HARD_MAX_INTERVAL_CANDIDATES}.`
+    );
+  }
   if (!Number.isInteger(policy.maxTotalCandidates) || policy.maxTotalCandidates < 1) {
     throw new Error('Video candidate maxTotalCandidates must be a positive integer.');
+  }
+  if (policy.maxTotalCandidates > HARD_MAX_TOTAL_CANDIDATES) {
+    throw new Error(
+      `Video candidate maxTotalCandidates must not exceed the hard system limit of ${HARD_MAX_TOTAL_CANDIDATES}.`
+    );
   }
   if (policy.maxTotalCandidates < policy.maxIntervalCandidates) {
     throw new Error('Video candidate maxTotalCandidates must be at least maxIntervalCandidates.');
