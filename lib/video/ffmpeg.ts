@@ -42,7 +42,7 @@ const getFfmpegPath = () =>
 
 const runFfmpeg = async (args: string[]) =>
   new Promise<{ stdout: Buffer; stderr: string }>((resolve, reject) => {
-    const child = spawn(getFfmpegPath(), args, {
+    const child = spawn(/* turbopackIgnore: true */ getFfmpegPath(), args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
