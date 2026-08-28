@@ -2,6 +2,11 @@ export type VideoFrameCandidateExtractionReason =
   | 'INTERVAL'
   | 'SCENE_CHANGE';
 
+export type NonEmptyVideoFrameCandidateExtractionReasons = readonly [
+  VideoFrameCandidateExtractionReason,
+  ...VideoFrameCandidateExtractionReason[],
+];
+
 export interface VideoFrameCandidatePolicy {
   targetIntervalFps: number;
   maxIntervalCandidates: number;
@@ -23,7 +28,7 @@ export interface TemporaryVideoFrameCandidate {
   height: number;
   byteLength: number;
   frameSha256: string;
-  extractionReasons: VideoFrameCandidateExtractionReason[];
+  extractionReasons: NonEmptyVideoFrameCandidateExtractionReasons;
   temporaryPath: string;
   lifecycle: 'TEMPORARY';
   providerEligible: false;
