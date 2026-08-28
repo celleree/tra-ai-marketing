@@ -11,6 +11,7 @@ import { ReferenceLibrary } from '@/components/reference-library/reference-libra
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
+import { parseGenerationResponse } from '@/lib/creatives/parse-generation-response';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { consumeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
 import type {
@@ -138,13 +139,21 @@ export function CreativeGenerator() {
           variationCount,
         }),
       });
-      const payload = await response.json();
+      const payload = await parseGenerationResponse(response);
 
       if (!response.ok) {
-        throw new Error(payload.error || 'Creative generation failed.');
+        throw new Error(
+          payload.error || `Creative generation failed (HTTP ${response.status}).`
+        );
       }
 
-      let nextCreatives = (payload.creatives || []) as GeneratedCreative[];
+      if (!Array.isArray(payload.creatives)) {
+        throw new Error(
+          payload.error || 'Creative generation returned an invalid response.'
+        );
+      }
+
+      let nextCreatives = payload.creatives;
       if (brand.logo && nextCreatives.length) {
         nextCreatives = await applyBrandLogoToCreatives(
           nextCreatives,
