@@ -5,7 +5,10 @@ import {
 import { CREATIVE_FORMAT_LABELS, type CreativeFormatId } from '@/lib/creative-formats';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { CreativeCopy } from '@/lib/creatives/generated';
-import { detectImageMimeType } from '@/lib/media/storage';
+import {
+  getVideoFrameIntegrity,
+  isStructurallyValidPng,
+} from '@/lib/video/frame-cache';
 import {
   MAX_PROVIDER_VIDEO_FRAMES,
   MAX_REPRESENTATIVE_VIDEO_FRAMES,
@@ -35,12 +38,15 @@ const validateApprovedFrames = (frames: ApprovedTraVideoFrame[]) => {
   }
   const first = frames[0];
   for (const [index, frame] of frames.entries()) {
+    const integrity = getVideoFrameIntegrity(frame.buffer);
     if (
       frame.frameIndex !== index ||
       frame.sourceRole !== 'TRA_VIDEO' ||
       frame.approvedHumanSource !== true ||
       frame.mimeType !== 'image/png' ||
-      detectImageMimeType(frame.buffer) !== 'image/png' ||
+      !isStructurallyValidPng(frame.buffer) ||
+      frame.frameSha256 !== integrity.frameSha256 ||
+      frame.byteLength !== integrity.byteLength ||
       frame.sourceVideoMediaId !== first.sourceVideoMediaId ||
       frame.sourceVideoFileName !== first.sourceVideoFileName ||
       frame.sourceVideoContentHash !== first.sourceVideoContentHash ||
