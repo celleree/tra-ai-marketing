@@ -1,6 +1,10 @@
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { R2VideoFrameCache, getVideoFrameCacheKey } from '@/lib/video/frame-cache';
+import {
+  R2VideoFrameCache,
+  getVideoFrameCacheKey,
+  getVideoFrameIntegrity,
+} from '@/lib/video/frame-cache';
 import type { VideoFrameManifest } from '@/lib/video/types';
 
 const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
@@ -9,19 +13,20 @@ vi.mock('@aws-sdk/client-s3', async (importOriginal) => {
   return { ...actual, S3Client: vi.fn(function MockS3Client() { return { send: sendMock }; }) };
 });
 
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const MEDIA_ID = `media_${'b'.repeat(32)}`;
 const HASH = 'c'.repeat(64);
 const KEY = getVideoFrameCacheKey(MEDIA_ID, HASH, 0);
+const INTEGRITY = getVideoFrameIntegrity(PNG);
 const MANIFEST: VideoFrameManifest = {
-  version: 1,
+  version: 2,
   sourceRole: 'TRA_VIDEO',
   sourceVideoMediaId: MEDIA_ID,
   sourceVideoFileName: `${MEDIA_ID}.mp4`,
   sourceVideoMimeType: 'video/mp4',
   sourceVideoContentHash: HASH,
   durationMs: 1_000,
-  frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', cacheKey: KEY }],
+  frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', cacheKey: KEY, ...INTEGRITY }],
 };
 const makeCache = () => new R2VideoFrameCache({ accountId: 'account-id', accessKeyId: 'access-key-id', secretAccessKey: 'secret-access-key', bucketName: 'bucket-name' });
 
@@ -36,7 +41,7 @@ describe('R2 derived TRA video frame cache', () => {
     expect(command.input).toMatchObject({ Bucket: 'bucket-name', Key: KEY, ContentType: 'image/png', Body: PNG });
   });
 
-  it('stores source provenance in the cache manifest', async () => {
+  it('stores source provenance plus per-frame hash and byte length in the cache manifest', async () => {
     sendMock.mockResolvedValueOnce({});
     await makeCache().writeManifest(MANIFEST);
     const command = sendMock.mock.calls[0][0] as PutObjectCommand;
@@ -44,7 +49,7 @@ describe('R2 derived TRA video frame cache', () => {
     expect(JSON.parse(Buffer.from(command.input.Body as Buffer).toString('utf8'))).toEqual(MANIFEST);
   });
 
-  it('reads and validates cached manifest and PNG bytes', async () => {
+  it('reads and validates cached manifest and structurally valid PNG bytes', async () => {
     sendMock
       .mockResolvedValueOnce({ Body: { transformToByteArray: vi.fn().mockResolvedValue(Buffer.from(JSON.stringify(MANIFEST))) } })
       .mockResolvedValueOnce({ Body: { transformToByteArray: vi.fn().mockResolvedValue(PNG) } });
@@ -52,5 +57,21 @@ describe('R2 derived TRA video frame cache', () => {
     await expect(cache.readManifest(MEDIA_ID, HASH)).resolves.toEqual(MANIFEST);
     await expect(cache.readFrame(KEY)).resolves.toEqual(PNG);
     expect(sendMock.mock.calls[0][0]).toBeInstanceOf(GetObjectCommand);
+  });
+
+  it('rejects a truncated PNG even when the PNG signature is intact', async () => {
+    const truncated = PNG.subarray(0, 16);
+    sendMock.mockResolvedValueOnce({ Body: { transformToByteArray: vi.fn().mockResolvedValue(truncated) } });
+    await expect(makeCache().readFrame(KEY)).resolves.toBeNull();
+  });
+
+  it('rejects a manifest whose cached representative timestamps do not match the deterministic selection', async () => {
+    const stale = {
+      ...MANIFEST,
+      durationMs: 4_000,
+      frames: [{ ...MANIFEST.frames[0], timestampMs: 100 }],
+    };
+    sendMock.mockResolvedValueOnce({ Body: { transformToByteArray: vi.fn().mockResolvedValue(Buffer.from(JSON.stringify(stale))) } });
+    await expect(makeCache().readManifest(MEDIA_ID, HASH)).resolves.toBeNull();
   });
 });
