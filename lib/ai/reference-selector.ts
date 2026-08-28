@@ -4,6 +4,8 @@ import { validateStoredMediaImage } from '@/lib/media/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const MIN_REFERENCE_CANDIDATES = 8;
+const REFERENCE_CANDIDATES_PER_OUTPUT = 4;
 const MAX_REFERENCE_CANDIDATES = 40;
 
 export interface ReferenceSelectionCandidate {
@@ -71,8 +73,11 @@ const referenceImageDataUrl = async (candidate: ReferenceSelectionCandidate) => 
 const newestFirst = (a: ReferenceSelectionCandidate, b: ReferenceSelectionCandidate) =>
   new Date(b.item.addedAt).getTime() - new Date(a.item.addedAt).getTime();
 
-const buildCandidatePool = (candidates: ReferenceSelectionCandidate[]) => {
-  if (candidates.length <= MAX_REFERENCE_CANDIDATES) return [...candidates];
+const buildCandidatePool = (
+  candidates: ReferenceSelectionCandidate[],
+  candidateBudget: number
+) => {
+  if (candidates.length <= candidateBudget) return [...candidates];
 
   const byAngle = new Map<string, ReferenceSelectionCandidate[]>();
   for (const candidate of candidates) {
@@ -86,14 +91,14 @@ const buildCandidatePool = (candidates: ReferenceSelectionCandidate[]) => {
   const pool: ReferenceSelectionCandidate[] = [];
   let round = 0;
 
-  while (pool.length < MAX_REFERENCE_CANDIDATES) {
+  while (pool.length < candidateBudget) {
     let added = false;
     for (const group of groups) {
       const candidate = group[round];
       if (!candidate) continue;
       pool.push(candidate);
       added = true;
-      if (pool.length >= MAX_REFERENCE_CANDIDATES) break;
+      if (pool.length >= candidateBudget) break;
     }
     if (!added) break;
     round += 1;
@@ -136,7 +141,14 @@ export async function selectBestReferenceCreatives(args: {
     );
   }
 
-  const pool = buildCandidatePool(args.candidates);
+  const candidateBudget = Math.min(
+    MAX_REFERENCE_CANDIDATES,
+    Math.max(
+      MIN_REFERENCE_CANDIDATES,
+      args.requestedCount * REFERENCE_CANDIDATES_PER_OUTPUT
+    )
+  );
+  const pool = buildCandidatePool(args.candidates, candidateBudget);
   if (pool.length < args.requestedCount) {
     throw new Error('There are not enough reference images to create this batch.');
   }
