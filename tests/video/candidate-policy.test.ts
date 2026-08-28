@@ -1,12 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import {
   DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+  HARD_MAX_INTERVAL_CANDIDATES,
+  HARD_MAX_TOTAL_CANDIDATES,
   estimateIntervalCandidateCount,
   getEffectiveIntervalFps,
   validateVideoFrameCandidatePolicy,
 } from '@/lib/video/candidate-policy';
 import type {
   TemporaryVideoFrameCandidate,
+  VideoFrameCandidateExtractionReason,
   VideoFrameCandidatePolicy,
 } from '@/lib/video/candidate-types';
 
@@ -39,6 +43,23 @@ describe('video frame candidate policy', () => {
     expect(() => getEffectiveIntervalFps(Number.NaN)).toThrow('Video duration must be a positive number.');
   });
 
+  it('enforces non-overridable system candidate ceilings', () => {
+    expect(HARD_MAX_INTERVAL_CANDIDATES).toBe(360);
+    expect(HARD_MAX_TOTAL_CANDIDATES).toBe(480);
+
+    expect(() =>
+      validateVideoFrameCandidatePolicy(
+        makePolicy({ maxIntervalCandidates: HARD_MAX_INTERVAL_CANDIDATES + 1 })
+      )
+    ).toThrow('hard system limit');
+
+    expect(() =>
+      validateVideoFrameCandidatePolicy(
+        makePolicy({ maxTotalCandidates: HARD_MAX_TOTAL_CANDIDATES + 1 })
+      )
+    ).toThrow('hard system limit');
+  });
+
   it.each([
     makePolicy({ targetIntervalFps: 0 }),
     makePolicy({ targetIntervalFps: Number.NaN }),
@@ -54,7 +75,19 @@ describe('video frame candidate policy', () => {
     expect(() => validateVideoFrameCandidatePolicy(policy)).toThrow();
   });
 
-  it('allows one candidate to record both interval and scene-change provenance', () => {
+  it('narrows candidate extraction inputs to hydrated MP4 video assets', () => {
+    expectTypeOf<HydratedTraVideoSource['role']>().toEqualTypeOf<'TRA_VIDEO'>();
+    expectTypeOf<HydratedTraVideoSource['media']['mediaType']>().toEqualTypeOf<'VIDEO'>();
+    expectTypeOf<HydratedTraVideoSource['media']['mimeType']>().toEqualTypeOf<'video/mp4'>();
+    expectTypeOf<HydratedTraVideoSource['stored']['mediaType']>().toEqualTypeOf<'VIDEO'>();
+    expectTypeOf<HydratedTraVideoSource['stored']['mimeType']>().toEqualTypeOf<'video/mp4'>();
+  });
+
+  it('requires at least one extraction reason and allows combined provenance', () => {
+    expectTypeOf<TemporaryVideoFrameCandidate['extractionReasons']>().toEqualTypeOf<
+      readonly [VideoFrameCandidateExtractionReason, ...VideoFrameCandidateExtractionReason[]]
+    >();
+
     const candidate: TemporaryVideoFrameCandidate = {
       candidateIndex: 12,
       timestampMs: 13_333,
