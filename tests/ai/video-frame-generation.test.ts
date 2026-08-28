@@ -43,6 +43,7 @@ describe('approved TRA video-frame provider boundary', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/images/edits');
     const formData = init.body as FormData;
+    expect(formData.get('quality')).toBe('high');
     expect(formData.getAll('image[]')).toHaveLength(3);
     expect(formData.getAll('image[]').every((image) => image instanceof Blob && image.type === 'image/png')).toBe(true);
     expect(formData.get('prompt')).toContain('Raw video is NOT attached');

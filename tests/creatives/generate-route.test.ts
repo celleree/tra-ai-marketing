@@ -283,7 +283,11 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, options] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
       expect(url).toBe('https://api.openai.com/v1/images/generations');
-      const body = JSON.parse(String(options?.body)) as { prompt?: string };
+      const body = JSON.parse(String(options?.body)) as {
+        prompt?: string;
+        quality?: string;
+      };
+      expect(body.quality).toBe('high');
       expect(body.prompt).toContain('APPROVED TRA COMPANY CONTEXT');
       expect(body.prompt).toContain('STRUCTURED LAYOUT BLUEPRINT');
       expect(body.prompt).toContain('replace human placeholder geometry with a non-human');

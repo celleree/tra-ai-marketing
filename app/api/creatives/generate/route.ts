@@ -164,7 +164,7 @@ TRA guardrails:
       model,
       prompt,
       size: '1024x1024',
-      quality: 'medium',
+      quality: 'high',
       output_format: 'png',
     }),
   });

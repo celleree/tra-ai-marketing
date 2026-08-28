@@ -140,7 +140,7 @@ export async function generateApprovedTraVideoFrameCreativeImage(args: {
   formData.set('model', process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2');
   formData.set('prompt', prompt);
   formData.set('size', '1024x1024');
-  formData.set('quality', 'medium');
+  formData.set('quality', 'high');
   formData.set('output_format', 'png');
   for (const frame of frames) {
     formData.append('image[]', new Blob([new Uint8Array(frame.buffer)], { type: 'image/png' }), `approved-tra-video-${frame.sourceVideoMediaId}-${frame.timestampMs}ms.png`);
