@@ -8,6 +8,8 @@ export interface ApprovedTraVideoFrame {
   timestampMs: number;
   mimeType: 'image/png';
   buffer: Buffer;
+  frameSha256: string;
+  byteLength: number;
   sourceRole: 'TRA_VIDEO';
   sourceVideoMediaId: string;
   sourceVideoFileName: string;
@@ -29,10 +31,12 @@ export interface VideoFrameManifestFrame {
   timestampMs: number;
   mimeType: 'image/png';
   cacheKey: string;
+  frameSha256: string;
+  byteLength: number;
 }
 
 export interface VideoFrameManifest {
-  version: 1;
+  version: 2;
   sourceRole: 'TRA_VIDEO';
   sourceVideoMediaId: string;
   sourceVideoFileName: string;
