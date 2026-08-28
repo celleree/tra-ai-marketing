@@ -32,18 +32,70 @@ Incoming ChatGPT instructions may use this structure:
 - `INSTRUCTIONS`: the requested next actions.
 - `RETURN`: the required response fields.
 
-For plans, implementation results, reviews, or blockers, Codex should default to this concise return structure unless the task requires another format:
+For plans, implementation results, reviews, investigations, or blockers, Codex should always return this compact, copy/paste-ready handoff by default, without requiring the user to request the format. Use `N/A` for a SHA when no changes were made and `NONE` where indicated:
 
-- `STATUS`: complete, blocked, or approval needed.
-- `BRANCH`: current branch and relevant commit/SHA when useful.
-- `FILES INSPECTED/CHANGED`: only the files materially involved.
-- `IMPLEMENTATION`: concise description of what was found or changed.
-- `VERIFICATION`: exact checks run and results.
-- `BLOCKERS`: exact blocker, or `none`.
-- `DECISIONS NEEDED`: exact unresolved decision, or `none`.
-- `NEXT RECOMMENDED ACTION`: one concrete next step.
+STATUS:
+COMPLETE | PARTIAL | BLOCKED | INVESTIGATION COMPLETE | APPROVAL NEEDED
 
-Do not repeat repository context already documented in canonical sources. Do not include play-by-play reasoning or raw transcripts. If approval is required for a command or write, ask concisely and include the exact command/action being requested.
+TASK:
+[one sentence]
+
+BRANCH:
+[current branch]
+
+BASE STAGING SHA:
+[staging SHA this work started from, when relevant]
+
+HEAD SHA:
+[current/final SHA, or N/A if no changes]
+
+FILES INSPECTED/CHANGED:
+
+- only materially relevant files
+- or NONE
+
+IMPLEMENTATION / FINDINGS:
+
+- concise findings or changes
+- no play-by-play reasoning
+
+VERIFICATION:
+
+- exact check: PASS | FAIL | NOT RUN
+
+BLOCKERS:
+
+- exact blocker
+- or NONE
+
+DECISIONS NEEDED:
+
+- exact unresolved decision
+- or NONE
+
+SHARED CONTRACTS / AREAS AFFECTED:
+
+- shared schema/API/storage/central files
+- or NONE
+
+RISKS / CONFLICTS:
+
+- relevant merge or regression risk
+- or NONE
+
+REMAINING:
+
+- unfinished work
+- or NONE
+
+NEXT RECOMMENDED ACTION:
+[one concrete next step]
+
+PARALLEL-SAFE NEXT WORK:
+YES | NO
+Reason: [one sentence]
+
+Final handoffs should be concise and directly pasteable into ChatGPT. Do not include raw command logs unless needed to explain a failure, long diffs unless specifically requested, chain-of-thought, or play-by-play reasoning. Do not repeat repository context already available in canonical sources. If approval is required for a command or write, ask concisely and include the exact command/action being requested.
 
 ## Sources of truth
 
