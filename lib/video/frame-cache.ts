@@ -3,9 +3,10 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
-import { detectImageMimeType } from '@/lib/media/storage';
+import { selectRepresentativeVideoTimestamps } from '@/lib/video/representative-timestamps';
 import {
   MAX_REPRESENTATIVE_VIDEO_FRAMES,
   type VideoFrameManifest,
@@ -16,6 +17,7 @@ const MANIFEST_FILE = 'manifest.json';
 const HEX_64 = /^[a-f0-9]{64}$/;
 const MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const FRAME_KEY = /^derived\/video-frames\/media_[a-f0-9]{32}\/[a-f0-9]{64}\/frame-\d{3}\.png$/;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export interface VideoFrameCache {
   readManifest(
@@ -53,6 +55,69 @@ const getManifestKey = (
   sourceVideoContentHash: string
 ) => `${getVideoFrameCachePrefix(sourceVideoMediaId, sourceVideoContentHash)}/${MANIFEST_FILE}`;
 
+const crc32 = (buffer: Buffer) => {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+};
+
+export const getVideoFrameIntegrity = (buffer: Buffer) => ({
+  frameSha256: createHash('sha256').update(buffer).digest('hex'),
+  byteLength: buffer.length,
+});
+
+export const isStructurallyValidPng = (buffer: Buffer) => {
+  if (buffer.length < 57 || !buffer.subarray(0, 8).equals(PNG_SIGNATURE)) return false;
+
+  let offset = 8;
+  let chunkIndex = 0;
+  let hasIdat = false;
+
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const typeStart = offset + 4;
+    const dataStart = typeStart + 4;
+    const dataEnd = dataStart + length;
+    const crcOffset = dataEnd;
+    const nextOffset = crcOffset + 4;
+    if (dataEnd < dataStart || nextOffset > buffer.length) return false;
+
+    const typeBuffer = buffer.subarray(typeStart, dataStart);
+    const type = typeBuffer.toString('ascii');
+    if (!/^[A-Za-z]{4}$/.test(type)) return false;
+
+    const expectedCrc = buffer.readUInt32BE(crcOffset);
+    const actualCrc = crc32(buffer.subarray(typeStart, dataEnd));
+    if (actualCrc !== expectedCrc) return false;
+
+    if (chunkIndex === 0) {
+      if (type !== 'IHDR' || length !== 13) return false;
+      const width = buffer.readUInt32BE(dataStart);
+      const height = buffer.readUInt32BE(dataStart + 4);
+      if (width < 1 || height < 1) return false;
+    }
+
+    if (type === 'IDAT') {
+      if (length < 1) return false;
+      hasIdat = true;
+    }
+
+    if (type === 'IEND') {
+      return length === 0 && hasIdat && nextOffset === buffer.length;
+    }
+
+    offset = nextOffset;
+    chunkIndex += 1;
+  }
+
+  return false;
+};
+
 const isValidManifest = (
   value: unknown,
   sourceVideoMediaId: string,
@@ -61,7 +126,7 @@ const isValidManifest = (
   if (!value || typeof value !== 'object') return false;
   const manifest = value as Partial<VideoFrameManifest>;
   if (
-    manifest.version !== 1 ||
+    manifest.version !== 2 ||
     manifest.sourceRole !== 'TRA_VIDEO' ||
     manifest.sourceVideoMediaId !== sourceVideoMediaId ||
     manifest.sourceVideoContentHash !== sourceVideoContentHash ||
@@ -70,9 +135,16 @@ const isValidManifest = (
     typeof manifest.durationMs !== 'number' ||
     !Number.isFinite(manifest.durationMs) ||
     manifest.durationMs <= 0 ||
-    !Array.isArray(manifest.frames) ||
-    manifest.frames.length < 1 ||
-    manifest.frames.length > MAX_REPRESENTATIVE_VIDEO_FRAMES
+    !Array.isArray(manifest.frames)
+  ) {
+    return false;
+  }
+
+  const expectedTimestamps = selectRepresentativeVideoTimestamps(manifest.durationMs);
+  if (
+    expectedTimestamps.length < 1 ||
+    expectedTimestamps.length > MAX_REPRESENTATIVE_VIDEO_FRAMES ||
+    manifest.frames.length !== expectedTimestamps.length
   ) {
     return false;
   }
@@ -81,9 +153,7 @@ const isValidManifest = (
     Boolean(
       frame &&
         frame.frameIndex === index &&
-        Number.isInteger(frame.timestampMs) &&
-        frame.timestampMs >= 0 &&
-        frame.timestampMs <= manifest.durationMs! &&
+        frame.timestampMs === expectedTimestamps[index] &&
         frame.mimeType === 'image/png' &&
         typeof frame.cacheKey === 'string' &&
         FRAME_KEY.test(frame.cacheKey) &&
@@ -92,7 +162,11 @@ const isValidManifest = (
             sourceVideoMediaId,
             sourceVideoContentHash,
             index
-          )
+          ) &&
+        typeof frame.frameSha256 === 'string' &&
+        HEX_64.test(frame.frameSha256) &&
+        Number.isInteger(frame.byteLength) &&
+        frame.byteLength > 0
     )
   );
 };
@@ -113,7 +187,7 @@ const parseManifest = (
 };
 
 const validateFrameBuffer = (buffer: Buffer) =>
-  detectImageMimeType(buffer) === 'image/png' ? buffer : null;
+  isStructurallyValidPng(buffer) ? buffer : null;
 
 export class LocalVideoFrameCache implements VideoFrameCache {
   constructor(
