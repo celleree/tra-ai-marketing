@@ -3,9 +3,10 @@ import {
   generateApprovedTraVideoFrameCreativeImage,
   selectProviderVideoFrames,
 } from '@/lib/ai/video-frame-generation';
+import { getVideoFrameIntegrity } from '@/lib/video/frame-cache';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const MEDIA_ID = `media_${'d'.repeat(32)}`;
 const HASH = 'e'.repeat(64);
 const makeFrames = (count = 6): ApprovedTraVideoFrame[] => Array.from({ length: count }, (_, index) => ({
@@ -13,6 +14,7 @@ const makeFrames = (count = 6): ApprovedTraVideoFrame[] => Array.from({ length: 
   timestampMs: index * 1_000,
   mimeType: 'image/png',
   buffer: PNG,
+  ...getVideoFrameIntegrity(PNG),
   sourceRole: 'TRA_VIDEO',
   sourceVideoMediaId: MEDIA_ID,
   sourceVideoFileName: `${MEDIA_ID}.mp4`,
@@ -28,7 +30,7 @@ describe('approved TRA video-frame provider boundary', () => {
     expect(selectProviderVideoFrames(makeFrames()).map((frame) => frame.frameIndex)).toEqual([0, 2, 5]);
   });
 
-  it('sends only approved PNG frame pixels to image editing and never raw MP4 pixels', async () => {
+  it('sends only content-bound approved PNG frame pixels to image editing and never raw MP4 pixels', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
@@ -54,6 +56,16 @@ describe('approved TRA video-frame provider boundary', () => {
     vi.stubGlobal('fetch', fetchMock);
     const frames = makeFrames(1);
     frames[0] = { ...frames[0], sourceRole: 'LAYOUT_REFERENCE' as 'TRA_VIDEO' };
+    await expect(generateApprovedTraVideoFrameCreativeImage({ frames, primaryFormat: 'direct-response', context: 'context', copy: { headline: 'h', primaryText: 'p', description: 'd' } })).rejects.toThrow('Refusing non-TRA or invalid pixels');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a frame whose bytes no longer match its approved integrity provenance', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const frames = makeFrames(1);
+    frames[0] = { ...frames[0], buffer: Buffer.from(PNG.subarray(0, 16)) };
     await expect(generateApprovedTraVideoFrameCreativeImage({ frames, primaryFormat: 'direct-response', context: 'context', copy: { headline: 'h', primaryText: 'p', description: 'd' } })).rejects.toThrow('Refusing non-TRA or invalid pixels');
     expect(fetchMock).not.toHaveBeenCalled();
   });
