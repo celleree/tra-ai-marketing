@@ -1,21 +1,25 @@
 import { createHash } from 'node:crypto';
 import type { HydratedCreativeSourceAsset } from '@/lib/media/source-hydration';
-import { detectImageMimeType } from '@/lib/media/storage';
 import {
   getVideoFrameCache,
   getVideoFrameCacheKey,
+  getVideoFrameIntegrity,
+  isStructurallyValidPng,
   type VideoFrameCache,
 } from '@/lib/video/frame-cache';
 import {
   FfmpegTraVideoProcessor,
   type TraVideoProcessor,
 } from '@/lib/video/ffmpeg';
+import { selectRepresentativeVideoTimestamps } from '@/lib/video/representative-timestamps';
 import {
   MAX_REPRESENTATIVE_VIDEO_FRAMES,
   type ApprovedTraVideoFrame,
   type ApprovedTraVideoFrameSet,
   type VideoFrameManifest,
 } from '@/lib/video/types';
+
+export { selectRepresentativeVideoTimestamps } from '@/lib/video/representative-timestamps';
 
 type HydratedTraVideoSource = HydratedCreativeSourceAsset & {
   role: 'TRA_VIDEO';
@@ -30,26 +34,6 @@ const isHydratedTraVideoSource = (
   source.stored.mediaType === 'VIDEO' &&
   source.stored.mimeType === 'video/mp4';
 
-export const selectRepresentativeVideoTimestamps = (durationMs: number) => {
-  if (!Number.isFinite(durationMs) || durationMs <= 0) return [];
-
-  const fractions =
-    durationMs < 1_500
-      ? [0]
-      : durationMs < 5_000
-        ? [0, 0.5, 0.9]
-        : [0, 0.2, 0.4, 0.6, 0.8, 0.95];
-  const latestTimestamp = Math.max(0, Math.floor(durationMs - 50));
-
-  return Array.from(
-    new Set(
-      fractions.map((fraction) =>
-        Math.min(latestTimestamp, Math.max(0, Math.round(durationMs * fraction)))
-      )
-    )
-  ).slice(0, MAX_REPRESENTATIVE_VIDEO_FRAMES);
-};
-
 const getContentHash = (buffer: Buffer) =>
   createHash('sha256').update(buffer).digest('hex');
 
@@ -63,6 +47,8 @@ const frameFromManifest = (
   timestampMs: frame.timestampMs,
   mimeType: 'image/png',
   buffer,
+  frameSha256: frame.frameSha256,
+  byteLength: frame.byteLength,
   sourceRole: 'TRA_VIDEO',
   sourceVideoMediaId: source.media.id,
   sourceVideoFileName: source.media.fileName,
@@ -79,10 +65,28 @@ const readCachedFrames = async (
   const manifest = await cache.readManifest(source.media.id, sourceVideoContentHash);
   if (!manifest || manifest.sourceVideoFileName !== source.media.fileName) return null;
 
+  const expectedTimestamps = selectRepresentativeVideoTimestamps(manifest.durationMs);
+  if (
+    manifest.frames.length !== expectedTimestamps.length ||
+    manifest.frames.some(
+      (frame, index) =>
+        frame.frameIndex !== index || frame.timestampMs !== expectedTimestamps[index]
+    )
+  ) {
+    return null;
+  }
+
   const frames: ApprovedTraVideoFrame[] = [];
   for (const frame of manifest.frames) {
     const buffer = await cache.readFrame(frame.cacheKey);
-    if (!buffer || detectImageMimeType(buffer) !== 'image/png') return null;
+    if (!buffer || !isStructurallyValidPng(buffer)) return null;
+    const integrity = getVideoFrameIntegrity(buffer);
+    if (
+      integrity.frameSha256 !== frame.frameSha256 ||
+      integrity.byteLength !== frame.byteLength
+    ) {
+      return null;
+    }
     frames.push(frameFromManifest(source, sourceVideoContentHash, frame, buffer));
   }
 
@@ -136,7 +140,7 @@ export const getApprovedTraVideoFrames = async (
     const extracted = processed.frames[index];
     if (
       extracted.timestampMs !== expectedTimestamps[index] ||
-      detectImageMimeType(extracted.buffer) !== 'image/png'
+      !isStructurallyValidPng(extracted.buffer)
     ) {
       throw new Error('TRA video preprocessing returned an invalid representative frame.');
     }
@@ -146,12 +150,14 @@ export const getApprovedTraVideoFrames = async (
       sourceVideoContentHash,
       index
     );
+    const integrity = getVideoFrameIntegrity(extracted.buffer);
     await cache.writeFrame(cacheKey, extracted.buffer);
     const manifestFrame = {
       frameIndex: index,
       timestampMs: extracted.timestampMs,
       mimeType: 'image/png' as const,
       cacheKey,
+      ...integrity,
     };
     manifestFrames.push(manifestFrame);
     approvedFrames.push(
@@ -165,7 +171,7 @@ export const getApprovedTraVideoFrames = async (
   }
 
   const manifest: VideoFrameManifest = {
-    version: 1,
+    version: 2,
     sourceRole: 'TRA_VIDEO',
     sourceVideoMediaId: source.media.id,
     sourceVideoFileName: source.media.fileName,
