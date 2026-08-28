@@ -429,7 +429,7 @@ const generateImageEdit = async (
   formData.set('model', model);
   formData.set('prompt', prompt);
   formData.set('size', '1024x1024');
-  formData.set('quality', 'medium');
+  formData.set('quality', 'high');
   formData.set('output_format', 'png');
 
   for (const image of images) {

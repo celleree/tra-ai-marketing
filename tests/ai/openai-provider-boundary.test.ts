@@ -47,6 +47,7 @@ describe('approved TRA final image-provider boundary', () => {
     expect(options?.body).toBeInstanceOf(FormData);
 
     const formData = options?.body as FormData;
+    expect(formData.get('quality')).toBe('high');
     const images = formData.getAll('image[]');
     expect(images).toHaveLength(1);
     expect(images[0]).toBeInstanceOf(File);
