@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaStorage } from '@/lib/media/storage';
+import { getVideoFrameIntegrity } from '@/lib/video/frame-cache';
 import type { ApprovedTraVideoFrameSet } from '@/lib/video/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
@@ -41,13 +42,13 @@ vi.mock('@/lib/media/local-storage', () => ({
 import { POST } from '@/app/api/creatives/generate/route';
 import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
 
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const VIDEO_ID = `media_${'1'.repeat(32)}`;
 const HASH = '3'.repeat(64);
 const analysis = { summary: 'Approved TRA video source.', visibleText: [], visualStructure: 'Talking-head source context.', hookOrAngle: 'clarity', offerOrCta: 'consultation', styleNotes: 'Use identity, not old layout.', preserve: ['visible person identity'], avoid: ['old captions'], unknowns: [], dominantCategory: 'customer-problems' };
 const makeFrameSet = (source: unknown): ApprovedTraVideoFrameSet => ({
   source: source as ApprovedTraVideoFrameSet['source'], sourceVideoContentHash: HASH, durationMs: 10_000, reused: false,
-  frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', buffer: PNG, sourceRole: 'TRA_VIDEO', sourceVideoMediaId: VIDEO_ID, sourceVideoFileName: `${VIDEO_ID}.mp4`, sourceVideoContentHash: HASH, approvedHumanSource: true, cacheKey: `derived/video-frames/${VIDEO_ID}/${HASH}/frame-000.png` }],
+  frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', buffer: PNG, ...getVideoFrameIntegrity(PNG), sourceRole: 'TRA_VIDEO', sourceVideoMediaId: VIDEO_ID, sourceVideoFileName: `${VIDEO_ID}.mp4`, sourceVideoContentHash: HASH, approvedHumanSource: true, cacheKey: `derived/video-frames/${VIDEO_ID}/${HASH}/frame-000.png` }],
 });
 const makeRequest = () => new Request('https://tra.example/api/creatives/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: 'Create clear TRA ads.', variationCount: 2, sourceAssets: [{ mediaId: VIDEO_ID, role: 'TRA_VIDEO' }] }) });
 
@@ -77,7 +78,7 @@ describe('creative generation TRA video integration', () => {
     expect(generateApprovedTraVideoFrameCreativeImageMock).toHaveBeenCalledTimes(2);
     expect(body.generationSourceRole).toBe('TRA_VIDEO');
     expect(body.providerSourceRole).toBe('TRA_VIDEO');
-    expect(body.approvedVideoFrames).toMatchObject({ sourceVideoMediaId: VIDEO_ID, sourceVideoContentHash: HASH, durationMs: 10_000, reused: false, frames: [{ frameIndex: 0, timestampMs: 0, sourceRole: 'TRA_VIDEO', approvedHumanSource: true }] });
+    expect(body.approvedVideoFrames).toMatchObject({ sourceVideoMediaId: VIDEO_ID, sourceVideoContentHash: HASH, durationMs: 10_000, reused: false, frames: [{ frameIndex: 0, timestampMs: 0, sourceRole: 'TRA_VIDEO', approvedHumanSource: true, frameSha256: getVideoFrameIntegrity(PNG).frameSha256, byteLength: PNG.length }] });
     expect(JSON.stringify(body.approvedVideoFrames)).not.toContain('buffer');
   });
 
