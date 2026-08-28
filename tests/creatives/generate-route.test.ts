@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   analyzeTraSourceCreative: vi.fn(),
   generateApprovedTraReferenceCreativeImage: vi.fn(),
   generateCreativeCopy: vi.fn(),
+  analyzeApprovedTraVideoFrames: vi.fn(),
+  generateApprovedTraVideoFrameCreativeImage: vi.fn(),
+  getApprovedTraVideoFrames: vi.fn(),
   getMediaStorage: vi.fn(),
   getOrAnalyzeLayoutBlueprint: vi.fn(),
   listReferenceLibrary: vi.fn(),
@@ -18,6 +21,16 @@ vi.mock('@/lib/ai/openai', () => ({
   generateApprovedTraReferenceCreativeImage:
     mocks.generateApprovedTraReferenceCreativeImage,
   generateCreativeCopy: mocks.generateCreativeCopy,
+}));
+
+vi.mock('@/lib/ai/video-frame-generation', () => ({
+  analyzeApprovedTraVideoFrames: mocks.analyzeApprovedTraVideoFrames,
+  generateApprovedTraVideoFrameCreativeImage:
+    mocks.generateApprovedTraVideoFrameCreativeImage,
+}));
+
+vi.mock('@/lib/video/tra-video-frames', () => ({
+  getApprovedTraVideoFrames: mocks.getApprovedTraVideoFrames,
 }));
 
 vi.mock('@/lib/ai/reference-selector', () => ({
@@ -190,6 +203,7 @@ beforeEach(() => {
   });
   mocks.getOrAnalyzeLayoutBlueprint.mockResolvedValue(layoutResolution);
   mocks.analyzeTraSourceCreative.mockResolvedValue(analysis);
+  mocks.analyzeApprovedTraVideoFrames.mockResolvedValue(analysis);
   mocks.generateCreativeCopy.mockImplementation(async (plan: Array<{ index: number }>) =>
     new Map(
       plan.map((item) => [
@@ -203,6 +217,27 @@ beforeEach(() => {
     )
   );
   mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(PNG);
+  mocks.generateApprovedTraVideoFrameCreativeImage.mockResolvedValue(PNG);
+  mocks.getApprovedTraVideoFrames.mockImplementation(async (source) => ({
+    source,
+    sourceVideoContentHash: 'a'.repeat(64),
+    durationMs: 1_000,
+    reused: false,
+    frames: [
+      {
+        frameIndex: 0,
+        timestampMs: 0,
+        mimeType: 'image/png',
+        buffer: PNG,
+        sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: source.media.id,
+        sourceVideoFileName: source.media.fileName,
+        sourceVideoContentHash: 'a'.repeat(64),
+        approvedHumanSource: true,
+        cacheKey: `derived/video-frames/${source.media.id}/${'a'.repeat(64)}/frame-000.png`,
+      },
+    ],
+  }));
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -243,6 +278,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('Runtime approved claim.');
     expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('STRUCTURED LAYOUT BLUEPRINT');
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
 
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, options] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
@@ -255,7 +291,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     }
   });
 
-  it('keeps TRA video out of image-only code and preserves non-human prompt-only generation', async () => {
+  it('turns validated TRA video into approved frame pixels while keeping raw video out of the image provider', async () => {
     const videoId = mediaId('b');
     storedById[videoId] = video('b');
 
@@ -265,9 +301,51 @@ describe('layout blueprint and final image-provider boundaries', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.getOrAnalyzeLayoutBlueprint).not.toHaveBeenCalled();
-    expect(mocks.analyzeTraSourceCreative).not.toHaveBeenCalled();
+    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
+    expect(mocks.analyzeApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('uses layout planning while supplying only approved extracted TRA video frames to final generation', async () => {
+    const layoutId = mediaId('7');
+    const videoId = mediaId('8');
+    storedById = {
+      [layoutId]: image('7'),
+      [videoId]: video('8'),
+    };
+
+    const response = await POST(
+      generationRequest(
+        [
+          { mediaId: videoId, role: 'TRA_VIDEO' },
+          { mediaId: layoutId, role: 'LAYOUT_REFERENCE' },
+        ],
+        { knowledgeBase: { companySummary: 'Runtime TRA layout-plus-video context.' } }
+      )
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
+    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
+    expect(mocks.getApprovedTraVideoFrames.mock.calls[0][0].stored).toBe(storedById[videoId]);
+    expect(mocks.analyzeApprovedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
+    for (const [call] of mocks.generateApprovedTraVideoFrameCreativeImage.mock.calls) {
+      expect(call.frames[0].sourceVideoMediaId).toBe(videoId);
+      expect(call.context).toContain('APPROVED TRA COMPANY CONTEXT');
+      expect(call.context).toContain('Runtime TRA layout-plus-video context.');
+      expect(call.context).toContain('STRUCTURED LAYOUT BLUEPRINT');
+      expect(call.context).toContain('Layout-reference mode');
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(payload.layoutBlueprint).toEqual(layoutResolution);
+    expect(payload.generationSourceRole).toBe('LAYOUT_REFERENCE');
+    expect(payload.providerSourceRole).toBe('TRA_VIDEO');
+    expect(payload.usedApprovedVideoFrames).toBe(true);
   });
 
   it('uses layout geometry for planning while attaching only the validated TRA reference from mixed sources', async () => {
@@ -293,9 +371,11 @@ describe('layout blueprint and final image-provider boundaries', () => {
 
     expect(response.status).toBe(200);
     expect(readMediaById).toHaveBeenCalledTimes(3);
+    expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
     expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
     expect(mocks.analyzeTraSourceCreative).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
     for (const [call] of mocks.generateApprovedTraReferenceCreativeImage.mock.calls) {
       expect(call.source).toBe(storedById[traId]);
       expect(call.source).not.toBe(storedById[layoutId]);
@@ -338,7 +418,9 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(readMediaById).toHaveBeenCalledTimes(1);
     expect(readMediaById).toHaveBeenCalledWith(traId);
     expect(mocks.getOrAnalyzeLayoutBlueprint).not.toHaveBeenCalled();
+    expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
     expect(
       mocks.generateApprovedTraReferenceCreativeImage.mock.calls.every(
         ([call]) => call.source === storedById[traId]
