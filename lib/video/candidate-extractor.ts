@@ -252,7 +252,7 @@ export class FfmpegIntervalCandidateExtractor
           '-map',
           '0:v:0',
           '-vf',
-          `fps=${effectiveIntervalFps},scale=w='min(iw,${resolvedPolicy.maxWidth})':h=-2,showinfo`,
+          `fps=${effectiveIntervalFps}:eof_action=pass,scale=w='min(iw,${resolvedPolicy.maxWidth})':h=-2,showinfo`,
           '-frames:v',
           String(intervalLimit),
           '-fps_mode',

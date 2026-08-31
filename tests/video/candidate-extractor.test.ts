@@ -10,7 +10,7 @@ import {
   type HydratedTraVideoSource,
 } from '@/lib/video/candidate-extractor';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
-import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
+import { runFfmpeg, TraVideoProcessingError } from '@/lib/video/ffmpeg';
 import { REAL_MULTI_FRAME_MP4 } from '@/tests/fixtures/media';
 
 const MEDIA_ID = `media_${'a'.repeat(32)}`;
@@ -342,6 +342,48 @@ describe('dense interval TRA video candidate extraction', () => {
       expect(result.candidates.every((candidate) =>
         candidate.timestampMs >= 0 && candidate.timestampMs < result.durationMs
       )).toBe(true);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('extracts a real 100 ms video into a trustworthy temporary candidate', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
+    const shortVideoPath = path.join(temporaryRoot, 'short.mp4');
+
+    try {
+      await runFfmpeg([
+        '-hide_banner',
+        '-nostdin',
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=blue:s=80x48:r=30:d=0.1',
+        '-map',
+        '0:v:0',
+        '-c:v',
+        'mpeg4',
+        shortVideoPath,
+      ]);
+
+      const result = await new FfmpegIntervalCandidateExtractor({
+        temporaryRoot,
+      }).extractCandidates(makeVideoSource(await readFile(shortVideoPath)));
+      const candidate = result.candidates[0];
+      const bytes = await readFile(candidate.temporaryPath);
+
+      expect(result.durationMs).toBe(100);
+      expect(result.candidates).toHaveLength(1);
+      expect(detectImageMimeType(bytes)).toBe('image/jpeg');
+      expect(candidate.timestampMs).toBeGreaterThanOrEqual(0);
+      expect(candidate.timestampMs).toBeLessThan(result.durationMs);
+      expect(candidate).toMatchObject({
+        lifecycle: 'TEMPORARY',
+        providerEligible: false,
+        extractionReasons: ['INTERVAL'],
+      });
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
