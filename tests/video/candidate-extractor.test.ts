@@ -26,6 +26,30 @@ const JPEG_HEADER_WITHOUT_SCAN = Buffer.from([
 ]);
 const successfulDirectories: string[] = [];
 
+const jpegWithDimensions = (width: number, height: number) => {
+  const jpeg = Buffer.from(VALID_JPEG);
+  const sofMarker = jpeg.indexOf(Buffer.from([0xff, 0xc0]));
+  if (sofMarker < 0) throw new Error('Test JPEG is missing a baseline SOF marker.');
+  jpeg.writeUInt16BE(height, sofMarker + 5);
+  jpeg.writeUInt16BE(width, sofMarker + 7);
+  return jpeg;
+};
+
+const writeCandidateFiles = async (
+  outputPattern: string,
+  count: number,
+  jpeg = VALID_JPEG
+) => {
+  await Promise.all(
+    Array.from({ length: count }, (_, index) =>
+      writeFile(
+        outputPattern.replace('%06d', String(index).padStart(6, '0')),
+        jpeg
+      )
+    )
+  );
+};
+
 const sha256 = (buffer: Buffer) =>
   createHash('sha256').update(buffer).digest('hex');
 
@@ -156,6 +180,209 @@ describe('dense interval TRA video candidate extraction', () => {
       expect(extractionArgs[extractionArgs.indexOf('-frames:v') + 1]).toBe('360');
       expect(extractionArgs[extractionArgs.indexOf('-vf') + 1]).toContain('fps=1.2');
       expect(result.candidates.length).toBeLessThanOrEqual(360);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves fractional-FPS showinfo timestamps at millisecond precision', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
+    const run = vi.fn(async (args: string[]) => {
+      if (args.includes('null')) {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr:
+            'Duration: 00:00:01.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
+        };
+      }
+      await writeCandidateFiles(args.at(-1)!, 4);
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: [
+          '[Parsed_showinfo_2] n: 0 pts: 0 pts_time:0 duration:1',
+          '[Parsed_showinfo_2] n: 1 pts: 1 pts_time:0.033367 duration:1',
+          '[Parsed_showinfo_2] n: 2 pts: 2 pts_time:0.066733 duration:1',
+          '[Parsed_showinfo_2] n: 3 pts: 3 pts_time:0.100100 duration:1',
+        ].join('\n'),
+      };
+    });
+
+    try {
+      const result = await new FfmpegIntervalCandidateExtractor({
+        run,
+        temporaryRoot,
+      }).extractCandidates(makeVideoSource(), {
+        ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+        targetIntervalFps: 29.97,
+        maxIntervalCandidates: 30,
+        maxTotalCandidates: 30,
+      });
+      successfulDirectories.push(result.temporaryDirectory);
+
+      expect(result.candidates.map((candidate) => candidate.timestampMs)).toEqual([
+        0, 33, 67, 100,
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects timestamps at or beyond the probed duration', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
+    const run = vi.fn(async (args: string[]) => {
+      if (args.includes('null')) {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr:
+            'Duration: 00:00:01.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
+        };
+      }
+      await writeCandidateFiles(args.at(-1)!, 1);
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: '[Parsed_showinfo_2] n: 0 pts: 1 pts_time:1 duration:1',
+      };
+    });
+
+    try {
+      await expect(
+        new FfmpegIntervalCandidateExtractor({ run, temporaryRoot }).extractCandidates(
+          makeVideoSource()
+        )
+      ).rejects.toThrow('trustworthy timestamp metadata');
+      expect(await readdir(temporaryRoot)).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('cleans partial candidate output when FFmpeg fails during extraction', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
+    const run = vi.fn(async (args: string[]) => {
+      if (args.includes('null')) {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr:
+            'Duration: 00:00:04.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
+        };
+      }
+      await writeFile(args.at(-1)!.replace('%06d', '000000'), VALID_JPEG);
+      throw new Error('simulated FFmpeg extraction failure');
+    });
+
+    try {
+      await expect(
+        new FfmpegIntervalCandidateExtractor({ run, temporaryRoot }).extractCandidates(
+          makeVideoSource()
+        )
+      ).rejects.toThrow('failed while extracting interval candidates');
+      expect(await readdir(temporaryRoot)).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects FFmpeg output that exceeds the configured candidate cap', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
+    const run = vi.fn(async (args: string[]) => {
+      if (args.includes('null')) {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr:
+            'Duration: 00:00:04.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
+        };
+      }
+      await writeCandidateFiles(args.at(-1)!, 3);
+      return { stdout: Buffer.alloc(0), stderr: '' };
+    });
+
+    try {
+      await expect(
+        new FfmpegIntervalCandidateExtractor({ run, temporaryRoot }).extractCandidates(
+          makeVideoSource(),
+          {
+            ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+            maxIntervalCandidates: 2,
+            maxTotalCandidates: 2,
+          }
+        )
+      ).rejects.toThrow('exceeded the bounded interval candidate limit');
+      expect(await readdir(temporaryRoot)).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('extracts short videos with in-range timestamps', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
+    const run = vi.fn(async (args: string[]) => {
+      if (args.includes('null')) {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr:
+            'Duration: 00:00:00.50\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
+        };
+      }
+      await writeCandidateFiles(args.at(-1)!, 1);
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: '[Parsed_showinfo_2] n: 0 pts: 0 pts_time:0 duration:1',
+      };
+    });
+
+    try {
+      const result = await new FfmpegIntervalCandidateExtractor({
+        run,
+        temporaryRoot,
+      }).extractCandidates(makeVideoSource());
+      successfulDirectories.push(result.temporaryDirectory);
+
+      expect(result.durationMs).toBe(500);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates.every((candidate) =>
+        candidate.timestampMs >= 0 && candidate.timestampMs < result.durationMs
+      )).toBe(true);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts portrait odd-dimension output scaled within maxWidth and preserves aspect ratio', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
+    const outputJpeg = jpegWithDimensions(400, 710);
+    const run = vi.fn(async (args: string[]) => {
+      if (args.includes('null')) {
+        return {
+          stdout: Buffer.alloc(0),
+          stderr:
+            'Duration: 00:00:02.00\n  Stream #0:0: Video: mpeg4, yuv420p, 721x1281',
+        };
+      }
+      await writeCandidateFiles(args.at(-1)!, 1, outputJpeg);
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: '[Parsed_showinfo_2] n: 0 pts: 0 pts_time:0 duration:1',
+      };
+    });
+
+    try {
+      const result = await new FfmpegIntervalCandidateExtractor({
+        run,
+        temporaryRoot,
+      }).extractCandidates(makeVideoSource(), {
+        ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+        maxWidth: 400,
+      });
+      successfulDirectories.push(result.temporaryDirectory);
+
+      const candidate = result.candidates[0];
+      expect(candidate.width).toBe(400);
+      expect(candidate.height).toBe(710);
+      expect(candidate.width).toBeLessThanOrEqual(400);
+      expect(candidate.width / candidate.height).toBeCloseTo(721 / 1281, 2);
+      expect(run.mock.calls[1][0][run.mock.calls[1][0].indexOf('-vf') + 1]).toContain(
+        "scale=w='min(iw,400)':h=-2"
+      );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

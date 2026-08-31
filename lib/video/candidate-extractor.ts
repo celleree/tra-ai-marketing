@@ -305,6 +305,7 @@ export class FfmpegIntervalCandidateExtractor
           (timestamp, index) =>
             timestamp.outputIndex !== index ||
             timestamp.timestampMs < 0 ||
+            timestamp.timestampMs >= durationMs ||
             (index > 0 &&
               timestamp.timestampMs <= timestamps[index - 1].timestampMs)
         ) ||
