@@ -69,16 +69,47 @@ const getJpegDimensions = (buffer: Buffer) => {
   }
 
   let offset = 2;
+  let dimensions: { width: number; height: number } | null = null;
   while (offset + 3 < buffer.length) {
     if (buffer[offset] !== 0xff) return null;
     while (buffer[offset] === 0xff) offset += 1;
     const marker = buffer[offset];
     offset += 1;
-    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker === 0xd9) return null;
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
     if (offset + 1 >= buffer.length) return null;
     const segmentLength = buffer.readUInt16BE(offset);
     if (segmentLength < 2 || offset + segmentLength > buffer.length) return null;
+    if (marker === 0xda) {
+      const componentCount = buffer[offset + 2];
+      if (
+        !dimensions ||
+        segmentLength !== 6 + componentCount * 2
+      ) {
+        return null;
+      }
+      offset += segmentLength;
+      let entropyByteCount = 0;
+      while (offset < buffer.length - 2) {
+        if (buffer[offset] !== 0xff) {
+          entropyByteCount += 1;
+          offset += 1;
+          continue;
+        }
+        const next = buffer[offset + 1];
+        if (next === 0x00) {
+          entropyByteCount += 1;
+          offset += 2;
+          continue;
+        }
+        if (next >= 0xd0 && next <= 0xd7) {
+          offset += 2;
+          continue;
+        }
+        return null;
+      }
+      return entropyByteCount > 0 ? dimensions : null;
+    }
     if (
       (marker >= 0xc0 && marker <= 0xc3) ||
       (marker >= 0xc5 && marker <= 0xc7) ||
@@ -88,7 +119,8 @@ const getJpegDimensions = (buffer: Buffer) => {
       if (segmentLength < 7) return null;
       const height = buffer.readUInt16BE(offset + 3);
       const width = buffer.readUInt16BE(offset + 5);
-      return width > 0 && height > 0 ? { width, height } : null;
+      if (width < 1 || height < 1) return null;
+      dimensions = { width, height };
     }
     offset += segmentLength;
   }

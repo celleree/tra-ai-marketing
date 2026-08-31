@@ -18,6 +18,12 @@ const VALID_JPEG = Buffer.from(
   '/9j/4AAQSkZJRgABAgAAAQABAAD//gAPTGF2YzYxLjMuMTAwAP/bAEMACAoKCwoLDQ0NDQ0NEA8QEBAQEBAQEBAQEBISEhUVFRISEhAQEhIUFBUVFxcXFRUVFRcXGRkZHh4cHCMjJCsrM//EAEwAAQEAAAAAAAAAAAAAAAAAAAAGAQEBAAAAAAAAAAAAAAAAAAAGBxABAAAAAAAAAAAAAAAAAAAAABEBAAAAAAAAAAAAAAAAAAAAAP/AABEIAAIAAgMBIgACEQADEQD/2gAMAwEAAhEDEQA/AIsAUX9//9k=',
   'base64'
 );
+const JPEG_HEADER_WITHOUT_SCAN = Buffer.from([
+  0xff, 0xd8,
+  0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x02, 0x00, 0x02, 0x03,
+  0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+  0xff, 0xd9,
+]);
 const successfulDirectories: string[] = [];
 
 const sha256 = (buffer: Buffer) =>
@@ -179,7 +185,10 @@ describe('dense interval TRA video candidate extraction', () => {
             'Duration: 00:00:04.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
         };
       }
-      await writeFile(args.at(-1)!.replace('%06d', '000000'), Buffer.from('bad jpeg'));
+      await writeFile(
+        args.at(-1)!.replace('%06d', '000000'),
+        JPEG_HEADER_WITHOUT_SCAN
+      );
       return {
         stdout: Buffer.alloc(0),
         stderr: '[Parsed_showinfo_2] n: 0 pts: 0 pts_time:0 duration:1',
