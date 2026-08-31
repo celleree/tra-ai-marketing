@@ -1,3 +1,12 @@
+## Checkpoint
+
+- Status: IN PROGRESS / READY FOR REVIEW / BLOCKED / READY TO MERGE
+- Branch:
+- HEAD SHA:
+- Last verified:
+- Next action:
+- Blockers: NONE
+
 ## Acceptance criteria
 
 - [ ] ...
