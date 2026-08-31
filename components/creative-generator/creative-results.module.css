@@ -104,6 +104,24 @@
   box-shadow: 0 0 0 2px rgba(36, 79, 211, 0.12), 0 8px 30px rgba(23, 33, 43, 0.05);
 }
 
+.failedCard {
+  border-color: #f1c7c7;
+}
+
+.failedImage {
+  display: grid;
+  place-items: center;
+  background: #fff0f0;
+  color: #a43a3a;
+  font-weight: 800;
+}
+
+.failedLabel {
+  margin-bottom: 8px !important;
+  color: #a43a3a !important;
+  font-weight: 800;
+}
+
 .selectionControl {
   position: absolute;
   z-index: 2;

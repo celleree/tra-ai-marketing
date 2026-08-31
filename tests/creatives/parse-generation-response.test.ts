@@ -1,8 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { parseGenerationResponse } from '@/lib/creatives/parse-generation-response';
+import {
+  consumeGenerationEventStream,
+  isGenerationEventStream,
+  parseGenerationResponse,
+} from '@/lib/creatives/parse-generation-response';
 
 const response = (body: string, status = 200) =>
   new Response(body, { status });
+
+const encoder = new TextEncoder();
+const streamResponse = (chunks: string[]) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        chunks.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
+        controller.close();
+      },
+    }),
+    { headers: { 'Content-Type': 'text/event-stream' } }
+  );
+
+const creative = {
+  id: 'creative_abc',
+  index: 2,
+  category: 'customer-problems',
+  format: 'direct-response',
+  image: {
+    id: `media_${'a'.repeat(32)}`,
+    fileName: `media_${'a'.repeat(32)}.png`,
+    originalName: 'generated.png',
+    mimeType: 'image/png',
+    size: 12,
+    url: `/api/media/files/media_${'a'.repeat(32)}.png`,
+  },
+  copy: { primaryText: 'Primary', headline: 'Headline', description: 'Description' },
+};
 
 describe('parseGenerationResponse', () => {
   it('reports an empty response with its HTTP status', async () => {
@@ -54,5 +86,57 @@ describe('parseGenerationResponse', () => {
     await expect(
       parseGenerationResponse(response(JSON.stringify({ creatives: [] })))
     ).resolves.toEqual({ creatives: [] });
+  });
+
+  it('recognizes and consumes events split across reader chunks', async () => {
+    const received: string[] = [];
+    const stream = streamResponse([
+      'event: creative\ndata: {"creative":',
+      `${JSON.stringify(creative)}}\n\n`,
+      'event: complete\ndata: {"requestedCount":2,"successfulCount":1,"failedCount":1,"successfulIndexes":[2],"failedIndexes":[1]}\n\n',
+    ]);
+
+    expect(isGenerationEventStream(stream)).toBe(true);
+    await consumeGenerationEventStream(stream, (event) => {
+      received.push(event.type === 'creative' ? `creative:${event.creative.index}` : event.type);
+    });
+
+    expect(received).toEqual(['creative:2', 'complete']);
+  });
+
+  it('consumes multiple validated events from one reader chunk', async () => {
+    const received: string[] = [];
+    const stream = streamResponse([
+      `event: error\ndata: {"index":1,"error":"Creative 1 could not be generated."}\n\nevent: creative\ndata: {"creative":${JSON.stringify(creative)}}\n\n`,
+    ]);
+
+    await consumeGenerationEventStream(stream, (event) => {
+      received.push(
+        event.type === 'error'
+          ? `error:${event.index}`
+          : event.type === 'creative'
+            ? `creative:${event.creative.index}`
+            : 'complete'
+      );
+    });
+
+    expect(received).toEqual(['error:1', 'creative:2']);
+  });
+
+  it.each([
+    'event: creative\ndata: {"creative":{"index":1}}\n\n',
+    'event: error\ndata: {"index":0,"error":"No"}\n\n',
+    'event: complete\ndata: {"requestedCount":2,"successfulCount":2,"failedCount":0,"successfulIndexes":[1],"failedIndexes":[]}\n\n',
+    'event: unknown\ndata: {}\n\n',
+    'event: creative\ndata: not-json\n\n',
+  ])('fails safely for malformed stream event data', async (body) => {
+    const received: string[] = [];
+
+    await expect(
+      consumeGenerationEventStream(streamResponse([body]), (event) => {
+        received.push(event.type);
+      })
+    ).rejects.toThrow('Creative generation returned');
+    expect(received).toEqual([]);
   });
 });

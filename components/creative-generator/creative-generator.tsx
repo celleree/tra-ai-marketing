@@ -11,7 +11,15 @@ import { ReferenceLibrary } from '@/components/reference-library/reference-libra
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
-import { parseGenerationResponse } from '@/lib/creatives/parse-generation-response';
+import {
+  consumeGenerationEventStream,
+  isGenerationEventStream,
+  parseGenerationResponse,
+} from '@/lib/creatives/parse-generation-response';
+import {
+  completeProgressiveCreative,
+  insertCreativeByIndex,
+} from '@/lib/creatives/progressive-delivery';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { consumeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
 import type {
@@ -42,10 +50,14 @@ export function CreativeGenerator() {
   const [variationCount, setVariationCount] = useState(4);
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [generationComplete, setGenerationComplete] = useState(true);
+  const [generationFailures, setGenerationFailures] = useState<Record<number, string>>({});
   const [generationError, setGenerationError] = useState('');
   const [handoffGenerate, setHandoffGenerate] = useState(false);
   const handoffConsumedRef = useRef(false);
   const handoffGenerationStartedRef = useRef(false);
+  const completedIndexesRef = useRef(new Set<number>());
+  const failedIndexesRef = useRef(new Map<number, string>());
 
   const ready = Boolean(context.trim());
 
@@ -62,18 +74,24 @@ export function CreativeGenerator() {
     setContext(draft.context);
     setVariationCount(draft.variationCount);
     setCreatives([]);
+    setGenerationComplete(true);
+    setGenerationFailures({});
     setGenerationError('');
     setHandoffGenerate(draft.generateOnOpen);
   }, []);
 
   const handleUploadStart = () => {
     setCreatives([]);
+    setGenerationComplete(true);
+    setGenerationFailures({});
     setGenerationError('');
   };
 
   const handleUploaded = (source: CreativeSourceAsset) => {
     setSourceAssets((current) => [...current, source]);
     setCreatives([]);
+    setGenerationComplete(true);
+    setGenerationFailures({});
     setGenerationError('');
   };
 
@@ -87,6 +105,8 @@ export function CreativeGenerator() {
       )
     );
     setCreatives([]);
+    setGenerationComplete(true);
+    setGenerationFailures({});
     setGenerationError('');
   };
 
@@ -95,11 +115,15 @@ export function CreativeGenerator() {
       current.filter((source) => source.media.id !== mediaId)
     );
     setCreatives([]);
+    setGenerationComplete(true);
+    setGenerationFailures({});
     setGenerationError('');
   };
 
   const handleDirectUploaded = (nextCreatives: GeneratedCreative[]) => {
     setCreatives(nextCreatives);
+    setGenerationComplete(true);
+    setGenerationFailures({});
     setGenerationError('');
   };
 
@@ -107,6 +131,8 @@ export function CreativeGenerator() {
     if (nextMode === creationMode) return;
     setCreationMode(nextMode);
     setCreatives([]);
+    setGenerationComplete(true);
+    setGenerationFailures({});
     setGenerationError('');
     setGenerating(false);
   };
@@ -115,8 +141,12 @@ export function CreativeGenerator() {
     if (!context.trim() || generating) return;
 
     setGenerating(true);
+    setGenerationComplete(false);
+    setGenerationFailures({});
     setGenerationError('');
     setCreatives([]);
+    completedIndexesRef.current = new Set();
+    failedIndexesRef.current = new Map();
 
     try {
       const brand = readStoredBrandGuidance();
@@ -139,49 +169,91 @@ export function CreativeGenerator() {
           variationCount,
         }),
       });
-      const payload = await parseGenerationResponse(response);
-
-      if (!response.ok) {
+      if (!response.ok || !isGenerationEventStream(response)) {
+        const payload = await parseGenerationResponse(response);
         throw new Error(
           payload.error || `Creative generation failed (HTTP ${response.status}).`
         );
       }
 
-      if (!Array.isArray(payload.creatives)) {
-        throw new Error(
-          payload.error || 'Creative generation returned an invalid response.'
-        );
-      }
+      let receivedComplete = false;
+      const recordFailure = (index: number, message: string) => {
+        failedIndexesRef.current.set(index, message);
+        setGenerationFailures(Object.fromEntries(failedIndexesRef.current));
+      };
 
-      let nextCreatives = payload.creatives;
-      if (brand.logo && nextCreatives.length) {
-        nextCreatives = await applyBrandLogoToCreatives(
-          nextCreatives,
-          brand.logo.url
-        );
-      }
+      await consumeGenerationEventStream(response, async (event) => {
+        if (event.type === 'error') {
+          if (event.index) recordFailure(event.index, event.error);
+          else setGenerationError(event.error);
+          return;
+        }
 
-      const saveResponse = await fetch('/api/creatives', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creatives: nextCreatives.map((creative) => ({
-            id: creative.id,
-            image: creative.image,
-            category: creative.category,
-            copy: creative.copy,
-            ...(creative.referenceImageId
-              ? { referenceImageId: creative.referenceImageId }
-              : {}),
-          })),
-        }),
+        if (event.type === 'complete') {
+          receivedComplete = true;
+          event.failedIndexes.forEach((index) => {
+            if (!failedIndexesRef.current.has(index)) {
+              recordFailure(index, `Creative ${index} could not be generated.`);
+            }
+          });
+          return;
+        }
+
+        try {
+          const completedCreative = await completeProgressiveCreative({
+            creative: event.creative,
+            ...(brand.logo ? { logoUrl: brand.logo.url } : {}),
+            applyBrandLogo: applyBrandLogoToCreatives,
+            persist: async (creative) => {
+              const saveResponse = await fetch('/api/creatives', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  creatives: [
+                    {
+                      id: creative.id,
+                      image: creative.image,
+                      category: creative.category,
+                      copy: creative.copy,
+                      ...(creative.referenceImageId
+                        ? { referenceImageId: creative.referenceImageId }
+                        : {}),
+                    },
+                  ],
+                }),
+              });
+              const savePayload = await saveResponse.json();
+              if (!saveResponse.ok) {
+                throw new Error(savePayload.error || 'Generated creative could not be saved.');
+              }
+            },
+          });
+
+          completedIndexesRef.current.add(completedCreative.index);
+          setCreatives((current) =>
+            insertCreativeByIndex(current, completedCreative)
+          );
+        } catch (error) {
+          recordFailure(
+            event.creative.index,
+            error instanceof Error
+              ? error.message
+              : `Creative ${event.creative.index} could not be completed.`
+          );
+        }
       });
-      const savePayload = await saveResponse.json();
-      if (!saveResponse.ok) {
-        throw new Error(savePayload.error || 'Generated creatives could not be saved.');
+
+      if (!receivedComplete) {
+        throw new Error('Creative generation ended before reporting completion.');
       }
 
-      setCreatives(nextCreatives);
+      setGenerationComplete(true);
+      const failedCount = failedIndexesRef.current.size;
+      if (failedCount) {
+        setGenerationError(
+          `Completed ${completedIndexesRef.current.size} of ${variationCount} creatives. ${failedCount} failed.`
+        );
+      }
     } catch (error) {
       setGenerationError(
         error instanceof Error ? error.message : 'Creative generation failed.'
@@ -311,6 +383,10 @@ export function CreativeGenerator() {
               creatives={creatives}
               generating={creationMode === 'generate' && generating}
               requestedCount={variationCount}
+              generationComplete={
+                creationMode !== 'generate' || generationComplete
+              }
+              generationFailures={generationFailures}
             />
           </div>
         ) : activeSection === 'tra-creatives' ? (
