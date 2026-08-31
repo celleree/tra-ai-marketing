@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "target_substantive_lines": 200,
+  "soft_max_substantive_lines": 400,
+  "soft_max_substantive_files": 10,
+  "high_risk_preferred_max_lines": 200,
+  "oversized_action": "split_or_justify",
+  "excluded_path_patterns": [
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+    "__snapshots__/",
+    ".snap"
+  ]
+}
