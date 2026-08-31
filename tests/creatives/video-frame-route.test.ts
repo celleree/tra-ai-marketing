@@ -69,17 +69,29 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('creative generation TRA video integration', () => {
-  it('uses extracted approved frames for Sol analysis and final generation and returns provenance without raw pixels', async () => {
+  it('uses extracted approved frames for Sol analysis and final generation through SSE without raw pixels', async () => {
     const response = await POST(makeRequest());
-    const body = await response.json();
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    const events = (await response.text())
+      .trim()
+      .split('\n\n')
+      .map((message) => {
+        const [eventLine, dataLine] = message.split('\n');
+        return {
+          event: eventLine.replace('event: ', ''),
+          data: JSON.parse(dataLine.replace('data: ', '')) as Record<string, unknown>,
+        };
+      });
     expect(response.status).toBe(200);
     expect(getApprovedTraVideoFramesMock).toHaveBeenCalledTimes(1);
     expect(analyzeApprovedTraVideoFramesMock).toHaveBeenCalledWith(expect.objectContaining({ context: expect.stringContaining('USER CREATIVE DIRECTION') }));
     expect(generateApprovedTraVideoFrameCreativeImageMock).toHaveBeenCalledTimes(2);
-    expect(body.generationSourceRole).toBe('TRA_VIDEO');
-    expect(body.providerSourceRole).toBe('TRA_VIDEO');
-    expect(body.approvedVideoFrames).toMatchObject({ sourceVideoMediaId: VIDEO_ID, sourceVideoContentHash: HASH, durationMs: 10_000, reused: false, frames: [{ frameIndex: 0, timestampMs: 0, sourceRole: 'TRA_VIDEO', approvedHumanSource: true, frameSha256: getVideoFrameIntegrity(PNG).frameSha256, byteLength: PNG.length }] });
-    expect(JSON.stringify(body.approvedVideoFrames)).not.toContain('buffer');
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+    expect(events.at(-1)).toMatchObject({
+      event: 'complete',
+      data: { requestedCount: 2, successfulCount: 2, failedCount: 0 },
+    });
+    expect(JSON.stringify(events)).not.toContain('buffer');
   });
 
   it('returns 400 for corrupt/unsupported video before Sol or image generation', async () => {

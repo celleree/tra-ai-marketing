@@ -50,6 +50,13 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const RENDER_CONCURRENCY = 2;
+
+const encodeSseEvent = (
+  encoder: TextEncoder,
+  event: 'creative' | 'error' | 'complete',
+  payload: object
+) => encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 
 const getOpenAIError = async (response: Response) => {
   try {
@@ -393,12 +400,7 @@ export async function POST(request: Request) {
       generationContext,
       analysis
     );
-    const creatives: GeneratedCreative[] = [];
-
-    for (let offset = 0; offset < creativePlan.length; offset += 2) {
-      const batch = creativePlan.slice(offset, offset + 2);
-      const generated = await Promise.all(
-        batch.map(async (item): Promise<GeneratedCreative> => {
+    const renderCreative = async (item: PlannedCreative): Promise<GeneratedCreative> => {
           const copy = copyByIndex.get(item.index);
           if (!copy) {
             throw new Error(`Missing copy for creative ${item.index}.`);
@@ -465,55 +467,75 @@ export async function POST(request: Request) {
                 ? { referenceImageId: uploadedReferenceImageId }
                 : {}),
           };
-        })
-      );
+    };
 
-      creatives.push(...generated);
-    }
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const successfulIndexes: number[] = [];
+        const failedIndexes: number[] = [];
+        let cursor = 0;
 
-    creatives.sort((a, b) => a.index - b.index);
-    return NextResponse.json({
-      creatives,
-      creativePlan,
-      analysis,
-      layoutBlueprint,
-      sourceAssets: sourceAssets.map(({ stored: _stored, ...sourceAsset }) =>
-        sourceAsset
-      ),
-      generationSourceRole:
-        generationSourceAsset?.role || (videoFrameSet ? 'TRA_VIDEO' : null),
-      providerSourceRole:
-        providerImageSource?.role || (videoFrameSet ? 'TRA_VIDEO' : null),
-      usedReferenceImage: Boolean(source),
-      usedApprovedVideoFrames: Boolean(videoFrameSet),
-      approvedVideoFrames: videoFrameSet
-        ? {
-            sourceVideoMediaId: videoFrameSet.source.media.id,
-            sourceVideoFileName: videoFrameSet.source.media.fileName,
-            sourceVideoContentHash: videoFrameSet.sourceVideoContentHash,
-            durationMs: videoFrameSet.durationMs,
-            reused: videoFrameSet.reused,
-            frames: videoFrameSet.frames.map(
-              ({ buffer: _buffer, ...frame }) => frame
-            ),
+        const emit = (
+          event: 'creative' | 'error' | 'complete',
+          payload: object
+        ) => controller.enqueue(encodeSseEvent(encoder, event, payload));
+
+        const worker = async () => {
+          while (true) {
+            const position = cursor;
+            cursor += 1;
+            if (position >= creativePlan.length) return;
+
+            const item = creativePlan[position];
+            try {
+              const creative = await renderCreative(item);
+              successfulIndexes.push(item.index);
+              emit('creative', { creative });
+            } catch (error) {
+              console.error(`Creative ${item.index} failed to render`, error);
+              failedIndexes.push(item.index);
+              emit('error', {
+                index: item.index,
+                error: `Creative ${item.index} could not be generated.`,
+              });
+            }
           }
-        : null,
-      usedBrandLogo: reserveLogoArea,
-      usedBrandColors: parsed.data.brandColors?.length || 0,
-      usedBrandFonts: parsed.data.brandFontNames?.length || 0,
-      referenceSelectionMode:
-        source && generationSourceAsset?.role === 'TRA_REFERENCE'
-          ? 'ai-single-reference'
-          : null,
-      referenceLibrarySelections: Array.from(librarySelections.entries()).map(
-        ([index, selection]) => ({
-          index,
-          referenceId: selection.item.id,
-          referenceUrl: selection.item.url,
-          referenceCategory: selection.item.angle,
-          selectionReason: selection.selectionReason,
-        })
-      ),
+        };
+
+        try {
+          await Promise.all(
+            Array.from(
+              { length: Math.min(RENDER_CONCURRENCY, creativePlan.length) },
+              () => worker()
+            )
+          );
+          successfulIndexes.sort((a, b) => a - b);
+          failedIndexes.sort((a, b) => a - b);
+          emit('complete', {
+            requestedCount: creativePlan.length,
+            successfulCount: successfulIndexes.length,
+            failedCount: failedIndexes.length,
+            successfulIndexes,
+            failedIndexes,
+          });
+        } catch (error) {
+          console.error('Creative generation stream failed', error);
+          emit('error', {
+            error: 'Creative generation was interrupted before completion.',
+          });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+      },
     });
   } catch (error) {
     console.error('Creative generation failed', error);

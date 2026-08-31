@@ -163,7 +163,8 @@ const libraryItem = (hex: string) => ({
 
 const generationRequest = (
   sourceAssets: Array<{ mediaId: string; role: string }>,
-  companyProfile?: object
+  companyProfile?: object,
+  variationCount = 2
 ) =>
   new Request('http://localhost/api/creatives/generate', {
     method: 'POST',
@@ -172,9 +173,24 @@ const generationRequest = (
       sourceAssets,
       ...(companyProfile ? { companyProfile } : {}),
       context: 'Create compliant TRA concepts.',
-      variationCount: 2,
+      variationCount,
     }),
   });
+
+const readStreamEvents = async (response: Response) => {
+  expect(response.headers.get('content-type')).toContain('text/event-stream');
+  const body = await response.text();
+  return body
+    .trim()
+    .split('\n\n')
+    .map((message) => {
+      const [eventLine, dataLine] = message.split('\n');
+      return {
+        event: eventLine.replace('event: ', ''),
+        data: JSON.parse(dataLine.replace('data: ', '')) as Record<string, unknown>,
+      };
+    });
+};
 
 let storedById: Record<string, StoredCreativeSourceMediaFile>;
 let readMediaById: ReturnType<typeof vi.fn>;
@@ -265,14 +281,15 @@ describe('layout blueprint and final image-provider boundaries', () => {
         guardrails: { approvedClaims: 'Runtime approved claim.' },
       })
     );
-    const payload = await response.json();
+    const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
     expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
-    expect(payload.layoutBlueprint).toEqual(layoutResolution);
-    expect(payload.analysis.visibleText).toEqual([]);
-    expect(payload.analysis.hookOrAngle).toContain('Not supplied by the layout reference');
-    expect(payload.analysis.visualStructure).toContain('STRUCTURED LAYOUT BLUEPRINT');
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+    expect(events.at(-1)).toMatchObject({
+      event: 'complete',
+      data: { requestedCount: 2, successfulCount: 2, failedCount: 0 },
+    });
     expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('APPROVED TRA COMPANY CONTEXT');
     expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('Runtime approved TRA summary.');
     expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('Runtime approved claim.');
@@ -302,6 +319,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const response = await POST(
       generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }])
     );
+    const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
     expect(mocks.getOrAnalyzeLayoutBlueprint).not.toHaveBeenCalled();
@@ -310,6 +328,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
   });
 
   it('uses layout planning while supplying only approved extracted TRA video frames to final generation', async () => {
@@ -329,7 +348,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
         { knowledgeBase: { companySummary: 'Runtime TRA layout-plus-video context.' } }
       )
     );
-    const payload = await response.json();
+    const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
     expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
@@ -346,10 +365,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(call.context).toContain('Layout-reference mode');
     }
     expect(fetch).not.toHaveBeenCalled();
-    expect(payload.layoutBlueprint).toEqual(layoutResolution);
-    expect(payload.generationSourceRole).toBe('LAYOUT_REFERENCE');
-    expect(payload.providerSourceRole).toBe('TRA_VIDEO');
-    expect(payload.usedApprovedVideoFrames).toBe(true);
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
   });
 
   it('uses layout geometry for planning while attaching only the validated TRA reference from mixed sources', async () => {
@@ -416,7 +432,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const response = await POST(
       generationRequest([{ mediaId: traId, role: 'TRA_REFERENCE' }])
     );
-    const payload = await response.json();
+    const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
     expect(readMediaById).toHaveBeenCalledTimes(1);
@@ -430,6 +446,97 @@ describe('layout blueprint and final image-provider boundaries', () => {
         ([call]) => call.source === storedById[traId]
       )
     ).toBe(true);
-    expect(payload.referenceLibrarySelections).toHaveLength(2);
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+  });
+});
+
+describe('progressive creative delivery', () => {
+  it('keeps no-source image rendering capped at two concurrent requests', async () => {
+    let active = 0;
+    let maximumActive = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        active -= 1;
+        return new Response(
+          JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      })
+    );
+
+    const response = await POST(generationRequest([], undefined, 4));
+    const events = await readStreamEvents(response);
+
+    expect(maximumActive).toBe(2);
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(4);
+    expect(events.at(-1)).toMatchObject({
+      event: 'complete',
+      data: {
+        requestedCount: 4,
+        successfulCount: 4,
+        failedCount: 0,
+        successfulIndexes: [1, 2, 3, 4],
+      },
+    });
+    for (const [, options] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(JSON.parse(String(options?.body)).quality).toBe('high');
+    }
+  });
+
+  it('emits an indexed render error and continues later creatives', async () => {
+    let attempts = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        attempts += 1;
+        if (attempts === 1) return new Response('provider unavailable', { status: 503 });
+        return new Response(
+          JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      })
+    );
+
+    const response = await POST(generationRequest([], undefined, 3));
+    const events = await readStreamEvents(response);
+
+    expect(events).toContainEqual({
+      event: 'error',
+      data: { index: 1, error: 'Creative 1 could not be generated.' },
+    });
+    expect(
+      events
+        .filter(({ event }) => event === 'creative')
+        .map(({ data }) => (data.creative as { index: number }).index)
+        .sort()
+    ).toEqual([2, 3]);
+    expect(events.at(-1)).toMatchObject({
+      event: 'complete',
+      data: {
+        requestedCount: 3,
+        successfulCount: 2,
+        failedCount: 1,
+        successfulIndexes: [2, 3],
+        failedIndexes: [1],
+      },
+    });
+  });
+
+  it('keeps early invalid requests as JSON errors', async () => {
+    const response = await POST(
+      new Request('http://localhost/api/creatives/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context: '', variationCount: 2 }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    await expect(response.json()).resolves.toEqual({ error: 'context is required' });
   });
 });

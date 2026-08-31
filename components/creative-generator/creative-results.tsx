@@ -14,6 +14,8 @@ interface CreativeResultsProps {
   creatives: GeneratedCreative[];
   generating?: boolean;
   requestedCount?: number;
+  generationComplete?: boolean;
+  generationFailures?: Record<number, string>;
 }
 
 interface MetaItem {
@@ -83,6 +85,8 @@ export function CreativeResults({
   creatives,
   generating = false,
   requestedCount = 0,
+  generationComplete = true,
+  generationFailures = {},
 }: CreativeResultsProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -344,51 +348,25 @@ export function CreativeResults({
     }
   };
 
-  if (generating) {
-    const count = Math.max(2, requestedCount);
+  const failedIndexes = Object.keys(generationFailures).map(Number);
+  if (!creatives.length && !generating && !failedIndexes.length) return null;
 
-    return (
-      <section className={styles.section} aria-live="polite" aria-busy="true">
-        <div className={styles.heading}>
-          <div>
-            <p className="eyebrow">Generating</p>
-            <h2>Building your creative variations</h2>
-          </div>
-          <span className="muted">{count} concepts</span>
-        </div>
-
-        <div className={styles.grid}>
-          {Array.from({ length: count }, (_, index) => (
-            <article className={`${styles.card} ${styles.skeletonCard}`} key={index}>
-              <div className={`${styles.image} ${styles.skeleton}`} />
-              <div className={styles.body}>
-                <div className={styles.skeletonPills}>
-                  <span className={`${styles.skeleton} ${styles.skeletonPill}`} />
-                  <span className={`${styles.skeleton} ${styles.skeletonPillShort}`} />
-                </div>
-                <div className={`${styles.skeleton} ${styles.skeletonTitle}`} />
-                <div className={`${styles.skeleton} ${styles.skeletonLine}`} />
-                <div className={`${styles.skeleton} ${styles.skeletonLineShort}`} />
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  if (!creatives.length) return null;
+  const displayedCount = generating
+    ? Math.max(2, requestedCount)
+    : Math.max(...creatives.map((creative) => creative.index), ...failedIndexes, 0);
+  const canPublish = generationComplete && !generating;
 
   const successfulAds =
     batchResult?.results.filter((result) => result.status === 'success').length || 0;
 
   return (
-    <section className={styles.section}>
+    <section className={styles.section} aria-live="polite" aria-busy={generating}>
       <div className={styles.heading}>
         <div>
-          <p className="eyebrow">Generated</p>
-          <h2>Creative variations</h2>
+          <p className="eyebrow">{generating ? 'Generating' : 'Generated'}</p>
+          <h2>{generating ? 'Building your creative variations' : 'Creative variations'}</h2>
         </div>
+        <span className="muted">{displayedCount} concepts</span>
         <div className={styles.actions}>
           <button
             type="button"
@@ -396,7 +374,7 @@ export function CreativeResults({
             onClick={() =>
               setSelectedIds(allSelected ? [] : creatives.map((creative) => creative.id))
             }
-            disabled={publishing}
+            disabled={publishing || !canPublish}
           >
             {allSelected ? 'Clear selection' : 'Select all'}
           </button>
@@ -404,14 +382,14 @@ export function CreativeResults({
             type="button"
             className={styles.secondaryButton}
             onClick={() => void openMetaSetup(false)}
-            disabled={publishing}
+            disabled={publishing || !canPublish}
           >
             {metaDefaults ? 'Meta setup' : 'Set up Meta'}
           </button>
           <button
             type="button"
             className={styles.primaryButton}
-            disabled={!selectedCreatives.length || publishing}
+            disabled={!selectedCreatives.length || publishing || !canPublish}
             onClick={() => void publishToMeta()}
           >
             {publishing
@@ -441,20 +419,52 @@ export function CreativeResults({
       ) : null}
 
       <div className={styles.grid}>
-        {creatives.map((creative) => {
+        {Array.from({ length: displayedCount }, (_, offset) => {
+          const index = offset + 1;
+          const creative = creatives.find((item) => item.index === index);
+          if (!creative) {
+            const failure = generationFailures[index];
+            if (failure) {
+              return (
+                <article className={`${styles.card} ${styles.failedCard}`} key={index}>
+                  <div className={`${styles.image} ${styles.failedImage}`}>Failed</div>
+                  <div className={styles.body}>
+                    <p className={styles.failedLabel}>Creative {index} could not be completed.</p>
+                    <p>{failure}</p>
+                  </div>
+                </article>
+              );
+            }
+
+            return (
+              <article className={`${styles.card} ${styles.skeletonCard}`} key={index}>
+                <div className={`${styles.image} ${styles.skeleton}`} />
+                <div className={styles.body}>
+                  <div className={styles.skeletonPills}>
+                    <span className={`${styles.skeleton} ${styles.skeletonPill}`} />
+                    <span className={`${styles.skeleton} ${styles.skeletonPillShort}`} />
+                  </div>
+                  <div className={`${styles.skeleton} ${styles.skeletonTitle}`} />
+                  <div className={`${styles.skeleton} ${styles.skeletonLine}`} />
+                  <div className={`${styles.skeleton} ${styles.skeletonLineShort}`} />
+                </div>
+              </article>
+            );
+          }
+
           const state = publishState[creative.id];
           const selected = selectedIds.includes(creative.id);
           return (
             <article
               className={`${styles.card} ${selected ? styles.cardSelected : ''}`}
-              key={creative.id}
+                key={creative.id}
             >
               <label className={styles.selectionControl}>
                 <input
                   type="checkbox"
                   checked={selected}
                   onChange={() => toggleCreative(creative.id)}
-                  disabled={publishing}
+                  disabled={publishing || !canPublish}
                 />
                 <span>Select</span>
               </label>
