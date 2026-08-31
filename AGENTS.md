@@ -18,6 +18,30 @@ Do not automatically expand a bounded feature into hostile-client-grade infrastr
 
 This does not remove normal security hygiene or repository risk-review requirements. Auth, secrets, production storage safety, destructive actions, spend/publishing controls, and hard product/compliance invariants still require appropriate safeguards. Reassess and strengthen the threat model before materially broader, external, or untrusted-user access is introduced.
 
+## Codex execution routing
+
+Before substantial Codex implementation, debugging, review, or repository work, determine and state the execution route using this compact block:
+
+```text
+WHERE: <VS Code sidebar | Terminal / CLI | Desktop app>
+SESSION: <CONTINUE | NEW — short name>
+MODEL: <current suitable Codex model>
+REASONING: <lowest sufficient level>
+PARALLEL: <YES | NO — short reason/ownership>
+```
+
+These fields are task-specific decisions, not fixed defaults. Example values from previous tasks must never be copied mechanically.
+
+- Prefer the cheapest suitable Codex model. Use lower-cost models such as Terra or Luna when capable; escalate only when task complexity, uncertainty, or repeated failure justifies it.
+- Use the lowest sufficient reasoning level and increase it only when needed.
+- Prefer parallel work when tasks can be isolated safely. Assign non-overlapping files/contracts/worktrees/agents and define merge/review ownership before starting.
+- Use `CONTINUE` only when the current session has relevant, clean context and continuity is useful.
+- Use `NEW` for a distinct phase/workstream, when the current session is long/noisy or anchored to failed approaches, or when fresh context is likely to improve implementation quality.
+- Independent review always uses a fresh chat/session that did not implement the change. Do not pass the implementer's transcript; pass acceptance criteria, canonical requirements, branch/HEAD SHA or final diff, and verification results.
+- For material remediation after review, prefer a fresh implementation/remediation chat when the original implementation thread is already long or biased by prior attempts.
+- New chats recover state from repo truth: `AGENTS.md`, the task-relevant Issue/PR, exact branch/SHA/checkpoint, and directly relevant code/docs — not conversation transcripts.
+- Do not create fresh chats or parallel agents for trivial work when coordination cost exceeds the benefit.
+
 ## ChatGPT <-> Codex handoff protocol
 
 When the user is manually relaying work between ChatGPT and Codex, optimize for direct structured handoff rather than explanatory prose.
