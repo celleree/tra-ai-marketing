@@ -10,6 +10,77 @@ permissions:
   contents: read
 
 jobs:
+  pr-reviewability:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check reviewability guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          policy=.github/pr-reviewability-policy.json
+          max_lines=$(jq -r '.soft_max_substantive_lines' "$policy")
+          max_files=$(jq -r '.soft_max_substantive_files' "$policy")
+
+          substantive_lines=0
+          substantive_files=0
+          mechanical_lines=0
+          mechanical_files=0
+
+          while IFS=$'\t' read -r added deleted path; do
+            [[ -z "${path:-}" ]] && continue
+            [[ "$added" =~ ^[0-9]+$ ]] || added=0
+            [[ "$deleted" =~ ^[0-9]+$ ]] || deleted=0
+            changed=$((added + deleted))
+
+            excluded=false
+            while IFS= read -r pattern; do
+              case "$pattern" in
+                */) [[ "$path" == *"$pattern"* ]] && excluded=true ;;
+                .*) [[ "$path" == *"$pattern" ]] && excluded=true ;;
+                *) [[ "$path" == "$pattern" || "$path" == */"$pattern" ]] && excluded=true ;;
+              esac
+            done < <(jq -r '.excluded_path_patterns[]' "$policy")
+
+            if [[ "$excluded" == true ]]; then
+              mechanical_lines=$((mechanical_lines + changed))
+              mechanical_files=$((mechanical_files + 1))
+            else
+              substantive_lines=$((substantive_lines + changed))
+              substantive_files=$((substantive_files + 1))
+            fi
+          done < <(git diff --numstat "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+
+          echo "Substantive review diff: ${substantive_lines} lines across ${substantive_files} files"
+          echo "Excluded mechanical diff: ${mechanical_lines} lines across ${mechanical_files} files"
+          echo "Guardrails: ${max_lines} substantive lines / ${max_files} substantive files"
+
+          if (( substantive_lines <= max_lines && substantive_files <= max_files )); then
+            exit 0
+          fi
+
+          justification=$(printf '%s\n' "$PR_BODY" | sed -n 's/^- Large PR justification:[[:space:]]*//p' | head -n 1)
+          review_order=$(printf '%s\n' "$PR_BODY" | sed -n 's/^- Review order:[[:space:]]*//p' | head -n 1)
+
+          invalid_value() {
+            local value="${1//[[:space:]]/}"
+            [[ -z "$value" || "$value" == "N/A" || "$value" == "NONE" || "$value" == "TBD" ]]
+          }
+
+          if invalid_value "$justification" || invalid_value "$review_order"; then
+            echo "::error::PR exceeds reviewability guardrails. Split it, or provide non-placeholder 'Large PR justification' and 'Review order' fields in the PR body."
+            exit 1
+          fi
+
+          echo "Oversized PR accepted under split-or-justify policy."
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
