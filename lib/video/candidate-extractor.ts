@@ -25,7 +25,6 @@ import type {
   VideoFrameCandidatePolicy,
 } from '@/lib/video/candidate-types';
 import {
-  parseFfmpegDurationMs,
   runFfmpeg,
   TraVideoProcessingError,
 } from '@/lib/video/ffmpeg';
@@ -147,9 +146,16 @@ const parseIntervalTimestamps = (stderr: string) => {
   return timestamps;
 };
 
-const requireValidProbe = (stderr: string) => {
-  const durationMs = parseFfmpegDurationMs(stderr);
-  if (!durationMs || !/Stream\s+#\d+:\d+.*Video:/i.test(stderr)) {
+const requireValidProbe = (stdout: Buffer) => {
+  const progress = stdout.toString('utf8');
+  const matches = [...progress.matchAll(/^out_time_us=(\d+)$/gm)];
+  const outTimeUs = Number(matches.at(-1)?.[1]);
+  const durationMs = Math.round(outTimeUs / 1000);
+  if (
+    !progress.includes('progress=end') ||
+    !Number.isFinite(durationMs) ||
+    durationMs <= 0
+  ) {
     throw new TraVideoProcessingError(
       'The TRA video does not contain a decodable video stream with a usable duration.'
     );
@@ -208,16 +214,19 @@ export class FfmpegIntervalCandidateExtractor
           '-hide_banner',
           '-nostdin',
           '-v',
-          'info',
+          'error',
           '-i',
           inputPath,
           '-map',
           '0:v:0',
-          '-frames:v',
-          '1',
+          '-c:v',
+          'copy',
           '-f',
           'null',
           '-',
+          '-progress',
+          'pipe:1',
+          '-nostats',
         ]);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -230,7 +239,7 @@ export class FfmpegIntervalCandidateExtractor
         );
       }
 
-      const durationMs = requireValidProbe(probe.stderr);
+      const durationMs = requireValidProbe(probe.stdout);
       const effectiveIntervalFps = getEffectiveIntervalFps(
         durationMs,
         resolvedPolicy

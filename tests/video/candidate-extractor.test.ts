@@ -11,7 +11,10 @@ import {
 } from '@/lib/video/candidate-extractor';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import { runFfmpeg, TraVideoProcessingError } from '@/lib/video/ffmpeg';
-import { REAL_MULTI_FRAME_MP4 } from '@/tests/fixtures/media';
+import {
+  REAL_MISMATCHED_STREAM_DURATION_MP4,
+  REAL_MULTI_FRAME_MP4,
+} from '@/tests/fixtures/media';
 
 const MEDIA_ID = `media_${'a'.repeat(32)}`;
 const VALID_JPEG = Buffer.from(
@@ -49,6 +52,13 @@ const writeCandidateFiles = async (
     )
   );
 };
+
+const probeResult = (durationMs: number, containerDuration: string) => ({
+  stdout: Buffer.from(
+    `out_time_us=${durationMs * 1000}\nout_time_ms=${durationMs * 1000}\nprogress=end\n`
+  ),
+  stderr: `Duration: ${containerDuration}`,
+});
 
 const sha256 = (buffer: Buffer) =>
   createHash('sha256').update(buffer).digest('hex');
@@ -149,15 +159,26 @@ describe('dense interval TRA video candidate extraction', () => {
     expect(result.candidates.every((candidate) => candidate.height === 48)).toBe(true);
   });
 
+  it('bases duration and adaptive density on selected video when audio is longer', async () => {
+    const result = await new FfmpegIntervalCandidateExtractor().extractCandidates(
+      makeVideoSource(REAL_MISMATCHED_STREAM_DURATION_MP4)
+    );
+    successfulDirectories.push(result.temporaryDirectory);
+
+    expect(result.durationMs).toBe(4_000);
+    expect(result.effectiveIntervalFps).toBe(3);
+    expect(result.candidates.length).toBeGreaterThanOrEqual(11);
+    expect(result.candidates.length).toBeLessThanOrEqual(12);
+    expect(result.candidates[0].timestampMs).toBe(0);
+    expect(result.candidates.at(-1)!.timestampMs).toBeGreaterThanOrEqual(3_500);
+    expect(result.candidates.at(-1)!.timestampMs).toBeLessThan(result.durationMs);
+  });
+
   it('uses the adaptive long-video FPS and passes the hard batch limit to FFmpeg', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:05:00.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
-        };
+        return probeResult(300_000, '00:05:00.00');
       }
       const outputPattern = args.at(-1)!;
       await writeFile(outputPattern.replace('%06d', '000000'), VALID_JPEG);
@@ -189,11 +210,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:00:01.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
-        };
+        return probeResult(1_000, '00:00:01.00');
       }
       await writeCandidateFiles(args.at(-1)!, 4);
       return {
@@ -231,11 +248,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:00:01.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
-        };
+        return probeResult(1_000, '00:00:01.00');
       }
       await writeCandidateFiles(args.at(-1)!, 1);
       return {
@@ -260,11 +273,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:00:04.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
-        };
+        return probeResult(4_000, '00:00:04.00');
       }
       await writeFile(args.at(-1)!.replace('%06d', '000000'), VALID_JPEG);
       throw new Error('simulated FFmpeg extraction failure');
@@ -286,11 +295,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:00:04.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
-        };
+        return probeResult(4_000, '00:00:04.00');
       }
       await writeCandidateFiles(args.at(-1)!, 3);
       return { stdout: Buffer.alloc(0), stderr: '' };
@@ -317,11 +322,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:00:00.50\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
-        };
+        return probeResult(500, '00:00:00.50');
       }
       await writeCandidateFiles(args.at(-1)!, 1);
       return {
@@ -394,11 +395,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const outputJpeg = jpegWithDimensions(400, 710);
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:00:02.00\n  Stream #0:0: Video: mpeg4, yuv420p, 721x1281',
-        };
+        return probeResult(2_000, '00:00:02.00');
       }
       await writeCandidateFiles(args.at(-1)!, 1, outputJpeg);
       return {
@@ -448,11 +445,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:00:04.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
-        };
+        return probeResult(4_000, '00:00:04.00');
       }
       await writeFile(
         args.at(-1)!.replace('%06d', '000000'),
@@ -482,11 +475,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       if (args.includes('null')) {
-        return {
-          stdout: Buffer.alloc(0),
-          stderr:
-            'Duration: 00:00:04.00\n  Stream #0:0: Video: mpeg4, yuv420p, 80x48',
-        };
+        return probeResult(4_000, '00:00:04.00');
       }
       await writeFile(args.at(-1)!.replace('%06d', '000000'), VALID_JPEG);
       return { stdout: Buffer.alloc(0), stderr: '' };
