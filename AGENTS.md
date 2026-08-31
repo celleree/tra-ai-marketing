@@ -10,6 +10,22 @@ Keep normal AI/Codex context small. Read only the files needed for the task.
 - Preserve intended work from parallel branches when resolving conflicts.
 - Promote `staging` to `main` only when explicitly approved for production.
 
+## PR reviewability — REQUIRED
+
+PRs must be the smallest coherent, self-contained change.
+
+Canonical thresholds live in `.github/pr-reviewability-policy.json`.
+
+- Preferred target: <=200 substantive changed lines when practical.
+- Normal soft ceiling: <=400 substantive changed lines.
+- Also split-or-justify when more than 10 substantive files are touched.
+- High-risk changes should prefer <=200 substantive changed lines.
+- If a planned PR is likely to exceed a threshold, attempt to split it before implementation. Use stacked PRs when dependencies require ordered changes.
+- If splitting would reduce correctness, coherence, or leave an invalid intermediate state, keep the PR together and provide `LARGE PR JUSTIFICATION` plus `REVIEW ORDER`.
+- Do not treat generated files, lockfiles, snapshots, mechanical formatting, bulk renames/moves, or similar mechanical changes as substantive review work. Handwritten tests that require reasoning are substantive.
+- AI generation speed is never justification for a larger PR.
+- Parallel agents should preferably own separate coherent PRs or non-overlapping portions of a planned stack.
+
 ## Current threat model
 
 TRA AI Marketing is currently an internal team tool with a very small set of trusted users. For the current phase, optimize safeguards primarily for accidental misuse, malformed inputs, data integrity, hard product invariants, and preventing costly or irreversible mistakes by trusted operators.
