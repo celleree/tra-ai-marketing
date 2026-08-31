@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [staging, main]
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [staging, main]
 
@@ -56,7 +57,7 @@ jobs:
               substantive_lines=$((substantive_lines + changed))
               substantive_files=$((substantive_files + 1))
             fi
-          done < <(git diff --numstat "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          done < <(git diff --numstat "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")
 
           echo "Substantive review diff: ${substantive_lines} lines across ${substantive_files} files"
           echo "Excluded mechanical diff: ${mechanical_lines} lines across ${mechanical_files} files"
@@ -82,6 +83,9 @@ jobs:
           echo "Oversized PR accepted under split-or-justify policy."
 
   verify:
+    if: >-
+      github.event_name == 'push' || github.event.action != 'edited' ||
+      github.event.changes.base != null
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
