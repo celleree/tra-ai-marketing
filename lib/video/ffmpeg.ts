@@ -40,7 +40,7 @@ const getFfmpegPath = () =>
     process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
   );
 
-const runFfmpeg = async (args: string[]) =>
+export const runFfmpeg = async (args: string[]) =>
   new Promise<{ stdout: Buffer; stderr: string }>((resolve, reject) => {
     const child = spawn(/* turbopackIgnore: true */ getFfmpegPath(), args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -91,7 +91,7 @@ const runFfmpeg = async (args: string[]) =>
     });
   });
 
-const parseDurationMs = (stderr: string) => {
+export const parseFfmpegDurationMs = (stderr: string) => {
   const match = stderr.match(/Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/);
   if (!match) return null;
   const hours = Number(match[1]);
@@ -142,7 +142,7 @@ export class FfmpegTraVideoProcessor implements TraVideoProcessor {
         );
       }
 
-      const durationMs = parseDurationMs(probe.stderr);
+      const durationMs = parseFfmpegDurationMs(probe.stderr);
       if (!durationMs || !/Stream\s+#\d+:\d+.*Video:/i.test(probe.stderr)) {
         throw new TraVideoProcessingError(
           'The TRA video does not contain a decodable video stream with a usable duration.'
