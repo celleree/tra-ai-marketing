@@ -12,43 +12,21 @@ permissions:
 
 jobs:
   verify:
-    name: >-
-      ${{ github.event_name == 'pull_request'
-          && github.event.action == 'edited'
-          && github.event.changes.base == null
-          && 'verify (not applicable)'
-          || 'verify' }}
+    name: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       NEXT_TELEMETRY_DISABLED: '1'
-      RUN_VERIFY: >-
-        ${{
-          github.event_name == 'push'
-          || github.event.action == 'opened'
-          || github.event.action == 'synchronize'
-          || github.event.action == 'reopened'
-          || (github.event.action == 'edited' && github.event.changes.base != null)
-        }}
     steps:
-      - name: Verification not applicable
-        if: env.RUN_VERIFY != 'true'
-        run: echo "Verification is not applicable to title/body-only PR edits."
       - uses: actions/checkout@v7
-        if: env.RUN_VERIFY == 'true'
       - uses: actions/setup-node@v7
-        if: env.RUN_VERIFY == 'true'
         with:
           node-version: '22'
           cache: npm
-      - if: env.RUN_VERIFY == 'true'
-        run: npm ci
+      - run: npm ci
       - name: Typecheck
-        if: env.RUN_VERIFY == 'true'
         run: npm run typecheck
       - name: Tests
-        if: env.RUN_VERIFY == 'true'
         run: npm test
       - name: Production build
-        if: env.RUN_VERIFY == 'true'
         run: npm run build
