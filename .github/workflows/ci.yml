@@ -41,6 +41,11 @@ jobs:
             [[ "$deleted" =~ ^[0-9]+$ ]] || deleted=0
             changed=$((added + deleted))
 
+            rename_only=false
+            if (( changed == 0 )) && [[ "$path" == *"=>"* ]]; then
+              rename_only=true
+            fi
+
             excluded=false
             while IFS= read -r pattern; do
               case "$pattern" in
@@ -50,14 +55,14 @@ jobs:
               esac
             done < <(jq -r '.excluded_path_patterns[]' "$policy")
 
-            if [[ "$excluded" == true ]]; then
+            if [[ "$rename_only" == true || "$excluded" == true ]]; then
               mechanical_lines=$((mechanical_lines + changed))
               mechanical_files=$((mechanical_files + 1))
             else
               substantive_lines=$((substantive_lines + changed))
               substantive_files=$((substantive_files + 1))
             fi
-          done < <(git diff --numstat "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")
+          done < <(git diff --numstat -M100% "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")
 
           echo "Substantive review diff: ${substantive_lines} lines across ${substantive_files} files"
           echo "Excluded mechanical diff: ${mechanical_lines} lines across ${mechanical_files} files"
@@ -83,9 +88,6 @@ jobs:
           echo "Oversized PR accepted under split-or-justify policy."
 
   verify:
-    if: >-
-      github.event_name == 'push' || github.event.action != 'edited' ||
-      github.event.changes.base != null
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
