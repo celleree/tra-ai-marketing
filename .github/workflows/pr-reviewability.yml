@@ -28,7 +28,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          policy=.github/pr-reviewability-policy.json
+          policy=$(mktemp)
+          git show "origin/${BASE_REF}:.github/pr-reviewability-policy.json" > "$policy"
           max_lines=$(jq -r '.soft_max_substantive_lines' "$policy")
           max_files=$(jq -r '.soft_max_substantive_files' "$policy")
 
