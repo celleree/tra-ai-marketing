@@ -80,6 +80,7 @@ jobs:
 
           invalid_value() {
             local value="${1//[[:space:]]/}"
+            value="${value^^}"
             [[ -z "$value" || "$value" == "N/A" || "$value" == "NONE" || "$value" == "TBD" ]]
           }
 
