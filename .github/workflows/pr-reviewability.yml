@@ -90,6 +90,7 @@ jobs:
           echo "Oversized PR accepted under split-or-justify policy."
 
   verify-base-retarget:
+    name: ${{ github.event.action == 'edited' && github.event.changes.base != null && 'verify-base-retarget' || 'verify-base-retarget (not applicable)' }}
     if: github.event.action == 'edited' && github.event.changes.base != null
     runs-on: ubuntu-latest
     timeout-minutes: 15
