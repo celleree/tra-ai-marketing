@@ -1,0 +1,127 @@
+name: PR Reviewability
+
+on:
+  pull_request_target:
+    branches: [staging, main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-reviewability:
+    name: pr-reviewability
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - name: Fetch PR head as untrusted Git data
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid pull request number."
+            exit 1
+          fi
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid base SHA."
+            exit 1
+          fi
+          if [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid head SHA."
+            exit 1
+          fi
+          if [[ "$(git rev-parse --verify HEAD)" != "$BASE_SHA" ]]; then
+            echo "::error::Checked-out commit does not match the event base SHA."
+            exit 1
+          fi
+
+          git fetch --no-tags origin \
+            "+refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr/${PR_NUMBER}/head"
+          fetched_head=$(git rev-parse --verify \
+            "refs/remotes/origin/pr/${PR_NUMBER}/head^{commit}")
+          if [[ "$fetched_head" != "$HEAD_SHA" ]]; then
+            echo "::error::Fetched pull request head does not match the event head SHA."
+            exit 1
+          fi
+      - name: Check reviewability guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          policy=$(mktemp)
+          trap 'rm -f "$policy"' EXIT
+          if ! git show "${BASE_SHA}:.github/pr-reviewability-policy.json" > "$policy"; then
+            echo "::error::Trusted reviewability policy is absent from base commit ${BASE_SHA}."
+            exit 1
+          fi
+
+          max_lines=$(jq -r '.soft_max_substantive_lines' "$policy")
+          max_files=$(jq -r '.soft_max_substantive_files' "$policy")
+
+          substantive_lines=0
+          substantive_files=0
+          mechanical_lines=0
+          mechanical_files=0
+
+          while IFS=$'\t' read -r added deleted path; do
+            [[ -z "${path:-}" ]] && continue
+            [[ "$added" =~ ^[0-9]+$ ]] || added=0
+            [[ "$deleted" =~ ^[0-9]+$ ]] || deleted=0
+            changed=$((added + deleted))
+
+            rename_only=false
+            if (( changed == 0 )) && [[ "$path" == *"=>"* ]]; then
+              rename_only=true
+            fi
+
+            excluded=false
+            while IFS= read -r pattern; do
+              case "$pattern" in
+                */) [[ "$path" == *"$pattern"* ]] && excluded=true ;;
+                .*) [[ "$path" == *"$pattern" ]] && excluded=true ;;
+                *) [[ "$path" == "$pattern" || "$path" == */"$pattern" ]] && excluded=true ;;
+              esac
+            done < <(jq -r '.excluded_path_patterns[]' "$policy")
+
+            if [[ "$rename_only" == true || "$excluded" == true ]]; then
+              mechanical_lines=$((mechanical_lines + changed))
+              mechanical_files=$((mechanical_files + 1))
+            else
+              substantive_lines=$((substantive_lines + changed))
+              substantive_files=$((substantive_files + 1))
+            fi
+          done < <(git diff --numstat -M100% "${BASE_SHA}...${HEAD_SHA}" --)
+
+          echo "Substantive review diff: ${substantive_lines} lines across ${substantive_files} files"
+          echo "Excluded mechanical diff: ${mechanical_lines} lines across ${mechanical_files} files"
+          echo "Guardrails: ${max_lines} substantive lines / ${max_files} substantive files"
+
+          if (( substantive_lines <= max_lines && substantive_files <= max_files )); then
+            exit 0
+          fi
+
+          justification=$(printf '%s\n' "$PR_BODY" | sed -n 's/^- Large PR justification:[[:space:]]*//p' | head -n 1)
+          review_order=$(printf '%s\n' "$PR_BODY" | sed -n 's/^- Review order:[[:space:]]*//p' | head -n 1)
+
+          invalid_value() {
+            local value="${1//[[:space:]]/}"
+            value="${value^^}"
+            [[ -z "$value" || "$value" == "N/A" || "$value" == "NONE" || "$value" == "TBD" ]]
+          }
+
+          if invalid_value "$justification" || invalid_value "$review_order"; then
+            echo "::error::PR exceeds reviewability guardrails. Split it, or provide non-placeholder 'Large PR justification' and 'Review order' fields in the PR body."
+            exit 1
+          fi
+
+          echo "Oversized PR accepted under split-or-justify policy."
