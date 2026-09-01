@@ -25,6 +25,7 @@ Canonical thresholds live in `.github/pr-reviewability-policy.json`.
 - Do not treat generated files, lockfiles, snapshots, mechanical formatting, bulk renames/moves, or similar mechanical changes as substantive review work. Handwritten tests that require reasoning are substantive.
 - AI generation speed is never justification for a larger PR.
 - Parallel agents should preferably own separate coherent PRs or non-overlapping portions of a planned stack.
+- Any PR changing `.github/workflows/**`, `.github/pr-reviewability-policy.json`, or safeguard/risk-review rules in `AGENTS.md` is HIGH risk and requires a fresh independent review of the exact current HEAD SHA before merge. Any subsequent commit, rebase, or base sync invalidates that review.
 
 ## Current threat model
 

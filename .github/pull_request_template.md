@@ -12,10 +12,20 @@
 - [ ] ...
 - Relevant requirements/canonical sources:
 
+## Reviewability
+
+- Substantive diff: [approx. lines / files]
+- Mechanical diff: NONE
+- PR scope: [single coherent change]
+- Stack: NONE
+- Large PR justification: N/A
+- Review order: N/A
+
 ## Verification
 
 - `command` — result
 - CI `verify`: pending / passed
+- CI `pr-reviewability`: pending / passed / N/A
 
 ## Risk
 
