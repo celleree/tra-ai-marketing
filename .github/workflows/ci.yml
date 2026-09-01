@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [staging, main]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [staging, main]
 
@@ -12,6 +12,20 @@ permissions:
 
 jobs:
   verify:
+    name: >-
+      ${{ github.event_name == 'pull_request'
+          && github.event.action == 'edited'
+          && github.event.changes.base == null
+          && 'verify (not applicable)'
+          || 'verify' }}
+    if: >-
+      ${{
+        github.event_name == 'push'
+        || github.event.action == 'opened'
+        || github.event.action == 'synchronize'
+        || github.event.action == 'reopened'
+        || (github.event.action == 'edited' && github.event.changes.base != null)
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
