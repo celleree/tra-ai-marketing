@@ -31,6 +31,18 @@ Canonical thresholds live in `.github/pr-reviewability-policy.json`.
 
 TRA AI Marketing is currently an internal team tool with a very small set of trusted users. For the current phase, optimize safeguards primarily for accidental misuse, malformed inputs, data integrity, hard product invariants, and preventing costly or irreversible mistakes by trusted operators.
 
+### Trusted-user assumption
+
+For the current phase, treat authorized application users and repository contributors as trusted and non-malicious.
+
+Do **not** design, implement, or review for scenarios where trusted users intentionally exploit loopholes, bypass workflows, craft adversarial inputs, subvert repository/CI rules, or try to break the application or repository.
+
+Assume the private repository is primarily operated through AI coding agents. Do not add architecture, validation, CI complexity, provenance systems, or other defensive infrastructure solely to protect against hypothetical malicious behavior by authorized users.
+
+Still protect against exposed secrets, unauthorized access, authentication/authorization failures, accidental destructive actions, production data loss, unintended publishing or advertising spend, and other realistic failures that could cause meaningful harm.
+
+Optimize safeguards for the actual trusted internal threat model.
+
 Do not automatically expand a bounded feature into hostile-client-grade infrastructure, adversarial multi-tenant controls, immutable provenance systems, or heavyweight security architecture unless the current task genuinely requires it. Prefer the smallest reliable safeguard appropriate to trusted internal use.
 
 This does not remove normal security hygiene or repository risk-review requirements. Auth, secrets, production storage safety, destructive actions, spend/publishing controls, and hard product/compliance invariants still require appropriate safeguards. Reassess and strengthen the threat model before materially broader, external, or untrusted-user access is introduced.
