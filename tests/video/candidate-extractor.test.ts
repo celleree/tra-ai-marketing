@@ -7,6 +7,7 @@ import type { HydratedCreativeSourceAsset } from '@/lib/media/source-hydration';
 import { detectImageMimeType } from '@/lib/media/storage';
 import {
   FfmpegIntervalCandidateExtractor,
+  FfmpegSceneCandidateMaterializer,
   type HydratedTraVideoSource,
 } from '@/lib/video/candidate-extractor';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
@@ -506,6 +507,116 @@ describe('dense interval TRA video candidate extraction', () => {
         source as HydratedTraVideoSource
       )
     ).rejects.toThrow('server-hydrated TRA_VIDEO MP4');
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('scene-change TRA video candidate materialization', () => {
+  it('materializes one trusted scene timestamp into a temporary JPEG with source provenance', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
+    try {
+      const [candidate] = await new FfmpegSceneCandidateMaterializer({
+        temporaryRoot,
+      }).materializeCandidates(makeVideoSource(), [1_000], {
+        ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+        maxWidth: 40,
+      });
+      successfulDirectories.push(path.dirname(candidate.temporaryPath));
+      const bytes = await readFile(candidate.temporaryPath);
+
+      expect(detectImageMimeType(bytes)).toBe('image/jpeg');
+      expect(candidate).toMatchObject({
+        candidateIndex: 0,
+        timestampMs: 1_000,
+        sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: MEDIA_ID,
+        sourceVideoFileName: `${MEDIA_ID}.mp4`,
+        sourceVideoContentHash: sha256(REAL_MULTI_FRAME_MP4),
+        mimeType: 'image/jpeg',
+        width: 40,
+        height: 24,
+        byteLength: bytes.length,
+        frameSha256: sha256(bytes),
+        extractionReasons: ['SCENE_CHANGE'],
+        lifecycle: 'TEMPORARY',
+        providerEligible: false,
+      });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('maps ordered timestamps to matching bounded FFmpeg JPEG outputs', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
+    const run = vi.fn(async (args: string[]) => {
+      await writeFile(args.at(-1)!, jpegWithDimensions(400, 240));
+      return { stdout: Buffer.alloc(0), stderr: '' };
+    });
+    try {
+      const candidates = await new FfmpegSceneCandidateMaterializer({
+        run,
+        temporaryRoot,
+      }).materializeCandidates(makeVideoSource(), [125, 1_250], {
+        ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+        maxIntervalCandidates: 2,
+        maxTotalCandidates: 2,
+        maxWidth: 400,
+        jpegQuality: 50,
+      });
+      successfulDirectories.push(path.dirname(candidates[0].temporaryPath));
+
+      expect(candidates.map((candidate) => [candidate.candidateIndex, candidate.timestampMs])).toEqual([
+        [0, 125], [1, 1_250],
+      ]);
+      expect(candidates.every((candidate) => candidate.width === 400 && candidate.height === 240)).toBe(true);
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(run.mock.calls.map(([args]) => args[args.indexOf('-ss') + 1])).toEqual(['0.125', '1.25']);
+      for (const [args] of run.mock.calls) {
+        expect(args[args.indexOf('-frames:v') + 1]).toBe('1');
+        expect(args[args.indexOf('-vf') + 1]).toContain("scale=w='min(iw,400)':h=-2");
+        expect(args[args.indexOf('-q:v') + 1]).toBe('17');
+      }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['FFmpeg fails', async (outputPath: string) => { await writeFile(outputPath, VALID_JPEG); throw new Error('failed'); }, /failed while extracting scene candidates/],
+    ['JPEG is malformed', async (outputPath: string) => { await writeFile(outputPath, JPEG_HEADER_WITHOUT_SCAN); }, /invalid JPEG scene candidate/],
+    ['output file does not match its timestamp', async (outputPath: string) => { await writeFile(path.join(path.dirname(outputPath), 'candidate-000001.jpg'), VALID_JPEG); }, /files did not match the requested timestamps/],
+  ])('fails cleanly when %s', async (_, writeOutput, expectedError) => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
+    const run = vi.fn(async (args: string[]) => {
+      await writeOutput(args.at(-1)!);
+      return { stdout: Buffer.alloc(0), stderr: '' };
+    });
+    try {
+      await expect(
+        new FfmpegSceneCandidateMaterializer({ run, temporaryRoot }).materializeCandidates(
+          makeVideoSource(),
+          [100]
+        )
+      ).rejects.toThrow(expectedError);
+      expect(await readdir(temporaryRoot)).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('enforces the total candidate bound before invoking FFmpeg', async () => {
+    const run = vi.fn();
+    await expect(
+      new FfmpegSceneCandidateMaterializer({ run }).materializeCandidates(
+        makeVideoSource(),
+        [100, 200, 300],
+        {
+          ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+          maxIntervalCandidates: 2,
+          maxTotalCandidates: 2,
+        }
+      )
+    ).rejects.toThrow('Scene timestamps must be bounded');
     expect(run).not.toHaveBeenCalled();
   });
 });
