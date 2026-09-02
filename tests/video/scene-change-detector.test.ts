@@ -14,6 +14,11 @@ const sceneOutput = (...timestamps: string[]) => ({
     .join('\n'),
 });
 
+const showinfoConfig = [
+  '[Parsed_showinfo_2 @ 0x123] config in time_base: 1/90000, frame_rate: 30/1',
+  '[Parsed_showinfo_2 @ 0x123] config out time_base: 0/0, frame_rate: 0/0',
+].join('\n');
+
 const detectorFor = (result = sceneOutput('0.1')) => {
   const run = vi.fn(async (_args: string[]) => result);
   return { detector: new FfmpegSceneChangeDetector({ run }), run };
@@ -32,6 +37,21 @@ describe('FFmpeg scene-change timestamp detection', () => {
     await expect(detector.detect('/tmp/source.mp4', 4_000, 10)).resolves.toEqual([]);
   });
 
+  it('ignores showinfo configuration before valid frame metadata', async () => {
+    const { detector } = detectorFor({
+      stdout: Buffer.alloc(0),
+      stderr: `${showinfoConfig}\n${sceneOutput('0.5', '1.25').stderr}`,
+    });
+    await expect(detector.detect('/tmp/source.mp4', 2_000, 10)).resolves.toEqual([
+      500, 1_250,
+    ]);
+  });
+
+  it('returns no timestamps for configuration-only showinfo output', async () => {
+    const { detector } = detectorFor({ stdout: Buffer.alloc(0), stderr: showinfoConfig });
+    await expect(detector.detect('/tmp/source.mp4', 2_000, 10)).resolves.toEqual([]);
+  });
+
   it('deduplicates rounding collisions deterministically', async () => {
     const { detector } = detectorFor(sceneOutput('0.1001', '0.1004', '0.101'));
     await expect(detector.detect('/tmp/source.mp4', 1_000, 10)).resolves.toEqual([
@@ -48,6 +68,7 @@ describe('FFmpeg scene-change timestamp detection', () => {
 
   it.each([
     ['malformed metadata', '[Parsed_showinfo_2] n: 0'],
+    ['frame metadata without pts_time', '[Parsed_showinfo_2] n: 0 pts: 0'],
     ['negative timestamp', sceneOutput('-0.1').stderr],
     ['timestamp at duration', sceneOutput('4').stderr],
     ['nonchronological metadata', sceneOutput('2', '1').stderr],

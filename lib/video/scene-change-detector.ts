@@ -48,6 +48,7 @@ const parseSceneTimestamps = (stderr: string, durationMs: number) => {
   let previousSeconds = -1;
   for (const line of stderr.split(/\r?\n/)) {
     if (!line.includes('Parsed_showinfo')) continue;
+    if (!/\bn:\s*|\bpts:\s*/.test(line)) continue;
     const timestamp = line.match(/\bpts_time:\s*(-?\d+(?:\.\d+)?)/)?.[1];
     if (timestamp === undefined) {
       fail('FFmpeg returned malformed scene-change timestamp metadata.');
