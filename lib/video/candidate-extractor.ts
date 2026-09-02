@@ -42,6 +42,14 @@ export interface TraVideoCandidateExtractor {
   ): Promise<TemporaryVideoFrameCandidateSet>;
 }
 
+export interface TraVideoSceneCandidateMaterializer {
+  materializeCandidates(
+    source: HydratedTraVideoSource,
+    sceneTimestampsMs: readonly number[],
+    policy?: VideoFrameCandidatePolicy
+  ): Promise<TemporaryVideoFrameCandidate[]>;
+}
+
 type FfmpegRunner = typeof runFfmpeg;
 
 interface FfmpegIntervalCandidateExtractorDependencies {
@@ -56,6 +64,20 @@ const toSha256 = (buffer: Buffer) =>
 
 const toFfmpegJpegQuality = (quality: number) =>
   Math.max(2, Math.min(31, Math.round(31 - (quality / 100) * 29)));
+
+const validateTraVideoSource = (source: HydratedTraVideoSource) => {
+  if (
+    source.role !== 'TRA_VIDEO' ||
+    source.media.mediaType !== 'VIDEO' ||
+    source.media.mimeType !== 'video/mp4' ||
+    source.stored.mediaType !== 'VIDEO' ||
+    source.stored.mimeType !== 'video/mp4'
+  ) {
+    throw new Error(
+      'Only a server-hydrated TRA_VIDEO MP4 may enter interval candidate extraction.'
+    );
+  }
+};
 
 const getJpegDimensions = (buffer: Buffer) => {
   if (
@@ -126,6 +148,53 @@ const getJpegDimensions = (buffer: Buffer) => {
   return null;
 };
 
+const materializeTemporaryCandidate = async ({
+  source,
+  sourceVideoContentHash,
+  policy,
+  candidateIndex,
+  timestampMs,
+  temporaryPath,
+  extractionReasons,
+  operation,
+}: {
+  source: HydratedTraVideoSource;
+  sourceVideoContentHash: string;
+  policy: VideoFrameCandidatePolicy;
+  candidateIndex: number;
+  timestampMs: number;
+  temporaryPath: string;
+  extractionReasons: TemporaryVideoFrameCandidate['extractionReasons'];
+  operation: string;
+}): Promise<TemporaryVideoFrameCandidate> => {
+  const buffer = await readFile(temporaryPath);
+  const dimensions = getJpegDimensions(buffer);
+  if (!dimensions || dimensions.width > policy.maxWidth) {
+    throw new TraVideoProcessingError(
+      `FFmpeg produced an invalid JPEG ${operation} candidate at index ${candidateIndex}.`,
+      400,
+      'FRAME_EXTRACTION_FAILED'
+    );
+  }
+  return {
+    candidateIndex,
+    timestampMs,
+    sourceRole: 'TRA_VIDEO',
+    sourceVideoMediaId: source.media.id,
+    sourceVideoFileName: source.media.fileName,
+    sourceVideoContentHash,
+    mimeType: 'image/jpeg',
+    width: dimensions.width,
+    height: dimensions.height,
+    byteLength: buffer.length,
+    frameSha256: toSha256(buffer),
+    extractionReasons,
+    temporaryPath,
+    lifecycle: 'TEMPORARY',
+    providerEligible: false,
+  };
+};
+
 const parseIntervalTimestamps = (stderr: string) => {
   const timestamps: Array<{ outputIndex: number; timestampMs: number }> = [];
   for (const line of stderr.split(/\r?\n/)) {
@@ -145,6 +214,14 @@ const parseIntervalTimestamps = (stderr: string) => {
   }
   return timestamps;
 };
+
+const buildSceneSelectionFilter = (sceneTimestampsMs: readonly number[]) =>
+  `select='${sceneTimestampsMs
+    .map(
+      (timestampMs, index) =>
+        `eq(selected_n,${index})*gte(t,${(timestampMs - 0.5) / 1000})`
+    )
+    .join('+')}'`;
 
 const requireValidProbe = (stdout: Buffer) => {
   const progress = stdout.toString('utf8');
@@ -180,17 +257,7 @@ export class FfmpegIntervalCandidateExtractor
     source: HydratedTraVideoSource,
     policy: VideoFrameCandidatePolicy = DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY
   ): Promise<TemporaryVideoFrameCandidateSet> {
-    if (
-      source.role !== 'TRA_VIDEO' ||
-      source.media.mediaType !== 'VIDEO' ||
-      source.media.mimeType !== 'video/mp4' ||
-      source.stored.mediaType !== 'VIDEO' ||
-      source.stored.mimeType !== 'video/mp4'
-    ) {
-      throw new Error(
-        'Only a server-hydrated TRA_VIDEO MP4 may enter interval candidate extraction.'
-      );
-    }
+    validateTraVideoSource(source);
 
     const resolvedPolicy = { ...policy };
     validateVideoFrameCandidatePolicy(resolvedPolicy);
@@ -337,32 +404,16 @@ export class FfmpegIntervalCandidateExtractor
           temporaryDirectory,
           candidateFiles[candidateIndex]
         );
-        const buffer = await readFile(temporaryPath);
-        const dimensions = getJpegDimensions(buffer);
-        if (!dimensions || dimensions.width > resolvedPolicy.maxWidth) {
-          throw new TraVideoProcessingError(
-            `FFmpeg produced an invalid JPEG interval candidate at index ${candidateIndex}.`,
-            400,
-            'FRAME_EXTRACTION_FAILED'
-          );
-        }
-        candidates.push({
+        candidates.push(await materializeTemporaryCandidate({
+          source,
+          sourceVideoContentHash,
+          policy: resolvedPolicy,
           candidateIndex,
           timestampMs: timestamps[candidateIndex].timestampMs,
-          sourceRole: 'TRA_VIDEO',
-          sourceVideoMediaId: source.media.id,
-          sourceVideoFileName: source.media.fileName,
-          sourceVideoContentHash,
-          mimeType: 'image/jpeg',
-          width: dimensions.width,
-          height: dimensions.height,
-          byteLength: buffer.length,
-          frameSha256: toSha256(buffer),
-          extractionReasons: ['INTERVAL'],
           temporaryPath,
-          lifecycle: 'TEMPORARY',
-          providerEligible: false,
-        });
+          extractionReasons: ['INTERVAL'],
+          operation: 'interval',
+        }));
       }
 
       completed = true;
@@ -376,6 +427,136 @@ export class FfmpegIntervalCandidateExtractor
         candidates,
         temporaryDirectory,
       };
+    } finally {
+      if (!completed) {
+        await rm(temporaryDirectory, { recursive: true, force: true });
+      }
+    }
+  }
+}
+
+export class FfmpegSceneCandidateMaterializer
+  implements TraVideoSceneCandidateMaterializer
+{
+  private readonly run: FfmpegRunner;
+  private readonly temporaryRoot: string;
+
+  constructor(dependencies: FfmpegIntervalCandidateExtractorDependencies = {}) {
+    this.run = dependencies.run || runFfmpeg;
+    this.temporaryRoot = dependencies.temporaryRoot || tmpdir();
+  }
+
+  async materializeCandidates(
+    source: HydratedTraVideoSource,
+    sceneTimestampsMs: readonly number[],
+    policy: VideoFrameCandidatePolicy = DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY
+  ): Promise<TemporaryVideoFrameCandidate[]> {
+    validateTraVideoSource(source);
+    const resolvedPolicy = { ...policy };
+    validateVideoFrameCandidatePolicy(resolvedPolicy);
+    if (
+      sceneTimestampsMs.length > resolvedPolicy.maxTotalCandidates ||
+      sceneTimestampsMs.some(
+        (timestampMs, index) =>
+          !Number.isSafeInteger(timestampMs) ||
+          timestampMs < 0 ||
+          (index > 0 && timestampMs <= sceneTimestampsMs[index - 1])
+      )
+    ) {
+      throw new Error('Scene timestamps must be bounded, non-negative, and strictly ordered.');
+    }
+    if (!sceneTimestampsMs.length) return [];
+
+    const temporaryDirectory = await mkdtemp(
+      path.join(this.temporaryRoot, 'tra-video-scene-candidates-')
+    );
+    const inputPath = path.join(temporaryDirectory, 'source.mp4');
+    const outputPattern = path.join(
+      temporaryDirectory,
+      'candidate-%06d.jpg'
+    );
+    const expectedFiles = sceneTimestampsMs.map(
+      (_, index) => `candidate-${String(index).padStart(6, '0')}.jpg`
+    );
+    let completed = false;
+
+    try {
+      await writeFile(inputPath, source.stored.buffer);
+      let extracted;
+      try {
+        extracted = await this.run([
+          '-hide_banner',
+          '-nostdin',
+          '-v',
+          'info',
+          '-i',
+          inputPath,
+          '-map',
+          '0:v:0',
+          '-vf',
+          `${buildSceneSelectionFilter(sceneTimestampsMs)},scale=w='min(iw,${resolvedPolicy.maxWidth})':h=-2,showinfo`,
+          '-frames:v',
+          String(sceneTimestampsMs.length),
+          '-fps_mode',
+          'passthrough',
+          '-an',
+          '-q:v',
+          String(toFfmpegJpegQuality(resolvedPolicy.jpegQuality)),
+          '-start_number',
+          '0',
+          outputPattern,
+        ]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error('FFmpeg runtime is unavailable for TRA video candidate extraction.');
+        }
+        throw new TraVideoProcessingError(
+          'The TRA video failed while extracting scene candidates.',
+          400,
+          'FRAME_EXTRACTION_FAILED'
+        );
+      }
+
+      const candidateFiles = (await readdir(temporaryDirectory))
+        .filter((fileName) => CANDIDATE_FILE_PATTERN.test(fileName))
+        .sort();
+      const extractedTimestamps = parseIntervalTimestamps(extracted.stderr);
+      if (
+        candidateFiles.length !== expectedFiles.length ||
+        candidateFiles.some((fileName, index) => fileName !== expectedFiles[index]) ||
+        extractedTimestamps.length !== sceneTimestampsMs.length ||
+        extractedTimestamps.some(
+          (timestamp, index) =>
+            timestamp.outputIndex !== index ||
+            timestamp.timestampMs !== sceneTimestampsMs[index] ||
+            (index > 0 &&
+              timestamp.timestampMs < extractedTimestamps[index - 1].timestampMs)
+        )
+      ) {
+        throw new TraVideoProcessingError(
+          'FFmpeg scene candidate files did not match the requested timestamps.',
+          400,
+          'FRAME_EXTRACTION_FAILED'
+        );
+      }
+
+      const sourceVideoContentHash = toSha256(source.stored.buffer);
+      const candidates = await Promise.all(
+        sceneTimestampsMs.map((timestampMs, candidateIndex) =>
+          materializeTemporaryCandidate({
+            source,
+            sourceVideoContentHash,
+            policy: resolvedPolicy,
+            candidateIndex,
+            timestampMs,
+            temporaryPath: path.join(temporaryDirectory, expectedFiles[candidateIndex]),
+            extractionReasons: ['SCENE_CHANGE'],
+            operation: 'scene',
+          })
+        )
+      );
+      completed = true;
+      return candidates;
     } finally {
       if (!completed) {
         await rm(temporaryDirectory, { recursive: true, force: true });
