@@ -47,7 +47,8 @@ const candidateSet = (
   },
   effectiveIntervalFps: 3,
   candidates,
-  temporaryDirectory: '/tmp/candidates',
+  temporarySourceVideoPath: '/tmp/candidates/source.mp4',
+  temporaryDirectories: ['/tmp/candidates'],
 });
 
 describe('temporary video frame candidate merger', () => {

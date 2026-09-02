@@ -104,8 +104,13 @@ describe('dense interval TRA video candidate extraction', () => {
       makeVideoSource(),
       policy
     );
-    successfulDirectories.push(result.temporaryDirectory);
+    successfulDirectories.push(...result.temporaryDirectories);
 
+    expect(result.temporaryDirectories).toHaveLength(1);
+    expect(result.temporarySourceVideoPath).toBe(
+      path.join(result.temporaryDirectories[0], 'source.mp4')
+    );
+    expect(await readFile(result.temporarySourceVideoPath)).toEqual(REAL_MULTI_FRAME_MP4);
     expect(result.durationMs).toBe(4_000);
     expect(result.effectiveIntervalFps).toBe(3);
     expect(result.candidates.length).toBeGreaterThanOrEqual(11);
@@ -149,7 +154,7 @@ describe('dense interval TRA video candidate extraction', () => {
       makeVideoSource(),
       { ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY, targetIntervalFps: 1 }
     );
-    successfulDirectories.push(result.temporaryDirectory);
+    successfulDirectories.push(...result.temporaryDirectories);
 
     expect(result.effectiveIntervalFps).toBe(1);
     expect(result.candidates).toHaveLength(4);
@@ -164,7 +169,7 @@ describe('dense interval TRA video candidate extraction', () => {
     const result = await new FfmpegIntervalCandidateExtractor().extractCandidates(
       makeVideoSource(REAL_MISMATCHED_STREAM_DURATION_MP4)
     );
-    successfulDirectories.push(result.temporaryDirectory);
+    successfulDirectories.push(...result.temporaryDirectories);
 
     expect(result.durationMs).toBe(4_000);
     expect(result.effectiveIntervalFps).toBe(3);
@@ -194,7 +199,7 @@ describe('dense interval TRA video candidate extraction', () => {
         run,
         temporaryRoot,
       }).extractCandidates(makeVideoSource());
-      successfulDirectories.push(result.temporaryDirectory);
+      successfulDirectories.push(...result.temporaryDirectories);
 
       expect(run).toHaveBeenCalledTimes(2);
       expect(result.effectiveIntervalFps).toBeCloseTo(1.2);
@@ -235,7 +240,7 @@ describe('dense interval TRA video candidate extraction', () => {
         maxIntervalCandidates: 30,
         maxTotalCandidates: 30,
       });
-      successfulDirectories.push(result.temporaryDirectory);
+      successfulDirectories.push(...result.temporaryDirectories);
 
       expect(result.candidates.map((candidate) => candidate.timestampMs)).toEqual([
         0, 33, 67, 100,
@@ -337,7 +342,7 @@ describe('dense interval TRA video candidate extraction', () => {
         run,
         temporaryRoot,
       }).extractCandidates(makeVideoSource());
-      successfulDirectories.push(result.temporaryDirectory);
+      successfulDirectories.push(...result.temporaryDirectories);
 
       expect(result.durationMs).toBe(500);
       expect(result.candidates).toHaveLength(1);
@@ -413,7 +418,7 @@ describe('dense interval TRA video candidate extraction', () => {
         ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
         maxWidth: 400,
       });
-      successfulDirectories.push(result.temporaryDirectory);
+      successfulDirectories.push(...result.temporaryDirectories);
 
       const candidate = result.candidates[0];
       expect(candidate.width).toBe(400);
@@ -515,15 +520,19 @@ describe('scene-change TRA video candidate materialization', () => {
   it('materializes one trusted scene timestamp into a temporary JPEG with source provenance', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
     try {
-      const [candidate] = await new FfmpegSceneCandidateMaterializer({
+      const {
+        candidates: [candidate],
+        temporaryDirectory,
+      } = await new FfmpegSceneCandidateMaterializer({
         temporaryRoot,
       }).materializeCandidates(makeVideoSource(), [1_000], {
         ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
         maxWidth: 40,
       });
-      successfulDirectories.push(path.dirname(candidate.temporaryPath));
+      successfulDirectories.push(temporaryDirectory!);
       const bytes = await readFile(candidate.temporaryPath);
 
+      expect(temporaryDirectory).toBe(path.dirname(candidate.temporaryPath));
       expect(detectImageMimeType(bytes)).toBe('image/jpeg');
       expect(candidate).toMatchObject({
         candidateIndex: 0,
@@ -572,7 +581,7 @@ describe('scene-change TRA video candidate materialization', () => {
         fractionalVideoPath,
       ]);
       const source = makeVideoSource(await readFile(fractionalVideoPath));
-      const candidates = await new FfmpegSceneCandidateMaterializer({
+      const { candidates } = await new FfmpegSceneCandidateMaterializer({
         run,
         temporaryRoot,
       }).materializeCandidates(source, [67, 100], {
@@ -619,7 +628,7 @@ describe('scene-change TRA video candidate materialization', () => {
       };
     });
     try {
-      const candidates = await new FfmpegSceneCandidateMaterializer({
+      const { candidates } = await new FfmpegSceneCandidateMaterializer({
         run,
         temporaryRoot,
       }).materializeCandidates(makeVideoSource(), [125, 1_250], {
