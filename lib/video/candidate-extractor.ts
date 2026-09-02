@@ -21,6 +21,7 @@ import {
 } from '@/lib/video/candidate-policy';
 import type {
   TemporaryVideoFrameCandidate,
+  TemporaryVideoFrameCandidateMaterialization,
   TemporaryVideoFrameCandidateSet,
   VideoFrameCandidatePolicy,
 } from '@/lib/video/candidate-types';
@@ -47,7 +48,7 @@ export interface TraVideoSceneCandidateMaterializer {
     source: HydratedTraVideoSource,
     sceneTimestampsMs: readonly number[],
     policy?: VideoFrameCandidatePolicy
-  ): Promise<TemporaryVideoFrameCandidate[]>;
+  ): Promise<TemporaryVideoFrameCandidateMaterialization>;
 }
 
 type FfmpegRunner = typeof runFfmpeg;
@@ -425,7 +426,8 @@ export class FfmpegIntervalCandidateExtractor
         policy: resolvedPolicy,
         effectiveIntervalFps,
         candidates,
-        temporaryDirectory,
+        temporarySourceVideoPath: inputPath,
+        temporaryDirectories: [temporaryDirectory],
       };
     } finally {
       if (!completed) {
@@ -450,7 +452,7 @@ export class FfmpegSceneCandidateMaterializer
     source: HydratedTraVideoSource,
     sceneTimestampsMs: readonly number[],
     policy: VideoFrameCandidatePolicy = DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY
-  ): Promise<TemporaryVideoFrameCandidate[]> {
+  ): Promise<TemporaryVideoFrameCandidateMaterialization> {
     validateTraVideoSource(source);
     const resolvedPolicy = { ...policy };
     validateVideoFrameCandidatePolicy(resolvedPolicy);
@@ -465,7 +467,9 @@ export class FfmpegSceneCandidateMaterializer
     ) {
       throw new Error('Scene timestamps must be bounded, non-negative, and strictly ordered.');
     }
-    if (!sceneTimestampsMs.length) return [];
+    if (!sceneTimestampsMs.length) {
+      return { candidates: [], temporaryDirectory: null };
+    }
 
     const temporaryDirectory = await mkdtemp(
       path.join(this.temporaryRoot, 'tra-video-scene-candidates-')
@@ -556,7 +560,7 @@ export class FfmpegSceneCandidateMaterializer
         )
       );
       completed = true;
-      return candidates;
+      return { candidates, temporaryDirectory };
     } finally {
       if (!completed) {
         await rm(temporaryDirectory, { recursive: true, force: true });

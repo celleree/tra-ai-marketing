@@ -42,5 +42,11 @@ export interface TemporaryVideoFrameCandidateSet {
   policy: VideoFrameCandidatePolicy;
   effectiveIntervalFps: number;
   candidates: TemporaryVideoFrameCandidate[];
-  temporaryDirectory: string;
+  temporarySourceVideoPath: string;
+  temporaryDirectories: readonly string[];
+}
+
+export interface TemporaryVideoFrameCandidateMaterialization {
+  candidates: TemporaryVideoFrameCandidate[];
+  temporaryDirectory: string | null;
 }
