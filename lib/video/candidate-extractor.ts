@@ -219,7 +219,7 @@ const buildSceneSelectionFilter = (sceneTimestampsMs: readonly number[]) =>
   `select='${sceneTimestampsMs
     .map(
       (timestampMs, index) =>
-        `eq(selected_n,${index})*gte(t,${timestampMs / 1000})`
+        `eq(selected_n,${index})*gte(t,${(timestampMs - 0.5) / 1000})`
     )
     .join('+')}'`;
 
@@ -528,7 +528,7 @@ export class FfmpegSceneCandidateMaterializer
         extractedTimestamps.some(
           (timestamp, index) =>
             timestamp.outputIndex !== index ||
-            timestamp.timestampMs < sceneTimestampsMs[index] ||
+            timestamp.timestampMs !== sceneTimestampsMs[index] ||
             (index > 0 &&
               timestamp.timestampMs < extractedTimestamps[index - 1].timestampMs)
         )

@@ -546,6 +546,66 @@ describe('scene-change TRA video candidate materialization', () => {
     }
   });
 
+  it('keeps the fractional frame whose timestamp rounds to the requested scene timestamp', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
+    const fractionalVideoPath = path.join(temporaryRoot, 'fractional.mp4');
+    let materializationStderr = '';
+    const run = vi.fn(async (args: string[]) => {
+      const result = await runFfmpeg(args);
+      materializationStderr = result.stderr;
+      return result;
+    });
+    try {
+      await runFfmpeg([
+        '-hide_banner',
+        '-nostdin',
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=s=80x48:r=30000/1001:d=0.15',
+        '-map',
+        '0:v:0',
+        '-c:v',
+        'mpeg4',
+        fractionalVideoPath,
+      ]);
+      const source = makeVideoSource(await readFile(fractionalVideoPath));
+      const candidates = await new FfmpegSceneCandidateMaterializer({
+        run,
+        temporaryRoot,
+      }).materializeCandidates(source, [67, 100], {
+        ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+        maxIntervalCandidates: 2,
+        maxTotalCandidates: 2,
+      });
+      successfulDirectories.push(path.dirname(candidates[0].temporaryPath));
+      const actualTimestamps = [...materializationStderr.matchAll(
+        /\bn:\s*\d+.*?\bpts_time:\s*(-?\d+(?:\.\d+)?)/g
+      )].map((match) => Number(match[1]));
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(actualTimestamps).toHaveLength(2);
+      expect(actualTimestamps[0]).toBeCloseTo(0.0667333, 6);
+      expect(actualTimestamps[0]).toBeLessThan(0.1);
+      expect(actualTimestamps.map((timestamp) => Math.round(timestamp * 1000))).toEqual([
+        67, 100,
+      ]);
+      expect(candidates.map((candidate) => candidate.timestampMs)).toEqual([67, 100]);
+      expect(candidates[0]).toMatchObject({
+        candidateIndex: 0,
+        sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: MEDIA_ID,
+        extractionReasons: ['SCENE_CHANGE'],
+        lifecycle: 'TEMPORARY',
+        providerEligible: false,
+      });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('maps ordered timestamps to matching bounded FFmpeg JPEG outputs', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
@@ -579,8 +639,8 @@ describe('scene-change TRA video candidate materialization', () => {
       const extractionArgs = run.mock.calls[0][0];
       expect(extractionArgs[extractionArgs.indexOf('-frames:v') + 1]).toBe('2');
       expect(extractionArgs).not.toContain('-ss');
-      expect(extractionArgs[extractionArgs.indexOf('-vf') + 1]).toContain('0.125');
-      expect(extractionArgs[extractionArgs.indexOf('-vf') + 1]).toContain('1.25');
+      expect(extractionArgs[extractionArgs.indexOf('-vf') + 1]).toContain('0.1245');
+      expect(extractionArgs[extractionArgs.indexOf('-vf') + 1]).toContain('1.2495');
       expect(extractionArgs[extractionArgs.indexOf('-q:v') + 1]).toBe('17');
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
