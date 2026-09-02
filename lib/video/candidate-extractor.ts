@@ -215,6 +215,14 @@ const parseIntervalTimestamps = (stderr: string) => {
   return timestamps;
 };
 
+const buildSceneSelectionFilter = (sceneTimestampsMs: readonly number[]) =>
+  `select='${sceneTimestampsMs
+    .map(
+      (timestampMs, index) =>
+        `eq(selected_n,${index})*gte(t,${timestampMs / 1000})`
+    )
+    .join('+')}'`;
+
 const requireValidProbe = (stdout: Buffer) => {
   const progress = stdout.toString('utf8');
   const matches = [...progress.matchAll(/^out_time_us=(\d+)$/gm)];
@@ -463,6 +471,10 @@ export class FfmpegSceneCandidateMaterializer
       path.join(this.temporaryRoot, 'tra-video-scene-candidates-')
     );
     const inputPath = path.join(temporaryDirectory, 'source.mp4');
+    const outputPattern = path.join(
+      temporaryDirectory,
+      'candidate-%06d.jpg'
+    );
     const expectedFiles = sceneTimestampsMs.map(
       (_, index) => `candidate-${String(index).padStart(6, '0')}.jpg`
     );
@@ -470,47 +482,56 @@ export class FfmpegSceneCandidateMaterializer
 
     try {
       await writeFile(inputPath, source.stored.buffer);
-      for (const [candidateIndex, timestampMs] of sceneTimestampsMs.entries()) {
-        const outputPath = path.join(temporaryDirectory, expectedFiles[candidateIndex]);
-        try {
-          await this.run([
-            '-hide_banner',
-            '-nostdin',
-            '-v',
-            'error',
-            '-i',
-            inputPath,
-            '-map',
-            '0:v:0',
-            '-ss',
-            String(timestampMs / 1000),
-            '-frames:v',
-            '1',
-            '-vf',
-            `scale=w='min(iw,${resolvedPolicy.maxWidth})':h=-2`,
-            '-an',
-            '-q:v',
-            String(toFfmpegJpegQuality(resolvedPolicy.jpegQuality)),
-            outputPath,
-          ]);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            throw new Error('FFmpeg runtime is unavailable for TRA video candidate extraction.');
-          }
-          throw new TraVideoProcessingError(
-            'The TRA video failed while extracting scene candidates.',
-            400,
-            'FRAME_EXTRACTION_FAILED'
-          );
+      let extracted;
+      try {
+        extracted = await this.run([
+          '-hide_banner',
+          '-nostdin',
+          '-v',
+          'info',
+          '-i',
+          inputPath,
+          '-map',
+          '0:v:0',
+          '-vf',
+          `${buildSceneSelectionFilter(sceneTimestampsMs)},scale=w='min(iw,${resolvedPolicy.maxWidth})':h=-2,showinfo`,
+          '-frames:v',
+          String(sceneTimestampsMs.length),
+          '-fps_mode',
+          'passthrough',
+          '-an',
+          '-q:v',
+          String(toFfmpegJpegQuality(resolvedPolicy.jpegQuality)),
+          '-start_number',
+          '0',
+          outputPattern,
+        ]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error('FFmpeg runtime is unavailable for TRA video candidate extraction.');
         }
+        throw new TraVideoProcessingError(
+          'The TRA video failed while extracting scene candidates.',
+          400,
+          'FRAME_EXTRACTION_FAILED'
+        );
       }
 
       const candidateFiles = (await readdir(temporaryDirectory))
         .filter((fileName) => CANDIDATE_FILE_PATTERN.test(fileName))
         .sort();
+      const extractedTimestamps = parseIntervalTimestamps(extracted.stderr);
       if (
         candidateFiles.length !== expectedFiles.length ||
-        candidateFiles.some((fileName, index) => fileName !== expectedFiles[index])
+        candidateFiles.some((fileName, index) => fileName !== expectedFiles[index]) ||
+        extractedTimestamps.length !== sceneTimestampsMs.length ||
+        extractedTimestamps.some(
+          (timestamp, index) =>
+            timestamp.outputIndex !== index ||
+            timestamp.timestampMs < sceneTimestampsMs[index] ||
+            (index > 0 &&
+              timestamp.timestampMs < extractedTimestamps[index - 1].timestampMs)
+        )
       ) {
         throw new TraVideoProcessingError(
           'FFmpeg scene candidate files did not match the requested timestamps.',

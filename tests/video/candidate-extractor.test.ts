@@ -549,8 +549,14 @@ describe('scene-change TRA video candidate materialization', () => {
   it('maps ordered timestamps to matching bounded FFmpeg JPEG outputs', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
-      await writeFile(args.at(-1)!, jpegWithDimensions(400, 240));
-      return { stdout: Buffer.alloc(0), stderr: '' };
+      await writeCandidateFiles(args.at(-1)!, 2, jpegWithDimensions(400, 240));
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: [
+          '[Parsed_showinfo_2] n: 0 pts: 125 pts_time:0.125 duration:1',
+          '[Parsed_showinfo_2] n: 1 pts: 1250 pts_time:1.25 duration:1',
+        ].join('\n'),
+      };
     });
     try {
       const candidates = await new FfmpegSceneCandidateMaterializer({
@@ -569,27 +575,30 @@ describe('scene-change TRA video candidate materialization', () => {
         [0, 125], [1, 1_250],
       ]);
       expect(candidates.every((candidate) => candidate.width === 400 && candidate.height === 240)).toBe(true);
-      expect(run).toHaveBeenCalledTimes(2);
-      expect(run.mock.calls.map(([args]) => args[args.indexOf('-ss') + 1])).toEqual(['0.125', '1.25']);
-      for (const [args] of run.mock.calls) {
-        expect(args[args.indexOf('-frames:v') + 1]).toBe('1');
-        expect(args[args.indexOf('-vf') + 1]).toContain("scale=w='min(iw,400)':h=-2");
-        expect(args[args.indexOf('-q:v') + 1]).toBe('17');
-      }
+      expect(run).toHaveBeenCalledTimes(1);
+      const extractionArgs = run.mock.calls[0][0];
+      expect(extractionArgs[extractionArgs.indexOf('-frames:v') + 1]).toBe('2');
+      expect(extractionArgs).not.toContain('-ss');
+      expect(extractionArgs[extractionArgs.indexOf('-vf') + 1]).toContain('0.125');
+      expect(extractionArgs[extractionArgs.indexOf('-vf') + 1]).toContain('1.25');
+      expect(extractionArgs[extractionArgs.indexOf('-q:v') + 1]).toBe('17');
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
 
   it.each([
-    ['FFmpeg fails', async (outputPath: string) => { await writeFile(outputPath, VALID_JPEG); throw new Error('failed'); }, /failed while extracting scene candidates/],
-    ['JPEG is malformed', async (outputPath: string) => { await writeFile(outputPath, JPEG_HEADER_WITHOUT_SCAN); }, /invalid JPEG scene candidate/],
-    ['output file does not match its timestamp', async (outputPath: string) => { await writeFile(path.join(path.dirname(outputPath), 'candidate-000001.jpg'), VALID_JPEG); }, /files did not match the requested timestamps/],
+    ['FFmpeg fails', async (outputPattern: string) => { await writeFile(outputPattern.replace('%06d', '000000'), VALID_JPEG); throw new Error('failed'); }, /failed while extracting scene candidates/],
+    ['JPEG is malformed', async (outputPattern: string) => { await writeFile(outputPattern.replace('%06d', '000000'), JPEG_HEADER_WITHOUT_SCAN); }, /invalid JPEG scene candidate/],
+    ['output file does not match its timestamp', async (outputPattern: string) => { await writeFile(outputPattern.replace('%06d', '000001'), VALID_JPEG); }, /files did not match the requested timestamps/],
   ])('fails cleanly when %s', async (_, writeOutput, expectedError) => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
     const run = vi.fn(async (args: string[]) => {
       await writeOutput(args.at(-1)!);
-      return { stdout: Buffer.alloc(0), stderr: '' };
+      return {
+        stdout: Buffer.alloc(0),
+        stderr: '[Parsed_showinfo_2] n: 0 pts: 100 pts_time:0.1 duration:1',
+      };
     });
     try {
       await expect(
