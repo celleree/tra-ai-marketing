@@ -1,0 +1,12 @@
+# Local-only heavy/private artifacts
+models/
+checkpoints/
+outputs/
+cache/
+private-inputs/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
