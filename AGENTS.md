@@ -126,6 +126,22 @@ Reason: [one sentence]
 
 Final handoffs should be concise and directly pasteable into ChatGPT. Do not include raw command logs unless needed to explain a failure, long diffs unless specifically requested, chain-of-thought, or play-by-play reasoning. Do not repeat repository context already available in canonical sources. If approval is required for a command or write, ask concisely and include the exact command/action being requested.
 
+## ChatGPT-managed Codex implementation cycle
+
+For bounded implementation work that the user is coordinating between ChatGPT and Codex, default to staged checkpoints instead of one large prompt that plans, implements, tests, reviews, fixes, and merges in one pass.
+
+1. Start a fresh implementation session with investigation/plan only. Do not edit files yet. Inspect the smallest relevant file set, confirm the current contract, propose the smallest coherent implementation, estimate PR size, list tests, and surface unresolved decisions.
+2. Return that plan to ChatGPT for review before implementation. Resolve scope, architecture, sequencing, and PR-size concerns while changes are still cheap.
+3. Continue the same implementation session to implement only the approved plan, run focused verification first, then complete the required branch/PR verification.
+4. Use a fresh independent review session for the exact PR and current HEAD SHA when review is required. The reviewer must not inherit the implementer's transcript and should return findings rather than implement fixes.
+5. Send review findings back to the original implementation session for correction. Keep fixes inside the approved scope unless a new design decision is explicitly reviewed.
+6. Re-run verification after fixes. If the reviewed HEAD changes materially, perform a fresh-context review of the new exact SHA before merge when required.
+7. Merge only after required verification and review are complete and material findings are resolved.
+
+Keep prompts bounded to the current checkpoint. Do not ask one Codex prompt to perform the entire lifecycle when a planning or review checkpoint could catch scope or design errors first.
+
+Simple low-risk mechanical changes may combine planning and implementation when there is no meaningful design decision, review boundary, or benefit from a separate checkpoint.
+
 ## Sources of truth
 
 - Runtime behavior, prompts, categories, formats, validation, defaults, and integration logic: source code.
