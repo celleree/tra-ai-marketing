@@ -226,6 +226,69 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
   });
 
+  it('rejects effective interval FPS that does not match the duration-limited interval budget', async () => {
+    const ownership = candidateSet();
+    const requestedPolicy = {
+      ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+      maxIntervalCandidates: 1,
+      maxTotalCandidates: 2,
+    };
+    ownership.policy = requestedPolicy;
+    ownership.effectiveIntervalFps = 3;
+    const preprocessCandidates = vi.fn(async () => ownership);
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership },
+        requestedPolicy
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: effectiveIntervalFps does not match the requested policy and duration.'
+    );
+
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+  });
+
+  it('rejects more interval-derived candidates than the requested interval cap', async () => {
+    const ownership = candidateSet();
+    const requestedPolicy = {
+      ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+      maxIntervalCandidates: 1,
+      maxTotalCandidates: 2,
+    };
+    ownership.policy = requestedPolicy;
+    ownership.effectiveIntervalFps = 0.25;
+    ownership.candidates.push({
+      ...ownership.candidates[0],
+      candidateIndex: 1,
+      timestampMs: 500,
+      frameSha256: 'b'.repeat(64),
+      temporaryPath: '/tmp/interval-candidates/candidate-000001.jpg',
+    });
+    const preprocessCandidates = vi.fn(async () => ownership);
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership },
+        requestedPolicy
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: interval candidate count is outside the requested bounded policy.'
+    );
+
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+  });
+
   it('propagates cleanup failure when consumption succeeds', async () => {
     const ownership = candidateSet();
     const cleanupError = new Error('cleanup failed');
