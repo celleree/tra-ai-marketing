@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { cleanupTemporaryVideoFrameCandidateOwnership } from '@/lib/video/candidate-cleanup';
+import {
+  cleanupTemporaryVideoFrameCandidateOwnership,
+  isSafeTemporaryVideoCandidateDirectory,
+} from '@/lib/video/candidate-cleanup';
 import {
   inspectTemporaryCandidateFile,
   inspectTemporarySourceVideoFile,
@@ -40,11 +43,6 @@ interface TraVideoSourceBoundarySnapshot {
   contentSha256: string;
 }
 
-const TEMPORARY_DIRECTORY_PREFIXES = [
-  'tra-video-candidates-',
-  'tra-video-scene-candidates-',
-] as const;
-
 const preprocessCandidatesByDefault: TemporaryCandidatePreprocessor = (source, policy) =>
   preprocessTemporaryTraVideoFrameCandidates(source, {}, policy);
 
@@ -72,13 +70,6 @@ const policiesMatch = (
   actual.imageFormat === requested.imageFormat &&
   actual.jpegQuality === requested.jpegQuality;
 
-const isExpectedTemporaryDirectory = (directory: string) => {
-  const baseName = path.basename(path.resolve(directory));
-  return TEMPORARY_DIRECTORY_PREFIXES.some(
-    (prefix) => baseName.startsWith(prefix) && baseName.length > prefix.length
-  );
-};
-
 const getReferencedTemporaryDirectories = (
   candidateSet: TemporaryVideoFrameCandidateSet
 ) =>
@@ -99,7 +90,8 @@ const getSafeCleanupDirectories = (
   );
   return [...getReferencedTemporaryDirectories(candidateSet)].filter(
     (directory) =>
-      declaredDirectories.has(directory) && isExpectedTemporaryDirectory(directory)
+      declaredDirectories.has(directory) &&
+      isSafeTemporaryVideoCandidateDirectory(directory)
   );
 };
 
@@ -121,7 +113,9 @@ const assertTemporaryDirectoryOwnership = (
   if (
     uniqueDeclaredDirectories.size !== declaredDirectories.length ||
     uniqueDeclaredDirectories.size !== referencedDirectories.size ||
-    declaredDirectories.some((directory) => !isExpectedTemporaryDirectory(directory)) ||
+    declaredDirectories.some(
+      (directory) => !isSafeTemporaryVideoCandidateDirectory(directory)
+    ) ||
     [...referencedDirectories].some(
       (directory) => !uniqueDeclaredDirectories.has(directory)
     )
