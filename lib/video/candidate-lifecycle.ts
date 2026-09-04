@@ -143,6 +143,7 @@ const assertTemporaryCandidateBoundary = (
     if (
       !Number.isInteger(candidate.width) ||
       candidate.width < 1 ||
+      candidate.width > requestedPolicy.maxWidth ||
       !Number.isInteger(candidate.height) ||
       candidate.height < 1 ||
       !Number.isInteger(candidate.byteLength) ||
