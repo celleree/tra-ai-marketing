@@ -1,5 +1,8 @@
 import path from 'node:path';
-import { cleanupTemporaryVideoFrameCandidateOwnership } from '@/lib/video/candidate-cleanup';
+import {
+  cleanupTemporaryVideoFrameCandidateOwnership,
+  isSafeTemporaryVideoCandidateDirectory,
+} from '@/lib/video/candidate-cleanup';
 import {
   FfmpegIntervalCandidateExtractor,
   FfmpegSceneCandidateMaterializer,
@@ -38,6 +41,25 @@ const candidateReferencesDirectory = (
     (candidate) =>
       path.resolve(path.dirname(candidate.temporaryPath)) === resolvedDirectory
   );
+};
+
+const validateSceneMaterializationOwnership = (
+  temporaryDirectory: string,
+  candidatePaths: readonly string[]
+) => {
+  if (!isSafeTemporaryVideoCandidateDirectory(temporaryDirectory)) {
+    throw new Error('Scene candidate materialization returned an unsafe temporary directory.');
+  }
+
+  const resolvedDirectory = path.resolve(temporaryDirectory);
+  if (
+    candidatePaths.some(
+      (candidatePath) =>
+        path.resolve(path.dirname(candidatePath)) !== resolvedDirectory
+    )
+  ) {
+    throw new Error('Scene candidate materialization returned a candidate outside its temporary directory.');
+  }
 };
 
 export const preprocessTemporaryTraVideoFrameCandidates = async (
@@ -81,6 +103,10 @@ export const preprocessTemporaryTraVideoFrameCandidates = async (
     if (!sceneMaterialization.temporaryDirectory) {
       throw new Error('Scene candidate materialization did not return a temporary directory.');
     }
+    validateSceneMaterializationOwnership(
+      sceneMaterialization.temporaryDirectory,
+      sceneMaterialization.candidates.map((candidate) => candidate.temporaryPath)
+    );
 
     cleanupOwnership = {
       ...intervalCandidates,
