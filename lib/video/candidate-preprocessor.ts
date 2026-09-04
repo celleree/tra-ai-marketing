@@ -130,8 +130,8 @@ export const preprocessTemporaryTraVideoFrameCandidates = async (
         ...intervalCandidates,
         temporaryDirectories: [sceneMaterialization.temporaryDirectory],
       };
-      cleanupOwnership = intervalCandidates;
       await cleanupCandidateOwnership(unreferencedSceneOwnership);
+      cleanupOwnership = intervalCandidates;
       return {
         ...mergedCandidates,
         temporaryDirectories: intervalCandidates.temporaryDirectories,
