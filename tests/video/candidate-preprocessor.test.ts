@@ -156,7 +156,7 @@ describe('temporary TRA video candidate preprocessing', () => {
     expect(dependencies.cleanupCandidateOwnership).not.toHaveBeenCalled();
   });
 
-  it('retains interval bytes and both temporary directories for an exact collision', async () => {
+  it('retains interval bytes and cleans an unreferenced scene directory for an exact collision', async () => {
     const interval = candidate(1_000, ['INTERVAL'], {
       frameSha256: 'interval-frame', temporaryPath: `${intervalDirectory}/interval.jpg`,
     });
@@ -175,7 +175,11 @@ describe('temporary TRA video candidate preprocessing', () => {
       candidateIndex: 0,
       extractionReasons: ['INTERVAL', 'SCENE_CHANGE'],
     }]);
-    expect(result.temporaryDirectories).toEqual([intervalDirectory, sceneDirectory]);
+    expect(result.temporaryDirectories).toEqual([intervalDirectory]);
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledOnce();
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledWith(
+      expect.objectContaining({ temporaryDirectories: [sceneDirectory] })
+    );
   });
 
   it.each([
