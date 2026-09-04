@@ -1,4 +1,8 @@
-import { cleanupTemporaryVideoFrameCandidateOwnership } from '@/lib/video/candidate-cleanup';
+import path from 'node:path';
+import {
+  cleanupTemporaryVideoFrameCandidateOwnership,
+  isSafeTemporaryVideoCandidateDirectory,
+} from '@/lib/video/candidate-cleanup';
 import {
   FfmpegIntervalCandidateExtractor,
   FfmpegSceneCandidateMaterializer,
@@ -27,6 +31,36 @@ interface TraVideoCandidatePreprocessorDependencies {
   sceneCandidateMaterializer?: TraVideoSceneCandidateMaterializer;
   cleanupCandidateOwnership?: TraVideoCandidateCleanup;
 }
+
+const candidateReferencesDirectory = (
+  candidateSet: TemporaryVideoFrameCandidateSet,
+  directory: string
+) => {
+  const resolvedDirectory = path.resolve(directory);
+  return candidateSet.candidates.some(
+    (candidate) =>
+      path.resolve(path.dirname(candidate.temporaryPath)) === resolvedDirectory
+  );
+};
+
+const validateSceneMaterializationOwnership = (
+  temporaryDirectory: string,
+  candidatePaths: readonly string[]
+) => {
+  if (!isSafeTemporaryVideoCandidateDirectory(temporaryDirectory)) {
+    throw new Error('Scene candidate materialization returned an unsafe temporary directory.');
+  }
+
+  const resolvedDirectory = path.resolve(temporaryDirectory);
+  if (
+    candidatePaths.some(
+      (candidatePath) =>
+        path.resolve(path.dirname(candidatePath)) !== resolvedDirectory
+    )
+  ) {
+    throw new Error('Scene candidate materialization returned a candidate outside its temporary directory.');
+  }
+};
 
 export const preprocessTemporaryTraVideoFrameCandidates = async (
   source: HydratedTraVideoSource,
@@ -69,6 +103,9 @@ export const preprocessTemporaryTraVideoFrameCandidates = async (
     if (!sceneMaterialization.temporaryDirectory) {
       throw new Error('Scene candidate materialization did not return a temporary directory.');
     }
+    if (!isSafeTemporaryVideoCandidateDirectory(sceneMaterialization.temporaryDirectory)) {
+      throw new Error('Scene candidate materialization returned an unsafe temporary directory.');
+    }
 
     cleanupOwnership = {
       ...intervalCandidates,
@@ -77,10 +114,33 @@ export const preprocessTemporaryTraVideoFrameCandidates = async (
         sceneMaterialization.temporaryDirectory,
       ],
     };
+    validateSceneMaterializationOwnership(
+      sceneMaterialization.temporaryDirectory,
+      sceneMaterialization.candidates.map((candidate) => candidate.temporaryPath)
+    );
+
     const mergedCandidates = mergeTemporaryVideoFrameCandidates(
       intervalCandidates,
       sceneMaterialization.candidates
     );
+
+    if (
+      !candidateReferencesDirectory(
+        mergedCandidates,
+        sceneMaterialization.temporaryDirectory
+      )
+    ) {
+      const unreferencedSceneOwnership = {
+        ...intervalCandidates,
+        temporaryDirectories: [sceneMaterialization.temporaryDirectory],
+      };
+      await cleanupCandidateOwnership(unreferencedSceneOwnership);
+      cleanupOwnership = intervalCandidates;
+      return {
+        ...mergedCandidates,
+        temporaryDirectories: intervalCandidates.temporaryDirectories,
+      };
+    }
 
     return {
       ...mergedCandidates,

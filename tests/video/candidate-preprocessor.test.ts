@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   type HydratedTraVideoSource,
@@ -13,8 +15,8 @@ import type {
 import type { SceneChangeDetector } from '@/lib/video/scene-change-detector';
 
 const source = {} as HydratedTraVideoSource;
-const intervalDirectory = '/tmp/interval-candidates';
-const sceneDirectory = '/tmp/scene-candidates';
+const intervalDirectory = path.join(tmpdir(), 'tra-video-candidates-test');
+const sceneDirectory = path.join(tmpdir(), 'tra-video-scene-candidates-test');
 
 const candidate = (
   timestampMs: number,
@@ -33,7 +35,10 @@ const candidate = (
   byteLength: 1_024,
   frameSha256: `frame-${timestampMs}`,
   extractionReasons,
-  temporaryPath: `${extractionReasons[0] === 'INTERVAL' ? intervalDirectory : sceneDirectory}/${timestampMs}.jpg`,
+  temporaryPath: path.join(
+    extractionReasons[0] === 'INTERVAL' ? intervalDirectory : sceneDirectory,
+    `${timestampMs}.jpg`
+  ),
   lifecycle: 'TEMPORARY',
   providerEligible: false,
   ...overrides,
@@ -54,7 +59,7 @@ const intervalCandidateSet = (
   },
   effectiveIntervalFps: 3,
   candidates,
-  temporarySourceVideoPath: `${intervalDirectory}/source.mp4`,
+  temporarySourceVideoPath: path.join(intervalDirectory, 'source.mp4'),
   temporaryDirectories: [intervalDirectory],
 });
 
@@ -115,7 +120,7 @@ describe('temporary TRA video candidate preprocessing', () => {
     const result = await preprocessTemporaryTraVideoFrameCandidates(source, dependencies);
 
     expect(dependencies.sceneChangeDetector.detect).toHaveBeenCalledWith(
-      `${intervalDirectory}/source.mp4`, 4_000, 1
+      path.join(intervalDirectory, 'source.mp4'), 4_000, 1
     );
     expect(dependencies.sceneCandidateMaterializer.materializeCandidates).toHaveBeenCalledWith(
       source, [3_000], intervalCandidates.policy
@@ -156,15 +161,15 @@ describe('temporary TRA video candidate preprocessing', () => {
     expect(dependencies.cleanupCandidateOwnership).not.toHaveBeenCalled();
   });
 
-  it('retains interval bytes and both temporary directories for an exact collision', async () => {
+  it('retains interval bytes and cleans an unreferenced scene directory for an exact collision', async () => {
     const interval = candidate(1_000, ['INTERVAL'], {
-      frameSha256: 'interval-frame', temporaryPath: `${intervalDirectory}/interval.jpg`,
+      frameSha256: 'interval-frame', temporaryPath: path.join(intervalDirectory, 'interval.jpg'),
     });
     const dependencies = dependenciesFor({
       intervalCandidates: intervalCandidateSet([interval]),
       timestamps: [1_000],
       sceneCandidates: [candidate(1_000, ['SCENE_CHANGE'], {
-        frameSha256: 'scene-frame', temporaryPath: `${sceneDirectory}/scene.jpg`,
+        frameSha256: 'scene-frame', temporaryPath: path.join(sceneDirectory, 'scene.jpg'),
       })],
     });
 
@@ -175,7 +180,81 @@ describe('temporary TRA video candidate preprocessing', () => {
       candidateIndex: 0,
       extractionReasons: ['INTERVAL', 'SCENE_CHANGE'],
     }]);
-    expect(result.temporaryDirectories).toEqual([intervalDirectory, sceneDirectory]);
+    expect(result.temporaryDirectories).toEqual([intervalDirectory]);
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledOnce();
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledWith(
+      expect.objectContaining({ temporaryDirectories: [sceneDirectory] })
+    );
+  });
+
+  it('retains scene ownership until collision cleanup succeeds', async () => {
+    const cleanupError = new Error('collision cleanup failed');
+    const interval = candidate(1_000, ['INTERVAL'], {
+      frameSha256: 'interval-frame', temporaryPath: path.join(intervalDirectory, 'interval.jpg'),
+    });
+    const dependencies = dependenciesFor({
+      intervalCandidates: intervalCandidateSet([interval]),
+      timestamps: [1_000],
+      sceneCandidates: [candidate(1_000, ['SCENE_CHANGE'], {
+        frameSha256: 'scene-frame', temporaryPath: path.join(sceneDirectory, 'scene.jpg'),
+      })],
+    });
+    dependencies.cleanupCandidateOwnership
+      .mockRejectedValueOnce(cleanupError)
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      preprocessTemporaryTraVideoFrameCandidates(source, dependencies)
+    ).rejects.toBe(cleanupError);
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledTimes(2);
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ temporaryDirectories: [sceneDirectory] })
+    );
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        temporaryDirectories: [intervalDirectory, sceneDirectory],
+      })
+    );
+  });
+
+  it('rejects an unsafe scene materialization directory before adding it to cleanup ownership', async () => {
+    const intervalCandidates = intervalCandidateSet([candidate(0)]);
+    const unsafeSceneDirectory = path.join(tmpdir(), 'scene-candidates-unsafe');
+    const dependencies = dependenciesFor({
+      intervalCandidates,
+      timestamps: [1_000],
+      sceneCandidates: [candidate(1_000, ['SCENE_CHANGE'])],
+      sceneTemporaryDirectory: unsafeSceneDirectory,
+    });
+
+    await expect(
+      preprocessTemporaryTraVideoFrameCandidates(source, dependencies)
+    ).rejects.toThrow('unsafe temporary directory');
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledOnce();
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledWith(intervalCandidates);
+  });
+
+  it('rejects scene candidates outside the materializer-owned directory', async () => {
+    const intervalCandidates = intervalCandidateSet([candidate(0)]);
+    const dependencies = dependenciesFor({
+      intervalCandidates,
+      timestamps: [1_000],
+      sceneCandidates: [candidate(1_000, ['SCENE_CHANGE'], {
+        temporaryPath: path.join(tmpdir(), 'outside-scene-candidate.jpg'),
+      })],
+    });
+
+    await expect(
+      preprocessTemporaryTraVideoFrameCandidates(source, dependencies)
+    ).rejects.toThrow('candidate outside its temporary directory');
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledOnce();
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        temporaryDirectories: [intervalDirectory, sceneDirectory],
+      })
+    );
   });
 
   it.each([
