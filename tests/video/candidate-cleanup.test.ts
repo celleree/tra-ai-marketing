@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,8 +19,10 @@ const candidateOwnership = (
 ) =>
   ({ temporaryDirectories, temporarySourceVideoPath }) as TemporaryVideoFrameCandidateSet;
 
-const makeRoot = async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'candidate-cleanup-test-'));
+const makeRoot = async (
+  prefix: 'tra-video-candidates-' | 'tra-video-scene-candidates-' = 'tra-video-candidates-'
+) => {
+  const root = await mkdtemp(path.join(tmpdir(), prefix));
   temporaryRoots.push(root);
   return root;
 };
@@ -47,15 +49,12 @@ afterEach(async () => {
 });
 
 describe('temporary video frame candidate ownership cleanup', () => {
-  it('removes every owned directory and nested source or unused scene artifacts', async () => {
-    const root = await makeRoot();
-    const intervalDirectory = path.join(root, 'interval');
-    const sceneDirectory = path.join(root, 'scene');
+  it('removes every owned candidate directory and nested source or unused scene artifacts', async () => {
+    const intervalDirectory = await makeRoot('tra-video-candidates-');
+    const sceneDirectory = await makeRoot('tra-video-scene-candidates-');
     const sourceVideoPath = path.join(intervalDirectory, 'source.mp4');
     const unusedSceneFramePath = path.join(sceneDirectory, 'candidate-000000.jpg');
 
-    await mkdir(intervalDirectory);
-    await mkdir(sceneDirectory);
     await writeFile(sourceVideoPath, Buffer.from('video'));
     await writeFile(unusedSceneFramePath, Buffer.from('frame'));
 
@@ -69,11 +68,12 @@ describe('temporary video frame candidate ownership cleanup', () => {
     await expectMissing(unusedSceneFramePath);
   });
 
-  it('deduplicates ownership and tolerates repeated cleanup and missing directories', async () => {
-    const root = await makeRoot();
-    const ownedDirectory = path.join(root, 'owned');
-    const missingDirectory = path.join(root, 'already-missing');
-    await mkdir(ownedDirectory);
+  it('deduplicates ownership and tolerates repeated cleanup and missing safe directories', async () => {
+    const ownedDirectory = await makeRoot();
+    const missingDirectory = path.join(
+      tmpdir(),
+      'tra-video-candidates-already-missing-test'
+    );
 
     const ownership = candidateOwnership([
       ownedDirectory,
@@ -91,12 +91,38 @@ describe('temporary video frame candidate ownership cleanup', () => {
     expect(mockedRm).toHaveBeenCalledTimes(4);
   });
 
-  it('attempts remaining ownership and reports aggregate failure after a deletion fails', async () => {
-    const root = await makeRoot();
-    const failingDirectory = path.join(root, 'failing');
-    const successfulDirectory = path.join(root, 'successful');
-    await mkdir(failingDirectory);
-    await mkdir(successfulDirectory);
+  it('refuses unsafe directory claims while still cleaning safe ownership', async () => {
+    const safeDirectory = await makeRoot();
+    const unsafeDirectory = tmpdir();
+    const mockedRm = vi.mocked(rm);
+    mockedRm.mockClear();
+
+    let thrown: unknown;
+    try {
+      await cleanupTemporaryVideoFrameCandidateOwnership(
+        candidateOwnership([unsafeDirectory, safeDirectory])
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AggregateError);
+    const aggregate = thrown as AggregateError;
+    expect(aggregate.errors).toHaveLength(1);
+    expect((aggregate.errors[0] as Error).message).toContain(
+      `Refusing to clean unsafe temporary video candidate directory: ${unsafeDirectory}`
+    );
+    expect(mockedRm).not.toHaveBeenCalledWith(unsafeDirectory, expect.anything());
+    expect(mockedRm).toHaveBeenCalledWith(safeDirectory, {
+      recursive: true,
+      force: true,
+    });
+    await expectMissing(safeDirectory);
+  });
+
+  it('attempts remaining safe ownership and reports aggregate failure after a deletion fails', async () => {
+    const failingDirectory = await makeRoot();
+    const successfulDirectory = await makeRoot('tra-video-scene-candidates-');
 
     const mockedRm = vi.mocked(rm);
     mockedRm.mockImplementation(async (target, options) => {
