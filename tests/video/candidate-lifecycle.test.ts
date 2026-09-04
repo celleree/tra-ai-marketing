@@ -52,7 +52,12 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     const ownership = candidateSet();
     const originalDirectories = [...ownership.temporaryDirectories];
     const preprocessCandidates = vi.fn(async () => ownership);
-    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    let cleanedOwnership: TemporaryVideoFrameCandidateSet | undefined;
+    const cleanupCandidateOwnership = vi.fn(
+      async (received: TemporaryVideoFrameCandidateSet) => {
+        cleanedOwnership = received;
+      }
+    );
 
     await withTemporaryTraVideoFrameCandidates(
       source,
@@ -63,9 +68,7 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     );
 
     expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
-    expect(cleanupCandidateOwnership.mock.calls[0]?.[0].temporaryDirectories).toEqual(
-      originalDirectories
-    );
+    expect(cleanedOwnership?.temporaryDirectories).toEqual(originalDirectories);
   });
 
   it('propagates cleanup failure when consumption succeeds', async () => {
