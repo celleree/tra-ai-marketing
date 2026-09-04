@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { cleanupTemporaryVideoFrameCandidateOwnership } from '@/lib/video/candidate-cleanup';
 import {
   FfmpegIntervalCandidateExtractor,
@@ -27,6 +28,17 @@ interface TraVideoCandidatePreprocessorDependencies {
   sceneCandidateMaterializer?: TraVideoSceneCandidateMaterializer;
   cleanupCandidateOwnership?: TraVideoCandidateCleanup;
 }
+
+const candidateReferencesDirectory = (
+  candidateSet: TemporaryVideoFrameCandidateSet,
+  directory: string
+) => {
+  const resolvedDirectory = path.resolve(directory);
+  return candidateSet.candidates.some(
+    (candidate) =>
+      path.resolve(path.dirname(candidate.temporaryPath)) === resolvedDirectory
+  );
+};
 
 export const preprocessTemporaryTraVideoFrameCandidates = async (
   source: HydratedTraVideoSource,
@@ -81,6 +93,24 @@ export const preprocessTemporaryTraVideoFrameCandidates = async (
       intervalCandidates,
       sceneMaterialization.candidates
     );
+
+    if (
+      !candidateReferencesDirectory(
+        mergedCandidates,
+        sceneMaterialization.temporaryDirectory
+      )
+    ) {
+      const unreferencedSceneOwnership = {
+        ...intervalCandidates,
+        temporaryDirectories: [sceneMaterialization.temporaryDirectory],
+      };
+      cleanupOwnership = intervalCandidates;
+      await cleanupCandidateOwnership(unreferencedSceneOwnership);
+      return {
+        ...mergedCandidates,
+        temporaryDirectories: intervalCandidates.temporaryDirectories,
+      };
+    }
 
     return {
       ...mergedCandidates,
