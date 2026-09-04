@@ -37,13 +37,17 @@ export const withTemporaryTraVideoFrameCandidates = async <T>(
   const cleanupCandidateOwnership =
     dependencies.cleanupCandidateOwnership || cleanupTemporaryVideoFrameCandidateOwnership;
   const candidateSet = await preprocessCandidates(source, policy);
+  const cleanupOwnership: TemporaryVideoFrameCandidateSet = {
+    ...candidateSet,
+    temporaryDirectories: [...candidateSet.temporaryDirectories],
+  };
 
   let result: T;
   try {
     result = await consumer(candidateSet);
   } catch (consumerError) {
     try {
-      await cleanupCandidateOwnership(candidateSet);
+      await cleanupCandidateOwnership(cleanupOwnership);
     } catch (cleanupError) {
       console.error(
         'Failed to clean temporary video candidate ownership after consumer error.',
@@ -53,6 +57,6 @@ export const withTemporaryTraVideoFrameCandidates = async <T>(
     throw consumerError;
   }
 
-  await cleanupCandidateOwnership(candidateSet);
+  await cleanupCandidateOwnership(cleanupOwnership);
   return result;
 };
