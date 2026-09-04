@@ -62,14 +62,18 @@ const dependenciesFor = ({
   intervalCandidates,
   timestamps = [],
   sceneCandidates = [],
+  sceneTemporaryDirectory = sceneDirectory,
   detectorError,
   materializerError,
+  cleanupError,
 }: {
   intervalCandidates: TemporaryVideoFrameCandidateSet;
   timestamps?: number[];
   sceneCandidates?: TemporaryVideoFrameCandidate[];
+  sceneTemporaryDirectory?: string | null;
   detectorError?: Error;
   materializerError?: Error;
+  cleanupError?: Error;
 }) => {
   const extractor: TraVideoCandidateExtractor = {
     extractCandidates: vi.fn(async () => intervalCandidates),
@@ -83,10 +87,18 @@ const dependenciesFor = ({
   const sceneCandidateMaterializer: TraVideoSceneCandidateMaterializer = {
     materializeCandidates: vi.fn(async () => {
       if (materializerError) throw materializerError;
-      return { candidates: sceneCandidates, temporaryDirectory: sceneDirectory };
+      return { candidates: sceneCandidates, temporaryDirectory: sceneTemporaryDirectory };
     }),
   };
-  return { extractor, sceneChangeDetector, sceneCandidateMaterializer };
+  const cleanupCandidateOwnership = vi.fn(async () => {
+    if (cleanupError) throw cleanupError;
+  });
+  return {
+    extractor,
+    sceneChangeDetector,
+    sceneCandidateMaterializer,
+    cleanupCandidateOwnership,
+  };
 };
 
 describe('temporary TRA video candidate preprocessing', () => {
@@ -113,6 +125,7 @@ describe('temporary TRA video candidate preprocessing', () => {
     expect(result.candidates.every(
       (frame) => frame.lifecycle === 'TEMPORARY' && frame.providerEligible === false
     )).toBe(true);
+    expect(dependencies.cleanupCandidateOwnership).not.toHaveBeenCalled();
   });
 
   it('skips scene work when interval candidates consume the total budget', async () => {
@@ -126,6 +139,7 @@ describe('temporary TRA video candidate preprocessing', () => {
     expect(dependencies.sceneCandidateMaterializer.materializeCandidates).not.toHaveBeenCalled();
     expect(result.candidates.map((frame) => frame.timestampMs)).toEqual([0, 1_000]);
     expect(result.temporaryDirectories).toEqual([intervalDirectory]);
+    expect(dependencies.cleanupCandidateOwnership).not.toHaveBeenCalled();
   });
 
   it('returns the interval-only result when scene detection finds no timestamps', async () => {
@@ -139,6 +153,7 @@ describe('temporary TRA video candidate preprocessing', () => {
     expect(dependencies.sceneCandidateMaterializer.materializeCandidates).not.toHaveBeenCalled();
     expect(result.candidates.map((frame) => frame.timestampMs)).toEqual([1_000]);
     expect(result.temporaryDirectories).toEqual([intervalDirectory]);
+    expect(dependencies.cleanupCandidateOwnership).not.toHaveBeenCalled();
   });
 
   it('retains interval bytes and both temporary directories for an exact collision', async () => {
@@ -166,9 +181,10 @@ describe('temporary TRA video candidate preprocessing', () => {
   it.each([
     ['scene detection', { detectorError: new Error('detector failed') }, 'detector failed'],
     ['scene materialization', { materializerError: new Error('materializer failed') }, 'materializer failed'],
-  ])('propagates %s errors without a partial result', async (_, errors, message) => {
+  ])('cleans interval ownership and propagates %s errors', async (_, errors, message) => {
+    const intervalCandidates = intervalCandidateSet([candidate(0)]);
     const dependencies = dependenciesFor({
-      intervalCandidates: intervalCandidateSet([candidate(0)]),
+      intervalCandidates,
       timestamps: [1_000],
       ...errors,
     });
@@ -176,5 +192,68 @@ describe('temporary TRA video candidate preprocessing', () => {
     await expect(
       preprocessTemporaryTraVideoFrameCandidates(source, dependencies)
     ).rejects.toThrow(message);
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledOnce();
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledWith(intervalCandidates);
+  });
+
+  it('cleans interval and scene ownership when merging fails after scene materialization', async () => {
+    const intervalCandidates = intervalCandidateSet([candidate(0)]);
+    const dependencies = dependenciesFor({
+      intervalCandidates,
+      timestamps: [1_000],
+      sceneCandidates: [candidate(1_000, ['SCENE_CHANGE'], {
+        sourceVideoMediaId: 'other-media',
+      })],
+    });
+
+    await expect(
+      preprocessTemporaryTraVideoFrameCandidates(source, dependencies)
+    ).rejects.toThrow('sourceVideoMediaId');
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledOnce();
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        temporaryDirectories: [intervalDirectory, sceneDirectory],
+      })
+    );
+  });
+
+  it('cleans known ownership when scene materialization omits its temporary directory', async () => {
+    const intervalCandidates = intervalCandidateSet([candidate(0)]);
+    const dependencies = dependenciesFor({
+      intervalCandidates,
+      timestamps: [1_000],
+      sceneCandidates: [candidate(1_000, ['SCENE_CHANGE'])],
+      sceneTemporaryDirectory: null,
+    });
+
+    await expect(
+      preprocessTemporaryTraVideoFrameCandidates(source, dependencies)
+    ).rejects.toThrow('did not return a temporary directory');
+    expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledWith(intervalCandidates);
+  });
+
+  it('preserves the processing error when cleanup also fails', async () => {
+    const detectorError = new Error('detector failed');
+    const cleanupError = new Error('cleanup failed');
+    const intervalCandidates = intervalCandidateSet([candidate(0)]);
+    const dependencies = dependenciesFor({
+      intervalCandidates,
+      detectorError,
+      cleanupError,
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        preprocessTemporaryTraVideoFrameCandidates(source, dependencies)
+      ).rejects.toBe(detectorError);
+      expect(dependencies.cleanupCandidateOwnership).toHaveBeenCalledWith(intervalCandidates);
+      expect(consoleError).toHaveBeenCalledWith(
+        'Failed to clean temporary video candidate ownership after preprocessing error.',
+        cleanupError
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
