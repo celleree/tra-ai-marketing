@@ -47,6 +47,17 @@ Do not automatically expand a bounded feature into hostile-client-grade infrastr
 
 This does not remove normal security hygiene or repository risk-review requirements. Auth, secrets, production storage safety, destructive actions, spend/publishing controls, and hard product/compliance invariants still require appropriate safeguards. Reassess and strengthen the threat model before materially broader, external, or untrusted-user access is introduced.
 
+### Review proportionality
+
+For this trusted internal application, review edge cases proportionally to realistic reachability and impact.
+
+- Do not enumerate or block merges on contrived internal states solely because they are theoretically possible.
+- Treat internal functions and trusted components as non-adversarial unless the current task explicitly establishes an untrusted or security-sensitive boundary.
+- Prioritize edge cases reachable through normal application use, ordinary developer mistakes, expected malformed external input, or realistic tool/infrastructure failures.
+- Treat a finding as merge-blocking when it has a plausible path to meaningful correctness failure, data-integrity loss, unauthorized access, secret exposure, destructive production action, production storage damage, unintended publishing/spend, compliance failure, or violation of a hard product invariant.
+- If a finding depends on multiple trusted internal components simultaneously violating their contracts in an unrealistic way, classify it as non-blocking or defer it unless there is evidence that the failure is reasonably likely.
+- Once acceptance criteria, realistic regressions, and material risks are covered, stop. Do not keep generating speculative edge cases merely to exhaust the theoretical possibility space.
+
 ## ChatGPT <-> Codex handoff protocol
 
 When the user is manually relaying work between ChatGPT and Codex, optimize for direct structured handoff rather than explanatory prose.
