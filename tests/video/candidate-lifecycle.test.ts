@@ -193,6 +193,33 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     }
   );
 
+  it('rejects a producer policy that differs from the caller requested policy', async () => {
+    const ownership = candidateSet();
+    const requestedPolicy = {
+      ...DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+      maxIntervalCandidates: 1,
+      maxTotalCandidates: 1,
+    };
+    const preprocessCandidates = vi.fn(async () => ownership);
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership },
+        requestedPolicy
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: candidate-set policy does not match the requested policy.'
+    );
+
+    expect(preprocessCandidates).toHaveBeenCalledWith(source, requestedPolicy);
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+  });
+
   it('propagates cleanup failure when consumption succeeds', async () => {
     const ownership = candidateSet();
     const cleanupError = new Error('cleanup failed');
