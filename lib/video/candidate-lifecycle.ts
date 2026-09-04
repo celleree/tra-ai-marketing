@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { cleanupTemporaryVideoFrameCandidateOwnership } from '@/lib/video/candidate-cleanup';
-import { inspectTemporaryCandidateFile } from '@/lib/video/candidate-file-integrity';
+import {
+  inspectTemporaryCandidateFile,
+  inspectTemporarySourceVideoFile,
+} from '@/lib/video/candidate-file-integrity';
 import { type HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { preprocessTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-preprocessor';
 import {
@@ -114,6 +117,16 @@ const assertTemporaryCandidateBoundary = async (
     )
   ) {
     rejectBoundary('temporary source ownership is invalid.');
+  }
+  const sourceFileIntegrity = await inspectTemporarySourceVideoFile(
+    candidateSet.temporarySourceVideoPath
+  );
+  if (
+    !sourceFileIntegrity ||
+    sourceFileIntegrity.byteLength !== source.stored.buffer.length ||
+    sourceFileIntegrity.contentSha256 !== expectedContentHash
+  ) {
+    rejectBoundary('temporary source video integrity does not match the hydrated TRA video.');
   }
 
   let previousTimestampMs = -1;
