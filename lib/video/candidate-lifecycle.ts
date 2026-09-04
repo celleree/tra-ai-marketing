@@ -5,6 +5,7 @@ import { type HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { preprocessTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-preprocessor';
 import {
   DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
+  getEffectiveIntervalFps,
   validateVideoFrameCandidatePolicy,
 } from '@/lib/video/candidate-policy';
 import type {
@@ -87,12 +88,15 @@ const assertTemporaryCandidateBoundary = (
   if (!Number.isFinite(candidateSet.durationMs) || candidateSet.durationMs <= 0) {
     rejectBoundary('durationMs must be positive.');
   }
+  const expectedEffectiveIntervalFps = getEffectiveIntervalFps(
+    candidateSet.durationMs,
+    requestedPolicy
+  );
   if (
     !Number.isFinite(candidateSet.effectiveIntervalFps) ||
-    candidateSet.effectiveIntervalFps <= 0 ||
-    candidateSet.effectiveIntervalFps > requestedPolicy.targetIntervalFps
+    candidateSet.effectiveIntervalFps !== expectedEffectiveIntervalFps
   ) {
-    rejectBoundary('effectiveIntervalFps is invalid.');
+    rejectBoundary('effectiveIntervalFps does not match the requested policy and duration.');
   }
   if (
     candidateSet.candidates.length < 1 ||
@@ -112,6 +116,7 @@ const assertTemporaryCandidateBoundary = (
   }
 
   let previousTimestampMs = -1;
+  let intervalCandidateCount = 0;
   for (let index = 0; index < candidateSet.candidates.length; index += 1) {
     const candidate = candidateSet.candidates[index];
     if (
@@ -162,10 +167,20 @@ const assertTemporaryCandidateBoundary = (
     ) {
       rejectBoundary('candidate extraction provenance is invalid.');
     }
+    if (candidate.extractionReasons.includes('INTERVAL')) {
+      intervalCandidateCount += 1;
+    }
     if (!isOwnedTemporaryFile(candidate.temporaryPath, candidateSet.temporaryDirectories)) {
       rejectBoundary('candidate file is outside preprocessing-owned temporary directories.');
     }
     previousTimestampMs = candidate.timestampMs;
+  }
+
+  if (
+    intervalCandidateCount < 1 ||
+    intervalCandidateCount > requestedPolicy.maxIntervalCandidates
+  ) {
+    rejectBoundary('interval candidate count is outside the requested bounded policy.');
   }
 };
 
