@@ -9,6 +9,21 @@ export interface TemporaryCandidateFileIntegrity {
   frameSha256: string;
 }
 
+export interface TemporarySourceVideoFileIntegrity {
+  byteLength: number;
+  contentSha256: string;
+}
+
+const readRegularFile = async (temporaryPath: string) => {
+  try {
+    const stats = await lstat(temporaryPath);
+    if (!stats.isFile()) return null;
+    return await readFile(temporaryPath);
+  } catch {
+    return null;
+  }
+};
+
 const getJpegDimensions = (buffer: Buffer) => {
   if (
     detectImageMimeType(buffer) !== 'image/jpeg' ||
@@ -73,21 +88,27 @@ const getJpegDimensions = (buffer: Buffer) => {
   return null;
 };
 
+export const inspectTemporarySourceVideoFile = async (
+  temporaryPath: string
+): Promise<TemporarySourceVideoFileIntegrity | null> => {
+  const buffer = await readRegularFile(temporaryPath);
+  if (!buffer) return null;
+  return {
+    byteLength: buffer.length,
+    contentSha256: createHash('sha256').update(buffer).digest('hex'),
+  };
+};
+
 export const inspectTemporaryCandidateFile = async (
   temporaryPath: string
 ): Promise<TemporaryCandidateFileIntegrity | null> => {
-  try {
-    const stats = await lstat(temporaryPath);
-    if (!stats.isFile()) return null;
-    const buffer = await readFile(temporaryPath);
-    const dimensions = getJpegDimensions(buffer);
-    if (!dimensions) return null;
-    return {
-      ...dimensions,
-      byteLength: buffer.length,
-      frameSha256: createHash('sha256').update(buffer).digest('hex'),
-    };
-  } catch {
-    return null;
-  }
+  const buffer = await readRegularFile(temporaryPath);
+  if (!buffer) return null;
+  const dimensions = getJpegDimensions(buffer);
+  if (!dimensions) return null;
+  return {
+    ...dimensions,
+    byteLength: buffer.length,
+    frameSha256: createHash('sha256').update(buffer).digest('hex'),
+  };
 };
