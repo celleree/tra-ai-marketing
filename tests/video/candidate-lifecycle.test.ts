@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
@@ -7,6 +10,11 @@ import type { TemporaryVideoFrameCandidateSet } from '@/lib/video/candidate-type
 
 const sourceBuffer = Buffer.from('trusted-tra-video');
 const sourceContentHash = createHash('sha256').update(sourceBuffer).digest('hex');
+const VALID_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAgAAAQABAAD//gAPTGF2YzYxLjMuMTAwAP/bAEMACAoKCwoLDQ0NDQ0NEA8QEBAQEBAQEBAQEBISEhUVFRISEhAQEhIUFBUVFxcXFRUVFRcXGRkZHh4cHCMjJCsrM//EAEwAAQEAAAAAAAAAAAAAAAAAAAAGAQEBAAAAAAAAAAAAAAAAAAAGBxABAAAAAAAAAAAAAAAAAAAAABEBAAAAAAAAAAAAAAAAAAAAAP/AABEIAAIAAgMBIgACEQADEQD/2gAMAwEAAhEDEQA/AIsAUX9//9k=',
+  'base64'
+);
+const jpegSha256 = createHash('sha256').update(VALID_JPEG).digest('hex');
 const source = {
   role: 'TRA_VIDEO',
   media: {
@@ -17,6 +25,20 @@ const source = {
     buffer: sourceBuffer,
   },
 } as unknown as HydratedTraVideoSource;
+
+let temporaryDirectory = '';
+let candidatePath = '';
+
+beforeEach(async () => {
+  temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'candidate-lifecycle-test-'));
+  candidatePath = path.join(temporaryDirectory, 'candidate-000000.jpg');
+  await writeFile(candidatePath, VALID_JPEG);
+});
+
+afterEach(async () => {
+  await rm(temporaryDirectory, { recursive: true, force: true });
+  vi.restoreAllMocks();
+});
 
 const candidateSet = (): TemporaryVideoFrameCandidateSet => ({
   sourceVideoMediaId: 'media-video-1',
@@ -34,18 +56,18 @@ const candidateSet = (): TemporaryVideoFrameCandidateSet => ({
       sourceVideoFileName: 'source.mp4',
       sourceVideoContentHash: sourceContentHash,
       mimeType: 'image/jpeg',
-      width: 640,
-      height: 360,
-      byteLength: 123,
-      frameSha256: 'a'.repeat(64),
+      width: 2,
+      height: 2,
+      byteLength: VALID_JPEG.length,
+      frameSha256: jpegSha256,
       extractionReasons: ['INTERVAL'],
-      temporaryPath: '/tmp/interval-candidates/candidate-000000.jpg',
+      temporaryPath: candidatePath,
       lifecycle: 'TEMPORARY',
       providerEligible: false,
     },
   ],
-  temporarySourceVideoPath: '/tmp/interval-candidates/source.mp4',
-  temporaryDirectories: ['/tmp/interval-candidates', '/tmp/scene-candidates'],
+  temporarySourceVideoPath: path.join(temporaryDirectory, 'source.mp4'),
+  temporaryDirectories: [temporaryDirectory],
 });
 
 type InvalidCandidateSetMutation = (
@@ -111,15 +133,36 @@ const invalidBoundaryCases: Array<[string, InvalidCandidateSetMutation]> = [
     },
   ],
   [
+    'candidate byte-length metadata',
+    (ownership) => {
+      ownership.candidates[0].byteLength += 1;
+    },
+  ],
+  [
+    'candidate hash metadata',
+    (ownership) => {
+      ownership.candidates[0].frameSha256 = 'b'.repeat(64);
+    },
+  ],
+  [
+    'candidate dimension metadata',
+    (ownership) => {
+      ownership.candidates[0].width = 3;
+    },
+  ],
+  [
     'candidate temporary ownership',
     (ownership) => {
-      ownership.candidates[0].temporaryPath = '/tmp/not-owned/candidate-000000.jpg';
+      ownership.candidates[0].temporaryPath = path.join(
+        tmpdir(),
+        'not-owned-candidate-000000.jpg'
+      );
     },
   ],
   [
     'source-video temporary ownership',
     (ownership) => {
-      ownership.temporarySourceVideoPath = '/tmp/not-owned/source.mp4';
+      ownership.temporarySourceVideoPath = path.join(tmpdir(), 'not-owned-source.mp4');
     },
   ],
 ];
@@ -168,7 +211,7 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     await withTemporaryTraVideoFrameCandidates(
       source,
       async (received) => {
-        received.temporaryDirectories = ['/tmp/not-owned-by-preprocessing'];
+        received.temporaryDirectories = [path.join(tmpdir(), 'not-owned-by-preprocessing')];
       },
       { preprocessCandidates, cleanupCandidateOwnership }
     );
@@ -198,6 +241,53 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
       expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
     }
   );
+
+  it('rejects a missing owned candidate file before consumption', async () => {
+    const ownership = candidateSet();
+    await rm(candidatePath, { force: true });
+    const preprocessCandidates = vi.fn(async () => ownership);
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership }
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: candidate file integrity does not match its metadata.'
+    );
+
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+  });
+
+  it('rejects non-JPEG candidate bytes even when length and hash metadata match', async () => {
+    const ownership = candidateSet();
+    const invalidBytes = Buffer.from('not-a-jpeg');
+    await writeFile(candidatePath, invalidBytes);
+    ownership.candidates[0].byteLength = invalidBytes.length;
+    ownership.candidates[0].frameSha256 = createHash('sha256')
+      .update(invalidBytes)
+      .digest('hex');
+    const preprocessCandidates = vi.fn(async () => ownership);
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership }
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: candidate file integrity does not match its metadata.'
+    );
+
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+  });
 
   it('rejects a producer policy that differs from the caller requested policy', async () => {
     const ownership = candidateSet();
@@ -263,12 +353,16 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     };
     ownership.policy = requestedPolicy;
     ownership.effectiveIntervalFps = 0.25;
+    const secondCandidatePath = path.join(
+      temporaryDirectory,
+      'candidate-000001.jpg'
+    );
+    await writeFile(secondCandidatePath, VALID_JPEG);
     ownership.candidates.push({
       ...ownership.candidates[0],
       candidateIndex: 1,
       timestampMs: 500,
-      frameSha256: 'b'.repeat(64),
-      temporaryPath: '/tmp/interval-candidates/candidate-000001.jpg',
+      temporaryPath: secondCandidatePath,
     });
     const preprocessCandidates = vi.fn(async () => ownership);
     const cleanupCandidateOwnership = vi.fn(async () => undefined);
@@ -336,23 +430,19 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     });
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    try {
-      await expect(
-        withTemporaryTraVideoFrameCandidates(
-          source,
-          async () => {
-            throw consumerError;
-          },
-          { preprocessCandidates, cleanupCandidateOwnership }
-        )
-      ).rejects.toBe(consumerError);
-      expect(consoleError).toHaveBeenCalledWith(
-        'Failed to clean temporary video candidate ownership after lifecycle error.',
-        cleanupError
-      );
-    } finally {
-      consoleError.mockRestore();
-    }
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        async () => {
+          throw consumerError;
+        },
+        { preprocessCandidates, cleanupCandidateOwnership }
+      )
+    ).rejects.toBe(consumerError);
+    expect(consoleError).toHaveBeenCalledWith(
+      'Failed to clean temporary video candidate ownership after lifecycle error.',
+      cleanupError
+    );
   });
 
   it('does not perform lifecycle cleanup when preprocessing fails before ownership transfers', async () => {
