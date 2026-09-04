@@ -35,6 +35,17 @@ const rejectBoundary = (reason: string): never => {
   throw new Error(`Temporary video candidate boundary rejected: ${reason}`);
 };
 
+const policiesMatch = (
+  actual: VideoFrameCandidatePolicy,
+  requested: VideoFrameCandidatePolicy
+) =>
+  actual.targetIntervalFps === requested.targetIntervalFps &&
+  actual.maxIntervalCandidates === requested.maxIntervalCandidates &&
+  actual.maxTotalCandidates === requested.maxTotalCandidates &&
+  actual.maxWidth === requested.maxWidth &&
+  actual.imageFormat === requested.imageFormat &&
+  actual.jpegQuality === requested.jpegQuality;
+
 const isOwnedTemporaryFile = (
   filePath: string,
   temporaryDirectories: readonly string[]
@@ -54,9 +65,14 @@ const isOwnedTemporaryFile = (
 
 const assertTemporaryCandidateBoundary = (
   source: HydratedTraVideoSource,
-  candidateSet: TemporaryVideoFrameCandidateSet
+  candidateSet: TemporaryVideoFrameCandidateSet,
+  requestedPolicy: VideoFrameCandidatePolicy
 ) => {
+  validateVideoFrameCandidatePolicy(requestedPolicy);
   validateVideoFrameCandidatePolicy(candidateSet.policy);
+  if (!policiesMatch(candidateSet.policy, requestedPolicy)) {
+    rejectBoundary('candidate-set policy does not match the requested policy.');
+  }
 
   const expectedContentHash = createHash('sha256')
     .update(source.stored.buffer)
@@ -74,15 +90,15 @@ const assertTemporaryCandidateBoundary = (
   if (
     !Number.isFinite(candidateSet.effectiveIntervalFps) ||
     candidateSet.effectiveIntervalFps <= 0 ||
-    candidateSet.effectiveIntervalFps > candidateSet.policy.targetIntervalFps
+    candidateSet.effectiveIntervalFps > requestedPolicy.targetIntervalFps
   ) {
     rejectBoundary('effectiveIntervalFps is invalid.');
   }
   if (
     candidateSet.candidates.length < 1 ||
-    candidateSet.candidates.length > candidateSet.policy.maxTotalCandidates
+    candidateSet.candidates.length > requestedPolicy.maxTotalCandidates
   ) {
-    rejectBoundary('candidate count is outside the bounded policy.');
+    rejectBoundary('candidate count is outside the requested bounded policy.');
   }
   if (
     candidateSet.temporaryDirectories.length < 1 ||
@@ -162,7 +178,9 @@ export const withTemporaryTraVideoFrameCandidates = async <T>(
     dependencies.preprocessCandidates || preprocessCandidatesByDefault;
   const cleanupCandidateOwnership =
     dependencies.cleanupCandidateOwnership || cleanupTemporaryVideoFrameCandidateOwnership;
-  const candidateSet = await preprocessCandidates(source, policy);
+  const requestedPolicy = { ...policy };
+  validateVideoFrameCandidatePolicy(requestedPolicy);
+  const candidateSet = await preprocessCandidates(source, { ...requestedPolicy });
   const cleanupOwnership: TemporaryVideoFrameCandidateSet = {
     ...candidateSet,
     temporaryDirectories: [...candidateSet.temporaryDirectories],
@@ -170,7 +188,7 @@ export const withTemporaryTraVideoFrameCandidates = async <T>(
 
   let result: T;
   try {
-    assertTemporaryCandidateBoundary(source, candidateSet);
+    assertTemporaryCandidateBoundary(source, candidateSet, requestedPolicy);
     result = await consumer(candidateSet);
   } catch (lifecycleError) {
     try {
