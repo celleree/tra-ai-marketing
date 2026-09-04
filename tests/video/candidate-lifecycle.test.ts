@@ -1,22 +1,122 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import type { TemporaryVideoFrameCandidateSet } from '@/lib/video/candidate-types';
 
-const source = {} as HydratedTraVideoSource;
+const sourceBuffer = Buffer.from('trusted-tra-video');
+const sourceContentHash = createHash('sha256').update(sourceBuffer).digest('hex');
+const source = {
+  role: 'TRA_VIDEO',
+  media: {
+    id: 'media-video-1',
+    fileName: 'source.mp4',
+  },
+  stored: {
+    buffer: sourceBuffer,
+  },
+} as unknown as HydratedTraVideoSource;
 
 const candidateSet = (): TemporaryVideoFrameCandidateSet => ({
   sourceVideoMediaId: 'media-video-1',
   sourceVideoFileName: 'source.mp4',
-  sourceVideoContentHash: 'source-hash',
+  sourceVideoContentHash: sourceContentHash,
   durationMs: 4_000,
   policy: DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY,
   effectiveIntervalFps: 3,
-  candidates: [],
+  candidates: [
+    {
+      candidateIndex: 0,
+      timestampMs: 250,
+      sourceRole: 'TRA_VIDEO',
+      sourceVideoMediaId: 'media-video-1',
+      sourceVideoFileName: 'source.mp4',
+      sourceVideoContentHash: sourceContentHash,
+      mimeType: 'image/jpeg',
+      width: 640,
+      height: 360,
+      byteLength: 123,
+      frameSha256: 'a'.repeat(64),
+      extractionReasons: ['INTERVAL'],
+      temporaryPath: '/tmp/interval-candidates/candidate-000000.jpg',
+      lifecycle: 'TEMPORARY',
+      providerEligible: false,
+    },
+  ],
   temporarySourceVideoPath: '/tmp/interval-candidates/source.mp4',
   temporaryDirectories: ['/tmp/interval-candidates', '/tmp/scene-candidates'],
 });
+
+type InvalidCandidateSetMutation = (
+  candidateSet: TemporaryVideoFrameCandidateSet
+) => void;
+
+const invalidBoundaryCases: Array<[string, InvalidCandidateSetMutation]> = [
+  [
+    'candidate-set source provenance',
+    (ownership) => {
+      ownership.sourceVideoContentHash = 'b'.repeat(64);
+    },
+  ],
+  [
+    'candidate source provenance',
+    (ownership) => {
+      ownership.candidates[0].sourceVideoMediaId = 'different-media';
+    },
+  ],
+  [
+    'provider eligibility',
+    (ownership) => {
+      (ownership.candidates[0] as unknown as { providerEligible: boolean }).providerEligible = true;
+    },
+  ],
+  [
+    'temporary lifecycle',
+    (ownership) => {
+      (ownership.candidates[0] as unknown as { lifecycle: string }).lifecycle = 'APPROVED';
+    },
+  ],
+  [
+    'approved-frame fields',
+    (ownership) => {
+      Object.assign(ownership.candidates[0], {
+        approvedHumanSource: true,
+        cacheKey: 'persistent/cache/key',
+      });
+    },
+  ],
+  [
+    'extraction provenance',
+    (ownership) => {
+      (ownership.candidates[0] as unknown as { extractionReasons: string[] }).extractionReasons = [];
+    },
+  ],
+  [
+    'candidate ordering',
+    (ownership) => {
+      ownership.candidates[0].candidateIndex = 3;
+    },
+  ],
+  [
+    'candidate timestamp',
+    (ownership) => {
+      ownership.candidates[0].timestampMs = ownership.durationMs;
+    },
+  ],
+  [
+    'candidate temporary ownership',
+    (ownership) => {
+      ownership.candidates[0].temporaryPath = '/tmp/not-owned/candidate-000000.jpg';
+    },
+  ],
+  [
+    'source-video temporary ownership',
+    (ownership) => {
+      ownership.temporarySourceVideoPath = '/tmp/not-owned/source.mp4';
+    },
+  ],
+];
 
 describe('temporary TRA video candidate consumer lifecycle', () => {
   it('keeps ownership available to the consumer, then cleans exactly once and returns its result', async () => {
@@ -71,6 +171,28 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     expect(cleanedOwnership?.temporaryDirectories).toEqual(originalDirectories);
   });
 
+  it.each(invalidBoundaryCases)(
+    'rejects invalid %s before consumption and cleans transferred ownership',
+    async (_label, mutate) => {
+      const ownership = candidateSet();
+      mutate(ownership);
+      const preprocessCandidates = vi.fn(async () => ownership);
+      const cleanupCandidateOwnership = vi.fn(async () => undefined);
+      const consumer = vi.fn(async () => 'unused');
+
+      await expect(
+        withTemporaryTraVideoFrameCandidates(
+          source,
+          consumer,
+          { preprocessCandidates, cleanupCandidateOwnership }
+        )
+      ).rejects.toThrow('Temporary video candidate boundary rejected:');
+
+      expect(consumer).not.toHaveBeenCalled();
+      expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+    }
+  );
+
   it('propagates cleanup failure when consumption succeeds', async () => {
     const ownership = candidateSet();
     const cleanupError = new Error('cleanup failed');
@@ -108,7 +230,7 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     expect(cleanupCandidateOwnership).toHaveBeenCalledWith(ownership);
   });
 
-  it('preserves a consumer error when cleanup also fails', async () => {
+  it('preserves a lifecycle error when cleanup also fails', async () => {
     const ownership = candidateSet();
     const consumerError = new Error('consumer failed');
     const cleanupError = new Error('cleanup failed');
@@ -129,7 +251,7 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
         )
       ).rejects.toBe(consumerError);
       expect(consoleError).toHaveBeenCalledWith(
-        'Failed to clean temporary video candidate ownership after consumer error.',
+        'Failed to clean temporary video candidate ownership after lifecycle error.',
         cleanupError
       );
     } finally {
