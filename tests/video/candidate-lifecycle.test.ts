@@ -31,7 +31,7 @@ let sourceVideoPath = '';
 let candidatePath = '';
 
 beforeEach(async () => {
-  temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'candidate-lifecycle-test-'));
+  temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'tra-video-candidates-'));
   sourceVideoPath = path.join(temporaryDirectory, 'source.mp4');
   candidatePath = path.join(temporaryDirectory, 'candidate-000000.jpg');
   await Promise.all([
@@ -226,7 +226,7 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
   });
 
   it.each(invalidBoundaryCases)(
-    'rejects invalid %s before consumption and cleans transferred ownership',
+    'rejects invalid %s before consumption and cleans only safe transferred ownership',
     async (_label, mutate) => {
       const ownership = candidateSet();
       mutate(ownership);
@@ -246,6 +246,109 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
       expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
     }
   );
+
+  it('rejects an unreferenced cleanup directory without passing it to cleanup', async () => {
+    const ownership = candidateSet();
+    const unrelatedDirectory = await mkdtemp(
+      path.join(tmpdir(), 'tra-video-scene-candidates-')
+    );
+    ownership.temporaryDirectories = [temporaryDirectory, unrelatedDirectory];
+    const preprocessCandidates = vi.fn(async () => ownership);
+    let cleanedOwnership: TemporaryVideoFrameCandidateSet | undefined;
+    const cleanupCandidateOwnership = vi.fn(
+      async (received: TemporaryVideoFrameCandidateSet) => {
+        cleanedOwnership = received;
+      }
+    );
+    const consumer = vi.fn(async () => 'unused');
+
+    try {
+      await expect(
+        withTemporaryTraVideoFrameCandidates(
+          source,
+          consumer,
+          { preprocessCandidates, cleanupCandidateOwnership }
+        )
+      ).rejects.toThrow(
+        'Temporary video candidate boundary rejected: temporary directory ownership is invalid.'
+      );
+
+      expect(consumer).not.toHaveBeenCalled();
+      expect(cleanedOwnership?.temporaryDirectories).toEqual([temporaryDirectory]);
+    } finally {
+      await rm(unrelatedDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a broad cleanup parent without passing it to cleanup', async () => {
+    const ownership = candidateSet();
+    ownership.temporaryDirectories = [tmpdir()];
+    const preprocessCandidates = vi.fn(async () => ownership);
+    let cleanedOwnership: TemporaryVideoFrameCandidateSet | undefined;
+    const cleanupCandidateOwnership = vi.fn(
+      async (received: TemporaryVideoFrameCandidateSet) => {
+        cleanedOwnership = received;
+      }
+    );
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership }
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: temporary directory ownership is invalid.'
+    );
+
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanedOwnership?.temporaryDirectories).toEqual([]);
+  });
+
+  it('uses source provenance snapshotted before preprocessing', async () => {
+    const mutableSource = {
+      role: 'TRA_VIDEO',
+      media: {
+        id: 'media-video-1',
+        fileName: 'source.mp4',
+      },
+      stored: {
+        buffer: Buffer.from(sourceBuffer),
+      },
+    } as unknown as HydratedTraVideoSource;
+    const ownership = candidateSet();
+    const mutatedBuffer = Buffer.from('mutated-tra-video');
+    const mutatedHash = createHash('sha256').update(mutatedBuffer).digest('hex');
+    const preprocessCandidates = vi.fn(async (received: HydratedTraVideoSource) => {
+      received.media.id = 'mutated-media-id';
+      received.media.fileName = 'mutated-source.mp4';
+      received.stored.buffer = mutatedBuffer;
+      ownership.sourceVideoMediaId = 'mutated-media-id';
+      ownership.sourceVideoFileName = 'mutated-source.mp4';
+      ownership.sourceVideoContentHash = mutatedHash;
+      ownership.candidates[0].sourceVideoMediaId = 'mutated-media-id';
+      ownership.candidates[0].sourceVideoFileName = 'mutated-source.mp4';
+      ownership.candidates[0].sourceVideoContentHash = mutatedHash;
+      await writeFile(sourceVideoPath, mutatedBuffer);
+      return ownership;
+    });
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        mutableSource,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership }
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: candidate-set source provenance does not match the hydrated TRA video.'
+    );
+
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+  });
 
   it('rejects a missing owned source video before consumption', async () => {
     const ownership = candidateSet();
