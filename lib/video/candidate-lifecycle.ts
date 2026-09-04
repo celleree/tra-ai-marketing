@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { cleanupTemporaryVideoFrameCandidateOwnership } from '@/lib/video/candidate-cleanup';
+import { inspectTemporaryCandidateFile } from '@/lib/video/candidate-file-integrity';
 import { type HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { preprocessTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-preprocessor';
 import {
@@ -64,7 +65,7 @@ const isOwnedTemporaryFile = (
   });
 };
 
-const assertTemporaryCandidateBoundary = (
+const assertTemporaryCandidateBoundary = async (
   source: HydratedTraVideoSource,
   candidateSet: TemporaryVideoFrameCandidateSet,
   requestedPolicy: VideoFrameCandidatePolicy
@@ -173,6 +174,16 @@ const assertTemporaryCandidateBoundary = (
     if (!isOwnedTemporaryFile(candidate.temporaryPath, candidateSet.temporaryDirectories)) {
       rejectBoundary('candidate file is outside preprocessing-owned temporary directories.');
     }
+    const fileIntegrity = await inspectTemporaryCandidateFile(candidate.temporaryPath);
+    if (
+      !fileIntegrity ||
+      fileIntegrity.width !== candidate.width ||
+      fileIntegrity.height !== candidate.height ||
+      fileIntegrity.byteLength !== candidate.byteLength ||
+      fileIntegrity.frameSha256 !== candidate.frameSha256
+    ) {
+      rejectBoundary('candidate file integrity does not match its metadata.');
+    }
     previousTimestampMs = candidate.timestampMs;
   }
 
@@ -204,7 +215,7 @@ export const withTemporaryTraVideoFrameCandidates = async <T>(
 
   let result: T;
   try {
-    assertTemporaryCandidateBoundary(source, candidateSet, requestedPolicy);
+    await assertTemporaryCandidateBoundary(source, candidateSet, requestedPolicy);
     result = await consumer(candidateSet);
   } catch (lifecycleError) {
     try {
