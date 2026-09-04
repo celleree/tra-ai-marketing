@@ -48,6 +48,26 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
     expect(cleanupCandidateOwnership).toHaveBeenCalledWith(ownership);
   });
 
+  it('cleans the original ownership even when the consumer reassigns temporary directories', async () => {
+    const ownership = candidateSet();
+    const originalDirectories = [...ownership.temporaryDirectories];
+    const preprocessCandidates = vi.fn(async () => ownership);
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+
+    await withTemporaryTraVideoFrameCandidates(
+      source,
+      async (received) => {
+        received.temporaryDirectories = ['/tmp/not-owned-by-preprocessing'];
+      },
+      { preprocessCandidates, cleanupCandidateOwnership }
+    );
+
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+    expect(cleanupCandidateOwnership.mock.calls[0]?.[0].temporaryDirectories).toEqual(
+      originalDirectories
+    );
+  });
+
   it('propagates cleanup failure when consumption succeeds', async () => {
     const ownership = candidateSet();
     const cleanupError = new Error('cleanup failed');
