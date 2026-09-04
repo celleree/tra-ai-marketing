@@ -27,12 +27,17 @@ const source = {
 } as unknown as HydratedTraVideoSource;
 
 let temporaryDirectory = '';
+let sourceVideoPath = '';
 let candidatePath = '';
 
 beforeEach(async () => {
   temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'candidate-lifecycle-test-'));
+  sourceVideoPath = path.join(temporaryDirectory, 'source.mp4');
   candidatePath = path.join(temporaryDirectory, 'candidate-000000.jpg');
-  await writeFile(candidatePath, VALID_JPEG);
+  await Promise.all([
+    writeFile(sourceVideoPath, sourceBuffer),
+    writeFile(candidatePath, VALID_JPEG),
+  ]);
 });
 
 afterEach(async () => {
@@ -66,7 +71,7 @@ const candidateSet = (): TemporaryVideoFrameCandidateSet => ({
       providerEligible: false,
     },
   ],
-  temporarySourceVideoPath: path.join(temporaryDirectory, 'source.mp4'),
+  temporarySourceVideoPath: sourceVideoPath,
   temporaryDirectories: [temporaryDirectory],
 });
 
@@ -241,6 +246,48 @@ describe('temporary TRA video candidate consumer lifecycle', () => {
       expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
     }
   );
+
+  it('rejects a missing owned source video before consumption', async () => {
+    const ownership = candidateSet();
+    await rm(sourceVideoPath, { force: true });
+    const preprocessCandidates = vi.fn(async () => ownership);
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership }
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: temporary source video integrity does not match the hydrated TRA video.'
+    );
+
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+  });
+
+  it('rejects substituted source-video bytes before consumption', async () => {
+    const ownership = candidateSet();
+    await writeFile(sourceVideoPath, Buffer.from('different-video'));
+    const preprocessCandidates = vi.fn(async () => ownership);
+    const cleanupCandidateOwnership = vi.fn(async () => undefined);
+    const consumer = vi.fn(async () => 'unused');
+
+    await expect(
+      withTemporaryTraVideoFrameCandidates(
+        source,
+        consumer,
+        { preprocessCandidates, cleanupCandidateOwnership }
+      )
+    ).rejects.toThrow(
+      'Temporary video candidate boundary rejected: temporary source video integrity does not match the hydrated TRA video.'
+    );
+
+    expect(consumer).not.toHaveBeenCalled();
+    expect(cleanupCandidateOwnership).toHaveBeenCalledOnce();
+  });
 
   it('rejects a missing owned candidate file before consumption', async () => {
     const ownership = candidateSet();
