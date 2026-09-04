@@ -105,6 +105,12 @@ const invalidBoundaryCases: Array<[string, InvalidCandidateSetMutation]> = [
     },
   ],
   [
+    'candidate width policy',
+    (ownership) => {
+      ownership.candidates[0].width = ownership.policy.maxWidth + 1;
+    },
+  ],
+  [
     'candidate temporary ownership',
     (ownership) => {
       ownership.candidates[0].temporaryPath = '/tmp/not-owned/candidate-000000.jpg';
