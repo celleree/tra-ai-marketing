@@ -33,12 +33,33 @@ interface TemporaryCandidateLifecycleDependencies {
   cleanupCandidateOwnership?: TemporaryCandidateCleanup;
 }
 
+interface TraVideoSourceBoundarySnapshot {
+  mediaId: string;
+  fileName: string;
+  byteLength: number;
+  contentSha256: string;
+}
+
+const TEMPORARY_DIRECTORY_PREFIXES = [
+  'tra-video-candidates-',
+  'tra-video-scene-candidates-',
+] as const;
+
 const preprocessCandidatesByDefault: TemporaryCandidatePreprocessor = (source, policy) =>
   preprocessTemporaryTraVideoFrameCandidates(source, {}, policy);
 
 const rejectBoundary = (reason: string): never => {
   throw new Error(`Temporary video candidate boundary rejected: ${reason}`);
 };
+
+const snapshotSourceBoundary = (
+  source: HydratedTraVideoSource
+): TraVideoSourceBoundarySnapshot => ({
+  mediaId: source.media.id,
+  fileName: source.media.fileName,
+  byteLength: source.stored.buffer.length,
+  contentSha256: createHash('sha256').update(source.stored.buffer).digest('hex'),
+});
 
 const policiesMatch = (
   actual: VideoFrameCandidatePolicy,
@@ -51,25 +72,66 @@ const policiesMatch = (
   actual.imageFormat === requested.imageFormat &&
   actual.jpegQuality === requested.jpegQuality;
 
-const isOwnedTemporaryFile = (
-  filePath: string,
-  temporaryDirectories: readonly string[]
+const isExpectedTemporaryDirectory = (directory: string) => {
+  const baseName = path.basename(path.resolve(directory));
+  return TEMPORARY_DIRECTORY_PREFIXES.some(
+    (prefix) => baseName.startsWith(prefix) && baseName.length > prefix.length
+  );
+};
+
+const getReferencedTemporaryDirectories = (
+  candidateSet: TemporaryVideoFrameCandidateSet
+) =>
+  new Set([
+    path.resolve(path.dirname(candidateSet.temporarySourceVideoPath)),
+    ...candidateSet.candidates.map((candidate) =>
+      path.resolve(path.dirname(candidate.temporaryPath))
+    ),
+  ]);
+
+const getSafeCleanupDirectories = (
+  candidateSet: TemporaryVideoFrameCandidateSet
 ) => {
-  const resolvedFilePath = path.resolve(filePath);
-  return temporaryDirectories.some((directory) => {
-    const resolvedDirectory = path.resolve(directory);
-    const relative = path.relative(resolvedDirectory, resolvedFilePath);
-    return (
-      relative !== '' &&
-      relative !== '..' &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative)
-    );
-  });
+  const declaredDirectories = new Set(
+    candidateSet.temporaryDirectories
+      .filter((directory) => Boolean(directory))
+      .map((directory) => path.resolve(directory))
+  );
+  return [...getReferencedTemporaryDirectories(candidateSet)].filter(
+    (directory) =>
+      declaredDirectories.has(directory) && isExpectedTemporaryDirectory(directory)
+  );
+};
+
+const assertTemporaryDirectoryOwnership = (
+  candidateSet: TemporaryVideoFrameCandidateSet
+) => {
+  if (
+    candidateSet.temporaryDirectories.length < 1 ||
+    candidateSet.temporaryDirectories.some((directory) => !directory)
+  ) {
+    rejectBoundary('temporary directory ownership is invalid.');
+  }
+
+  const declaredDirectories = candidateSet.temporaryDirectories.map((directory) =>
+    path.resolve(directory)
+  );
+  const uniqueDeclaredDirectories = new Set(declaredDirectories);
+  const referencedDirectories = getReferencedTemporaryDirectories(candidateSet);
+  if (
+    uniqueDeclaredDirectories.size !== declaredDirectories.length ||
+    uniqueDeclaredDirectories.size !== referencedDirectories.size ||
+    declaredDirectories.some((directory) => !isExpectedTemporaryDirectory(directory)) ||
+    [...referencedDirectories].some(
+      (directory) => !uniqueDeclaredDirectories.has(directory)
+    )
+  ) {
+    rejectBoundary('temporary directory ownership is invalid.');
+  }
 };
 
 const assertTemporaryCandidateBoundary = async (
-  source: HydratedTraVideoSource,
+  sourceSnapshot: TraVideoSourceBoundarySnapshot,
   candidateSet: TemporaryVideoFrameCandidateSet,
   requestedPolicy: VideoFrameCandidatePolicy
 ) => {
@@ -79,13 +141,10 @@ const assertTemporaryCandidateBoundary = async (
     rejectBoundary('candidate-set policy does not match the requested policy.');
   }
 
-  const expectedContentHash = createHash('sha256')
-    .update(source.stored.buffer)
-    .digest('hex');
   if (
-    candidateSet.sourceVideoMediaId !== source.media.id ||
-    candidateSet.sourceVideoFileName !== source.media.fileName ||
-    candidateSet.sourceVideoContentHash !== expectedContentHash
+    candidateSet.sourceVideoMediaId !== sourceSnapshot.mediaId ||
+    candidateSet.sourceVideoFileName !== sourceSnapshot.fileName ||
+    candidateSet.sourceVideoContentHash !== sourceSnapshot.contentSha256
   ) {
     rejectBoundary('candidate-set source provenance does not match the hydrated TRA video.');
   }
@@ -108,23 +167,16 @@ const assertTemporaryCandidateBoundary = async (
   ) {
     rejectBoundary('candidate count is outside the requested bounded policy.');
   }
-  if (
-    candidateSet.temporaryDirectories.length < 1 ||
-    candidateSet.temporaryDirectories.some((directory) => !directory) ||
-    !isOwnedTemporaryFile(
-      candidateSet.temporarySourceVideoPath,
-      candidateSet.temporaryDirectories
-    )
-  ) {
-    rejectBoundary('temporary source ownership is invalid.');
-  }
+
+  assertTemporaryDirectoryOwnership(candidateSet);
+
   const sourceFileIntegrity = await inspectTemporarySourceVideoFile(
     candidateSet.temporarySourceVideoPath
   );
   if (
     !sourceFileIntegrity ||
-    sourceFileIntegrity.byteLength !== source.stored.buffer.length ||
-    sourceFileIntegrity.contentSha256 !== expectedContentHash
+    sourceFileIntegrity.byteLength !== sourceSnapshot.byteLength ||
+    sourceFileIntegrity.contentSha256 !== sourceSnapshot.contentSha256
   ) {
     rejectBoundary('temporary source video integrity does not match the hydrated TRA video.');
   }
@@ -184,9 +236,6 @@ const assertTemporaryCandidateBoundary = async (
     if (candidate.extractionReasons.includes('INTERVAL')) {
       intervalCandidateCount += 1;
     }
-    if (!isOwnedTemporaryFile(candidate.temporaryPath, candidateSet.temporaryDirectories)) {
-      rejectBoundary('candidate file is outside preprocessing-owned temporary directories.');
-    }
     const fileIntegrity = await inspectTemporaryCandidateFile(candidate.temporaryPath);
     if (
       !fileIntegrity ||
@@ -220,15 +269,20 @@ export const withTemporaryTraVideoFrameCandidates = async <T>(
     dependencies.cleanupCandidateOwnership || cleanupTemporaryVideoFrameCandidateOwnership;
   const requestedPolicy = { ...policy };
   validateVideoFrameCandidatePolicy(requestedPolicy);
+  const sourceSnapshot = snapshotSourceBoundary(source);
   const candidateSet = await preprocessCandidates(source, { ...requestedPolicy });
   const cleanupOwnership: TemporaryVideoFrameCandidateSet = {
     ...candidateSet,
-    temporaryDirectories: [...candidateSet.temporaryDirectories],
+    temporaryDirectories: getSafeCleanupDirectories(candidateSet),
   };
 
   let result: T;
   try {
-    await assertTemporaryCandidateBoundary(source, candidateSet, requestedPolicy);
+    await assertTemporaryCandidateBoundary(
+      sourceSnapshot,
+      candidateSet,
+      requestedPolicy
+    );
     result = await consumer(candidateSet);
   } catch (lifecycleError) {
     try {
