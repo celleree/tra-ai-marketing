@@ -103,10 +103,9 @@ export const preprocessTemporaryTraVideoFrameCandidates = async (
     if (!sceneMaterialization.temporaryDirectory) {
       throw new Error('Scene candidate materialization did not return a temporary directory.');
     }
-    validateSceneMaterializationOwnership(
-      sceneMaterialization.temporaryDirectory,
-      sceneMaterialization.candidates.map((candidate) => candidate.temporaryPath)
-    );
+    if (!isSafeTemporaryVideoCandidateDirectory(sceneMaterialization.temporaryDirectory)) {
+      throw new Error('Scene candidate materialization returned an unsafe temporary directory.');
+    }
 
     cleanupOwnership = {
       ...intervalCandidates,
@@ -115,6 +114,11 @@ export const preprocessTemporaryTraVideoFrameCandidates = async (
         sceneMaterialization.temporaryDirectory,
       ],
     };
+    validateSceneMaterializationOwnership(
+      sceneMaterialization.temporaryDirectory,
+      sceneMaterialization.candidates.map((candidate) => candidate.temporaryPath)
+    );
+
     const mergedCandidates = mergeTemporaryVideoFrameCandidates(
       intervalCandidates,
       sceneMaterialization.candidates
