@@ -38,7 +38,7 @@ jobs:
       - name: Install Unix build tools
         if: runner.os != 'Windows'
         run: |
-          if [ "${{ runner.os }}" = Linux ]; then sudo apt-get update && sudo apt-get install --yes build-essential curl gpg nasm xz-utils; else brew install nasm; fi
+          if [ "${{ runner.os }}" = Linux ]; then sudo apt-get update && sudo apt-get install --yes build-essential curl gpg nasm xz-utils zlib1g-dev; else brew install nasm; fi
       - name: Set up MSYS2 MINGW64
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
@@ -46,7 +46,7 @@ jobs:
           msystem: MINGW64
           install: >-
             base-devel git mingw-w64-x86_64-gcc mingw-w64-x86_64-nodejs
-            nasm curl gnupg xz tar gzip
+            mingw-w64-x86_64-zlib nasm curl gnupg xz tar gzip
       - name: Build pinned FFmpeg on Windows
         if: runner.os == 'Windows'
         shell: msys2 {0}
