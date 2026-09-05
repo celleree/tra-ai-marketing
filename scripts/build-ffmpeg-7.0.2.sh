@@ -34,6 +34,11 @@ if [[ "$(sha256 "$work_dir/ffmpeg.tar.xz")" != "$FFMPEG_SOURCE_SHA256" ]]; then
   exit 1
 fi
 
+# Publish one copy of the exact verified corresponding source with the release.
+if [[ "$target_key" == 'linux-x64' ]]; then
+  cp "$work_dir/ffmpeg.tar.xz" "$output_dir/ffmpeg-${FFMPEG_VERSION}.tar.xz"
+fi
+
 tar -xJf "$work_dir/ffmpeg.tar.xz" -C "$work_dir"
 source_dir="$work_dir/ffmpeg-${FFMPEG_VERSION}"
 test "$(git -C "$source_dir" rev-parse HEAD 2>/dev/null || true)" = ''
@@ -48,7 +53,9 @@ configure_args=(
   --enable-filter=fps,select,scale,showinfo,format
   --enable-encoder=mjpeg,png,wrapped_avframe --enable-muxer=image2,image2pipe,null
 )
-if [[ "$target_key" == 'win32-x64' ]]; then configure_args+=(--target-os=mingw32 --arch=x86_64); fi
+if [[ "$target_key" == 'win32-x64' ]]; then
+  configure_args+=(--target-os=mingw32 --arch=x86_64 --extra-ldflags=-static)
+fi
 
 (
   cd "$source_dir"
@@ -64,6 +71,11 @@ grep -q "ffmpeg version ${FFMPEG_VERSION}" "$output_dir/${target_key}.version.tx
 grep -q -- '--disable-nonfree' "$output_dir/${target_key}.buildconf.txt" && { echo 'Nonfree build is not allowed.' >&2; exit 1; }
 grep -q -- '--enable-nonfree' "$output_dir/${target_key}.buildconf.txt" && { echo 'Nonfree build is not allowed.' >&2; exit 1; }
 grep -q 'GNU Lesser General Public License' "$output_dir/${target_key}.license-check.txt"
+
+if [[ "$target_key" == 'win32-x64' ]] && objdump -p "$output_dir/$executable" | grep -Eiq 'DLL Name:[[:space:]]+zlib1\.dll'; then
+  echo 'Windows FFmpeg must not depend on the MSYS2 zlib1.dll runtime.' >&2
+  exit 1
+fi
 
 cp "$source_dir/COPYING.LGPLv2.1" "$output_dir/${target_key}.LICENSE"
 gzip -n -c "$output_dir/$executable" > "$output_dir/ffmpeg-${target_key}.gz"
