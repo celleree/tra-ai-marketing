@@ -90,10 +90,12 @@ jobs:
               "${target}.license-check.txt"
             )
           done
-          test "${#payload_files[@]}" -eq 30
+          payload_files+=("ffmpeg-7.0.2.tar.xz")
+          test "${#payload_files[@]}" -eq 31
           for payload_file in "${payload_files[@]}"; do test -f "release/${payload_file}"; done
+          echo '8646515b638a3ad303e23af6a3587734447cb8fc0a0c064ecdb8e95c4fd8b389  release/ffmpeg-7.0.2.tar.xz' | sha256sum -c -
           (cd release && sha256sum "${payload_files[@]}" > SHA256SUMS)
-          test "$(wc -l < release/SHA256SUMS)" -eq 30
+          test "$(wc -l < release/SHA256SUMS)" -eq 31
 
       - name: Publish verified assets to R2
         env:
@@ -126,9 +128,11 @@ jobs:
               "${prefix}${target}.buildconf.txt" \
               "${prefix}${target}.license-check.txt"
           done | sort > "$expected_file"
-          printf '%s\n' "${prefix}SHA256SUMS" >> "$expected_file"
+          printf '%s\n' \
+            "${prefix}ffmpeg-7.0.2.tar.xz" \
+            "${prefix}SHA256SUMS" >> "$expected_file"
           sort -o "$expected_file" "$expected_file"
-          test "$(wc -l < "$expected_file")" -eq 31
+          test "$(wc -l < "$expected_file")" -eq 32
           existing_objects="$(aws s3api list-objects-v2 \
             --bucket "$R2_BUCKET" \
             --prefix "$prefix" \
@@ -171,4 +175,7 @@ jobs:
                 "${R2_PUBLIC_BASE_URL}/${RELEASE_TAG}/${payload_file}?run=${CACHE_BUST}"
             done
           done
+          curl --fail --location --silent --show-error --header 'Cache-Control: no-cache' \
+            --output "$public_dir/ffmpeg-7.0.2.tar.xz" \
+            "${R2_PUBLIC_BASE_URL}/${RELEASE_TAG}/ffmpeg-7.0.2.tar.xz?run=${CACHE_BUST}"
           (cd "$public_dir" && sha256sum -c SHA256SUMS)
