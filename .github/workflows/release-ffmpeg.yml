@@ -118,7 +118,28 @@ jobs:
           expected_file="$(mktemp)"
           actual_file="$(mktemp)"
           public_dir="$(mktemp -d)"
-          trap 'rm -f "$expected_file" "$actual_file"; rm -rf "$public_dir"' EXIT
+          publish_started=0
+          publish_verified=0
+          cleanup() {
+            status="$?"
+            set +e
+            if [[ "$status" -ne 0 && "$publish_started" -eq 1 && "$publish_verified" -eq 0 ]]; then
+              echo "Release failed before verification; removing objects uploaded by this run from ${prefix}." >&2
+              cleanup_failed=0
+              while IFS= read -r key; do
+                aws s3 rm "s3://${R2_BUCKET}/${key}" \
+                  --only-show-errors \
+                  --endpoint-url "$endpoint" || cleanup_failed=1
+              done < "$expected_file"
+              if [[ "$cleanup_failed" -ne 0 ]]; then
+                echo "Automatic cleanup did not remove every expected object under ${prefix}; manual cleanup may be required before retry." >&2
+              fi
+            fi
+            rm -f "$expected_file" "$actual_file"
+            rm -rf "$public_dir"
+            exit "$status"
+          }
+          trap cleanup EXIT
           for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64; do
             printf '%s\n' \
               "${prefix}ffmpeg-${target}.gz" \
@@ -144,8 +165,13 @@ jobs:
             echo "R2 release prefix already contains objects: $RELEASE_TAG" >&2
             exit 1
           fi
+          publish_started=1
           aws s3 cp release/ "s3://${R2_BUCKET}/${prefix}" \
             --recursive \
+            --exclude 'SHA256SUMS' \
+            --only-show-errors \
+            --endpoint-url "$endpoint"
+          aws s3 cp release/SHA256SUMS "s3://${R2_BUCKET}/${prefix}SHA256SUMS" \
             --only-show-errors \
             --endpoint-url "$endpoint"
           aws s3api list-objects-v2 \
@@ -179,3 +205,4 @@ jobs:
             --output "$public_dir/ffmpeg-7.0.2.tar.xz" \
             "${R2_PUBLIC_BASE_URL}/${RELEASE_TAG}/ffmpeg-7.0.2.tar.xz?run=${CACHE_BUST}"
           (cd "$public_dir" && sha256sum -c SHA256SUMS)
+          publish_verified=1
