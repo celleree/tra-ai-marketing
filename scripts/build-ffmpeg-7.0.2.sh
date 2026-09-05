@@ -41,12 +41,12 @@ test "$(git -C "$source_dir" rev-parse HEAD 2>/dev/null || true)" = ''
 configure_args=(
   --disable-everything --disable-autodetect --disable-network --disable-doc --disable-debug
   --disable-programs --disable-shared --enable-static --enable-ffmpeg
-  --enable-avcodec --enable-avformat --enable-avfilter --enable-swscale
+  --enable-avcodec --enable-avformat --enable-avfilter --enable-swscale --enable-zlib
   --enable-protocol=file,pipe --enable-demuxer=mov
   --enable-parser=h264,hevc,mpeg4video
   --enable-decoder=h264,hevc,mpeg4,mjpeg,prores
   --enable-filter=fps,select,scale,showinfo,format
-  --enable-encoder=mjpeg --enable-muxer=image2,null
+  --enable-encoder=mjpeg,png,wrapped_avframe --enable-muxer=image2,image2pipe,null
 )
 if [[ "$target_key" == 'win32-x64' ]]; then configure_args+=(--target-os=mingw32 --arch=x86_64); fi
 
