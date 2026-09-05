@@ -166,11 +166,15 @@ jobs:
             exit 1
           fi
           publish_started=1
-          aws s3 cp release/ "s3://${R2_BUCKET}/${prefix}" \
-            --recursive \
-            --exclude 'SHA256SUMS' \
-            --only-show-errors \
-            --endpoint-url "$endpoint"
+          while IFS= read -r key; do
+            payload_file="${key#"$prefix"}"
+            if [[ "$payload_file" == 'SHA256SUMS' ]]; then
+              continue
+            fi
+            aws s3 cp "release/${payload_file}" "s3://${R2_BUCKET}/${key}" \
+              --only-show-errors \
+              --endpoint-url "$endpoint"
+          done < "$expected_file"
           aws s3 cp release/SHA256SUMS "s3://${R2_BUCKET}/${prefix}SHA256SUMS" \
             --only-show-errors \
             --endpoint-url "$endpoint"
