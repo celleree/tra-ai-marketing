@@ -78,35 +78,58 @@ const targetKey = `${process.platform}-${process.arch}`;
 const target = TARGETS[targetKey];
 if (!target) throw new Error(`Unsupported platform for TRA video preprocessing: ${targetKey}.`);
 
-const provenanceBuffer = await fetchPinnedAsset(target.provenanceAsset, target.provenanceSha256);
-let provenance;
-try {
-  provenance = JSON.parse(provenanceBuffer.toString('utf8'));
-} catch {
-  throw new Error('Pinned FFmpeg provenance metadata is not valid JSON.');
-}
-if (
-  provenance?.ffmpegVersion !== FFMPEG_VERSION ||
-  provenance?.ffmpegTag !== FFMPEG_TAG ||
-  provenance?.sourceUrl !== SOURCE_URL ||
-  provenance?.sourceSha256 !== SOURCE_SHA256 ||
-  provenance?.target !== targetKey ||
-  provenance?.compressedSha256 !== target.compressedSha256 ||
-  provenance?.binarySha256 !== target.binarySha256
-) {
-  throw new Error(`Pinned FFmpeg provenance metadata failed validation for ${targetKey}.`);
-}
+const validateProvenance = (provenanceBuffer) => {
+  if (sha256(provenanceBuffer) !== target.provenanceSha256) {
+    throw new Error('Pinned FFmpeg provenance metadata failed SHA-256 verification.');
+  }
+  let provenance;
+  try {
+    provenance = JSON.parse(provenanceBuffer.toString('utf8'));
+  } catch {
+    throw new Error('Pinned FFmpeg provenance metadata is not valid JSON.');
+  }
+  if (
+    provenance?.ffmpegVersion !== FFMPEG_VERSION ||
+    provenance?.ffmpegTag !== FFMPEG_TAG ||
+    provenance?.sourceUrl !== SOURCE_URL ||
+    provenance?.sourceSha256 !== SOURCE_SHA256 ||
+    provenance?.target !== targetKey ||
+    provenance?.compressedSha256 !== target.compressedSha256 ||
+    provenance?.binarySha256 !== target.binarySha256
+  ) {
+    throw new Error(`Pinned FFmpeg provenance metadata failed validation for ${targetKey}.`);
+  }
+};
+
+const fileMatchesHash = async (filePath, expectedSha256) => {
+  try {
+    return sha256(await readFile(filePath)) === expectedSha256;
+  } catch {
+    return false;
+  }
+};
 
 await mkdir(RUNTIME_DIR, { recursive: true });
 const executablePath = path.join(RUNTIME_DIR, target.executable);
 const licensePath = path.join(RUNTIME_DIR, 'FFMPEG-LICENSE.txt');
+const provenancePath = path.join(RUNTIME_DIR, 'FFMPEG-PROVENANCE.json');
 
-let installed = false;
+const installed = await fileMatchesHash(executablePath, target.binarySha256);
+const licenseInstalled = await fileMatchesHash(licensePath, target.licenseSha256);
+let provenanceInstalled = false;
 try {
-  installed = sha256(await readFile(executablePath)) === target.binarySha256;
+  validateProvenance(await readFile(provenancePath));
+  provenanceInstalled = true;
 } catch {
-  installed = false;
+  provenanceInstalled = false;
 }
+
+let provenanceBuffer = null;
+if (!provenanceInstalled) {
+  provenanceBuffer = await fetchPinnedAsset(target.provenanceAsset, target.provenanceSha256);
+  validateProvenance(provenanceBuffer);
+}
+
 if (!installed) {
   const compressed = await fetchPinnedAsset(target.asset, target.compressedSha256);
   const binary = gunzipSync(compressed);
@@ -117,14 +140,11 @@ if (!installed) {
 }
 if (process.platform !== 'win32') await chmod(executablePath, 0o755);
 
-let licenseInstalled = false;
-try {
-  licenseInstalled = sha256(await readFile(licensePath)) === target.licenseSha256;
-} catch {
-  licenseInstalled = false;
-}
 if (!licenseInstalled) {
   await writeFile(licensePath, await fetchPinnedAsset(target.licenseAsset, target.licenseSha256));
+}
+if (!provenanceInstalled) {
+  await writeFile(provenancePath, provenanceBuffer);
 }
 
 console.log(`Pinned FFmpeg ${FFMPEG_VERSION} (${RELEASE}) ready for ${targetKey}.`);
