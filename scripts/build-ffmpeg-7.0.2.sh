@@ -25,9 +25,52 @@ trap 'rm -rf "$work_dir"' EXIT
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd -P)"
 
+export GNUPGHOME="$work_dir/gnupg"
+mkdir "$GNUPGHOME"
+chmod 700 "$GNUPGHOME"
+
+key_file="$work_dir/ffmpeg-release-signing-key.asc"
+cat > "$key_file" <<'EOF'
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mQENBE22rV0BCAC3DzRmA2XlhrqYv9HKoEvNHHf+PzosmCTHmYhWHDqvBxPkSvCl
+ipkbvJ4pBnVvcX6mW5QyKhspHm5j1X5ibe9Bt9/chS/obnIobmvF8shSUgjQ0qRW
+9c1aWOjvT26SxYQ1y9TmYCFwixeydGFHYKjAim+evGUccni5KMlfPoT3VTPtim78
+ufkr3E9Nco/Mobn/8APO0NmLEGWAM6ln/8J/c9h6a1QKnQyBqWfT0YnAaebafFaZ
+YwOtRdDG54VbJ4xwcHbCj5cKhTABk/QtBzDvnW4bG+uSpqdHbFZEY2JpURDuj/T3
+NudKQGzn0bYNpY1XY2l0pqs/btKHnBW0fVMjABEBAAG0NEZGbXBlZyByZWxlYXNl
+IHNpZ25pbmcga2V5IDxmZm1wZWctZGV2ZWxAZmZtcGVnLm9yZz6JATgEEwECACIF
+Ak22rV0CGwMGCwkIBwMCBhUIAgkKCwQWAgMBAh4BAheAAAoJELQyLwTWdljYKxUH
+/1fqzl7SKie2g4t4PJbqUbkLuMsC+CP6gp0dcVZOHkuUYAoD3PM3iVxpLBVyKIXI
+g7wMSTAtlIcYnzhWIpnoCBes6/O2Mrq6xHgGeTp6CDcm3LmmSYR1f5KdD8KUaA+l
+c/M/1fEnwrSs/UGDk6R6iUmbqwxPsbozlOvmUHOLbDZBnKrk9XfAJdUhAuFACrSA
+T+KF1jniz0OfNGd23SaHWRCphoRW9pXDc5FfkdaueBUvBvGv19ZNcDhcxT3/u6z2
+DaUFC0rLWqk8obo951jVvi/zOhB94Pw6u1SLvcTq3V1q5URWJtgSbpih9VRqxUbQ
+NbXduKGzbHz6Vwpkupz4JRe5AQ0ETbatXQEIANjYrygJi/fn1nlSg5Mz0l9KHDm4
+yfWtaOrXUjJcyiGe4G0XXJLGh45qxJ0DOKzi9id+9W4jby+kKuzG9O6Vn0iDeODO
+aOGnz4ua7Vu6d0AbYfNXZPWge/GCodo/ZD/qri1tPkLmRtT/sniahwy6LruPNHfF
+SRoNIjwbcD/IL+EbY1pL1/IFSzEAA1ZZamgmHgB7o9pwDIkK6HuvHMR/Y5MsoMfV
+fWV3ZGtA6v9z51CvnHsHPsADRSnUp7aYtR412SiAO4XodMLTA92L3LxgYhI4ma7D
+XZ8jgKg4JkKO+DXmoU63HtRdq/HZjeXJKk1JGJF3zCvP3DyIzZ8LWIjN8t0AEQEA
+AYkBHwQYAQIACQUCTbatXQIbDAAKCRC0Mi8E1nZY2LS8B/0bMoUAl4X9D0WQbL4l
+U0czCIOKOsvbHpIxivjCnOQxU23+PV5WZdoCCpSuAHGv+2OHzhNrij++P9BNTJeQ
+skxdS9FH4MZwy1IRSPrxegSxbCUpBI1rd0Zf7qb9BNPrHPTueWFV1uExOSB2Apsv
+WrKo2D8mR0uZAPYfYl2ToFVoa5PR7/+ii9WiJr/flF6qm7hoLpI5Bm4VcZh2GPsJ
+9Vo/8x/qOGwtdWHqBykYloKsrwD4U69rjn+d9feLoPBRgoVroXWQttt0sUnyoudz
++x8ETJgPoNK3kQoDagApj4qAt83Ayac3HzNIuEJ7LdvfINIOprujnJ9vH4n04XLg
+I4EZ
+=Rjbw
+-----END PGP PUBLIC KEY BLOCK-----
+EOF
+gpg --batch --import "$key_file"
+imported_fingerprint="$(gpg --batch --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+if [[ "$imported_fingerprint" != "$FFMPEG_SIGNING_FINGERPRINT" ]]; then
+  echo 'Pinned FFmpeg release signing key fingerprint does not match.' >&2
+  exit 1
+fi
+
 curl --fail --location --silent --show-error -o "$work_dir/ffmpeg.tar.xz" "$FFMPEG_SOURCE_URL"
 curl --fail --location --silent --show-error -o "$work_dir/ffmpeg.tar.xz.asc" "${FFMPEG_SOURCE_URL}.asc"
-gpg --batch --keyserver hkps://keyserver.ubuntu.com --recv-keys "$FFMPEG_SIGNING_FINGERPRINT"
 gpg --batch --verify "$work_dir/ffmpeg.tar.xz.asc" "$work_dir/ffmpeg.tar.xz"
 if [[ "$(sha256 "$work_dir/ffmpeg.tar.xz")" != "$FFMPEG_SOURCE_SHA256" ]]; then
   echo 'FFmpeg source SHA-256 does not match the pinned FFmpeg 7.0.2 archive.' >&2
@@ -70,7 +113,8 @@ fi
 grep -q "ffmpeg version ${FFMPEG_VERSION}" "$output_dir/${target_key}.version.txt"
 grep -q -- '--disable-nonfree' "$output_dir/${target_key}.buildconf.txt" && { echo 'Nonfree build is not allowed.' >&2; exit 1; }
 grep -q -- '--enable-nonfree' "$output_dir/${target_key}.buildconf.txt" && { echo 'Nonfree build is not allowed.' >&2; exit 1; }
-grep -q 'GNU Lesser General Public License' "$output_dir/${target_key}.license-check.txt"
+grep -q 'GNU Lesser General Public' "$output_dir/${target_key}.license-check.txt"
+grep -q 'version 2.1 of the License' "$output_dir/${target_key}.license-check.txt"
 
 if [[ "$target_key" == 'win32-x64' ]] && objdump -p "$output_dir/$executable" | grep -Eiq 'DLL Name:[[:space:]]+zlib1\.dll'; then
   echo 'Windows FFmpeg must not depend on the MSYS2 zlib1.dll runtime.' >&2
