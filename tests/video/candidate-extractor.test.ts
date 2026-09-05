@@ -13,6 +13,10 @@ import {
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import { runFfmpeg, TraVideoProcessingError } from '@/lib/video/ffmpeg';
 import {
+  REAL_FRACTIONAL_2997_MP4,
+  REAL_SHORT_100MS_MP4,
+} from '@/tests/fixtures/candidate-extractor-media';
+import {
   REAL_MISMATCHED_STREAM_DURATION_MP4,
   REAL_MULTI_FRAME_MP4,
 } from '@/tests/fixtures/media';
@@ -356,28 +360,11 @@ describe('dense interval TRA video candidate extraction', () => {
 
   it('extracts a real 100 ms video into a trustworthy temporary candidate', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
-    const shortVideoPath = path.join(temporaryRoot, 'short.mp4');
 
     try {
-      await runFfmpeg([
-        '-hide_banner',
-        '-nostdin',
-        '-v',
-        'error',
-        '-f',
-        'lavfi',
-        '-i',
-        'color=c=blue:s=80x48:r=30:d=0.1',
-        '-map',
-        '0:v:0',
-        '-c:v',
-        'mpeg4',
-        shortVideoPath,
-      ]);
-
       const result = await new FfmpegIntervalCandidateExtractor({
         temporaryRoot,
-      }).extractCandidates(makeVideoSource(await readFile(shortVideoPath)));
+      }).extractCandidates(makeVideoSource(REAL_SHORT_100MS_MP4));
       const candidate = result.candidates[0];
       const bytes = await readFile(candidate.temporaryPath);
 
@@ -557,7 +544,6 @@ describe('scene-change TRA video candidate materialization', () => {
 
   it('keeps the fractional frame whose timestamp rounds to the requested scene timestamp', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scene-candidate-test-'));
-    const fractionalVideoPath = path.join(temporaryRoot, 'fractional.mp4');
     let materializationStderr = '';
     const run = vi.fn(async (args: string[]) => {
       const result = await runFfmpeg(args);
@@ -565,22 +551,7 @@ describe('scene-change TRA video candidate materialization', () => {
       return result;
     });
     try {
-      await runFfmpeg([
-        '-hide_banner',
-        '-nostdin',
-        '-v',
-        'error',
-        '-f',
-        'lavfi',
-        '-i',
-        'testsrc2=s=80x48:r=30000/1001:d=0.15',
-        '-map',
-        '0:v:0',
-        '-c:v',
-        'mpeg4',
-        fractionalVideoPath,
-      ]);
-      const source = makeVideoSource(await readFile(fractionalVideoPath));
+      const source = makeVideoSource(REAL_FRACTIONAL_2997_MP4);
       const { candidates } = await new FfmpegSceneCandidateMaterializer({
         run,
         temporaryRoot,
