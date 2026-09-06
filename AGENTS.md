@@ -236,3 +236,41 @@ LOW needs normal verification. MEDIUM requires independent review before merge w
 Each PR records acceptance criteria, verification results, risk level and reason, independent-review status when applicable, and the reusable-learning outcome; `.github/pull_request_template.md` is the default mechanism.
 
 A reviewer may be human or AI, but must use a fresh context that did not implement the change. Start the reviewer with the acceptance criteria, relevant canonical requirements, final diff or reviewed commit, and verification results. The reviewer may inspect additional directly relevant code, config, or tests when necessary to verify the change, but should not inherit the implementer's transcript or unrelated context. The reviewer checks requirement alignment, regressions, missing edge cases or tests, safety/security, risk classification, and weakened safeguards, then returns findings/conclusion rather than implementation or private reasoning. Resolve findings, reverify, and re-review materially changed fixes.
+
+## Model and subagent routing
+
+Optimize for the lowest expected total cost of completing work correctly, including avoiding retries.
+
+The root agent owns overall architecture, roadmap/phase sequencing, integration decisions, and final acceptance. When delegating, use the cheapest model and lowest reasoning effort likely to complete the bounded task correctly.
+
+Preferred routing:
+
+- GPT-5.6 Luna / low reasoning: mechanical or repetitive work, targeted file search, extraction, classification, simple inspection, and very easy tasks.
+- GPT-5.6 Terra / medium reasoning: normal bounded implementation, micro-PRs, tests, straightforward fixes, and routine investigation.
+- GPT-5.6 Sol / high reasoning: difficult but well-scoped reasoning, debugging, implementation, planning, substantial review, or unclear failures.
+- GPT-6 Astra / high reasoning: architecture, difficult root-cause debugging, high-risk review, large-context work, complex multi-step agentic work, repeated failures, or tasks where getting the decision wrong is expensive.
+
+For every delegated subagent:
+
+- Explicitly select both the model and reasoning effort when the runtime supports those overrides.
+- Do not inherit the root agent's more expensive model/reasoning level unless the delegated task actually requires it.
+- Escalate upward only when a cheaper model fails, discovers materially greater complexity, or reaches a decision outside its assigned scope.
+- If a preferred model is unavailable in the current runtime, use the next-cheapest available model likely to complete the task correctly.
+- Use the minimum number of subagents that materially improves speed, independent verification, or quality.
+- Prefer separate coherent PRs or non-overlapping work for agents that write code. Do not delegate overlapping edits to multiple agents unless explicitly coordinated.
+
+## Autonomous execution and approvals
+
+Within an explicitly approved development scope, proceed without requesting approval for reversible development actions such as reading files, editing the feature branch, running focused tests/checks, creating commits/checkpoints, updating the PR, and repairing findings inside the approved scope.
+
+Require explicit approval before actions that are destructive, irreversible, production-impacting, externally consequential, affect advertising spend/publishing, expose/change credentials or secrets, mutate production data/assets, or otherwise cross a HIGH-risk execution boundary.
+
+Autonomous execution does not waive repository safeguards: required verification and independent review still apply, and `staging` must never be promoted to `main` without explicit production approval.
+
+## Long-running root/orchestrator sessions
+
+A long-running root/orchestrator session may own multiple roadmap phases or an end-to-end flow when explicitly asked to do so, but it must still execute through bounded checkpoints and the smallest coherent PRs. Persistent ownership is not permission to collapse planning, implementation, testing, review, fixes, and merge into one giant change.
+
+The root agent should maintain a concise durable checkpoint between phases/PRs containing completed scope, important decisions, verification state, unresolved risks, and the next bounded task. Prefer canonical repo sources and these checkpoints over repeatedly reloading broad chat or repository history.
+
+Each PR must still satisfy the repository's normal verification, risk classification, and fresh independent-review requirements. Use fresh reviewer context where required rather than reusing the root implementer's transcript.
