@@ -30,7 +30,7 @@ it('sends only candidate pixels to analysis, binds output on the server, and pre
   const request = vi.fn<typeof fetch>().mockResolvedValue(response());
   const result = await observeTemporaryVideoFrame(frame, { request });
   expect(result).toMatchObject({ sourceVideoContentHash: frame.sourceVideoContentHash, frameSha256: frame.frameSha256,
-    candidateIndex: 4, timestampMs: 1333, providerEligible: false, observation });
+    candidateIndex: 4, timestampMs: 1333, providerEligible: false, evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', observation });
   expect(result).not.toHaveProperty('approvedHumanSource');
   const [url, options] = request.mock.calls[0];
   expect(url).toBe('https://api.openai.com/v1/responses');
@@ -53,7 +53,8 @@ it('rejects changed pixels before sending and fails clearly for missing credenti
   await expect(observeTemporaryVideoFrame(frame, { request })).rejects.toThrow('HTTP 429');
 });
 
-it.each([null, {}, { ...observation, sceneType: 'JOSEPH' }, { ...observation, topics: [42] }])('rejects malformed observations', (value) => {
+it.each([null, {}, { ...observation, sceneType: 'JOSEPH' }, { ...observation, topics: [42] },
+  { ...observation, topics: ['customer quote'] }, { ...observation, topics: ['Joseph'] }])('rejects malformed or inferred identity/status topics', (value) => {
   expect(() => parseFrameVisualObservation(value)).toThrow('invalid frame observation');
 });
 
