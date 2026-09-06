@@ -18,6 +18,12 @@ const baseRequest = {
   variationCount: 4,
 };
 
+const videoFrameSelection = {
+  libraryId: `video-library:${'a'.repeat(64)}`,
+  sourceVideoContentHash: 'b'.repeat(64),
+  frameIds: [`video-frame:${'c'.repeat(64)}`],
+};
+
 const expectGroundedContext = (value: unknown) => {
   expect(value).toEqual(expect.stringContaining('USER CREATIVE DIRECTION:'));
   expect(value).toEqual(expect.stringContaining(baseRequest.context));
@@ -52,6 +58,63 @@ describe('multi-source creative generation request', () => {
     if (!result.success) return;
     expect(result.data.sourceAssets).toEqual([]);
     expectGroundedContext(result.data.context);
+  });
+
+  it('accepts a strict selected-frame contract for exactly one TRA video', () => {
+    const sourceAssets = [makeSource('TRA_VIDEO', 'a')];
+    const result = validateGenerateCreativeRequest({
+      ...baseRequest,
+      sourceAssets,
+      videoFrameSelection,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.videoFrameSelection).toEqual(videoFrameSelection);
+  });
+
+  it.each([
+    null,
+    { ...videoFrameSelection, extra: true },
+    { ...videoFrameSelection, libraryId: 'library' },
+    { ...videoFrameSelection, sourceVideoContentHash: 'ABC' },
+    { ...videoFrameSelection, frameIds: [] },
+    { ...videoFrameSelection, frameIds: Array(4).fill(`video-frame:${'c'.repeat(64)}`) },
+    { ...videoFrameSelection, frameIds: [`video-frame:${'c'.repeat(64)}`, `video-frame:${'c'.repeat(64)}`] },
+  ])('rejects malformed selected-frame metadata %#', (selection) => {
+    const result = validateGenerateCreativeRequest({
+      ...baseRequest,
+      sourceAssets: [makeSource('TRA_VIDEO', 'a')],
+      videoFrameSelection: selection,
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'videoFrameSelection must contain a valid libraryId, sourceVideoContentHash, and 1 to 3 unique frameIds',
+    });
+  });
+
+  it.each([
+    { sourceAssets: [] },
+    { sourceAssets: [makeSource('TRA_REFERENCE', 'a')] },
+    {
+      sourceAssets: [
+        makeSource('TRA_VIDEO', 'a'),
+        makeSource('LAYOUT_REFERENCE', 'b'),
+      ],
+    },
+  ])('rejects selected frames without exactly one TRA video source %#', ({ sourceAssets }) => {
+    expect(
+      validateGenerateCreativeRequest({
+        ...baseRequest,
+        sourceAssets,
+        videoFrameSelection,
+      })
+    ).toEqual({
+      success: false,
+      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset',
+    });
   });
 
   it('normalizes runtime company profile and grounds it into the AI context', () => {

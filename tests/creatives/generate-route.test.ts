@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
@@ -10,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   analyzeApprovedTraVideoFrames: vi.fn(),
   generateApprovedTraVideoFrameCreativeImage: vi.fn(),
   getApprovedTraVideoFrames: vi.fn(),
+  getApprovedSelectedTraVideoFrames: vi.fn(),
+  loadVideoFrameLibrary: vi.fn(),
   getMediaStorage: vi.fn(),
   getOrAnalyzeLayoutBlueprint: vi.fn(),
   listReferenceLibrary: vi.fn(),
@@ -33,6 +36,15 @@ vi.mock('@/lib/video/tra-video-frames', () => ({
   getApprovedTraVideoFrames: mocks.getApprovedTraVideoFrames,
 }));
 
+vi.mock('@/lib/video/selected-frames', () => ({
+  getApprovedSelectedTraVideoFrames: mocks.getApprovedSelectedTraVideoFrames,
+}));
+
+vi.mock('@/lib/video/library-service', async (original) => ({
+  ...(await original<typeof import('@/lib/video/library-service')>()),
+  loadVideoFrameLibrary: mocks.loadVideoFrameLibrary,
+}));
+
 vi.mock('@/lib/ai/reference-selector', () => ({
   selectBestReferenceCreatives: mocks.selectBestReferenceCreatives,
 }));
@@ -53,8 +65,17 @@ import { POST } from '@/app/api/creatives/generate/route';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MP4 = Buffer.from(REAL_ENCODED_MP4);
+const LIBRARY_ID = `video-library:${'a'.repeat(64)}`;
+const LIBRARY_FRAME_ID = `video-frame:${'b'.repeat(64)}`;
 
 const mediaId = (hex: string) => `media_${hex.repeat(32)}`;
+const contentHash = (buffer: Buffer) =>
+  createHash('sha256').update(buffer).digest('hex');
+const selectionFor = (sourceVideoContentHash: string) => ({
+  libraryId: LIBRARY_ID,
+  sourceVideoContentHash,
+  frameIds: [LIBRARY_FRAME_ID],
+});
 
 const image = (hex: string): StoredCreativeSourceMediaFile => ({
   fileName: `${mediaId(hex)}.png`,
@@ -164,7 +185,8 @@ const libraryItem = (hex: string) => ({
 const generationRequest = (
   sourceAssets: Array<{ mediaId: string; role: string }>,
   companyProfile?: object,
-  variationCount = 2
+  variationCount = 2,
+  videoFrameSelection?: object
 ) =>
   new Request('http://localhost/api/creatives/generate', {
     method: 'POST',
@@ -172,6 +194,7 @@ const generationRequest = (
     body: JSON.stringify({
       sourceAssets,
       ...(companyProfile ? { companyProfile } : {}),
+      ...(videoFrameSelection ? { videoFrameSelection } : {}),
       context: 'Create compliant TRA concepts.',
       variationCount,
     }),
@@ -234,6 +257,7 @@ beforeEach(() => {
   );
   mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(PNG);
   mocks.generateApprovedTraVideoFrameCreativeImage.mockResolvedValue(PNG);
+  mocks.loadVideoFrameLibrary.mockResolvedValue(null);
   mocks.getApprovedTraVideoFrames.mockImplementation(async (source) => ({
     source,
     sourceVideoContentHash: 'a'.repeat(64),
@@ -329,6 +353,148 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+  });
+
+  it('regenerates only selected library frames for analysis and image generation and streams their provenance', async () => {
+    const videoId = mediaId('9');
+    storedById[videoId] = video('9');
+    const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
+    const selectedFrames = [{ frameIndex: 0, buffer: PNG }];
+    const selectionProvenance = [
+      {
+        frameIndex: 0,
+        libraryFrameId: LIBRARY_FRAME_ID,
+        candidateFrameSha256: 'c'.repeat(64),
+        timestampMs: 250,
+        approvedPngSha256: 'd'.repeat(64),
+      },
+    ];
+    const library = {
+      id: LIBRARY_ID,
+      sourceVideoMediaId: videoId,
+      sourceVideoContentHash,
+    };
+    mocks.loadVideoFrameLibrary.mockResolvedValue(library);
+    mocks.getApprovedSelectedTraVideoFrames.mockImplementation(async (source) => ({
+      source,
+      sourceVideoContentHash,
+      durationMs: 1_000,
+      reused: false,
+      frames: selectedFrames,
+      selectionProvenance,
+    }));
+
+    const response = await POST(
+      generationRequest(
+        [{ mediaId: videoId, role: 'TRA_VIDEO' }],
+        undefined,
+        2,
+        selectionFor(sourceVideoContentHash)
+      )
+    );
+    const events = await readStreamEvents(response);
+
+    expect(response.status).toBe(200);
+    expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.loadVideoFrameLibrary).toHaveBeenCalledWith(
+      videoId,
+      sourceVideoContentHash
+    );
+    expect(mocks.getApprovedSelectedTraVideoFrames).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'TRA_VIDEO' }),
+      library,
+      [LIBRARY_FRAME_ID]
+    );
+    expect(mocks.analyzeApprovedTraVideoFrames).toHaveBeenCalledWith(
+      expect.objectContaining({ frames: selectedFrames })
+    );
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
+    for (const [call] of mocks.generateApprovedTraVideoFrameCreativeImage.mock.calls) {
+      expect(call.frames).toBe(selectedFrames);
+    }
+    for (const { data } of events.filter(({ event }) => event === 'creative')) {
+      expect(data.creative).toMatchObject({
+        videoFrameSelection: {
+          libraryId: LIBRARY_ID,
+          sourceVideoMediaId: videoId,
+          sourceVideoContentHash,
+          frames: selectionProvenance,
+        },
+      });
+    }
+  });
+
+  it('rejects stale or missing selected-frame state before paid generation calls', async () => {
+    const videoId = mediaId('9');
+    storedById[videoId] = video('9');
+    const selection = selectionFor(contentHash(storedById[videoId].buffer));
+
+    const stale = await POST(
+      generationRequest(
+        [{ mediaId: videoId, role: 'TRA_VIDEO' }],
+        undefined,
+        2,
+        selectionFor('f'.repeat(64))
+      )
+    );
+    expect(stale.status).toBe(409);
+    await expect(stale.json()).resolves.toEqual({
+      error: 'The selected TRA video frames are stale. Reanalyze the video and select frames again.',
+    });
+
+    const missing = await POST(
+      generationRequest(
+        [{ mediaId: videoId, role: 'TRA_VIDEO' }],
+        undefined,
+        2,
+        selection
+      )
+    );
+    expect(missing.status).toBe(409);
+    await expect(missing.json()).resolves.toEqual({
+      error: 'The selected TRA video frame library is missing or invalid. Reanalyze the video and select frames again.',
+    });
+
+    mocks.loadVideoFrameLibrary.mockResolvedValue({
+      id: `video-library:${'e'.repeat(64)}`,
+    });
+    const mismatchedLibrary = await POST(
+      generationRequest(
+        [{ mediaId: videoId, role: 'TRA_VIDEO' }],
+        undefined,
+        2,
+        selection
+      )
+    );
+    expect(mismatchedLibrary.status).toBe(409);
+    await expect(mismatchedLibrary.json()).resolves.toEqual({
+      error: 'The selected TRA video frame library does not match this request. Select frames again.',
+    });
+    expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.getApprovedSelectedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.analyzeApprovedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.generateCreativeCopy).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns production 404 for selected-frame generation before storage or providers', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const response = await POST(
+      generationRequest(
+        [{ mediaId: mediaId('9'), role: 'TRA_VIDEO' }],
+        undefined,
+        2,
+        selectionFor('b'.repeat(64))
+      )
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.getMediaStorage).not.toHaveBeenCalled();
+    expect(mocks.loadVideoFrameLibrary).not.toHaveBeenCalled();
+    expect(mocks.getApprovedSelectedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.generateCreativeCopy).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('uses layout planning while supplying only approved extracted TRA video frames to final generation', async () => {
