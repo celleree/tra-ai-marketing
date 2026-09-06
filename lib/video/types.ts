@@ -15,7 +15,7 @@ export interface ApprovedTraVideoFrame {
   sourceVideoFileName: string;
   sourceVideoContentHash: string;
   approvedHumanSource: true;
-  cacheKey: string;
+  cacheKey: string | null;
 }
 
 export interface ApprovedTraVideoFrameSet {
