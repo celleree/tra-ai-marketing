@@ -69,6 +69,8 @@ The exact generation prompts, creative categories, formats, model defaults, vali
 
 ## Knowledge and guardrails
 
+The video-intelligence prototype runs in local development: it retains source-bound analysis and inspection thumbnails under ignored `.runtime/video-intelligence`, reusing completed analysis for unchanged source bytes and analysis models. It explicitly rejects production use; production media storage continues to require R2. Semantic observations and speech overlap remain unverified context, never identity evidence or generation approval. Generation must obtain approved frames separately from the server-hydrated TRA video.
+
 Only concise, reusable business knowledge belongs in the repository. Customer-review patterns are summarized in `knowledge/customer-insights.md`; raw review data remains in its external source and is retrieved only when exact evidence is needed.
 
 ## Change policy
