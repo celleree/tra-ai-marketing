@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { TemporaryVideoFrameCandidateSet } from '@/lib/video/candidate-types';
 import { getJpegDimensions } from '@/lib/video/candidate-file-integrity';
 import type { analyzeTemporaryVideoCandidates } from '@/lib/video/candidate-technical-selection';
+import type { VideoFrameThumbnail } from '@/lib/video/frame-thumbnail';
 import { transcriptAtTimestamp, type VideoTranscript } from '@/lib/video/transcript';
 import { VIDEO_CONTENT_TOPICS, VIDEO_SCENE_TYPES, type observeTemporaryVideoFrame } from '@/lib/video/visual-observation';
 
@@ -58,7 +59,7 @@ export const assembleVideoFrameLibrary = (
   technicalSelection: TechnicalSelection,
   transcript: VideoTranscript,
   observations: readonly FrameObservationResult[],
-  thumbnails: ReadonlyMap<number, string>
+  thumbnails: ReadonlyMap<number, VideoFrameThumbnail>
 ): VideoFrameLibrary => {
   sourceMatches(technicalSelection, set, 'Technical selection');
   sourceMatches(transcript, set, 'Transcript');
@@ -83,9 +84,15 @@ export const assembleVideoFrameLibrary = (
   if (representatives.size !== technicalSelection.groups.length || thumbnails.size !== representatives.size) {
     throw new Error('Every representative requires exactly one thumbnail.');
   }
-  for (const [index, dataUrl] of thumbnails) {
-    const encoded = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl)?.[1];
-    if (!representatives.has(index) || !encoded || !getJpegDimensions(Buffer.from(encoded, 'base64'))) {
+  for (const [index, thumbnail] of thumbnails) {
+    const candidate = candidates.get(index);
+    const encoded = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(thumbnail.thumbnailDataUrl)?.[1];
+    if (
+      !representatives.has(index) || !candidate || thumbnail.sourceVideoMediaId !== set.sourceVideoMediaId
+      || thumbnail.sourceVideoContentHash !== set.sourceVideoContentHash || thumbnail.candidateIndex !== candidate.candidateIndex
+      || thumbnail.timestampMs !== candidate.timestampMs || thumbnail.frameSha256 !== candidate.frameSha256
+      || !encoded || !getJpegDimensions(Buffer.from(encoded, 'base64'))
+    ) {
       throw new Error(`Invalid representative thumbnail for candidate ${index}.`);
     }
   }
@@ -106,7 +113,7 @@ export const assembleVideoFrameLibrary = (
     const observation = observed.get(group.representativeIndex)!;
     return { id: frameId(set.sourceVideoContentHash, candidate.timestampMs, candidate.frameSha256), candidateIndexes: [...group.candidateIndexes],
       candidateIndex: candidate.candidateIndex, timestampMs: candidate.timestampMs, frameSha256: candidate.frameSha256,
-      qualityScore: technical.get(candidate.candidateIndex)!.technical.qualityScore, thumbnailDataUrl: thumbnails.get(candidate.candidateIndex)!,
+      qualityScore: technical.get(candidate.candidateIndex)!.technical.qualityScore, thumbnailDataUrl: thumbnails.get(candidate.candidateIndex)!.thumbnailDataUrl,
       evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION' as const, observation: observation.observation,
       transcriptSegments: transcriptAtTimestamp(transcript, candidate.timestampMs) };
   }).sort((a, b) => a.timestampMs - b.timestampMs || a.candidateIndex - b.candidateIndex);
