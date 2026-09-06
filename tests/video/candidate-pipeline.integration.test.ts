@@ -6,6 +6,7 @@ import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-life
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import type { TemporaryVideoFrameCandidateSet } from '@/lib/video/candidate-types';
 import { REAL_SCENE_CHANGE_MP4 } from '@/tests/fixtures/video-candidate-scene';
+import { analyzeTemporaryVideoCandidates } from '@/lib/video/candidate-technical-selection';
 
 const MEDIA_ID = `media_${'e'.repeat(32)}`;
 
@@ -44,6 +45,19 @@ describe('temporary TRA video candidate pipeline integration', () => {
     const consumedCount = await withTemporaryTraVideoFrameCandidates(
       source,
       async (candidateSet: TemporaryVideoFrameCandidateSet) => {
+        const selection = await analyzeTemporaryVideoCandidates(candidateSet);
+        expect(selection.sourceVideoContentHash).toBe(candidateSet.sourceVideoContentHash);
+        expect(selection.sourceVideoMediaId).toBe(MEDIA_ID);
+        expect(selection.providerEligible).toBe(false);
+        expect(selection.candidates).toHaveLength(candidateSet.candidates.length);
+        expect(selection.groups.flatMap((group) => group.candidateIndexes).sort((a, b) => a - b))
+          .toEqual(candidateSet.candidates.map((candidate) => candidate.candidateIndex));
+        for (const group of selection.groups) expect(group.candidateIndexes).toContain(group.representativeIndex);
+        for (const entry of selection.candidates) {
+          expect(entry.technical.qualityScore).toBeGreaterThanOrEqual(0);
+          expect(entry.technical.qualityScore).toBeLessThanOrEqual(1);
+          expect(entry).not.toHaveProperty('temporaryPath');
+        }
         expect(candidateSet.candidates.length).toBeGreaterThan(6);
         expect(candidateSet.candidates.length).toBeLessThanOrEqual(
           DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY.maxTotalCandidates

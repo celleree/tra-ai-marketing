@@ -7,6 +7,7 @@ import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import { runFfmpeg } from '@/lib/video/ffmpeg';
+import { analyzeTemporaryVideoCandidates } from '@/lib/video/candidate-technical-selection';
 
 // Opt-in local validation; real customer media and generated reports stay out of Git.
 // Set TRA_VIDEO_VALIDATION_INPUT, then npm test -- tests/video/real-video.validation.test.ts
@@ -65,6 +66,8 @@ it.skipIf(!input)('validates a local TRA video and writes an inspectable extract
         `Missing scene-change candidate in ${startMs}-${endMs}ms`).toBe(true);
     }
     const candidates = [];
+    const technicalSelection = process.env.TRA_VIDEO_VALIDATION_TECHNICAL === '1'
+      ? await analyzeTemporaryVideoCandidates(set) : null;
     for (const candidate of set.candidates) {
       const bytes = await readFile(candidate.temporaryPath);
       expect(sha256(bytes)).toBe(candidate.frameSha256);
@@ -73,7 +76,8 @@ it.skipIf(!input)('validates a local TRA video and writes an inspectable extract
       expect(candidate.lifecycle).toBe('TEMPORARY');
       expect(candidate.providerEligible).toBe(false);
       const { temporaryPath: _temporaryPath, ...metadata } = candidate;
-      candidates.push(metadata);
+      const technical = technicalSelection?.candidates.find((entry) => entry.candidateIndex === candidate.candidateIndex)?.technical;
+      candidates.push({ ...metadata, ...(technical ? { technical } : {}) });
       gallery.push(`<figure><img loading="lazy" src="data:image/jpeg;base64,${bytes.toString('base64')}" alt="Frame ${candidate.candidateIndex}"><figcaption>#${candidate.candidateIndex} · ${(candidate.timestampMs / 1000).toFixed(3)}s · ${candidate.extractionReasons.join(' + ')}</figcaption></figure>`);
     }
     return {
@@ -84,7 +88,7 @@ it.skipIf(!input)('validates a local TRA video and writes an inspectable extract
       maxIntervalGapMs: Math.max(0, ...gapsMs),
       expectedSceneWindowsMs: sceneWindows,
       sceneCoverage: sceneWindows.length ? 'EXPECTED_WINDOWS_PASSED' : 'REQUIRES_VISUAL_REVIEW',
-      candidates,
+      candidates, technicalSelection,
     };
   });
   for (const ownedPath of ownedPaths) await expect(access(ownedPath)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -97,6 +101,7 @@ it.skipIf(!input)('validates a local TRA video and writes an inspectable extract
 <p>Local inspection only. These samples are temporary candidates, provider-ineligible, and are not approved generation references. Working files were cleaned; this gallery retains inspection copies.</p>
 <p>${result.candidateCount} candidates · ${result.intervalCount} interval · ${result.sceneCount} scene · ${result.processingRuntimeMs}ms processing · cleanup passed</p>
 <p>Scene coverage: ${result.sceneCoverage}. Inspect beginning, middle, end and brief graphics against the source video.</p>
+${result.technicalSelection ? `<h2>Technical duplicate groups</h2><p>${result.technicalSelection.groups.length} representatives from ${result.candidateCount} candidates. All alternatives are retained; technical scores do not establish identity or approval.</p><pre>${escapeHtml(JSON.stringify(result.technicalSelection.groups, null, 2))}</pre>` : ''}
 <main>${gallery.join('\n')}</main></html>`);
   console.log(`Video validation report: ${path.join(output, 'report.json')}`);
   console.log(`Video validation gallery: ${path.join(output, 'index.html')}`);
