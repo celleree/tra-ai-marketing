@@ -24,6 +24,24 @@ const source = {
   stored: { fileName: `${MEDIA_ID}.mp4`, buffer: REAL_SCENE_CHANGE_MP4,
     mimeType: 'video/mp4', mediaType: 'VIDEO' },
 } as HydratedCreativeSourceAsset as HydratedTraVideoSource;
+const OFFSET_MEDIA_ID = `media_${'c'.repeat(32)}`;
+const OFFSET_PTS_MP4 = await readFile(
+  new URL('../fixtures/video-offset-pts.mp4', import.meta.url)
+);
+const offsetSource = {
+  ...source,
+  media: {
+    ...source.media,
+    id: OFFSET_MEDIA_ID,
+    fileName: `${OFFSET_MEDIA_ID}.mp4`,
+    size: OFFSET_PTS_MP4.length,
+  },
+  stored: {
+    ...source.stored,
+    fileName: `${OFFSET_MEDIA_ID}.mp4`,
+    buffer: OFFSET_PTS_MP4,
+  },
+} as HydratedTraVideoSource;
 
 const hash = createHash('sha256').update(REAL_SCENE_CHANGE_MP4).digest('hex');
 let library: VideoFrameLibrary;
@@ -93,6 +111,44 @@ beforeAll(async () => {
 }, 30_000);
 
 describe('selected TRA video frame approval', () => {
+  it('selects interval frames by timestamp when video PTS starts after audio', async () => {
+    let offsetLibrary: VideoFrameLibrary | undefined;
+    let intervalJpeg: Buffer | undefined;
+    let wrongIntervalJpeg: Buffer | undefined;
+    await withTemporaryTraVideoFrameCandidates(offsetSource, async (set) => {
+      const interval = set.candidates.find(
+        (candidate) =>
+          candidate.timestampMs === 1_000 &&
+          candidate.extractionReasons.includes('INTERVAL')
+      );
+      const oldIndexMatch = set.candidates.find(
+        (candidate) =>
+          candidate.timestampMs === 2_000 &&
+          candidate.extractionReasons.includes('INTERVAL')
+      );
+      expect(interval).toBeDefined();
+      expect(oldIndexMatch).toBeDefined();
+      offsetLibrary = makeLibrary(set, [interval!]);
+      intervalJpeg = await readFile(interval!.temporaryPath);
+      wrongIntervalJpeg = await readFile(oldIndexMatch!.temporaryPath);
+    });
+
+    const result = await getApprovedSelectedTraVideoFrames(
+      offsetSource,
+      offsetLibrary!,
+      [offsetLibrary!.representativeFrames[0].id]
+    );
+    expect(result.frames[0].timestampMs).toBe(1_000);
+    const selectedDifference = await meanPixelDifference(
+      result.frames[0].buffer, intervalJpeg!
+    );
+    const oldIndexDifference = await meanPixelDifference(
+      result.frames[0].buffer, wrongIntervalJpeg!
+    );
+    expect(selectedDifference).toBeLessThan(12);
+    expect(selectedDifference).toBeLessThan(oldIndexDifference);
+  }, 30_000);
+
   it('re-extracts chosen interval and scene representatives as approved PNGs', async () => {
     const selectedIds = [
       library.representativeFrames[1].id,

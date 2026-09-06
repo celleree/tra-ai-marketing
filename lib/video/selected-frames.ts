@@ -89,11 +89,11 @@ const extractPng = async (
   effectiveIntervalFps: number,
   maxWidth: number
 ) => {
-  const selection = candidate.extractionReasons.includes('INTERVAL')
-    ? `fps=${effectiveIntervalFps}:eof_action=pass,select='eq(n,${Math.round(
-        (candidate.timestampMs * effectiveIntervalFps) / 1000
-      )})'`
-    : `select='gte(t,${(candidate.timestampMs - 0.5) / 1000})'`;
+  const intervalFilter = candidate.extractionReasons.includes('INTERVAL')
+    ? `fps=${effectiveIntervalFps}:eof_action=pass,`
+    : '';
+  const selection =
+    `${intervalFilter}select='gte(t,${(candidate.timestampMs - 0.5) / 1000})'`;
   const result = await runFfmpeg([
     '-hide_banner', '-nostdin', '-v', 'error', '-i', sourcePath,
     '-map', '0:v:0', '-vf',
