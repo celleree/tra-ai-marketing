@@ -16,6 +16,6 @@ describe('SelectedFrameGeneration', () => {
     const html = renderToStaticMarkup(createElement(SelectedFrameGeneration, { media, library, selection }));
     expect(html).toContain('Choose 1–3 source frames');
     expect(html).toContain('type="checkbox"');
-    expect(html).toContain('Generate 2 variations · estimated $0.0400');
+    expect(html).toContain('Generate 2 creatives from checked frames (uses API)');
   });
 });

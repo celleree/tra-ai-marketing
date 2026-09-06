@@ -38,6 +38,7 @@ export function SelectedFrameGeneration({
   const [generating, setGenerating] = useState(false);
   const [complete, setComplete] = useState(true);
   const [error, setError] = useState('');
+  const [savedCount, setSavedCount] = useState(0);
   const [failures, setFailures] = useState<Record<number, string>>({});
   const completedIndexes = useRef(new Set<number>());
   const failedIndexes = useRef(new Map<number, string>());
@@ -58,10 +59,9 @@ export function SelectedFrameGeneration({
     setError('');
     setFailures({});
     setCreatives([]);
+    setSavedCount(0);
     completedIndexes.current = new Set();
     failedIndexes.current = new Map();
-    const brand = readStoredBrandGuidance();
-    const companyProfile = readStoredRuntimeCompanyProfile();
     const conceptContext = `Creative concept: ${selection.concept}\n\nSelected-frame rationale (unverified model selection):\n${selectedFrames.map((frame) => `- ${frame.reason}`).join('\n')}`;
 
     const recordFailure = (index: number, message: string) => {
@@ -70,6 +70,8 @@ export function SelectedFrameGeneration({
     };
 
     try {
+      const brand = readStoredBrandGuidance();
+      const companyProfile = readStoredRuntimeCompanyProfile();
       const response = await fetch('/api/creatives/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -134,6 +136,7 @@ export function SelectedFrameGeneration({
             },
           });
           completedIndexes.current.add(creative.index);
+          setSavedCount((current) => current + 1);
           setCreatives((current) => insertCreativeByIndex(current, creative));
         } catch (reason) {
           recordFailure(event.creative.index, reason instanceof Error ? reason.message : `Creative ${event.creative.index} could not be completed.`);
@@ -175,8 +178,9 @@ export function SelectedFrameGeneration({
       })}
     </fieldset>
     <button className={styles.primary} type="button" onClick={() => void generate()} disabled={generating || selectedFrameIds.length < 1}>
-      {generating ? 'Generating 2 variations…' : 'Generate 2 variations · estimated $0.0400'}
+      {generating ? 'Generating 2 creatives…' : 'Generate 2 creatives from checked frames (uses API)'}
     </button>
+    {savedCount ? <p className={styles.progress} role="status">Saved {savedCount} {savedCount === 1 ? 'creative' : 'creatives'} to the TRA creative library.</p> : null}
     {error ? <p className={styles.error} role="alert">{error}</p> : null}
     <CreativeResults creatives={creatives} generating={generating} requestedCount={2} generationComplete={complete} generationFailures={failures} />
   </section>;
