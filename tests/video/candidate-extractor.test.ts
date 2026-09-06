@@ -16,6 +16,7 @@ import {
   REAL_FRACTIONAL_2997_MP4,
   REAL_SHORT_100MS_MP4,
 } from '@/tests/fixtures/candidate-extractor-media';
+import { REAL_REORDERED_MP4 } from '@/tests/fixtures/reordered-video';
 import {
   REAL_MISMATCHED_STREAM_DURATION_MP4,
   REAL_MULTI_FRAME_MP4,
@@ -274,6 +275,22 @@ describe('dense interval TRA video candidate extraction', () => {
         )
       ).rejects.toThrow('trustworthy timestamp metadata');
       expect(await readdir(temporaryRoot)).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the final presentation frame when packet-copy progress underestimates duration', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'candidate-test-'));
+    // This encoded fixture's packet-copy progress ends at 968ms, although
+    // its decoded presentation lasts 1034ms and emits an interval frame at 1000ms.
+    const run = vi.fn(runFfmpeg);
+    try {
+      const result = await new FfmpegIntervalCandidateExtractor({ run, temporaryRoot })
+        .extractCandidates(makeVideoSource(REAL_REORDERED_MP4));
+      expect(result.durationMs).toBe(1_034);
+      expect(result.candidates.map((candidate) => candidate.timestampMs)).toEqual([0, 333, 667, 1_000]);
+      expect(run).toHaveBeenCalledTimes(2);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
