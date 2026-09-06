@@ -76,12 +76,15 @@ it('runs real extraction with mocked providers, persists complete analysis, and 
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toEqual(first.library);
 }, 30_000);
 
-it('coalesces concurrent uncached analysis, including force calls', async () => {
+it.each([false, true])('coalesces an uncached owner (force=%s) with force followers', async (force) => {
   root = await mkdtemp(path.join(tmpdir(), 'tra-library-service-test-'));
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const provider = vi.fn<typeof fetch>(async (url) => {
+    entered();
     await gate;
     return String(url).endsWith('/transcriptions')
       ? Response.json({ language: 'en', segments: [{ start: 0, end: 1, text: 'Sample speech.' }] })
@@ -89,13 +92,14 @@ it('coalesces concurrent uncached analysis, including force calls', async () => 
         sceneType: 'OTHER', summary: 'Colored test frame.', composition: 'Full frame.', visibleText: [], topics: ['other'], uncertainties: [],
       }) }] }] });
   });
-  const first = analyzeTraVideoIntelligence(source, { root, force: true, request: provider });
+  const first = analyzeTraVideoIntelligence(source, { root, force, request: provider });
   const second = analyzeTraVideoIntelligence(source, { root, force: true, request: provider });
-  await vi.waitFor(() => expect(provider).toHaveBeenCalledTimes(1));
+  await started;
   release();
   const [firstResult, secondResult] = await Promise.all([first, second]);
   expect(firstResult).toEqual(secondResult);
   expect(firstResult.reused).toBe(false);
+  expect(provider).toHaveBeenCalledTimes(1 + firstResult.library.representativeFrames.length);
 }, 30_000);
 
 it('does not persist failed provider runs and rejects production or oversized inputs before paid calls', async () => {

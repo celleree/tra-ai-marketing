@@ -127,8 +127,8 @@ export const analyzeTraVideoIntelligence = async (
   const active = activeAnalyses.get(key);
   if (active) {
     if (!options.force || active.force) return active.promise;
-    await active.promise;
-    return analyzeTraVideoIntelligence(source, options);
+    const result = await active.promise;
+    return result.reused ? analyzeTraVideoIntelligence(source, options) : result;
   }
   const pending = (async () => {
     const cached = options.force ? null : await loadVideoFrameLibrary(source.media.id, hash, root);
