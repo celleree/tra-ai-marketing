@@ -16,7 +16,8 @@ const errorResponse = (error: unknown) => NextResponse.json(
 export async function POST(request: Request) {
   try {
     assertLocalVideoIntelligence();
-    const body = await request.json() as { mediaId?: unknown; concept?: unknown };
+    const body = await request.json() as { mediaId?: unknown; concept?: unknown } | null;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
     if (typeof body.mediaId !== 'string' || !isSafeMediaId(body.mediaId)) {
       return NextResponse.json({ error: 'Choose a stored TRA video.' }, { status: 400 });
     }

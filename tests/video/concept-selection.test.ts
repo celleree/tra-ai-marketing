@@ -28,7 +28,7 @@ it('returns provider-selected known IDs in order without mutating the library or
     providerEligible: false, evidenceStatus: 'UNVERIFIED_MODEL_SELECTION', frames: [{ frameId: 'opaque-content-hash-b', reason: 'Clear brand call to action.' }, { frameId: 'opaque-content-hash-a', reason: 'Visible proof graphic.' }] });
   expect(JSON.stringify(source)).toBe(before);
   const body = JSON.parse(request.mock.calls[0][1]!.body as string); const metadata = body.input[1].content[0].text;
-  expect(body).toMatchObject({ model: 'gpt-5.6-terra', store: false, reasoning: { effort: 'low' } });
+  expect(body).toMatchObject({ model: 'gpt-5.6-terra', store: false, max_output_tokens: 2048, reasoning: { effort: 'low' } });
   expect(body.text.format.schema.properties.frames.items.properties.frameId.enum).toEqual(['opaque-content-hash-a', 'opaque-content-hash-b']);
   expect(metadata).not.toContain('thumbnailDataUrl'); expect(metadata).not.toContain('secret-thumbnail'); expect(metadata).not.toContain('frameSha256');
   expect(JSON.parse(metadata).frames[0]).toMatchObject({ summary: 'A'.repeat(400), visibleText: 'B'.repeat(1_000), temporalTranscriptContext: 'C'.repeat(700) });

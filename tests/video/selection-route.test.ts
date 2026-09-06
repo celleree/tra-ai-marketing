@@ -9,7 +9,7 @@ import { POST } from '@/app/api/video/selection/route';
 
 const id = `media_${'a'.repeat(32)}`;
 const source = { role: 'TRA_VIDEO', media: { id }, stored: { buffer: Buffer.from('server bytes') } };
-const post = (body: object) => new Request('http://localhost/api/video/selection', { method: 'POST', body: JSON.stringify(body) });
+const post = (body: unknown) => new Request('http://localhost/api/video/selection', { method: 'POST', body: JSON.stringify(body) });
 
 beforeEach(() => { vi.clearAllMocks(); mocks.hydrate.mockResolvedValue([source]); mocks.load.mockResolvedValue({ id: 'library' }); });
 afterEach(() => vi.unstubAllEnvs());
@@ -24,6 +24,7 @@ it('hydrates the TRA video, uses its cached library, and returns a selection', a
 });
 
 it('rejects invalid requests before hydrating or selecting and requires an analysis cache', async () => {
+  expect((await POST(post(null))).status).toBe(400);
   expect((await POST(post({ mediaId: id, concept: ' ' }))).status).toBe(400);
   expect((await POST(post({ mediaId: '../video', concept: 'Concept' }))).status).toBe(400);
   expect(mocks.hydrate).not.toHaveBeenCalled();

@@ -50,7 +50,7 @@ export const selectVideoFramesForConcept = async (
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
   const response = await (dependencies.request || fetch)('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(120_000),
-    body: JSON.stringify({ model, store: false, reasoning: { effort: 'low' }, input: [
+    body: JSON.stringify({ model, store: false, max_output_tokens: 2048, reasoning: { effort: 'low' }, input: [
       { role: 'developer', content: [{ type: 'input_text', text: rules }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ concept: brief, frames }) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_video_concept_selection', strict: true, schema: selectionSchema(frames.map((frame) => frame.id)) } } }),
