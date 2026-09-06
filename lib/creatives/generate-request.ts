@@ -11,6 +11,10 @@ import {
 } from '@/lib/company/creative-context';
 import type { CreativeSourceSelection } from '@/lib/media/types';
 import { parseCreativeSourceSelection } from '@/lib/media/source-contract';
+import {
+  parseGenerateVideoFrameSelection,
+  type GenerateVideoFrameSelection,
+} from '@/lib/video/generation-selection-contract';
 
 export type GenerateCreativeRequest = {
   sourceAssets?: CreativeSourceSelection[];
@@ -18,6 +22,7 @@ export type GenerateCreativeRequest = {
   brandColors?: string[];
   brandFontNames?: string[];
   companyProfile?: RuntimeCompanyProfileSnapshot;
+  videoFrameSelection?: GenerateVideoFrameSelection;
   context: string;
   variationCount: number;
 };
@@ -86,6 +91,10 @@ export function validateGenerateCreativeRequest(input: unknown):
   }
 
   const sourceValues = Array.isArray(body.sourceAssets) ? body.sourceAssets : [];
+  const videoFrameSelection =
+    body.videoFrameSelection === undefined
+      ? undefined
+      : parseGenerateVideoFrameSelection(body.videoFrameSelection);
   const brandLogoMediaId =
     typeof body.brandLogoMediaId === 'string'
       ? body.brandLogoMediaId.trim()
@@ -103,6 +112,14 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   if (body.sourceAssets !== undefined && !Array.isArray(body.sourceAssets)) {
     return { success: false, error: 'sourceAssets must be an array' };
+  }
+
+  if (body.videoFrameSelection !== undefined && !videoFrameSelection) {
+    return {
+      success: false,
+      error:
+        'videoFrameSelection must contain a valid libraryId, sourceVideoContentHash, and 1 to 3 unique frameIds',
+    };
   }
 
   if (
@@ -123,6 +140,16 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   if (new Set(sourceAssets.map((source) => source.mediaId)).size !== sourceAssets.length) {
     return { success: false, error: 'sourceAssets contains duplicate media IDs' };
+  }
+
+  if (
+    videoFrameSelection &&
+    (sourceAssets.length !== 1 || sourceAssets[0].role !== 'TRA_VIDEO')
+  ) {
+    return {
+      success: false,
+      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset',
+    };
   }
 
   if (!userContext) {
@@ -164,6 +191,7 @@ export function validateGenerateCreativeRequest(input: unknown):
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),
       ...(companyProfile ? { companyProfile } : {}),
+      ...(videoFrameSelection ? { videoFrameSelection } : {}),
       context,
       variationCount,
     },

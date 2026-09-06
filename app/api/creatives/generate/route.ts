@@ -24,6 +24,7 @@ import {
   type ValidGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
+import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import {
   formatLayoutBlueprintForPlanning,
   type LayoutBlueprint,
@@ -43,6 +44,12 @@ import { isUsableApprovedHumanSource } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
+import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
+import {
+  loadVideoFrameLibrary,
+  videoSourceHash,
+} from '@/lib/video/library-service';
+import { getApprovedSelectedTraVideoFrames } from '@/lib/video/selected-frames';
 import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
 import type { ApprovedTraVideoFrameSet } from '@/lib/video/types';
 
@@ -229,6 +236,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
+    if (
+      parsed.data.videoFrameSelection &&
+      process.env.NODE_ENV === 'production'
+    ) {
+      return NextResponse.json(
+        { error: 'Selected TRA video frame generation is available in local development only.' },
+        { status: 404 }
+      );
+    }
+
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: 'OpenAI generation is not configured yet.' },
@@ -261,10 +278,60 @@ export async function POST(request: Request) {
     const providerImageSource = findEligibleProviderImageSource(sourceAssets);
     const traVideoSource = sourceAssets.find(
       (sourceAsset) => sourceAsset.role === 'TRA_VIDEO'
-    );
+    ) as HydratedTraVideoSource | undefined;
     let videoFrameSet: ApprovedTraVideoFrameSet | null = null;
+    let generatedVideoFrameSelection: GeneratedVideoFrameSelection | undefined;
 
-    if (traVideoSource && !providerImageSource) {
+    if (parsed.data.videoFrameSelection && traVideoSource) {
+      const requestedSelection = parsed.data.videoFrameSelection;
+      const sourceContentHash = videoSourceHash(traVideoSource);
+      if (sourceContentHash !== requestedSelection.sourceVideoContentHash) {
+        return NextResponse.json(
+          { error: 'The selected TRA video frames are stale. Reanalyze the video and select frames again.' },
+          { status: 409 }
+        );
+      }
+      const library = await loadVideoFrameLibrary(
+        traVideoSource.media.id,
+        sourceContentHash
+      );
+      if (!library) {
+        return NextResponse.json(
+          { error: 'The selected TRA video frame library is missing or invalid. Reanalyze the video and select frames again.' },
+          { status: 409 }
+        );
+      }
+      if (library.id !== requestedSelection.libraryId) {
+        return NextResponse.json(
+          { error: 'The selected TRA video frame library does not match this request. Select frames again.' },
+          { status: 409 }
+        );
+      }
+      try {
+        const selectedFrameSet = await getApprovedSelectedTraVideoFrames(
+          traVideoSource,
+          library,
+          requestedSelection.frameIds
+        );
+        videoFrameSet = selectedFrameSet;
+        generatedVideoFrameSelection = {
+          libraryId: library.id,
+          sourceVideoMediaId: traVideoSource.media.id,
+          sourceVideoContentHash: selectedFrameSet.sourceVideoContentHash,
+          frames: selectedFrameSet.selectionProvenance,
+        };
+      } catch (error) {
+        return NextResponse.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : 'The selected TRA video frames could not be verified. Select frames again.',
+          },
+          { status: 409 }
+        );
+      }
+    } else if (traVideoSource && !providerImageSource) {
       try {
         videoFrameSet = await getApprovedTraVideoFrames(traVideoSource);
       } catch (error) {
@@ -456,6 +523,9 @@ export async function POST(request: Request) {
             format: item.format,
             image,
             copy,
+            ...(generatedVideoFrameSelection
+              ? { videoFrameSelection: generatedVideoFrameSelection }
+              : {}),
             ...(selectedReference
               ? {
                   referenceImageId: selectedReference.item.id,
