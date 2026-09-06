@@ -74,13 +74,18 @@
 .selection b { display: block; margin-bottom: 3px; color: #173eac; }
 .selectedGeneration { margin-top: 16px; border-top: 1px solid #d9e3f5; padding-top: 14px; }
 .selectedGeneration > .primary { width: 100%; margin-top: 8px; font-size: .78rem; }
-.selectedGeneration :global(.error-message) { margin-bottom: 0; }
 .selectedFrames { display: grid; gap: 8px; margin: 0; border: 0; padding: 0; }
 .selectedFrames legend { font-size: .8rem; font-weight: 800; }
 .selectedFrames .muted { margin: 0; }
 .frameChoice { display: grid; grid-template-columns: auto 58px 1fr; align-items: center; gap: 8px; color: #44576a; font-size: .78rem; line-height: 1.35; }
 .frameChoice img { width: 58px; height: 72px; border-radius: 6px; object-fit: contain; background: #eaf0f4; }
 .frameChoice b { display: block; color: #173eac; }
+.generatedResults { display: grid; gap: 12px; margin-top: 16px; }
+.generatedCreative, .generatedFailure, .generatedPending { border: 1px solid #d9e3f5; border-radius: 10px; padding: 10px; }
+.selection .generatedCreativeImage { width: 100%; height: auto; aspect-ratio: 1; border-radius: 7px; object-fit: contain; background: #eef3f9; }
+.generatedCreative h3, .generatedCreative p, .generatedFailure p { margin: 7px 0 0; font-size: .83rem; line-height: 1.4; }
+.generatedLabel, .generatedSource { color: #2864dc; font-weight: 750; }
+.generatedFailure { color: #ae2d29; }.generatedPending { color: #526271; font-weight: 700; }
 
 @media (max-width: 800px) {
   .frameGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

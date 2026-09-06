@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
@@ -36,7 +35,6 @@ export function SelectedFrameGeneration({
   );
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generating, setGenerating] = useState(false);
-  const [complete, setComplete] = useState(true);
   const [error, setError] = useState('');
   const [savedCount, setSavedCount] = useState(0);
   const [failures, setFailures] = useState<Record<number, string>>({});
@@ -55,7 +53,6 @@ export function SelectedFrameGeneration({
     }
 
     setGenerating(true);
-    setComplete(false);
     setError('');
     setFailures({});
     setCreatives([]);
@@ -144,7 +141,6 @@ export function SelectedFrameGeneration({
       });
 
       if (!receivedComplete) throw new Error('Creative generation ended before reporting completion.');
-      setComplete(true);
       if (failedIndexes.current.size) {
         setError(`Completed ${completedIndexes.current.size} of 2 creatives. ${failedIndexes.current.size} failed.`);
       }
@@ -182,6 +178,16 @@ export function SelectedFrameGeneration({
     </button>
     {savedCount ? <p className={styles.progress} role="status">Saved {savedCount} {savedCount === 1 ? 'creative' : 'creatives'} to the TRA creative library.</p> : null}
     {error ? <p className={styles.error} role="alert">{error}</p> : null}
-    <CreativeResults creatives={creatives} generating={generating} requestedCount={2} generationComplete={complete} generationFailures={failures} />
+    {creatives.length || generating || Object.keys(failures).length ? <section className={styles.generatedResults} aria-live="polite">
+      {[1, 2].map((index) => {
+        const creative = creatives.find((item) => item.index === index);
+        if (creative) return <article className={styles.generatedCreative} key={creative.id}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}<img className={styles.generatedCreativeImage} src={creative.image.url} alt={`Generated TRA creative ${index}`} />
+          <div><p className={styles.generatedLabel}>Creative {index} · saved to library</p><h3>{creative.copy.headline}</h3><p>{creative.copy.primaryText}</p>{creative.copy.description ? <p>{creative.copy.description}</p> : null}<p className={styles.generatedSource}>Source frames: {creative.videoFrameSelection?.frames.map((frame) => `${(frame.timestampMs / 1000).toFixed(3)}s`).join(', ') || 'selected TRA video frames'}</p></div>
+        </article>;
+        if (failures[index]) return <article className={styles.generatedFailure} key={index}><strong>Creative {index} could not be completed.</strong><p>{failures[index]}</p></article>;
+        return generating ? <article className={styles.generatedPending} key={index}>Generating creative {index}…</article> : null;
+      })}
+    </section> : null}
   </section>;
 }
