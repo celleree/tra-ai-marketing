@@ -77,8 +77,9 @@ it.skipIf(!input)('validates a local TRA video and writes an inspectable extract
       expect(candidate.providerEligible).toBe(false);
       const { temporaryPath: _temporaryPath, ...metadata } = candidate;
       const technical = technicalSelection?.candidates.find((entry) => entry.candidateIndex === candidate.candidateIndex)?.technical;
+      const representative = technicalSelection?.groups.some((group) => group.representativeIndex === candidate.candidateIndex);
       candidates.push({ ...metadata, ...(technical ? { technical } : {}) });
-      gallery.push(`<figure><img loading="lazy" src="data:image/jpeg;base64,${bytes.toString('base64')}" alt="Frame ${candidate.candidateIndex}"><figcaption>#${candidate.candidateIndex} · ${(candidate.timestampMs / 1000).toFixed(3)}s · ${candidate.extractionReasons.join(' + ')}</figcaption></figure>`);
+      gallery.push(`<figure><img loading="lazy" src="data:image/jpeg;base64,${bytes.toString('base64')}" alt="Frame ${candidate.candidateIndex}"><figcaption>#${candidate.candidateIndex} · ${(candidate.timestampMs / 1000).toFixed(3)}s · ${candidate.extractionReasons.join(' + ')}${technical ? `<br>Technical score ${technical.qualityScore.toFixed(3)}${representative ? ' · REPRESENTATIVE' : ''}` : ''}</figcaption></figure>`);
     }
     return {
       inputFileName: fileName, sourceHash, sourceBytes: buffer.length, startedAt,

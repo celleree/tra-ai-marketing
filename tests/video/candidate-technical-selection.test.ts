@@ -3,7 +3,8 @@ import { groupSimilarVideoCandidates } from '@/lib/video/candidate-technical-sel
 import type { FrameTechnicalAnalysis } from '@/lib/video/frame-technical-analysis';
 
 const metrics: FrameTechnicalAnalysis = {
-  version: 1, differenceHash: '0000000000000000', meanRgb: [100, 100, 100],
+  version: 1, analysisWidth: 144, analysisHeight: 256,
+  differenceHash: '0000000000000000', meanRgb: [100, 100, 100],
   meanLuminance: 100, luminanceDeviation: 20, laplacianVariance: 100,
   darkFraction: 0, lightFraction: 0, qualityScore: 0.5,
 };
