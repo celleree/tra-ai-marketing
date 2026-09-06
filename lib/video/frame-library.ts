@@ -16,6 +16,7 @@ export interface VideoFrameLibrary {
   sourceVideoMediaId: string;
   sourceVideoContentHash: string;
   durationMs: number;
+  analysisModels: { transcription: string; vision: string[] };
   transcript: Pick<VideoTranscript, 'version' | 'model' | 'language' | 'segments'>;
   candidates: Array<{
     candidateIndex: number; timestampMs: number; width: number; height: number;
@@ -118,6 +119,7 @@ export const assembleVideoFrameLibrary = (
     version: 1, id: `video-library:${createHash('sha256').update(`${set.sourceVideoMediaId}:${set.sourceVideoContentHash}`).digest('hex')}`,
     providerEligible: false, evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', sourceVideoMediaId: set.sourceVideoMediaId,
     sourceVideoContentHash: set.sourceVideoContentHash, durationMs: set.durationMs,
+    analysisModels: { transcription: transcript.model, vision: [...new Set(observations.map((result) => result.model))] },
     transcript: { version: transcript.version, model: transcript.model, language: transcript.language, segments: transcript.segments },
     candidates: [...candidates.values()].sort((a, b) => a.timestampMs - b.timestampMs || a.candidateIndex - b.candidateIndex).map((candidate) => ({
       candidateIndex: candidate.candidateIndex, timestampMs: candidate.timestampMs, width: candidate.width, height: candidate.height,

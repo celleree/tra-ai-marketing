@@ -34,6 +34,7 @@ describe('video frame library assembly', () => {
     const library = assembleVideoFrameLibrary(set(), selection(), transcript(), [observation(0, 'PERSON', ['person']), observation(2, 'BRAND_CTA', ['brand']), observation(3, 'BRAND_CTA', ['brand', 'call to action'])], thumbnails());
     expect(library.representativeFrames.map((frame) => [frame.candidateIndex, frame.candidateIndexes])).toEqual([[0, [0, 1]], [2, [2]], [3, [3]]]);
     expect(library.candidates).toHaveLength(4);
+    expect(library.analysisModels).toEqual({ transcription: 'whisper-1', vision: ['test'] });
     expect(library.representativeFrames.map((frame) => frame.transcriptSegments.map((segment) => segment.text))).toEqual([['First.'], [], ['Last.']]);
     expect(library.semanticGroups).toEqual({ sceneTypes: [{ sceneType: 'PERSON', representativeFrameIds: [`video-frame:${sourceVideoContentHash}:0`] }, { sceneType: 'BRAND_CTA', representativeFrameIds: [`video-frame:${sourceVideoContentHash}:2`, `video-frame:${sourceVideoContentHash}:3`] }], topics: [{ topic: 'person', representativeFrameIds: [`video-frame:${sourceVideoContentHash}:0`] }, { topic: 'brand', representativeFrameIds: [`video-frame:${sourceVideoContentHash}:2`, `video-frame:${sourceVideoContentHash}:3`] }, { topic: 'call to action', representativeFrameIds: [`video-frame:${sourceVideoContentHash}:3`] }] });
     const json = JSON.stringify(library);
