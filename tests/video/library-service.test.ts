@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
+import sharp from 'sharp';
 import { analyzeTraVideoIntelligence, loadVideoFrameLibrary, videoSourceHash } from '@/lib/video/library-service';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { REAL_MULTI_FRAME_MP4 } from '@/tests/fixtures/media';
@@ -11,6 +13,11 @@ const source: HydratedTraVideoSource = { role: 'TRA_VIDEO',
   stored: { fileName: 'source.mp4', buffer: REAL_MULTI_FRAME_MP4, mimeType: 'video/mp4', mediaType: 'VIDEO' } };
 let root = '';
 afterEach(async () => { vi.unstubAllEnvs(); if (root) await rm(root, { recursive: true, force: true }); });
+const cachePath = () => path.join(root, source.media.id, `${videoSourceHash(source)}.json`);
+const writeCache = async (library: unknown) => {
+  const sha256 = createHash('sha256').update(JSON.stringify(library)).digest('hex');
+  await writeFile(cachePath(), JSON.stringify({ library, sha256 }));
+};
 const request = () => vi.fn<typeof fetch>(async (url) => String(url).endsWith('/transcriptions')
   ? Response.json({ language: 'en', segments: [{ start: 0, end: 1, text: 'Sample speech.' }] })
   : Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({
@@ -35,29 +42,37 @@ it('runs real extraction with mocked providers, persists complete analysis, and 
   expect(second.reused).toBe(true);
   expect(second.library).toEqual(first.library);
   expect(provider).not.toHaveBeenCalled();
+  const normal = analyzeTraVideoIntelligence(source, { root, request: provider });
+  const forced = analyzeTraVideoIntelligence(source, { root, force: true, request: provider });
+  const forcedFollower = analyzeTraVideoIntelligence(source, { root, force: true, request: provider });
+  const [normalResult, forcedResult, forcedFollowerResult] = await Promise.all([normal, forced, forcedFollower]);
+  expect(normalResult.reused).toBe(true);
+  expect(forcedResult.reused).toBe(false);
+  expect(forcedFollowerResult).toEqual(forcedResult);
+  expect(provider).toHaveBeenCalledTimes(1 + first.library.representativeFrames.length);
+  provider.mockClear();
   expect(await loadVideoFrameLibrary(source.media.id, 'b'.repeat(64), root)).toBeNull();
-  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), '{broken');
+  await writeFile(cachePath(), '{broken');
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
-  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify({
-    ...first.library, candidates: [], representativeFrames: [{}],
-  }));
+  await writeCache({ ...first.library, candidates: [], representativeFrames: [{}] });
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
   const stale = structuredClone(first.library);
   stale.representativeFrames[0].frameSha256 = '0'.repeat(64);
-  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify(stale));
+  await writeCache(stale);
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
   const incompleteTechnical = structuredClone(first.library);
   delete (incompleteTechnical.candidates[0].technical as Partial<typeof incompleteTechnical.candidates[0]['technical']>).meanRgb;
-  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify(incompleteTechnical));
+  await writeCache(incompleteTechnical);
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
+  const thumbnailReplacement = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#ff00ff' } }).jpeg().toBuffer();
   const invalidThumbnail = structuredClone(first.library);
-  invalidThumbnail.representativeFrames[0].thumbnailDataUrl = 'data:image/jpeg;base64,AAAA';
-  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify(invalidThumbnail));
+  invalidThumbnail.representativeFrames[0].thumbnailDataUrl = `data:image/jpeg;base64,${thumbnailReplacement.toString('base64')}`;
+  await writeFile(cachePath(), JSON.stringify({ library: invalidThumbnail, sha256: createHash('sha256').update(JSON.stringify(first.library)).digest('hex') }));
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
   const staleDerived = structuredClone(first.library);
   staleDerived.semanticGroups = { sceneTypes: [null as never], topics: [null as never] };
   staleDerived.representativeFrames[0].transcriptSegments = [];
-  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify(staleDerived));
+  await writeCache(staleDerived);
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toEqual(first.library);
 }, 30_000);
 

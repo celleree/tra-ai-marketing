@@ -29,6 +29,7 @@ const isTechnicalAnalysis = (value: unknown) => isRecord(value) && value.version
   && isInteger(value.analysisWidth) && value.analysisWidth > 0 && isInteger(value.analysisHeight) && value.analysisHeight > 0
   && isHash(value.differenceHash, 16) && Array.isArray(value.meanRgb) && value.meanRgb.length === 3 && value.meanRgb.every(isFiniteNumber)
   && ['meanLuminance', 'luminanceDeviation', 'laplacianVariance', 'darkFraction', 'lightFraction', 'qualityScore'].every((key) => isFiniteNumber(value[key]));
+const libraryDigest = (library: unknown) => createHash('sha256').update(JSON.stringify(library)).digest('hex');
 
 const normalizePersistedVideoFrameLibrary = (value: unknown, mediaId: string, hash: string): VideoFrameLibrary | null => {
   if (!isRecord(value) || value.version !== 1 || value.sourceVideoMediaId !== mediaId || value.sourceVideoContentHash !== hash
@@ -94,7 +95,8 @@ const normalizePersistedVideoFrameLibrary = (value: unknown, mediaId: string, ha
   } };
 };
 
-const activeAnalyses = new Map<string, Promise<{ library: VideoFrameLibrary; reused: boolean }>>();
+type VideoLibraryAnalysis = { library: VideoFrameLibrary; reused: boolean };
+const activeAnalyses = new Map<string, { force: boolean; promise: Promise<VideoLibraryAnalysis> }>();
 
 export const loadVideoFrameLibrary = async (mediaId: string, hash: string, root = defaultRoot()): Promise<VideoFrameLibrary | null> => {
   const file = libraryPath(mediaId, hash, root);
@@ -103,7 +105,8 @@ export const loadVideoFrameLibrary = async (mediaId: string, hash: string, root 
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   try {
     const value = JSON.parse(bytes);
-    return normalizePersistedVideoFrameLibrary(value, mediaId, hash);
+    if (!isRecord(value) || !isHash(value.sha256) || !('library' in value) || value.sha256 !== libraryDigest(value.library)) return null;
+    return normalizePersistedVideoFrameLibrary(value.library, mediaId, hash);
   } catch { return null; }
 };
 
@@ -122,7 +125,11 @@ export const analyzeTraVideoIntelligence = async (
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
   const key = JSON.stringify([path.resolve(root), source.media.id, hash, model]);
   const active = activeAnalyses.get(key);
-  if (active) return active;
+  if (active) {
+    if (!options.force || active.force) return active.promise;
+    await active.promise;
+    return analyzeTraVideoIntelligence(source, options);
+  }
   const pending = (async () => {
     const cached = options.force ? null : await loadVideoFrameLibrary(source.media.id, hash, root);
     if (cached?.analysisModels.vision.length === 1 && cached.analysisModels.vision[0] === model) return { library: cached, reused: true };
@@ -153,11 +160,13 @@ export const analyzeTraVideoIntelligence = async (
     await mkdir(path.dirname(file), { recursive: true });
     const temporaryFile = `${file}.${randomUUID()}.tmp`;
     try {
-      await writeFile(temporaryFile, JSON.stringify(library), { flag: 'wx' });
+      await writeFile(temporaryFile, JSON.stringify({ library, sha256: libraryDigest(library) }), { flag: 'wx' });
       await rename(temporaryFile, file);
     } finally { await rm(temporaryFile, { force: true }); }
     return { library, reused: false };
   })();
-  activeAnalyses.set(key, pending);
-  try { return await pending; } finally { activeAnalyses.delete(key); }
+  activeAnalyses.set(key, { force: options.force === true, promise: pending });
+  try { return await pending; } finally {
+    if (activeAnalyses.get(key)?.promise === pending) activeAnalyses.delete(key);
+  }
 };
