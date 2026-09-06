@@ -4,10 +4,11 @@ import path from 'node:path';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
 import { analyzeTemporaryVideoCandidates } from '@/lib/video/candidate-technical-selection';
+import { getJpegDimensions } from '@/lib/video/candidate-file-integrity';
 import { assembleVideoFrameLibrary, type VideoFrameLibrary } from '@/lib/video/frame-library';
 import { createVideoFrameThumbnail, type VideoFrameThumbnail } from '@/lib/video/frame-thumbnail';
-import { MAX_TRANSCRIPTION_UPLOAD_BYTES, transcribeTraVideo } from '@/lib/video/transcript';
-import { observeTemporaryVideoFrame, parseFrameVisualObservation } from '@/lib/video/visual-observation';
+import { MAX_TRANSCRIPTION_UPLOAD_BYTES, transcriptAtTimestamp, transcribeTraVideo, type VideoTranscript } from '@/lib/video/transcript';
+import { observeTemporaryVideoFrame, parseFrameVisualObservation, VIDEO_CONTENT_TOPICS, VIDEO_SCENE_TYPES } from '@/lib/video/visual-observation';
 
 export const assertLocalVideoIntelligence = () => {
   if (process.env.NODE_ENV === 'production') throw new Error('Video intelligence is currently available in local development only.');
@@ -24,15 +25,18 @@ const isFiniteNumber = (value: unknown): value is number => typeof value === 'nu
 const isInteger = (value: unknown): value is number => isFiniteNumber(value) && Number.isInteger(value);
 const isHash = (value: unknown, length = 64) => typeof value === 'string' && new RegExp(`^[a-f0-9]{${length}}$`).test(value);
 const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+const isTechnicalAnalysis = (value: unknown) => isRecord(value) && value.version === 1
+  && isInteger(value.analysisWidth) && value.analysisWidth > 0 && isInteger(value.analysisHeight) && value.analysisHeight > 0
+  && isHash(value.differenceHash, 16) && Array.isArray(value.meanRgb) && value.meanRgb.length === 3 && value.meanRgb.every(isFiniteNumber)
+  && ['meanLuminance', 'luminanceDeviation', 'laplacianVariance', 'darkFraction', 'lightFraction', 'qualityScore'].every((key) => isFiniteNumber(value[key]));
 
-const isPersistedVideoFrameLibrary = (value: unknown, mediaId: string, hash: string): value is VideoFrameLibrary => {
+const normalizePersistedVideoFrameLibrary = (value: unknown, mediaId: string, hash: string): VideoFrameLibrary | null => {
   if (!isRecord(value) || value.version !== 1 || value.sourceVideoMediaId !== mediaId || value.sourceVideoContentHash !== hash
     || value.providerEligible !== false || value.evidenceStatus !== 'UNVERIFIED_MODEL_OBSERVATION'
     || !isFiniteNumber(value.durationMs) || value.durationMs <= 0 || value.id !== `video-library:${createHash('sha256').update(`${mediaId}:${hash}`).digest('hex')}`
     || !isRecord(value.analysisModels) || value.analysisModels.transcription !== 'whisper-1' || !isStringArray(value.analysisModels.vision) || !value.analysisModels.vision.length
     || !isRecord(value.transcript) || value.transcript.version !== 1 || value.transcript.model !== 'whisper-1' || typeof value.transcript.language !== 'string' || !Array.isArray(value.transcript.segments)
-    || !Array.isArray(value.candidates) || !value.candidates.length || !Array.isArray(value.representativeFrames) || !value.representativeFrames.length
-    || !isRecord(value.semanticGroups) || !Array.isArray(value.semanticGroups.sceneTypes) || !Array.isArray(value.semanticGroups.topics)) return false;
+    || !Array.isArray(value.candidates) || !value.candidates.length || !Array.isArray(value.representativeFrames) || !value.representativeFrames.length) return null;
   const candidates = new Map<number, Record<string, unknown>>();
   for (const candidate of value.candidates) {
     if (!isRecord(candidate) || !isInteger(candidate.candidateIndex) || candidate.candidateIndex < 0 || candidates.has(candidate.candidateIndex)
@@ -40,7 +44,7 @@ const isPersistedVideoFrameLibrary = (value: unknown, mediaId: string, hash: str
       || !isInteger(candidate.width) || candidate.width <= 0 || !isInteger(candidate.height) || candidate.height <= 0
       || !isHash(candidate.frameSha256) || !Array.isArray(candidate.extractionReasons) || !candidate.extractionReasons.length
       || !candidate.extractionReasons.every((reason) => reason === 'INTERVAL' || reason === 'SCENE_CHANGE')
-      || !isRecord(candidate.technical) || !isFiniteNumber(candidate.technical.qualityScore)) return false;
+      || !isTechnicalAnalysis(candidate.technical)) return null;
     candidates.set(candidate.candidateIndex, candidate);
   }
   const representativeIndexes = new Set<number>();
@@ -49,24 +53,45 @@ const isPersistedVideoFrameLibrary = (value: unknown, mediaId: string, hash: str
     if (!isRecord(frame) || !isInteger(frame.candidateIndex) || representativeIndexes.has(frame.candidateIndex)
       || !Array.isArray(frame.candidateIndexes) || !frame.candidateIndexes.length || !frame.candidateIndexes.every((index) => isInteger(index) && candidates.has(index))
       || !frame.candidateIndexes.includes(frame.candidateIndex) || !isFiniteNumber(frame.timestampMs) || !isHash(frame.frameSha256)
-      || typeof frame.thumbnailDataUrl !== 'string' || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(frame.thumbnailDataUrl)
-      || !isRecord(frame.observation) || !Array.isArray(frame.transcriptSegments)) return false;
+      || !isFiniteNumber(frame.qualityScore) || frame.evidenceStatus !== 'UNVERIFIED_MODEL_OBSERVATION'
+      || typeof frame.thumbnailDataUrl !== 'string' || !isRecord(frame.observation)) return null;
     const candidate = candidates.get(frame.candidateIndex)!;
-    if (frame.timestampMs !== candidate.timestampMs || frame.frameSha256 !== candidate.frameSha256
-      || frame.id !== `video-frame:${createHash('sha256').update(`${hash}:${candidate.timestampMs}:${candidate.frameSha256}`).digest('hex')}`) return false;
-    try { parseFrameVisualObservation(frame.observation); } catch { return false; }
+    const technical = candidate.technical as { qualityScore: number };
+    const encoded = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(frame.thumbnailDataUrl)?.[1];
+    if (frame.timestampMs !== candidate.timestampMs || frame.frameSha256 !== candidate.frameSha256 || frame.qualityScore !== technical.qualityScore
+      || frame.id !== `video-frame:${createHash('sha256').update(`${hash}:${candidate.timestampMs}:${candidate.frameSha256}`).digest('hex')}`
+      || !encoded || !getJpegDimensions(Buffer.from(encoded, 'base64'))) return null;
+    try { parseFrameVisualObservation(frame.observation); } catch { return null; }
     for (const index of frame.candidateIndexes) {
-      if (representedCandidates.has(index)) return false;
+      if (representedCandidates.has(index)) return null;
       representedCandidates.add(index);
     }
     representativeIndexes.add(frame.candidateIndex);
   }
-  if (representedCandidates.size !== candidates.size) return false;
+  if (representedCandidates.size !== candidates.size) return null;
+  let previousStart = -1;
   for (const segment of value.transcript.segments) {
     if (!isRecord(segment) || !isInteger(segment.segmentIndex) || !isFiniteNumber(segment.startMs) || !isFiniteNumber(segment.endMs)
-      || segment.startMs < 0 || segment.endMs <= segment.startMs || segment.endMs > value.durationMs || typeof segment.text !== 'string') return false;
+      || segment.segmentIndex < 0 || segment.segmentIndex !== value.transcript.segments.indexOf(segment)
+      || segment.startMs < 0 || segment.endMs <= segment.startMs || segment.startMs < previousStart || segment.endMs > value.durationMs
+      || typeof segment.text !== 'string' || !segment.text.trim() || segment.text !== segment.text.trim()) return null;
+    previousStart = segment.startMs;
   }
-  return true;
+  const library = value as unknown as VideoFrameLibrary;
+  const transcript: VideoTranscript = { ...library.transcript, sourceVideoMediaId: mediaId, sourceVideoContentHash: hash };
+  const representativeFrames = library.representativeFrames.map((frame) => ({ ...frame,
+    transcriptSegments: transcriptAtTimestamp(transcript, frame.timestampMs),
+  })).sort((a, b) => a.timestampMs - b.timestampMs || a.candidateIndex - b.candidateIndex);
+  return { ...library, representativeFrames, semanticGroups: {
+    sceneTypes: VIDEO_SCENE_TYPES.flatMap((sceneType) => {
+      const representativeFrameIds = representativeFrames.filter((frame) => frame.observation.sceneType === sceneType).map((frame) => frame.id);
+      return representativeFrameIds.length ? [{ sceneType, representativeFrameIds }] : [];
+    }),
+    topics: VIDEO_CONTENT_TOPICS.flatMap((topic) => {
+      const representativeFrameIds = representativeFrames.filter((frame) => frame.observation.topics.includes(topic)).map((frame) => frame.id);
+      return representativeFrameIds.length ? [{ topic, representativeFrameIds }] : [];
+    }),
+  } };
 };
 
 const activeAnalyses = new Map<string, Promise<{ library: VideoFrameLibrary; reused: boolean }>>();
@@ -78,7 +103,7 @@ export const loadVideoFrameLibrary = async (mediaId: string, hash: string, root 
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   try {
     const value = JSON.parse(bytes);
-    return isPersistedVideoFrameLibrary(value, mediaId, hash) ? value : null;
+    return normalizePersistedVideoFrameLibrary(value, mediaId, hash);
   } catch { return null; }
 };
 

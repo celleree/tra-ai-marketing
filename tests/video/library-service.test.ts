@@ -46,6 +46,19 @@ it('runs real extraction with mocked providers, persists complete analysis, and 
   stale.representativeFrames[0].frameSha256 = '0'.repeat(64);
   await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify(stale));
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
+  const incompleteTechnical = structuredClone(first.library);
+  delete (incompleteTechnical.candidates[0].technical as Partial<typeof incompleteTechnical.candidates[0]['technical']>).meanRgb;
+  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify(incompleteTechnical));
+  expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
+  const invalidThumbnail = structuredClone(first.library);
+  invalidThumbnail.representativeFrames[0].thumbnailDataUrl = 'data:image/jpeg;base64,AAAA';
+  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify(invalidThumbnail));
+  expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
+  const staleDerived = structuredClone(first.library);
+  staleDerived.semanticGroups = { sceneTypes: [null as never], topics: [null as never] };
+  staleDerived.representativeFrames[0].transcriptSegments = [];
+  await writeFile(path.join(root, source.media.id, `${videoSourceHash(source)}.json`), JSON.stringify(staleDerived));
+  expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toEqual(first.library);
 }, 30_000);
 
 it('coalesces concurrent uncached analysis, including force calls', async () => {
