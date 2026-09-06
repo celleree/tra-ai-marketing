@@ -1,3 +1,4 @@
+import { parseGeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { NextResponse } from 'next/server';
 import { isCreativeCategory } from '@/lib/creative-categories';
 import type { CreativeRecord } from '@/lib/creatives/generated';
@@ -67,6 +68,7 @@ const normalizeCreative = (
   const headline = typeof copy?.headline === 'string' ? copy.headline.trim() : '';
   const description =
     typeof copy?.description === 'string' ? copy.description.trim() : '';
+  const videoFrameSelection = parseGeneratedVideoFrameSelection(input.videoFrameSelection);
   const referenceImageId =
     typeof input.referenceImageId === 'string'
       ? input.referenceImageId
@@ -79,6 +81,7 @@ const normalizeCreative = (
     !primaryText ||
     !headline ||
     (referenceImageId !== undefined && !isSafeMediaId(referenceImageId))
+    || (input.videoFrameSelection !== undefined && !videoFrameSelection)
   ) {
     return null;
   }
@@ -90,6 +93,7 @@ const normalizeCreative = (
     category,
     copy: { primaryText, headline, description },
     ...(referenceImageId ? { referenceImageId } : {}),
+    ...(videoFrameSelection ? { videoFrameSelection } : {}),
   };
 };
 

@@ -33,4 +33,5 @@ export interface CreativeRecord {
   category: CreativeCategoryId;
   copy: CreativeCopy;
   referenceImageId?: string;
+  videoFrameSelection?: GeneratedVideoFrameSelection;
 }

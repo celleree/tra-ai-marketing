@@ -87,6 +87,17 @@ export function CreativeLibrary() {
                     Reference ID: {creative.referenceImageId}
                   </p>
                 ) : null}
+                {creative.videoFrameSelection ? (
+                  <details style={{ overflowWrap: 'anywhere' }}>
+                    <summary>Selected video frames</summary>
+                    <p className={styles.creativeId}>Source: {creative.videoFrameSelection.sourceVideoMediaId}</p>
+                    <ul>{creative.videoFrameSelection.frames.map((frame) => (
+                      <li key={frame.libraryFrameId}>
+                        {(frame.timestampMs / 1000).toFixed(3)}s · {frame.libraryFrameId}
+                      </li>
+                    ))}</ul>
+                  </details>
+                ) : null}
                 {creative.metaAdId ? (
                   <p className={styles.creativeId}>Meta Ad ID: {creative.metaAdId}</p>
                 ) : null}

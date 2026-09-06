@@ -255,3 +255,20 @@ describe('TRA creative storage', () => {
     await expect(listCreatives()).resolves.toEqual([newer, older]);
   });
 });
+
+it('preserves video frame provenance through saving and reloading without dropping older records', async () => {
+  const previous = record('a', '2026-08-20T12:00:00.000Z');
+  const generated = { ...record('b', '2026-08-25T12:00:00.000Z'), videoFrameSelection: {
+    libraryId: `video-library:${'1'.repeat(64)}`, sourceVideoMediaId: `media_${'2'.repeat(32)}`,
+    sourceVideoContentHash: '3'.repeat(64), frames: [{ frameIndex: 0, libraryFrameId: `video-frame:${'4'.repeat(64)}`,
+      candidateFrameSha256: '5'.repeat(64), timestampMs: 500, approvedPngSha256: '6'.repeat(64) }],
+  } };
+  readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [previous] }));
+  await saveCreativeBatch([generated]);
+  const encoded = writeFileMock.mock.calls[0][1] as string;
+  readFileMock.mockResolvedValueOnce(encoded);
+  expect(await listCreatives()).toEqual([generated, previous]);
+  writeFileMock.mockClear();
+  await expect(saveCreativeBatch([{ ...generated, videoFrameSelection: { ...generated.videoFrameSelection, frames: [] } }])).rejects.toThrow();
+  expect(writeFileMock).not.toHaveBeenCalled();
+});

@@ -1,3 +1,4 @@
+import { parseGeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { resolve } from 'path';
 import {
@@ -91,6 +92,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const headline = typeof copy?.headline === 'string' ? copy.headline : '';
   const description =
     typeof copy?.description === 'string' ? copy.description : '';
+  const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
   const referenceImageId =
     typeof record.referenceImageId === 'string'
       ? record.referenceImageId
@@ -111,6 +113,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     !primaryText ||
     !headline ||
     (referenceImageId !== undefined && !isSafeMediaId(referenceImageId))
+    || (record.videoFrameSelection !== undefined && !videoFrameSelection)
   ) {
     return null;
   }
@@ -129,6 +132,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     category,
     copy: { primaryText, headline, description },
     ...(referenceImageId ? { referenceImageId } : {}),
+    ...(videoFrameSelection ? { videoFrameSelection } : {}),
   };
 };
 
