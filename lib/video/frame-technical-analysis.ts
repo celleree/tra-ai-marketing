@@ -2,6 +2,8 @@ import sharp from 'sharp';
 
 export interface FrameTechnicalAnalysis {
   version: 1;
+  analysisWidth: number;
+  analysisHeight: number;
   differenceHash: string;
   meanRgb: [number, number, number];
   meanLuminance: number;
@@ -16,7 +18,7 @@ export interface FrameTechnicalAnalysis {
 // Normalize spatial scale so differently sized frames can be compared.
 export const analyzeFrameTechnicalQuality = async (bytes: Buffer): Promise<FrameTechnicalAnalysis> => {
   const { data: rgb, info } = await sharp(bytes, { limitInputPixels: 40_000_000 })
-    .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+    .resize(256, 256, { fit: 'inside' })
     .removeAlpha().toColourspace('srgb').raw().toBuffer({ resolveWithObject: true });
   const pixels = info.width * info.height;
   const grey = Buffer.alloc(pixels);
@@ -65,7 +67,7 @@ export const analyzeFrameTechnicalQuality = async (bytes: Buffer): Promise<Frame
     + 0.25 * luminanceDeviation / (luminanceDeviation + 32)
     + 0.15 * (1 - darkFraction - lightFraction);
   return {
-    version: 1, differenceHash,
+    version: 1, analysisWidth: info.width, analysisHeight: info.height, differenceHash,
     meanRgb: channelSums.map((value) => value / pixels) as [number, number, number],
     meanLuminance, luminanceDeviation, laplacianVariance, darkFraction, lightFraction, qualityScore,
   };

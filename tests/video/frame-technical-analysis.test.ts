@@ -38,6 +38,16 @@ describe('candidate technical analysis', () => {
     expect(metrics.darkFraction + metrics.lightFraction).toBe(1);
   });
 
+  it('normalizes small and large versions of the same composition to the same analysis scale', async () => {
+    const small = await checkerboard();
+    const large = await sharp(small).resize(512, 512, { kernel: 'nearest' }).png().toBuffer();
+    const first = await analyzeFrameTechnicalQuality(small);
+    const second = await analyzeFrameTechnicalQuality(large);
+    expect([first.analysisWidth, first.analysisHeight]).toEqual([256, 256]);
+    expect([second.analysisWidth, second.analysisHeight]).toEqual([256, 256]);
+    expect(Math.abs(first.qualityScore - second.qualityScore)).toBeLessThan(0.05);
+  });
+
   it('handles tiny greyscale input and preserves colour evidence for hash collisions', async () => {
     const tiny = await sharp({ create: { width: 1, height: 1, channels: 3,
       background: { r: 128, g: 128, b: 128 } } }).greyscale().png().toBuffer();
