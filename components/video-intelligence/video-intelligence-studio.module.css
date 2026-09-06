@@ -72,6 +72,15 @@
 .selection img { width: 86px; height: 144px; flex: 0 0 86px; border-radius: 7px; object-fit: contain; }
 .selection p { margin: 0; color: #44576a; font-size: .83rem; line-height: 1.45; }
 .selection b { display: block; margin-bottom: 3px; color: #173eac; }
+.selectedGeneration { margin-top: 16px; border-top: 1px solid #d9e3f5; padding-top: 14px; }
+.selectedGeneration > .primary { width: 100%; margin-top: 8px; font-size: .78rem; }
+.selectedGeneration :global(.error-message) { margin-bottom: 0; }
+.selectedFrames { display: grid; gap: 8px; margin: 0; border: 0; padding: 0; }
+.selectedFrames legend { font-size: .8rem; font-weight: 800; }
+.selectedFrames .muted { margin: 0; }
+.frameChoice { display: grid; grid-template-columns: auto 58px 1fr; align-items: center; gap: 8px; color: #44576a; font-size: .78rem; line-height: 1.35; }
+.frameChoice img { width: 58px; height: 72px; border-radius: 6px; object-fit: contain; background: #eaf0f4; }
+.frameChoice b { display: block; color: #173eac; }
 
 @media (max-width: 800px) {
   .frameGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

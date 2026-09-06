@@ -4,6 +4,7 @@ import { type ChangeEvent, type FormEvent, useState } from 'react';
 import type { CreativeSourceVideoAsset } from '@/lib/media/types';
 import type { VideoConceptSelection } from '@/lib/video/concept-selection';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
+import { SelectedFrameGeneration } from './selected-frame-generation';
 import styles from './video-intelligence-studio.module.css';
 
 type StreamEvent = {
@@ -195,9 +196,6 @@ export function VideoIntelligenceStudio() {
     setError('');
   };
 
-  const labelFor = (frameId: string) =>
-    library?.representativeFrames.find((frame) => frame.id === frameId);
-
   return (
     <main className={styles.page}>
       <header className={styles.header}>
@@ -269,7 +267,7 @@ export function VideoIntelligenceStudio() {
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>4 · Concept selection</p><h2>Compare distinct creative directions</h2></div></div>
           <form className={styles.conceptForm} onSubmit={select}><label htmlFor="concept">Creative concept</label><textarea id="concept" value={concept} onChange={(event) => setConcept(event.target.value)} maxLength={2000} placeholder="For example: a credibility-focused concept using clear proof graphics" /><button className={styles.primary} disabled={!concept.trim() || busy}>Select 1–3 frames (uses API)</button></form>
-          {selections.length ? <div className={styles.selectionGrid}>{selections.map((selection, index) => <article className={styles.selection} key={`${selection.concept}-${index}`}><strong>{selection.concept}</strong>{selection.frames.map((item) => { const frame = labelFor(item.frameId); return <div key={item.frameId}>{frame ? <img src={frame.thumbnailDataUrl} alt="Selected frame" /> : null}<p><b>{frame ? formatTime(frame.timestampMs) : 'Frame'}</b>{item.reason}</p></div>; })}</article>)}</div> : null}
+          {selections.length ? <div className={styles.selectionGrid}>{selections.map((selection, index) => <article className={styles.selection} key={`${selection.concept}-${index}`}><strong>{selection.concept}</strong><SelectedFrameGeneration media={media!} library={library} selection={selection} /></article>)}</div> : null}
         </section>
       </> : null}
     </main>
