@@ -287,8 +287,10 @@ export class FfmpegIntervalCandidateExtractor
           inputPath,
           '-map',
           '0:v:0',
-          '-c:v',
-          'copy',
+          // Decode the selected stream: packet-copy progress can end at DTS,
+          // underestimating presentation duration for videos with reordered frames.
+          '-fps_mode',
+          'passthrough',
           '-f',
           'null',
           '-',
