@@ -3,6 +3,7 @@
   margin: 0 auto;
   padding: 48px 0 80px;
   color: #192430;
+  overflow-wrap: anywhere;
 }
 
 .header { max-width: 760px; margin-bottom: 30px; }
@@ -22,7 +23,7 @@
 .sectionHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .sectionHeading h2 { margin: 5px 0 0; font-size: 1.25rem; letter-spacing: -.025em; }
 .uploadRow, .videoGrid, .conceptForm { display: flex; gap: 12px; align-items: center; }
-.fileInput { display: flex; min-width: 0; flex: 1; align-items: center; border: 1px dashed #aebac8; border-radius: 12px; background: #f8fafc; padding: 12px; color: #526271; font-weight: 650; }
+.fileInput { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; flex: 1; align-items: center; border: 1px dashed #aebac8; border-radius: 12px; background: #f8fafc; padding: 12px; color: #526271; font-weight: 650; }
 .fileInput input { max-width: 210px; }
 .primary, .secondary { min-height: 42px; border-radius: 10px; padding: 0 15px; font-weight: 800; }
 .primary { border: 0; background: #173eac; color: #fff; }
@@ -41,7 +42,7 @@
 
 .frameGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .frame { overflow: hidden; border: 1px solid #e1e6ec; border-radius: 14px; background: #fbfcfe; padding: 12px; font-size: .88rem; line-height: 1.45; }
-.frame img { width: 100%; aspect-ratio: 16 / 10; border-radius: 9px; object-fit: cover; background: #eaf0f4; }
+.frame img { width: 100%; aspect-ratio: 9 / 16; max-height: 360px; border-radius: 9px; object-fit: contain; background: #eaf0f4; }
 .frameMeta { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .frameMeta span, .tag { color: #2864dc; font-size: .74rem; font-weight: 800; }
 .tag { display: inline-block; margin: 10px 0 0; text-transform: capitalize; }
@@ -65,10 +66,10 @@
 .conceptForm { align-items: stretch; flex-wrap: wrap; }
 .conceptForm label { width: 100%; font-size: .82rem; font-weight: 800; }
 .conceptForm textarea { min-height: 92px; flex: 1; min-width: min(100%, 420px); border: 1px solid #cbd5e1; border-radius: 11px; padding: 11px; resize: vertical; }
-.selectionGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 22px; }
+.selectionGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px; margin-top: 22px; }
 .selection { border: 1px solid #d9e3f5; border-radius: 12px; background: #f8fbff; padding: 14px; }
 .selection > div { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
-.selection img { width: 86px; height: 54px; border-radius: 7px; object-fit: cover; }
+.selection img { width: 86px; height: 144px; flex: 0 0 86px; border-radius: 7px; object-fit: contain; }
 .selection p { margin: 0; color: #44576a; font-size: .83rem; line-height: 1.45; }
 .selection b { display: block; margin-bottom: 3px; color: #173eac; }
 
