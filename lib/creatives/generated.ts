@@ -1,6 +1,7 @@
 import type { CreativeCategoryId } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import type { MediaAsset } from '@/lib/media/types';
+import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 
 export interface CreativeCopy {
   primaryText: string;
@@ -22,6 +23,7 @@ export interface GeneratedCreative {
   referenceImageUrl?: string;
   referenceCategory?: CreativeCategoryId;
   referenceSelectionReason?: string;
+  videoFrameSelection?: GeneratedVideoFrameSelection;
 }
 
 export interface CreativeRecord {
@@ -31,4 +33,5 @@ export interface CreativeRecord {
   category: CreativeCategoryId;
   copy: CreativeCopy;
   referenceImageId?: string;
+  videoFrameSelection?: GeneratedVideoFrameSelection;
 }

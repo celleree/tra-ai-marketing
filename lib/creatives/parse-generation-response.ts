@@ -8,6 +8,7 @@ import {
 } from '@/lib/creative-formats';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import type { MediaAsset } from '@/lib/media/types';
+import { parseGeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 
 export type CreativeGenerationPayload = {
   creatives?: GeneratedCreative[];
@@ -60,6 +61,10 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
   const copy = creative.copy;
   const category = creative.category;
   const format = creative.format;
+  const videoFrameSelection =
+    creative.videoFrameSelection === undefined
+      ? undefined
+      : parseGeneratedVideoFrameSelection(creative.videoFrameSelection);
 
   if (
     typeof creative.id !== 'string' ||
@@ -71,7 +76,8 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
     !isMediaAsset(creative.image) ||
     !copy ||
     typeof copy !== 'object' ||
-    Array.isArray(copy)
+    Array.isArray(copy) ||
+    (creative.videoFrameSelection !== undefined && !videoFrameSelection)
   ) {
     return null;
   }
@@ -109,6 +115,7 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
     ...(typeof creative.referenceSelectionReason === 'string'
       ? { referenceSelectionReason: creative.referenceSelectionReason }
       : {}),
+    ...(videoFrameSelection ? { videoFrameSelection } : {}),
   };
 };
 

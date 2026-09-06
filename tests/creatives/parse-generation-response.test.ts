@@ -36,6 +36,21 @@ const creative = {
   copy: { primaryText: 'Primary', headline: 'Headline', description: 'Description' },
 };
 
+const videoFrameSelection = {
+  libraryId: `video-library:${'b'.repeat(64)}`,
+  sourceVideoMediaId: `media_${'c'.repeat(32)}`,
+  sourceVideoContentHash: 'd'.repeat(64),
+  frames: [
+    {
+      frameIndex: 0,
+      libraryFrameId: `video-frame:${'e'.repeat(64)}`,
+      candidateFrameSha256: 'f'.repeat(64),
+      timestampMs: 250,
+      approvedPngSha256: 'a'.repeat(64),
+    },
+  ],
+};
+
 describe('parseGenerationResponse', () => {
   it('reports an empty response with its HTTP status', async () => {
     await expect(parseGenerationResponse(response(''))).resolves.toEqual({
@@ -121,6 +136,20 @@ describe('parseGenerationResponse', () => {
     });
 
     expect(received).toEqual(['error:1', 'creative:2']);
+  });
+
+  it('validates and preserves selected TRA video frame provenance in SSE creatives', async () => {
+    let received: unknown;
+    await consumeGenerationEventStream(
+      streamResponse([
+        `event: creative\ndata: {"creative":${JSON.stringify({ ...creative, videoFrameSelection })}}\n\n`,
+      ]),
+      (event) => {
+        if (event.type === 'creative') received = event.creative.videoFrameSelection;
+      }
+    );
+
+    expect(received).toEqual(videoFrameSelection);
   });
 
   it.each([
