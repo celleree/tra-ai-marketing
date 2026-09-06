@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { TemporaryVideoFrameCandidateSet } from '@/lib/video/candidate-types';
+import { getJpegDimensions } from '@/lib/video/candidate-file-integrity';
 import type { analyzeTemporaryVideoCandidates } from '@/lib/video/candidate-technical-selection';
 import { transcriptAtTimestamp, type VideoTranscript } from '@/lib/video/transcript';
 import { VIDEO_CONTENT_TOPICS, VIDEO_SCENE_TYPES, type observeTemporaryVideoFrame } from '@/lib/video/visual-observation';
@@ -49,7 +50,8 @@ const uniqueByIndex = <T extends { candidateIndex: number }>(values: readonly T[
   return result;
 };
 
-const frameId = (hash: string, candidateIndex: number) => `video-frame:${hash}:${candidateIndex}`;
+const frameId = (sourceHash: string, timestampMs: number, frameHash: string) =>
+  `video-frame:${createHash('sha256').update(`${sourceHash}:${timestampMs}:${frameHash}`).digest('hex')}`;
 
 export const assembleVideoFrameLibrary = (
   set: TemporaryVideoFrameCandidateSet,
@@ -82,7 +84,8 @@ export const assembleVideoFrameLibrary = (
     throw new Error('Every representative requires exactly one thumbnail.');
   }
   for (const [index, dataUrl] of thumbnails) {
-    if (!representatives.has(index) || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]*={0,2}$/.test(dataUrl)) {
+    const encoded = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl)?.[1];
+    if (!representatives.has(index) || !encoded || !getJpegDimensions(Buffer.from(encoded, 'base64'))) {
       throw new Error(`Invalid representative thumbnail for candidate ${index}.`);
     }
   }
@@ -101,7 +104,7 @@ export const assembleVideoFrameLibrary = (
   const representativeFrames = technicalSelection.groups.map((group) => {
     const candidate = candidates.get(group.representativeIndex)!;
     const observation = observed.get(group.representativeIndex)!;
-    return { id: frameId(set.sourceVideoContentHash, candidate.candidateIndex), candidateIndexes: [...group.candidateIndexes],
+    return { id: frameId(set.sourceVideoContentHash, candidate.timestampMs, candidate.frameSha256), candidateIndexes: [...group.candidateIndexes],
       candidateIndex: candidate.candidateIndex, timestampMs: candidate.timestampMs, frameSha256: candidate.frameSha256,
       qualityScore: technical.get(candidate.candidateIndex)!.technical.qualityScore, thumbnailDataUrl: thumbnails.get(candidate.candidateIndex)!,
       evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION' as const, observation: observation.observation,

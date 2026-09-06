@@ -24,7 +24,7 @@ const readRegularFile = async (temporaryPath: string) => {
   }
 };
 
-const getJpegDimensions = (buffer: Buffer) => {
+export const getJpegDimensions = (buffer: Buffer) => {
   if (
     detectImageMimeType(buffer) !== 'image/jpeg' ||
     buffer.length < 4 ||
