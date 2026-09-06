@@ -87,9 +87,9 @@ export function VideoIntelligenceStudio() {
     }
   };
 
-  const loadStoredVideo = async (event: FormEvent) => {
-    event.preventDefault();
-    const mediaId = storedMediaId.trim();
+  const loadStoredVideo = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const mediaId = event ? storedMediaId.trim() : media?.id;
     if (!mediaId || busy) return;
     setBusy(true);
     setError('');
@@ -215,7 +215,7 @@ export function VideoIntelligenceStudio() {
             <p>1 · Source</p>
             <h2 id="source-title">TRA video</h2>
           </div>
-          {media ? <button className={styles.secondary} type="button" onClick={() => void refresh(media.id)} disabled={busy}>Refresh saved library</button> : null}
+          {media ? <button className={styles.secondary} type="button" onClick={() => void loadStoredVideo()} disabled={busy}>Refresh saved library</button> : null}
         </div>
         <div className={styles.uploadRow}>
           <label className={styles.fileInput}>
@@ -262,13 +262,13 @@ export function VideoIntelligenceStudio() {
           })}</div>
         </section>
         <section className={styles.panel}>
-          <div className={styles.sectionHeading}><div><p>3 · Semantic map</p><h2>Searchable groups</h2></div></div>
+          <div className={styles.sectionHeading}><div><p>3 · Semantic map</p><h2>Semantic groups</h2></div></div>
           <div className={styles.groups}>{[...library.semanticGroups.sceneTypes.map((group) => ({ label: group.sceneType, count: group.representativeFrameIds.length })), ...library.semanticGroups.topics.map((group) => ({ label: group.topic, count: group.representativeFrameIds.length }))].map((group) => <span key={group.label}>{group.label.replaceAll('_', ' ')} <b>{group.count}</b></span>)}</div>
           <div className={styles.transcriptList}><h3>Timestamped transcript</h3>{library.transcript.segments.length ? library.transcript.segments.map((segment) => <p key={segment.segmentIndex}><time>{formatTime(segment.startMs)}</time>{segment.text}</p>) : <p className={styles.muted}>No speech segments were returned.</p>}</div>
         </section>
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>4 · Concept selection</p><h2>Compare distinct creative directions</h2></div></div>
-          <form className={styles.conceptForm} onSubmit={select}><label htmlFor="concept">Creative concept</label><textarea id="concept" value={concept} onChange={(event) => setConcept(event.target.value)} maxLength={2000} placeholder="For example: a credibility-focused concept using clear proof graphics" /><button className={styles.primary} disabled={!concept.trim() || busy}>Select 1–3 frames</button></form>
+          <form className={styles.conceptForm} onSubmit={select}><label htmlFor="concept">Creative concept</label><textarea id="concept" value={concept} onChange={(event) => setConcept(event.target.value)} maxLength={2000} placeholder="For example: a credibility-focused concept using clear proof graphics" /><button className={styles.primary} disabled={!concept.trim() || busy}>Select 1–3 frames (uses API)</button></form>
           {selections.length ? <div className={styles.selectionGrid}>{selections.map((selection, index) => <article className={styles.selection} key={`${selection.concept}-${index}`}><strong>{selection.concept}</strong>{selection.frames.map((item) => { const frame = labelFor(item.frameId); return <div key={item.frameId}>{frame ? <img src={frame.thumbnailDataUrl} alt="Selected frame" /> : null}<p><b>{frame ? formatTime(frame.timestampMs) : 'Frame'}</b>{item.reason}</p></div>; })}</article>)}</div> : null}
         </section>
       </> : null}
