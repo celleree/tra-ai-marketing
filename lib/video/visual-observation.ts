@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type { TemporaryVideoFrameCandidate } from '@/lib/video/candidate-types';
 
 export const VIDEO_SCENE_TYPES = ['PERSON', 'PROOF_GRAPHIC', 'DOCUMENT', 'BRAND_CTA', 'OTHER'] as const;
+export const VIDEO_VISION_TIMEOUT_MS = 120_000;
 export interface FrameVisualObservation {
   sceneType: typeof VIDEO_SCENE_TYPES[number];
   summary: string;
@@ -67,7 +68,7 @@ export const observeTemporaryVideoFrame = async (
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
   const response = await (dependencies.request || fetch)('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(VIDEO_VISION_TIMEOUT_MS),
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'low' },
       input: [
         { role: 'developer', content: [{ type: 'input_text', text: RULES }] },
