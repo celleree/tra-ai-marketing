@@ -237,27 +237,37 @@ Each PR records acceptance criteria, verification results, risk level and reason
 
 A reviewer may be human or AI, but must use a fresh context that did not implement the change. Start the reviewer with the acceptance criteria, relevant canonical requirements, final diff or reviewed commit, and verification results. The reviewer may inspect additional directly relevant code, config, or tests when necessary to verify the change, but should not inherit the implementer's transcript or unrelated context. The reviewer checks requirement alignment, regressions, missing edge cases or tests, safety/security, risk classification, and weakened safeguards, then returns findings/conclusion rather than implementation or private reasoning. Resolve findings, reverify, and re-review materially changed fixes.
 
-## Model and subagent routing
+## Model, reasoning, and subagent routing
 
-Optimize for the lowest expected total cost of completing work correctly, including avoiding retries.
+Optimize for the lowest expected total cost of reaching a correct, verified result, including retries, escalation, rework, and the cost of mistakes.
 
-The root agent owns overall architecture, roadmap/phase sequencing, integration decisions, and final acceptance. When delegating, use the cheapest model and lowest reasoning effort likely to complete the bounded task correctly.
+Choose **model capability and reasoning effort independently**:
 
-Preferred routing:
+1. Use the cheapest model with sufficient capability for the task.
+2. Use the lowest reasoning effort likely to complete it correctly.
+3. Escalate model tier or reasoning only when task difficulty, ambiguity, context, risk, or failed verification justifies it.
 
-- GPT-5.6 Luna / low reasoning: mechanical or repetitive work, targeted file search, extraction, classification, simple inspection, and very easy tasks.
-- GPT-5.6 Terra / medium reasoning: normal bounded implementation, micro-PRs, tests, straightforward fixes, and routine investigation.
-- GPT-5.6 Sol / high reasoning: difficult but well-scoped reasoning, debugging, implementation, planning, substantial review, or unclear failures.
-- GPT-6 Astra / high reasoning: architecture, difficult root-cause debugging, high-risk review, large-context work, complex multi-step agentic work, repeated failures, or tasks where getting the decision wrong is expensive.
+Do not assume more reasoning on a weaker model is better than a stronger model at lower reasoning. Before using very high reasoning on a lower-tier model, consider whether the next model tier at low or medium reasoning is more likely to succeed at lower total cost.
 
-For every delegated subagent:
+Model starting points:
+- **Luna:** mechanical, repetitive, extraction/classification, targeted inspection, very easy work.
+- **Terra:** normal bounded coding, micro-PRs, tests, straightforward fixes, routine implementation.
+- **Sol:** difficult but bounded reasoning, unfamiliar subsystems, debugging, complex implementation, planning, substantial review.
+- **Astra:** architecture, cross-phase decisions, difficult root-cause debugging, high-risk review, large-context or long-running orchestration, repeated failures, expensive mistakes.
 
-- Explicitly select both the model and reasoning effort when the runtime supports those overrides.
-- Do not inherit the root agent's more expensive model/reasoning level unless the delegated task actually requires it.
-- Escalate upward only when a cheaper model fails, discovers materially greater complexity, or reaches a decision outside its assigned scope.
-- If a preferred model is unavailable in the current runtime, use the next-cheapest available model likely to complete the task correctly.
-- Use the minimum number of subagents that materially improves speed, independent verification, or quality.
-- Prefer separate coherent PRs or non-overlapping work for agents that write code. Do not delegate overlapping edits to multiple agents unless explicitly coordinated.
+Reasoning starting points:
+- **Low:** straightforward, local, well-specified, easily verified.
+- **Medium:** normal implementation, testing, investigation, bounded decisions.
+- **High:** difficult debugging, ambiguity, complex integration, consequential review.
+- **Extra-high / maximum:** exceptional cases where high is insufficient or failure is unusually costly.
+
+Do not repeatedly retry a failed configuration unchanged. Escalate when verification fails, complexity materially exceeds expectations, required capability/context exceeds the current route, or the same approach has already failed.
+
+For subagents, the root agent retains architecture, sequencing, integration, and final acceptance. Route each delegated task independently instead of automatically inheriting the root model/reasoning. Use the minimum number of subagents that materially improves speed, independence, or quality, and avoid overlapping edits unless explicitly coordinated.
+
+If a preferred model is unavailable, use the next-cheapest available configuration likely to succeed.
+
+Treat these routes as defaults. When repeated repository-specific evidence shows another model/reasoning combination reaches verified completion more cheaply or reliably for a task class, prefer the observed route. Do not add routing infrastructure or logging solely for hypothetical optimization.
 
 ## Autonomous execution and approvals
 
