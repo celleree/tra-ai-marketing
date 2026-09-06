@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
 import { analyzeTemporaryVideoCandidates } from '@/lib/video/candidate-technical-selection';
 import { assembleVideoFrameLibrary, type VideoFrameLibrary } from '@/lib/video/frame-library';
+import { createVideoFrameThumbnail, type VideoFrameThumbnail } from '@/lib/video/frame-thumbnail';
 import { MAX_TRANSCRIPTION_UPLOAD_BYTES, transcribeTraVideo } from '@/lib/video/transcript';
 import { observeTemporaryVideoFrame } from '@/lib/video/visual-observation';
 
@@ -57,14 +57,14 @@ export const analyzeTraVideoIntelligence = async (
     options.onProgress?.(`Transcribing speech; ${technical.groups.length} visual representatives`);
     const transcript = await transcribeTraVideo(source, set.durationMs, { request: options.request });
     const observations: Awaited<ReturnType<typeof observeTemporaryVideoFrame>>[] = [];
-    const thumbnails = new Map<number, string>();
+    const thumbnails = new Map<number, VideoFrameThumbnail>();
     for (let start = 0; start < technical.groups.length; start += 2) {
       // Drain each pair before cleanup even when one provider call fails.
       const results = await Promise.allSettled(technical.groups.slice(start, start + 2).map(async (group) => {
         const frame = set.candidates[group.representativeIndex];
         const observation = await observeTemporaryVideoFrame(frame, { request: options.request });
-        const thumbnail = await sharp(await readFile(frame.temporaryPath)).resize({ width: 280, withoutEnlargement: true }).jpeg().toBuffer();
-        return { observation, thumbnail: `data:image/jpeg;base64,${thumbnail.toString('base64')}` };
+        const thumbnail = await createVideoFrameThumbnail(frame);
+        return { observation, thumbnail };
       }));
       for (const result of results) {
         if (result.status === 'rejected') throw result.reason;
