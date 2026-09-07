@@ -266,6 +266,7 @@ export function CreativeResults({
           creatives: selectedCreatives.map((creative) => ({
             id: creative.id,
             imageId: creative.image.id,
+            source: creative.source,
             category: creative.category,
             format: creative.format,
             copy: creative.copy,
@@ -363,10 +364,10 @@ export function CreativeResults({
     <section className={styles.section} aria-live="polite" aria-busy={generating}>
       <div className={styles.heading}>
         <div>
-          <p className="eyebrow">{generating ? 'Generating' : 'Generated'}</p>
-          <h2>{generating ? 'Building your creative variations' : 'Creative variations'}</h2>
+          <p className="eyebrow">{generating ? 'Generating' : 'Creatives'}</p>
+          <h2>{generating ? 'Building your creative variations' : 'Your creatives'}</h2>
         </div>
-        <span className="muted">{displayedCount} concepts</span>
+        <span className="muted">{displayedCount} creative{displayedCount === 1 ? '' : 's'}</span>
         <div className={styles.actions}>
           <button
             type="button"

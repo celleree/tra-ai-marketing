@@ -113,6 +113,23 @@ describe('TRA creatives API validation', () => {
     expect(saveCreativeBatchMock).toHaveBeenCalledWith([expect.objectContaining({ format: 'direct-response', placement: 'PORTRAIT_4_5', planning })]);
   });
 
+  it('defaults an omitted source to generated and retains uploaded source', async () => {
+    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue(creative.image) });
+    saveCreativeBatchMock.mockImplementation(async (records) => records);
+
+    expect((await POST(request(JSON.stringify({ creatives: [creative] })))).status).toBe(201);
+    expect(saveCreativeBatchMock).toHaveBeenLastCalledWith([
+      expect.objectContaining({ source: 'generated' }),
+    ]);
+
+    expect((await POST(request(JSON.stringify({ creatives: [{ ...creative, source: 'uploaded' }] })))).status).toBe(201);
+    expect(saveCreativeBatchMock).toHaveBeenLastCalledWith([
+      expect.objectContaining({ source: 'uploaded' }),
+    ]);
+
+    expect((await POST(request(JSON.stringify({ creatives: [{ ...creative, source: 'manual' }] })))).status).toBe(400);
+  });
+
   it('accepts legacy records without generated metadata and rejects malformed supplied metadata', async () => {
     getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue(creative.image) });
     saveCreativeBatchMock.mockImplementation(async (records) => records);

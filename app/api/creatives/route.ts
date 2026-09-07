@@ -73,6 +73,7 @@ const normalizeCreative = (
   const headline = typeof copy?.headline === 'string' ? copy.headline.trim() : '';
   const description =
     typeof copy?.description === 'string' ? copy.description.trim() : '';
+  const source = input.source === undefined ? 'generated' : input.source;
   const videoFrameSelection = parseGeneratedVideoFrameSelection(input.videoFrameSelection);
   const planning = parseCreativePlanning(input.planning);
   const generationProvenance = parseCreativeGenerationProvenance(input.generationProvenance);
@@ -95,6 +96,7 @@ const normalizeCreative = (
     !isCreativeCategory(category) ||
     !primaryText ||
     !headline ||
+    (source !== 'generated' && source !== 'uploaded') ||
     (input.format !== undefined && !format) ||
     (input.placement !== undefined && !placement) ||
     (referenceImageId !== undefined && !isSafeMediaId(referenceImageId))
@@ -112,6 +114,7 @@ const normalizeCreative = (
     image,
     category,
     copy: { primaryText, headline, description },
+    source,
     ...(format ? { format } : {}),
     ...(placement ? { placement } : {}),
     ...(referenceImageId ? { referenceImageId } : {}),

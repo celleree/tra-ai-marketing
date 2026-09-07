@@ -55,6 +55,7 @@ const record = (hex: string, createdAt: string): CreativeRecord => ({
 
 const persisted = (creative: CreativeRecord): CreativeRecord => ({
   ...creative,
+  source: creative.source ?? 'generated',
   humanReview: { status: 'PENDING' },
   lifecycle: { status: 'ACTIVE', updatedAt: creative.createdAt },
 });
@@ -138,6 +139,20 @@ afterEach(() => {
 });
 
 describe('TRA creative storage', () => {
+  it('preserves uploaded source through saving, reload and human review updates', async () => {
+    const uploaded = { ...record('b', '2026-08-25T12:00:00.000Z'), source: 'uploaded' as const };
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));
+    await saveCreativeBatch([uploaded]);
+    const encoded = writeFileMock.mock.calls[0][1] as string;
+    readFileMock.mockResolvedValueOnce(encoded);
+    await expect(listCreatives()).resolves.toEqual([persisted(uploaded)]);
+    readFileMock.mockResolvedValueOnce(encoded);
+    const updated = await updateCreativeReviewState(uploaded.id, { humanReview: rejectedReview() });
+    expect(updated?.source).toBe('uploaded');
+    expect(updated?.identity).toBeUndefined();
+    expect(updated?.planning).toBeUndefined();
+  });
+
   it('round-trips generated metadata while retaining legacy records', async () => {
     const legacy = record('a', '2026-08-20T12:00:00.000Z');
     const generated = { ...record('b', '2026-08-25T12:00:00.000Z'), format: 'direct-response' as const, placement: 'PORTRAIT_4_5' as const, planning, generationProvenance };
@@ -145,7 +160,10 @@ describe('TRA creative storage', () => {
     await saveCreativeBatch([generated]);
     const encoded = writeFileMock.mock.calls[0][1] as string;
     readFileMock.mockResolvedValueOnce(encoded);
-    await expect(listCreatives()).resolves.toEqual([persisted(generated), legacy]);
+    await expect(listCreatives()).resolves.toEqual([
+      persisted(generated),
+      { ...legacy, source: 'generated' },
+    ]);
   });
 
   it.each([
@@ -155,6 +173,7 @@ describe('TRA creative storage', () => {
     ['generation provenance', { generationProvenance: { ...generationProvenance, version: 2 } }],
     ['null generation provenance', { generationProvenance: null }],
     ['identity', { identity: { operation: 'GENERATE' } }],
+    ['source', { source: 'manual' }],
   ])('rejects malformed supplied %s metadata', async (_label, metadata) => {
     await expect(saveCreativeBatch([{ ...record('b', '2026-08-25T12:00:00.000Z'), ...metadata } as CreativeRecord])).rejects.toThrow('One or more creative records are invalid.');
     expect(writeFileMock).not.toHaveBeenCalled();
@@ -353,7 +372,10 @@ describe('TRA creative storage', () => {
       JSON.stringify({ version: 1, items: [older, newer] })
     );
 
-    await expect(listCreatives()).resolves.toEqual([newer, older]);
+    await expect(listCreatives()).resolves.toEqual([
+      { ...newer, source: 'generated' },
+      { ...older, source: 'generated' },
+    ]);
   });
 
   it('round-trips valid review state and rejects malformed present review metadata', async () => {
@@ -480,7 +502,10 @@ it('preserves video frame provenance through saving and reloading without droppi
   await saveCreativeBatch([generated]);
   const encoded = writeFileMock.mock.calls[0][1] as string;
   readFileMock.mockResolvedValueOnce(encoded);
-  expect(await listCreatives()).toEqual([persisted(generated), previous]);
+  expect(await listCreatives()).toEqual([
+    persisted(generated),
+    { ...previous, source: 'generated' },
+  ]);
   writeFileMock.mockClear();
   await expect(saveCreativeBatch([{ ...generated, videoFrameSelection: { ...generated.videoFrameSelection, frames: [] } }])).rejects.toThrow();
   expect(writeFileMock).not.toHaveBeenCalled();

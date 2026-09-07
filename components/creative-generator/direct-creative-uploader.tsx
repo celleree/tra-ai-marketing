@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
-import type { GeneratedCreative } from '@/lib/creatives/generated';
+import type { CreativeRecord, GeneratedCreative } from '@/lib/creatives/generated';
 import type { MediaAsset } from '@/lib/media/types';
 import styles from './creative-create-mode.module.css';
 
@@ -125,6 +125,43 @@ export function DirectCreativeUploader({
     return plan.media;
   };
 
+  const saveUploadedCreative = async (
+    image: MediaAsset,
+    copy: GeneratedCreative['copy']
+  ) => {
+    const response = await fetch('/api/creatives', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        creatives: [{
+          id: `creative_${crypto.randomUUID().replaceAll('-', '')}`,
+          image,
+          category: 'feature-led',
+          format: 'direct-response',
+          source: 'uploaded',
+          copy,
+        }],
+      }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      items?: CreativeRecord[];
+    };
+    const saved = payload.items?.[0];
+    if (
+      !response.ok ||
+      !saved ||
+      saved.source !== 'uploaded' ||
+      saved.format !== 'direct-response'
+    ) {
+      throw new Error(payload.error || 'Uploaded creative could not be saved.');
+    }
+    return saved as CreativeRecord & {
+      source: 'uploaded';
+      format: 'direct-response';
+    };
+  };
+
   const uploadBatch = async () => {
     if (!files.length || uploading) return;
     if (!headline.trim() || !primaryText.trim()) {
@@ -137,34 +174,28 @@ export function DirectCreativeUploader({
     setProgress('Preparing uploads…');
     onUploadStart();
 
-    const successful: MediaAsset[] = [];
+    const successful: GeneratedCreative[] = [];
     const failed: File[] = [];
 
     for (let index = 0; index < files.length; index += 1) {
       const sourceFile = files[index];
       setProgress(`Uploading ${index + 1} of ${files.length}…`);
       try {
-        successful.push(await uploadFile(sourceFile));
+        const image = await uploadFile(sourceFile);
+        setProgress(`Saving ${index + 1} of ${files.length}…`);
+        const saved = await saveUploadedCreative(image, {
+          primaryText: primaryText.trim(),
+          headline: headline.trim(),
+          description: description.trim(),
+        });
+        successful.push({ ...saved, index: index + 1 });
       } catch {
         failed.push(sourceFile);
       }
     }
 
     if (successful.length) {
-      const nextCreatives: GeneratedCreative[] = successful.map((media, index) => ({
-        id: `upload_${media.id.replace(/^media_/, '')}`,
-        index: index + 1,
-        category: 'feature-led',
-        format: 'direct-response',
-        source: 'uploaded',
-        image: media,
-        copy: {
-          primaryText: primaryText.trim(),
-          headline: headline.trim(),
-          description: description.trim(),
-        },
-      }));
-      onUploaded(nextCreatives);
+      onUploaded(successful);
     }
 
     setFiles(failed);
@@ -173,7 +204,7 @@ export function DirectCreativeUploader({
 
     if (failed.length) {
       setError(
-        `${successful.length} uploaded successfully. ${failed.length} failed and remain selected so you can retry them.`
+        `${successful.length} saved successfully. ${failed.length} failed and remain selected so you can retry them.`
       );
     } else {
       setError('');
