@@ -6,6 +6,10 @@ import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-pr
 import type { MediaAsset } from '@/lib/media/types';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { CreativeIdentity } from '@/lib/creatives/identity';
+import type {
+  CreativeHumanReview,
+  CreativeLifecycle,
+} from '@/lib/creatives/human-review';
 
 export interface CreativeCopy {
   primaryText: string;
@@ -33,6 +37,8 @@ export interface GeneratedCreative {
   planning?: CreativePlanningMetadata;
   generationProvenance?: CreativeGenerationProvenance;
   identity?: CreativeIdentity;
+  humanReview?: CreativeHumanReview;
+  lifecycle?: CreativeLifecycle;
 }
 
 export interface CreativeRecord {
@@ -48,4 +54,6 @@ export interface CreativeRecord {
   planning?: CreativePlanningMetadata;
   generationProvenance?: CreativeGenerationProvenance;
   identity?: CreativeIdentity;
+  humanReview?: CreativeHumanReview;
+  lifecycle?: CreativeLifecycle;
 }
