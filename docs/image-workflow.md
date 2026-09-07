@@ -214,51 +214,20 @@ The current image workflow is ready when these work end-to-end:
 
 ## Current remaining roadmap for Astra
 
-This is the current active implementation roadmap for completing the Stage 1 static-image workflow.
+This is the active Stage 1 implementation order. Astra must verify current `staging` and relevant code/tests before treating any item as incomplete.
 
-Astra should use this roadmap for orchestration and delegation, while still verifying current code/tests before treating any item as incomplete.
-
-Treat already-merged foundations as complete unless current code/tests show a regression or a clearly missing contract.
-
-### Current remaining implementation order
-
-1. **Wire GPT-6 Astra (medium reasoning)** as the creative planning and prompt-building model for the active image pipeline.
-2. **Finish meaningful variation planning**, including `SO WHAT?` outcome-chain capture and small-batch strategic hypothesis selection.
-3. **Finish placement-aware format generation**, including 9:16, 4:5, and 1:1 variants plus safe-zone enforcement.
-4. **Finish provenance and metadata saving** across all supported source paths.
-5. **Finish editing/regeneration and version history** for saved creatives.
-6. **Productionize the currently local-only video intelligence and frame-selection path** where needed.
-7. **Finish production hardening and the quality/compliance release gate** for the image workflow.
-
-### Astra execution rule
-
-Before delegating implementation work, Astra should:
-
-1. inspect current `staging`;
-2. compare current code/tests against this roadmap and the release gate in this document;
-3. mark each item as COMPLETE, PARTIAL, NOT STARTED, or BLOCKED based on executable evidence;
-4. avoid reopening already-completed foundations unless code/tests show a regression or missing contract;
-5. convert only the real remaining work into small coherent PRs;
-6. parallelize only work that is truly independent.
-
-This section is the active implementation roadmap for Stage 1 image work.
-
-`docs/roadmap.md` remains long-term/future direction and does not override this section.
-
-## Immediate implementation order
-
-Treat already-merged foundations as complete unless current code/tests show a regression. Do not reopen completed historical Issues merely because an older document still describes them as future work.
+Treat already-merged foundations as complete unless current code/tests show a regression or a clearly missing contract. Do not reopen completed historical Issues merely because an older document still describes them as future work.
 
 Company-profile grounding and the cached `LayoutBlueprint` foundation are already implemented foundations. Only reopen them for a specific observed regression or a clearly identified missing contract.
 
-Remaining current priorities:
-
 1. Wire GPT-6 Astra with medium reasoning as the creative planning/prompting model for the active pipeline.
 2. Complete variation planner, including `SO WHAT?` outcome-chain capture, and small-batch selection.
-3. Complete placement-aware format generation, including safe-zone enforcement.
+3. Complete placement-aware format generation, including 9:16, 4:5, and 1:1 variants plus safe-zone enforcement.
 4. Complete save-to-library provenance/metadata across all source paths.
 5. Complete editing/regeneration and version history.
 6. Productionize the local-only video-intelligence/selection path where needed.
-7. Production hardening for the image workflow, including the quality/compliance release gate.
+7. Complete production hardening for the image workflow, including the quality/compliance release gate.
 
-Use GitHub Issues for task-specific acceptance criteria, but verify completion against code/tests and keep every Issue subordinate to the active product direction in this document unless it explicitly records a newer product decision.
+Before delegation, Astra must classify each item as COMPLETE, PARTIAL, NOT STARTED, or BLOCKED based on current code/tests. Detailed orchestration, delegation, and parallel-work rules live in `docs/agent-workflow.md`.
+
+Use GitHub Issues for task-specific acceptance criteria, but verify completion against code/tests and keep every Issue subordinate to the active product direction in this document unless it explicitly records a newer product decision. `docs/roadmap.md` remains long-term/future direction and does not override this section.
