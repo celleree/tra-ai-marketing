@@ -51,6 +51,18 @@ const videoFrameSelection = {
   ],
 };
 
+const planning = {
+  strategy: {
+    category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Busy taxpayer',
+    painPoint: 'Growing notices', desiredOutcome: 'A clear resolution path', emotion: 'Relief',
+    hook: 'Open the letter with confidence', cta: 'Get a consultation', offer: null,
+    soWhat: { surfaceMessage: 'Organize your case', functionalConsequence: 'Understand the next step', meaningfulOutcome: 'Move forward with confidence' },
+    execution: { subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'photographic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' },
+    visualDirection: 'A clean desk and organized documents',
+  },
+  selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium',
+};
+
 describe('parseGenerationResponse', () => {
   it('reports an empty response with its HTTP status', async () => {
     await expect(parseGenerationResponse(response(''))).resolves.toEqual({
@@ -166,12 +178,41 @@ describe('parseGenerationResponse', () => {
     expect(received).toBe('PORTRAIT_4_5');
   });
 
+  it('preserves valid planning metadata in an SSE creative', async () => {
+    let received: unknown;
+    await consumeGenerationEventStream(
+      streamResponse([
+        `event: creative\ndata: {"creative":${JSON.stringify({ ...creative, planning })}}\n\n`,
+      ]),
+      (event) => {
+        if (event.type === 'creative') received = event.creative.planning;
+      }
+    );
+
+    expect(received).toEqual(planning);
+  });
+
   it('rejects a malformed provided placement in an SSE creative', async () => {
     const body = `event: creative\ndata: {"creative":${JSON.stringify({ ...creative, placement: 'LANDSCAPE_16_9' })}}\n\n`;
 
     await expect(
       consumeGenerationEventStream(streamResponse([body]), () => undefined)
     ).rejects.toThrow('Creative generation returned an invalid creative event.');
+  });
+
+  it('rejects malformed provided planning metadata while allowing legacy absence', async () => {
+    const malformed = `event: creative\ndata: {"creative":${JSON.stringify({ ...creative, planning: { ...planning, model: ' ' } })}}\n\n`;
+
+    await expect(
+      consumeGenerationEventStream(streamResponse([malformed]), () => undefined)
+    ).rejects.toThrow('Creative generation returned an invalid creative event.');
+
+    await expect(
+      consumeGenerationEventStream(
+        streamResponse([`event: creative\ndata: {"creative":${JSON.stringify(creative)}}\n\n`]),
+        () => undefined
+      )
+    ).resolves.toBeUndefined();
   });
 
   it.each([

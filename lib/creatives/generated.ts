@@ -1,6 +1,7 @@
 import type { CreativeCategoryId } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import type { CreativePlacement } from '@/lib/creatives/placements';
+import type { CreativePlanningMetadata } from '@/lib/creatives/planning-metadata';
 import type { MediaAsset } from '@/lib/media/types';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 
@@ -26,6 +27,7 @@ export interface GeneratedCreative {
   referenceCategory?: CreativeCategoryId;
   referenceSelectionReason?: string;
   videoFrameSelection?: GeneratedVideoFrameSelection;
+  planning?: CreativePlanningMetadata;
 }
 
 export interface CreativeRecord {

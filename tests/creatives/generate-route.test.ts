@@ -685,7 +685,16 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(firstCall.context).toContain('Composition: single-focus');
     expect(firstCall.context).toContain('Visual direction: Distinct visual direction 1');
     expect(firstCall.context).toContain('This planned concept is explicitly non-human');
-    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+    const creatives = events
+      .filter(({ event }) => event === 'creative')
+      .map(({ data }) => data.creative as { index: number; planning?: unknown });
+    expect(creatives).toHaveLength(2);
+    expect(creatives.find(({ index }) => index === 1)?.planning).toEqual({
+      strategy: plannedCreative(1).strategy,
+      selectionReason: 'Distinct strategic fit 1',
+      model: 'gpt-6-astra',
+      reasoningEffort: 'medium',
+    });
   });
 
   it('allows TRA reference generation with an empty optional reference library', async () => {
