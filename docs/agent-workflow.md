@@ -45,7 +45,25 @@ Live GitHub state is authoritative for current PR HEAD/base/diff/checks. Histori
 
 ## Result handoff
 
-Return concise fields only: `STATUS`, `TASK`, `BRANCH`, `HEAD SHA`, relevant `FILES`, `IMPLEMENTATION/FINDINGS`, `VERIFICATION`, `BLOCKERS`, `DECISIONS NEEDED`, `RISKS/CONFLICTS`, `REMAINING`, `NEXT RECOMMENDED ACTION`, and `PARALLEL-SAFE NEXT WORK`.
+Return these concise fields by default:
+
+- `STATUS`
+- `TASK`
+- `BRANCH`
+- `BASE STAGING SHA` when branch ancestry matters
+- `HEAD SHA`
+- relevant `FILES INSPECTED/CHANGED`
+- `IMPLEMENTATION / FINDINGS`
+- `VERIFICATION`
+- `BLOCKERS`
+- `DECISIONS NEEDED`
+- `SHARED CONTRACTS / AREAS AFFECTED`
+- `RISKS / CONFLICTS`
+- `REMAINING`
+- `NEXT RECOMMENDED ACTION`
+- `PARALLEL-SAFE NEXT WORK`
+
+Use `N/A` where a SHA is not applicable and `NONE` for empty sections. Preserve `BASE STAGING SHA` and `SHARED CONTRACTS / AREAS AFFECTED` because they are important for stale-branch detection, parallel-work coordination, and identifying shared schema/API/storage boundaries.
 
 Do not include raw logs, long diffs, private reasoning, or repeated repository context unless needed to explain a failure.
 
