@@ -31,8 +31,8 @@ npm run build
 - `lib/` — runtime logic, integrations, creative planning, and storage
 - `assets/` / `public/` — approved static assets
 - `knowledge/` — concise business/customer knowledge intended for selective AI use
-- `docs/image-workflow.md` — active Stage 1 image-workflow behavior and current implementation order
-- `docs/roadmap.md` — staged product roadmap and future ordering
+- `docs/image-workflow.md` — active Stage 1 image-workflow product direction and implementation order; read this before older planning
+- `docs/roadmap.md` — staged long-term/future product roadmap
 - `docs/architecture.md` — stable system boundaries
 - `docs/deployment.md` — external deployment/setup requirements
 - `docs/agent-workflow.md` — detailed Codex planning/review/handoff/routing rules; load only when coordination work needs them
@@ -40,4 +40,11 @@ npm run build
 - `.env.example` — canonical environment-variable names and examples
 - `AGENTS.md` — concise repository-wide AI-agent map and invariant rules
 
-Current GitHub Issues contain exact current implementation work and acceptance criteria. Runtime behavior is defined by code/config. `docs/image-workflow.md` governs the active image-generation workflow; `docs/roadmap.md` remains the long-term stage plan.
+When sources disagree, use this hierarchy:
+
+1. Runtime code and tests define what is actually implemented.
+2. `docs/image-workflow.md` defines the active Stage 1 image-product direction and intended architecture.
+3. GitHub Issues are task-specific implementation specs underneath that direction. They override `docs/image-workflow.md` only when they explicitly record a newer product decision and state what they supersede.
+4. `docs/roadmap.md` is long-term/future direction and does not override the active Stage 1 image workflow.
+
+Do not restore old architecture from stale Issues, PR descriptions, roadmap text, or historical planning. The current active image-workflow model decision is GPT-6 Astra with medium reasoning for creative planning/prompting, followed by GPT Image 2 for generation; see `docs/image-workflow.md` for the full current contract.
