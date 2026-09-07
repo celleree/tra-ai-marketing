@@ -12,6 +12,7 @@ import {
 import type { PlannedCreativeFormat } from '@/lib/creatives/generate-request';
 import type { CreativeCopy } from '@/lib/creatives/generated';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import type { StoredMediaFile } from '@/lib/media/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -365,16 +366,6 @@ export async function generateCreativeCopy(
   return copyByIndex;
 }
 
-const logoSafeAreaRules = (reserveLogoArea: boolean) =>
-  reserveLogoArea
-    ? `
-Approved-logo placement:
-- Do NOT draw, imitate, typeset, or invent a TRA logo in the generated image.
-- Leave the upper-left area clear of important text, faces, CTA buttons, and essential imagery: approximately the left 27% of the canvas and top 13% of the canvas.
-- The exact approved TRA logo asset will be composited into that reserved space after image generation. Treat that space as a deliberate brand lockup area.
-`
-    : '';
-
 const buildApprovedTraSourceImagePrompt = (
   primaryFormat: CreativeFormatId,
   secondaryFormat: CreativeFormatId | undefined,
@@ -409,7 +400,8 @@ Approved-source rules:
 - If the output depicts a person, preserve the visible identity from the attached TRA image. Do not invent, replace, blend, or add another person.
 - Do not recreate the attached image verbatim or depend on its old layout unless the text direction explicitly asks for a high-level structural cue.
 - Make the result clearly original and specific to TRA.
-${logoSafeAreaRules(reserveLogoArea)}
+${formatCreativeSafeZoneRules(placement)}
+${reserveLogoArea ? formatCreativeLogoReservation(placement) : ''}
 TRA guardrails:
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
