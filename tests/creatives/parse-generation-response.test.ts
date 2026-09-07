@@ -63,6 +63,30 @@ const planning = {
   selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium',
 };
 
+const generationProvenance = {
+  version: 1,
+  imageGeneration: { prompt: 'Exact provider prompt', model: 'gpt-image-2' },
+  requestedSources: [
+    {
+      role: 'TRA_REFERENCE',
+      mediaId: `media_${'1'.repeat(32)}`,
+      sha256: '2'.repeat(64),
+    },
+  ],
+  attachedSource: {
+    type: 'TRA_REFERENCE_IMAGE',
+    mediaId: `media_${'1'.repeat(32)}`,
+    sha256: '2'.repeat(64),
+  },
+  analysisSources: [
+    { type: 'REFERENCE_LIBRARY', mediaId: `media_${'3'.repeat(32)}` },
+  ],
+  logoOverlaySource: {
+    mediaId: `media_${'4'.repeat(32)}`,
+    sha256: '5'.repeat(64),
+  },
+};
+
 describe('parseGenerationResponse', () => {
   it('reports an empty response with its HTTP status', async () => {
     await expect(parseGenerationResponse(response(''))).resolves.toEqual({
@@ -190,6 +214,40 @@ describe('parseGenerationResponse', () => {
     );
 
     expect(received).toEqual(planning);
+  });
+
+  it('validates and preserves supplied generation provenance in SSE creatives', async () => {
+    let received: unknown;
+    await consumeGenerationEventStream(
+      streamResponse([
+        `event: creative\ndata: {"creative":${JSON.stringify({ ...creative, generationProvenance })}}\n\n`,
+      ]),
+      (event) => {
+        if (event.type === 'creative') received = event.creative.generationProvenance;
+      }
+    );
+
+    expect(received).toEqual(generationProvenance);
+  });
+
+  it('rejects malformed supplied generation provenance while allowing legacy absence', async () => {
+    const malformed = `event: creative\ndata: {"creative":${JSON.stringify({
+      ...creative,
+      generationProvenance: {
+        ...generationProvenance,
+        attachedSource: { ...generationProvenance.attachedSource, sha256: '6'.repeat(64) },
+      },
+    })}}\n\n`;
+
+    await expect(
+      consumeGenerationEventStream(streamResponse([malformed]), () => undefined)
+    ).rejects.toThrow('Creative generation returned an invalid creative event.');
+    await expect(
+      consumeGenerationEventStream(
+        streamResponse([`event: creative\ndata: {"creative":${JSON.stringify(creative)}}\n\n`]),
+        () => undefined
+      )
+    ).resolves.toBeUndefined();
   });
 
   it('rejects a malformed provided placement in an SSE creative', async () => {

@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import {
   analyzeTraSourceCreative,
@@ -22,6 +22,7 @@ import {
   validateGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
+import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
@@ -31,6 +32,7 @@ import {
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import {
   formatLayoutBlueprintForPlanning,
+  LAYOUT_BLUEPRINT_SCHEMA_VERSION,
   type LayoutBlueprint,
 } from '@/lib/layouts/blueprint';
 import {
@@ -55,13 +57,19 @@ import {
 } from '@/lib/video/library-service';
 import { getApprovedSelectedTraVideoFrames } from '@/lib/video/selected-frames';
 import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
-import type { ApprovedTraVideoFrameSet } from '@/lib/video/types';
+import type {
+  ApprovedTraVideoFrame,
+  ApprovedTraVideoFrameSet,
+} from '@/lib/video/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const RENDER_CONCURRENCY = 2;
+
+const sha256 = (buffer: Buffer) =>
+  createHash('sha256').update(buffer).digest('hex');
 
 const encodeSseEvent = (
   encoder: TextEncoder,
@@ -265,6 +273,12 @@ export async function POST(request: Request) {
     }
 
     const generationSourceAsset = findGenerationSource(sourceAssets);
+    const requestedSources: CreativeGenerationProvenance['requestedSources'] =
+      sourceAssets.map((sourceAsset) => ({
+        role: sourceAsset.role,
+        mediaId: sourceAsset.media.id,
+        sha256: sha256(sourceAsset.stored.buffer),
+      }));
     const source =
       generationSourceAsset?.stored.mediaType === 'IMAGE'
         ? generationSourceAsset.stored
@@ -352,6 +366,12 @@ export async function POST(request: Request) {
       );
     }
     const reserveLogoArea = Boolean(brandLogo);
+    const logoOverlaySource = brandLogo && parsed.data.brandLogoMediaId
+      ? {
+          mediaId: parsed.data.brandLogoMediaId,
+          sha256: sha256(brandLogo.buffer),
+        }
+      : undefined;
 
     let analysis: CreativeReferenceAnalysis;
     let layoutBlueprint: ResolvedLayoutBlueprint | null = null;
@@ -452,6 +472,27 @@ export async function POST(request: Request) {
       );
     }
 
+    const analysisSources: CreativeGenerationProvenance['analysisSources'] = [
+      ...(layoutBlueprint && generationSourceAsset
+        ? [
+            {
+              type: 'LAYOUT_REFERENCE' as const,
+              mediaId: generationSourceAsset.media.id,
+              sha256: layoutBlueprint.contentHash,
+              layoutCache: {
+                sourceSha256: layoutBlueprint.contentHash,
+                analyzerModel: layoutBlueprint.analyzerModel,
+                schemaVersion: LAYOUT_BLUEPRINT_SCHEMA_VERSION,
+              },
+            },
+          ]
+        : []),
+      ...selectedReferences.map((selection) => ({
+        type: 'REFERENCE_LIBRARY' as const,
+        mediaId: selection.item.id,
+      })),
+    ];
+
     const renderCreative = async (
       item: PlannedCreativeConcept
     ): Promise<GeneratedCreative> => {
@@ -467,6 +508,7 @@ export async function POST(request: Request) {
           const execution = item.strategy.execution;
           const itemContext = `${parsed.data.context}${videoFrameSet ? `\n\n${modeDirection}` : ''}\n\n${itemHumanDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\n\nPLANNED CREATIVE BRIEF:\nSelection reason: ${item.selectionReason}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.strategy.category]}\nSO WHAT outcome chain:\n- Surface message: ${item.strategy.soWhat.surfaceMessage}\n- Functional consequence: ${item.strategy.soWhat.functionalConsequence}\n- Meaningful customer outcome: ${item.strategy.soWhat.meaningfulOutcome}\nExecution:\n- Subject source: ${execution.subjectSource}\n- Composition: ${execution.composition}\n- Image treatment: ${execution.imageTreatment}\n- Text density: ${execution.textDensity}\n- CTA treatment: ${execution.ctaTreatment}\n- Typography hierarchy: ${execution.typographyHierarchy}\nVisual direction: ${item.strategy.visualDirection}${singleReferenceContract}`;
           let imageResult: ImageGenerationResult;
+          let providerFrames: ApprovedTraVideoFrame[] | undefined;
 
           if (providerImageSource) {
             imageResult = await generateApprovedTraReferenceCreativeImage({
@@ -478,7 +520,7 @@ export async function POST(request: Request) {
               reserveLogoArea,
             });
           } else if (videoFrameSet) {
-            imageResult = await generateApprovedTraVideoFrameCreativeImage({
+            const videoImageResult = await generateApprovedTraVideoFrameCreativeImage({
               frames: videoFrameSet.frames,
               primaryFormat: item.format,
               placement: parsed.data.placement,
@@ -486,6 +528,8 @@ export async function POST(request: Request) {
               copy,
               reserveLogoArea,
             });
+            imageResult = videoImageResult;
+            providerFrames = videoImageResult.providerFrames;
           } else {
             imageResult = await generatePromptOnlyCreativeImage({
               primaryFormat: item.format,
@@ -506,6 +550,38 @@ export async function POST(request: Request) {
             generationSourceAsset?.role === 'LAYOUT_REFERENCE'
               ? generationSourceAsset.media.id
               : undefined;
+          const attachedSource: CreativeGenerationProvenance['attachedSource'] =
+            providerImageSource
+              ? {
+                  type: 'TRA_REFERENCE_IMAGE',
+                  mediaId: providerImageSource.media.id,
+                  sha256: sha256(providerImageSource.stored.buffer),
+                }
+              : providerFrames
+                ? {
+                    type: 'TRA_VIDEO_FRAMES',
+                    mediaId: providerFrames[0].sourceVideoMediaId,
+                    sourceSha256: providerFrames[0].sourceVideoContentHash,
+                    selectionMode: generatedVideoFrameSelection
+                      ? 'USER_SELECTED'
+                      : 'AUTOMATIC',
+                    frames: providerFrames.map((frame) => ({
+                      timestampMs: frame.timestampMs,
+                      approvedPngSha256: frame.frameSha256,
+                    })),
+                  }
+                : null;
+          const generationProvenance: CreativeGenerationProvenance = {
+            version: 1,
+            imageGeneration: {
+              prompt: imageResult.prompt,
+              model: imageResult.model,
+            },
+            requestedSources,
+            attachedSource,
+            analysisSources,
+            ...(logoOverlaySource ? { logoOverlaySource } : {}),
+          };
 
           return {
             id: `creative_${randomUUID().replaceAll('-', '')}`,
@@ -515,6 +591,7 @@ export async function POST(request: Request) {
             placement: parsed.data.placement,
             image,
             copy,
+            generationProvenance,
             planning: {
               strategy: item.strategy,
               selectionReason: item.selectionReason,
