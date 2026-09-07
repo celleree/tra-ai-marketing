@@ -60,8 +60,6 @@ PRs should be the smallest coherent, self-contained change. Canonical thresholds
 - Normal soft ceiling: <=400 substantive changed lines.
 - Split-or-justify when more than 10 substantive files are touched.
 - High-risk work should prefer <=200 substantive lines.
-- If a planned PR is likely to exceed a threshold, attempt to split it before implementation; use stacked PRs when ordered dependencies require them.
-- Generated/lock/snapshot/mechanical bulk changes are not substantive review work; handwritten tests that require reasoning are substantive. AI generation speed is never justification for a larger PR.
 - If splitting would reduce correctness or leave an invalid intermediate state, keep the coherent change together and provide the required justification/review order.
 - Keep unrelated work out of the branch.
 
@@ -83,7 +81,7 @@ By default:
 - MEDIUM: runtime/business logic, APIs, data mappings, storage/creative behavior, external integrations, meaningful dependencies/infrastructure.
 - HIGH: ad spend/publishing, Meta mutation, auth/authz, secrets/security boundaries, destructive production operations, production data/assets/storage, billing, or weakened safeguards.
 
-If risk is genuinely uncertain, choose the higher classification. LOW needs normal verification. MEDIUM requires independent review when runtime behavior or an integration boundary changes. HIGH always requires independent review.
+LOW needs normal verification. MEDIUM requires independent review when runtime behavior or an integration boundary changes. HIGH always requires independent review.
 
 When review is required:
 - reviewer context must be fresh and independent of the implementer;
@@ -107,7 +105,7 @@ Starting points:
 
 Reasoning: Low for straightforward/local work, Medium for normal implementation/investigation, High for difficult ambiguity/integration/consequential review, Extra-high only when clearly justified.
 
-Before using very high reasoning on a lower-tier model, compare the next model tier at Low/Medium and choose the route with lower expected total cost. If a preferred route is unavailable, use the next-cheapest configuration likely to succeed. Repeated repository-specific evidence may override these defaults; do not add routing telemetry/infrastructure solely for hypothetical optimization.
+Before using very high reasoning on a lower-tier model, compare the next model tier at Low/Medium and choose the route with lower expected total cost. If a preferred route is unavailable, use the next-cheapest configuration likely to succeed. Repeated repository-specific evidence may override these defaults.
 
 Do not retry a failed model/reasoning configuration unchanged without new evidence. Escalate only when difficulty, ambiguity, context, risk, or failed verification warrants it.
 
