@@ -5,6 +5,10 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
+import {
+  CREATIVE_PLACEMENT_SPECS,
+  type CreativePlacement,
+} from '@/lib/creatives/placements';
 import type { PlannedCreativeFormat } from '@/lib/creatives/generate-request';
 import type { CreativeCopy } from '@/lib/creatives/generated';
 import type { StoredMediaFile } from '@/lib/media/types';
@@ -373,11 +377,16 @@ Approved-logo placement:
 const buildApprovedTraSourceImagePrompt = (
   primaryFormat: CreativeFormatId,
   secondaryFormat: CreativeFormatId | undefined,
+  placement: CreativePlacement,
   context: string,
   copy: CreativeCopy,
   reserveLogoArea: boolean
-) => `
-Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+) => {
+  const placementSpec = CREATIVE_PLACEMENT_SPECS[placement];
+  return `
+Create an ORIGINAL ${placementSpec.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+
+Compose natively for the ${placementSpec.aspectRatio} canvas (${placementSpec.width}x${placementSpec.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
 The ONE attached image is a validated, TRA-owned reference and is the only raw source image supplied to this generation call. Layout references, external reference-library images, and video frames are not attached.
 
@@ -408,6 +417,7 @@ TRA guardrails:
 - Strong visual hierarchy. Avoid tiny text and clutter.
 - The only company/brand name that may appear is Tax Relief Advocates or TRA.
 `;
+};
 
 const appendImage = (
   formData: FormData,
@@ -423,13 +433,14 @@ const appendImage = (
 
 const generateImageEdit = async (
   prompt: string,
-  images: Array<{ source: StoredMediaFile; fileName: string }>
+  images: Array<{ source: StoredMediaFile; fileName: string }>,
+  providerSize: string
 ): Promise<Buffer> => {
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const formData = new FormData();
   formData.set('model', model);
   formData.set('prompt', prompt);
-  formData.set('size', '1024x1024');
+  formData.set('size', providerSize);
   formData.set('quality', 'high');
   formData.set('output_format', 'png');
 
@@ -462,6 +473,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
   source: StoredMediaFile;
   primaryFormat: CreativeFormatId;
   secondaryFormat?: CreativeFormatId;
+  placement?: CreativePlacement;
   context: string;
   copy: CreativeCopy;
   reserveLogoArea?: boolean;
@@ -470,6 +482,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
     buildApprovedTraSourceImagePrompt(
       args.primaryFormat,
       args.secondaryFormat,
+      args.placement ?? 'SQUARE_1_1',
       args.context,
       args.copy,
       Boolean(args.reserveLogoArea)
@@ -479,6 +492,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
         source: args.source,
         fileName: `approved-tra-source-${args.source.fileName}`,
       },
-    ]
+    ],
+    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize
   );
 }

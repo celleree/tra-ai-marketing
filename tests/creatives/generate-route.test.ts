@@ -186,7 +186,8 @@ const generationRequest = (
   sourceAssets: Array<{ mediaId: string; role: string }>,
   companyProfile?: object,
   variationCount = 2,
-  videoFrameSelection?: object
+  videoFrameSelection?: object,
+  placement?: unknown
 ) =>
   new Request('http://localhost/api/creatives/generate', {
     method: 'POST',
@@ -195,6 +196,7 @@ const generationRequest = (
       sourceAssets,
       ...(companyProfile ? { companyProfile } : {}),
       ...(videoFrameSelection ? { videoFrameSelection } : {}),
+      ...(placement !== undefined ? { placement } : {}),
       context: 'Create compliant TRA concepts.',
       variationCount,
     }),
@@ -327,8 +329,11 @@ describe('layout blueprint and final image-provider boundaries', () => {
       const body = JSON.parse(String(options?.body)) as {
         prompt?: string;
         quality?: string;
+        size?: string;
       };
       expect(body.quality).toBe('high');
+      expect(body.size).toBe('1024x1024');
+      expect(body.prompt).toContain('1:1 canvas (1024x1024)');
       expect(body.prompt).toContain('APPROVED TRA COMPANY CONTEXT');
       expect(body.prompt).toContain('STRUCTURED LAYOUT BLUEPRINT');
       expect(body.prompt).toContain('replace human placeholder geometry with a non-human');
@@ -617,6 +622,31 @@ describe('layout blueprint and final image-provider boundaries', () => {
 });
 
 describe('progressive creative delivery', () => {
+  it('requests and streams a vertical placement for prompt-only generation', async () => {
+    const response = await POST(
+      generationRequest([], undefined, 2, undefined, 'VERTICAL_9_16')
+    );
+    const events = await readStreamEvents(response);
+
+    expect(response.status).toBe(200);
+    for (const [, options] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
+      const body = JSON.parse(String(options?.body)) as {
+        prompt: string;
+        size: string;
+      };
+      expect(body.size).toBe('1152x2048');
+      expect(body.prompt).toContain('9:16 canvas (1152x2048)');
+      expect(body.prompt).toContain('do not crop or stretch a square design');
+    }
+    expect(
+      events
+        .filter(({ event }) => event === 'creative')
+        .every(({ data }) =>
+          (data.creative as { placement?: string }).placement === 'VERTICAL_9_16'
+        )
+    ).toBe(true);
+  });
+
   it('keeps no-source image rendering capped at two concurrent requests', async () => {
     let active = 0;
     let maximumActive = 0;
@@ -704,5 +734,19 @@ describe('progressive creative delivery', () => {
     expect(response.status).toBe(400);
     expect(response.headers.get('content-type')).toContain('application/json');
     await expect(response.json()).resolves.toEqual({ error: 'context is required' });
+  });
+
+  it('rejects an unsupported placement before storage or provider work', async () => {
+    const response = await POST(
+      generationRequest([], undefined, 2, undefined, 'LANDSCAPE_16_9')
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'placement is unsupported',
+    });
+    expect(mocks.getMediaStorage).not.toHaveBeenCalled();
+    expect(mocks.generateCreativeCopy).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

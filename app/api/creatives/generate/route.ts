@@ -24,6 +24,10 @@ import {
   type ValidGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
+import {
+  CREATIVE_PLACEMENT_SPECS,
+  type CreativePlacement,
+} from '@/lib/creatives/placements';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import {
   formatLayoutBlueprintForPlanning,
@@ -127,6 +131,7 @@ const buildLayoutReferenceAnalysis = (
 
 const generatePromptOnlyCreativeImage = async (args: {
   primaryFormat: keyof typeof CREATIVE_FORMAT_LABELS;
+  placement: CreativePlacement;
   context: string;
   copy: CreativeCopy;
   reserveLogoArea: boolean;
@@ -137,6 +142,7 @@ const generatePromptOnlyCreativeImage = async (args: {
   }
 
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+  const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
   const logoDirection = args.reserveLogoArea
     ? `
 Approved-logo placement:
@@ -146,7 +152,9 @@ Approved-logo placement:
 `
     : '';
   const prompt = `
-Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+
+Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
 User direction: ${args.context}
@@ -177,7 +185,7 @@ TRA guardrails:
     body: JSON.stringify({
       model,
       prompt,
-      size: '1024x1024',
+      size: placement.providerSize,
       quality: 'high',
       output_format: 'png',
     }),
@@ -484,6 +492,7 @@ export async function POST(request: Request) {
             imageBuffer = await generateApprovedTraReferenceCreativeImage({
               source: providerImageSource.stored,
               primaryFormat: item.format,
+              placement: parsed.data.placement,
               context: itemContext,
               copy,
               reserveLogoArea,
@@ -492,6 +501,7 @@ export async function POST(request: Request) {
             imageBuffer = await generateApprovedTraVideoFrameCreativeImage({
               frames: videoFrameSet.frames,
               primaryFormat: item.format,
+              placement: parsed.data.placement,
               context: itemContext,
               copy,
               reserveLogoArea,
@@ -499,6 +509,7 @@ export async function POST(request: Request) {
           } else {
             imageBuffer = await generatePromptOnlyCreativeImage({
               primaryFormat: item.format,
+              placement: parsed.data.placement,
               context: itemContext,
               copy,
               reserveLogoArea,
@@ -521,6 +532,7 @@ export async function POST(request: Request) {
             index: item.index,
             category: item.category,
             format: item.format,
+            placement: parsed.data.placement,
             image,
             copy,
             ...(generatedVideoFrameSelection

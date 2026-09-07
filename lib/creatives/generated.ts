@@ -1,5 +1,6 @@
 import type { CreativeCategoryId } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
+import type { CreativePlacement } from '@/lib/creatives/placements';
 import type { MediaAsset } from '@/lib/media/types';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 
@@ -16,6 +17,7 @@ export interface GeneratedCreative {
   index: number;
   category: CreativeCategoryId;
   format: CreativeFormatId;
+  placement?: CreativePlacement;
   image: MediaAsset;
   copy: CreativeCopy;
   source?: CreativeSource;
