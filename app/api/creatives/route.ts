@@ -5,6 +5,7 @@ import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import { parseCreativeIdentity } from '@/lib/creatives/identity';
 import { isCreativePlacement } from '@/lib/creatives/placements';
 import {
   isSafeCreativeId,
@@ -75,6 +76,7 @@ const normalizeCreative = (
   const videoFrameSelection = parseGeneratedVideoFrameSelection(input.videoFrameSelection);
   const planning = parseCreativePlanning(input.planning);
   const generationProvenance = parseCreativeGenerationProvenance(input.generationProvenance);
+  const identity = parseCreativeIdentity(input.identity, id);
   const format =
     typeof input.format === 'string' && isCreativeFormat(input.format)
       ? input.format
@@ -99,6 +101,7 @@ const normalizeCreative = (
     || (input.videoFrameSelection !== undefined && !videoFrameSelection)
     || (input.planning !== undefined && !planning)
     || (input.generationProvenance !== undefined && !generationProvenance)
+    || (input.identity !== undefined && !identity)
   ) {
     return null;
   }
@@ -115,6 +118,7 @@ const normalizeCreative = (
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
     ...(planning ? { planning } : {}),
     ...(generationProvenance ? { generationProvenance } : {}),
+    ...(identity ? { identity } : {}),
   };
 };
 

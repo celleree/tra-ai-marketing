@@ -53,6 +53,13 @@ const generationProvenance: CreativeGenerationProvenance = {
   logoOverlaySource: { mediaId: `media_${'f'.repeat(32)}`, sha256: 'a'.repeat(64) },
 };
 
+const identity = {
+  conceptId: creative.id,
+  parentCreativeId: null,
+  operation: 'GENERATE' as const,
+  fingerprint: 'a'.repeat(64),
+};
+
 beforeEach(() => {
   getMediaStorageMock.mockReset();
   saveCreativeBatchMock.mockReset();
@@ -69,6 +76,16 @@ describe('TRA creatives API validation', () => {
     for (const invalid of [null, { ...generationProvenance, version: 2 }]) {
       expect((await POST(request(JSON.stringify({ creatives: [{ ...creative, generationProvenance: invalid }] })))).status).toBe(400);
     }
+    expect(saveCreativeBatchMock).not.toHaveBeenCalled();
+  });
+
+  it('retains a valid identity and rejects malformed supplied identity', async () => {
+    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue(creative.image) });
+    saveCreativeBatchMock.mockImplementation(async (records) => records);
+    expect((await POST(request(JSON.stringify({ creatives: [{ ...creative, identity }] })))).status).toBe(201);
+    expect(saveCreativeBatchMock).toHaveBeenCalledWith([expect.objectContaining({ identity })]);
+    saveCreativeBatchMock.mockClear();
+    expect((await POST(request(JSON.stringify({ creatives: [{ ...creative, identity: { ...identity, fingerprint: 'A'.repeat(64) } }] })))).status).toBe(400);
     expect(saveCreativeBatchMock).not.toHaveBeenCalled();
   });
 

@@ -83,6 +83,20 @@ const generationProvenance: NonNullable<CreativeRecord['generationProvenance']> 
   logoOverlaySource: { mediaId: `media_${'f'.repeat(32)}`, sha256: 'a'.repeat(64) },
 };
 
+const generatedIdentity = (id: string) => ({
+  conceptId: id,
+  parentCreativeId: null,
+  operation: 'GENERATE' as const,
+  fingerprint: 'a'.repeat(64),
+});
+
+const placementIdentity = (id: string, parentId: string) => ({
+  conceptId: parentId,
+  parentCreativeId: parentId,
+  operation: 'PLACEMENT' as const,
+  fingerprint: 'a'.repeat(64),
+});
+
 beforeEach(() => {
   vi.stubEnv('NODE_ENV', 'test');
   mkdirMock.mockReset().mockResolvedValue(undefined);
@@ -112,6 +126,7 @@ describe('TRA creative storage', () => {
     ['planning', { planning: { ...planning, reasoningEffort: 'high' } }],
     ['generation provenance', { generationProvenance: { ...generationProvenance, version: 2 } }],
     ['null generation provenance', { generationProvenance: null }],
+    ['identity', { identity: { operation: 'GENERATE' } }],
   ])('rejects malformed supplied %s metadata', async (_label, metadata) => {
     await expect(saveCreativeBatch([{ ...record('b', '2026-08-25T12:00:00.000Z'), ...metadata } as CreativeRecord])).rejects.toThrow('One or more creative records are invalid.');
     expect(writeFileMock).not.toHaveBeenCalled();
@@ -137,6 +152,25 @@ describe('TRA creative storage', () => {
       generated[1].id,
       existing.id,
     ]);
+  });
+
+  it('persists a valid derived identity only when its parent already exists', async () => {
+    const parent = { ...record('a', '2026-08-20T12:00:00.000Z'), identity: generatedIdentity(`creative_${'a'.repeat(32)}`) };
+    const child = { ...record('b', '2026-08-25T12:00:00.000Z'), identity: placementIdentity(`creative_${'b'.repeat(32)}`, parent.id) };
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [parent] }));
+    await expect(saveCreativeBatch([child])).resolves.toEqual([child]);
+
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));
+    await expect(saveCreativeBatch([child])).rejects.toThrow('Creative identity transition is invalid.');
+    expect(writeFileMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not use same-batch records as identity parents', async () => {
+    const parent = { ...record('a', '2026-08-20T12:00:00.000Z'), identity: generatedIdentity(`creative_${'a'.repeat(32)}`) };
+    const child = { ...record('b', '2026-08-25T12:00:00.000Z'), identity: placementIdentity(`creative_${'b'.repeat(32)}`, parent.id) };
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));
+    await expect(saveCreativeBatch([parent, child])).rejects.toThrow('Creative identity transition is invalid.');
+    expect(writeFileMock).not.toHaveBeenCalled();
   });
 
   it('rejects duplicate IDs within the submitted batch', async () => {
@@ -222,9 +256,9 @@ describe('TRA creative storage', () => {
 
   it('refetches and merges the latest R2 index after a write conflict', async () => {
     configureR2();
-    const existing = record('a', '2026-08-20T12:00:00.000Z');
+    const existing = { ...record('a', '2026-08-20T12:00:00.000Z'), identity: generatedIdentity(`creative_${'a'.repeat(32)}`) };
     const concurrent = record('c', '2026-08-25T11:59:00.000Z');
-    const generated = record('b', '2026-08-25T12:00:00.000Z');
+    const generated = { ...record('b', '2026-08-25T12:00:00.000Z'), identity: placementIdentity(`creative_${'b'.repeat(32)}`, existing.id) };
     sendMock
       .mockResolvedValueOnce(r2Response([existing], 'etag-1'))
       .mockRejectedValueOnce({
@@ -246,6 +280,7 @@ describe('TRA creative storage', () => {
       concurrent.id,
       existing.id,
     ]);
+    expect(saved.items[0].identity).toEqual(generated.identity);
   });
 
   it('bounds repeated R2 conflict retries', async () => {
