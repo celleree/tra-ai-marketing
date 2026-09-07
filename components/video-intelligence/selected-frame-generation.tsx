@@ -1,6 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
+import type { CreativePlacement } from '@/lib/creatives/placements';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
@@ -35,6 +37,7 @@ export function SelectedFrameGeneration({
   );
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [placement, setPlacement] = useState<CreativePlacement>('SQUARE_1_1');
   const [error, setError] = useState('');
   const [savedCount, setSavedCount] = useState(0);
   const [failures, setFailures] = useState<Record<number, string>>({});
@@ -85,6 +88,7 @@ export function SelectedFrameGeneration({
           ...(companyProfile ? { companyProfile } : {}),
           context: conceptContext,
           variationCount: 2,
+          placement,
         }),
       });
       if (!response.ok || !isGenerationEventStream(response)) {
@@ -176,6 +180,7 @@ export function SelectedFrameGeneration({
         </label>;
       })}
     </fieldset>
+    <CreativePlacementSelect value={placement} onChange={setPlacement} disabled={generating} />
     <button className={styles.primary} type="button" onClick={() => void generate()} disabled={generating || selectedFrameIds.length < 1}>
       {generating ? 'Generating 2 creatives…' : 'Generate 2 creatives from checked frames (uses API)'}
     </button>
