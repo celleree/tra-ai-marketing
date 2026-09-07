@@ -31,10 +31,13 @@ npm run build
 - `lib/` — runtime logic, integrations, creative planning, and storage
 - `assets/` / `public/` — approved static assets
 - `knowledge/` — concise business/customer knowledge intended for selective AI use
-- `docs/roadmap.md` — staged product roadmap and implementation ordering
+- `docs/image-workflow.md` — active Stage 1 image-workflow behavior and current implementation order
+- `docs/roadmap.md` — staged product roadmap and future ordering
 - `docs/architecture.md` — stable system boundaries
 - `docs/deployment.md` — external deployment/setup requirements
+- `docs/agent-workflow.md` — detailed Codex planning/review/handoff/routing rules; load only when coordination work needs them
+- `docs/parallel-coding.md` — parallel-agent rules; load only when parallel execution is being considered
 - `.env.example` — canonical environment-variable names and examples
-- `AGENTS.md` — repository workflow and documentation/context rules for AI coding agents
+- `AGENTS.md` — concise repository-wide AI-agent map and invariant rules
 
-Runtime behavior is defined by code/config. `docs/roadmap.md` defines the staged product direction; GitHub Issues contain current implementation work and acceptance criteria.
+Current GitHub Issues contain exact current implementation work and acceptance criteria. Runtime behavior is defined by code/config. `docs/image-workflow.md` governs the active image-generation workflow; `docs/roadmap.md` remains the long-term stage plan.
