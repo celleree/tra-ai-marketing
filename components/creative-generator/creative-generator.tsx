@@ -222,6 +222,8 @@ export function CreativeGenerator() {
                       format: creative.format,
                       placement: creative.placement,
                       planning: creative.planning,
+                      generationProvenance: creative.generationProvenance,
+                      videoFrameSelection: creative.videoFrameSelection,
                       ...(creative.referenceImageId
                         ? { referenceImageId: creative.referenceImageId }
                         : {}),

@@ -11,6 +11,7 @@ import { isCreativeCategory } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { isCreativePlacement } from '@/lib/creatives/placements';
 import {
   getStoredImageMimeType,
@@ -97,6 +98,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     typeof copy?.description === 'string' ? copy.description : '';
   const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
   const planning = parseCreativePlanning(record.planning);
+  const generationProvenance = parseCreativeGenerationProvenance(record.generationProvenance);
   const format =
     typeof record.format === 'string' && isCreativeFormat(record.format)
       ? record.format
@@ -128,6 +130,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     (referenceImageId !== undefined && !isSafeMediaId(referenceImageId))
     || (record.videoFrameSelection !== undefined && !videoFrameSelection)
     || (record.planning !== undefined && !planning)
+    || (record.generationProvenance !== undefined && !generationProvenance)
   ) {
     return null;
   }
@@ -150,6 +153,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     ...(referenceImageId ? { referenceImageId } : {}),
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
     ...(planning ? { planning } : {}),
+    ...(generationProvenance ? { generationProvenance } : {}),
   };
 };
 
