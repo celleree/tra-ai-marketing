@@ -1,193 +1,140 @@
 # TRA AI Marketing — Active Image Workflow
 
-## Status
+## Status and authority
 
-This is the active implementation scope for the current TRA AI Marketing phase.
+This document is the current product-direction source of truth for the Stage 1 static-image workflow. Its purpose is to prevent older planning from being treated as current when agents or Codex read the repository.
 
-For now, focus only on the static-image creative workflow. Do not implement Claude ad-account management, autonomous Meta decisions, budget optimization, automatic pause/scale behavior, performance dashboards, or autonomous publishing unless explicitly reactivated by a later project decision.
+Use this hierarchy when sources disagree:
 
-The current creative pipeline is:
+1. Runtime code and tests define what is actually implemented now.
+2. `docs/image-workflow.md` defines the active Stage 1 image-product direction and intended architecture.
+3. GitHub Issues define task-specific implementation work and acceptance criteria underneath this direction. An Issue overrides this file only when it explicitly records a newer product decision and states what it supersedes.
+4. `docs/architecture.md` defines stable system boundaries and future-stage architecture; it does not override the active Stage 1 image workflow.
+5. `docs/roadmap.md` is long-term/future direction and does not override this file for active Stage 1 image work.
 
-`User/Kinetiq inputs -> GPT-5.6 Sol creative planning/prompting -> GPT Image 2 generation -> user edit/regenerate -> save to TRA Creatives`
+Do not reopen or restore older architecture merely because it still appears in a stale Issue, roadmap section, PR description, or historical planning note.
 
-There is no separate AI QA/reviewer pass in the current workflow. Keep deterministic technical/compliance safeguards where practical.
+Current Stage 1 scope: static-image creative generation and editing. Do not implement Claude ad-account management, autonomous Meta decisions, budget optimization, automatic pause/scale behavior, performance dashboards, or autonomous publishing unless explicitly reactivated.
+
+The active target creative pipeline is:
+
+`User/Kinetiq inputs -> GPT-6 Astra (medium reasoning) creative planning/prompting -> GPT Image 2 generation -> user review/select -> save to TRA Creatives`
+
+GPT-6 Astra is the current creative-planning/prompting model decision. When this path is wired through the OpenAI Responses API, use model `gpt-6-astra` with `reasoning.effort: medium`. Narrow preprocessing/analyzer tasks may continue to use cheaper models when they reliably satisfy their structured contract.
+
+Claude is not currently required in the active image-generation path. Any roadmap or historical plan that assigns Claude a strategist/orchestrator role is future/deferred architecture unless this document or an explicit newer product-decision Issue reactivates it.
+
+There is no separate AI QA/reviewer pass in the current image workflow. Keep deterministic technical/compliance safeguards where practical.
+
+Editing/regeneration and version history remain implementation work; do not treat them as already shipped merely because they are part of the Stage 1 target scope.
 
 ## Source roles
 
-The Create flow must support multiple explicitly typed source assets.
+The Create flow supports multiple explicitly typed source assets in one request while preserving each asset's role.
 
 ### TRA Video
 
-May supply:
-- people/human identity;
-- messaging/captions;
-- visual context;
-- frames used as approved human references.
+May supply people/human identity, messaging/captions, visual context, and approved human-reference frames.
 
 ### TRA Reference
 
-TRA-owned image or creative.
-
-May supply:
-- people/human identity;
-- TRA-owned imagery;
-- messaging;
-- visual context.
+TRA-owned image/creative. May supply people/human identity, TRA-owned imagery, messaging, and visual context.
 
 ### Layout Reference
 
-Third-party or external static ad used only as a design blueprint.
+Third-party/external ad used only as a design blueprint. It may influence layout, hierarchy, spacing, composition, text density, image/text balance, CTA placement, visual mechanism, typography feel, and image treatment.
 
-May influence:
-- layout;
-- hierarchy;
-- spacing;
-- composition;
-- text density;
-- image/text balance;
-- CTA placement;
-- visual mechanism;
-- typography feel;
-- image treatment.
-
-Must never supply:
-- the reference advertiser's person/model;
-- logo;
-- branding;
-- copy;
-- claims;
-- trademarks.
+It must never supply the external advertiser's person/model, logo, branding, copy, claims, or trademarks to final generation.
 
 ## Human-source invariant
 
 When a generated creative contains a human:
 
 - the human must come from an uploaded TRA Video or TRA Reference;
-- never use the human from a Layout Reference;
-- never invent a pure AI spokesperson/person as a substitute;
-- if no approved TRA human source is available, choose a non-human concept instead;
-- retain source provenance so each human-containing creative can be traced to its approved TRA source.
+- never use a Layout Reference person;
+- never invent a pure-AI spokesperson as a substitute;
+- if no approved TRA human source is available, choose a non-human concept;
+- retain source provenance to the approved TRA source.
 
 This is a hard product requirement.
 
 ## Reference preprocessing
 
-The three source roles do not all flow into final image generation in the same way.
+The source roles do not enter final generation in the same way.
 
-### Layout-reference analysis
+### Layout references
 
-A `LAYOUT_REFERENCE` or external Reference Library ad is analysis-only source material. Its raw pixels may be inspected by a layout-analysis step, but must not be attached to final image generation as content source pixels when those pixels could carry a third-party person/model or other prohibited content.
+A `LAYOUT_REFERENCE` or external Reference Library ad is analysis-only source material. Raw layout-reference pixels may be inspected by the layout-analysis step but must not become content-source pixels in final generation when they could carry third-party identity/content.
 
-Planned architecture:
+Current intended flow:
 
-`LAYOUT_REFERENCE -> low-cost vision/layout analyzer -> cached LayoutBlueprint -> GPT-5.6 Sol creative planning -> image generation`
+`LAYOUT_REFERENCE -> low-cost vision/layout analyzer -> cached LayoutBlueprint -> GPT-6 Astra (medium) planning -> image generation`
 
-The layout analyzer should have a narrow job: identify what the design is doing. Prefer a lower-cost vision-capable model with low reasoning and strict structured output unless testing shows a stronger model is necessary.
+The analyzer has one narrow job: describe reusable design mechanisms. Prefer the cheapest vision-capable route that reliably returns the required strict structured blueprint; do not use a stronger reasoning model unless testing shows it is necessary.
 
-A `LayoutBlueprint` should describe reusable design mechanisms such as:
-- overall composition;
-- subject/person placeholder location without identity;
-- image/text split;
-- headline location and hierarchy;
-- CTA placement/treatment;
-- whitespace;
-- card/overlay positioning;
-- geometric/background mechanisms;
-- typography feel/hierarchy;
-- text density;
-- image/photography/illustration treatment;
-- spacing/alignment.
+The blueprint may contain composition, subject placeholder location without identity, image/text split, hierarchy, CTA treatment, whitespace, overlays, background/geometric mechanisms, typography feel, text density, image treatment, spacing, and alignment.
 
-It must not carry third-party person identity, logo/branding, exact copy, trademarks, unsupported claims, or other unapproved content downstream.
+It must not carry third-party person identity, logo/branding, exact copy, trademarks, or unsupported claims downstream.
 
-Analyze each unchanged layout reference once and cache/reuse the blueprint by media identity and/or content hash where practical.
+Cache/reuse unchanged layout analysis by media identity/content hash where practical.
 
-Detailed deferred work is tracked in GitHub Issue #27.
+### TRA video
 
-### TRA-video preprocessing
+The video preprocessing/selection path is implemented for local development through the merged video-intelligence and selected-frame generation work. It is not yet production-complete. Do not rebuild it from the old deferred Issue #28 description.
 
-A raw `TRA_VIDEO` is an approved source that may eventually supply a human, but raw video should not be treated as though its human pixels have already reached an image-only generation provider.
+Current implemented local flow:
 
-Planned architecture:
+`TRA_VIDEO -> validation/hydration -> candidate extraction -> technical grouping + transcript + visual observations -> source-bound frame library -> user selects 1-3 known representative frames -> fresh approved PNG extraction from original video -> Astra/image generation -> provenance saved with creative`
 
-`TRA_VIDEO -> trusted video probe/validation -> stored approved video -> frame extraction -> representative approved frames -> Sol creative planning / image generation`
+Current invariants:
 
-Future video preprocessing should preserve:
-- frame timestamp;
-- source-video identity/provenance;
-- approved-human eligibility;
-- reusable/cached representative frames.
+- raw video is not itself an approved image-provider input;
+- analysis candidates/thumbnails remain unverified and provider-ineligible;
+- selected generation frames must be re-extracted as fresh approved PNGs from the original server-hydrated TRA video;
+- selected frames retain source-video identity, source hash, candidate/frame identity, and timestamps;
+- invalid, stale, mixed-source, or unknown selections fail before paid generation calls;
+- the local video-intelligence prototype remains development-only until production architecture is explicitly added;
+- unchanged source analysis should be cached/reused rather than repeating provider work.
 
-Do not assume every frame should be persisted. Prefer a bounded representative set once frame-selection criteria are defined. Subtitle/caption extraction may be added later if it materially improves creative planning.
+The layout and video preprocessing systems remain separate:
 
-Detailed deferred work is tracked in GitHub Issue #28.
-
-These preprocessing systems are separate:
 - `TRA_VIDEO -> approved human/reference frames`;
 - `LAYOUT_REFERENCE -> LayoutBlueprint`.
 
-Sol later combines approved TRA context, approved TRA source material, layout instructions, user direction, and variation requirements. The layout analyzer is not a second creative planner.
+GPT-6 Astra combines approved TRA context, approved TRA source pixels, layout instructions, user direction, and variation requirements. The layout analyzer is not a second creative planner.
 
 ## Company and brand grounding
 
-Sol must receive the relevant approved TRA context automatically rather than relying only on logo/colors/fonts.
+GPT-6 Astra must receive relevant approved TRA context automatically rather than relying only on logo/colors/fonts.
 
-Canonical project context includes:
+Canonical context includes:
 - `knowledge/tra-knowledge-base.md`;
 - `knowledge/tra-brand-guidelines.md`;
-- `knowledge/tra-guardrails-summary.md` plus the approved full guardrails source when exact compliance/disclaimer wording is required;
-- `knowledge/customer-insights.md` where relevant;
-- current Company Profile/runtime data when it is more current than static documentation.
+- `knowledge/tra-guardrails-summary.md` plus approved full guardrails when exact wording is required;
+- `knowledge/customer-insights.md` when relevant;
+- current Company Profile/runtime data when newer than static documentation.
 
-Unsupported claims must remain unknown rather than being inferred.
+Unsupported claims remain unknown rather than inferred.
 
-The real TRA logo is the source of truth. Image models must not redraw it; reserve appropriate space and composite the approved logo deterministically.
+The real TRA logo is the source of truth. Image models must not redraw it; reserve space and composite the approved logo deterministically. Preserve its artwork, aspect ratio, colors, shapes, and spacing; proportional resizing is allowed.
 
 ## Variation planner
 
-Sol should plan the batch before image generation.
+GPT-6 Astra plans the batch before image generation using medium reasoning.
 
-Strategic dimensions can include:
-- customer problem;
-- desired outcome;
-- objection;
-- testimonial/proof when approved;
-- statistics when approved;
-- comparison when approved;
-- price/offer positioning;
-- feature-led angle;
-- emotional angle;
-- educational angle;
-- aspirational/lifestyle angle;
-- curiosity;
-- urgency;
-- before/after when supportable;
-- customer persona;
-- awareness stage;
-- core message/hook;
-- CTA/offer framing.
+For each strategic hypothesis, require a concise `SO WHAT?` outcome chain that connects the surface message to a functional consequence and then to a meaningful customer outcome. Use that chain to sharpen the concept rather than treating it as decorative metadata, and retain it with the creative's structured strategy metadata.
 
-Execution dimensions can include:
-- visual archetype;
-- subject;
-- environment;
-- composition/layout;
-- image treatment;
-- photography/illustration treatment;
-- text density;
-- copy structure;
-- image/text balance;
-- graphic treatment;
-- CTA treatment;
-- typography hierarchy.
+Strategic dimensions may include customer problem, desired outcome, objection, approved proof/statistics, comparison, price/offer positioning, feature-led angle, emotional/educational/aspirational/curiosity/urgency framing, before/after when supportable, persona, awareness stage, core message/hook, and CTA/offer framing.
 
-Use Meta/Andromeda-style creative diversification as the practical standard: concepts should represent materially different creative hypotheses, not headline swaps, recolors, person swaps, or minor rearrangements.
+Execution dimensions may include visual archetype, subject, environment, composition/layout, image treatment, photography/illustration treatment, text density, copy structure, image/text balance, graphic treatment, CTA treatment, and typography hierarchy.
+
+Use Meta/Andromeda-style diversification as the practical standard: concepts should be materially different creative hypotheses, not headline swaps, recolors, person swaps, or minor rearrangements.
 
 Nearby concepts should generally differ on at least:
 - 1 strategic dimension; and
 - 2 execution dimensions.
 
-When the user requests fewer images, Sol should not take the first N matrix entries. It should select the highest-leverage set of distinct hypotheses available from the supplied TRA context, proof, source assets, and user direction. Until verified performance data exists, "highest leverage" means strongest strategically distinct hypotheses, not predicted winners.
+For small batches, select the strongest strategically distinct hypotheses available from supplied TRA context, proof, source assets, and user direction. Until verified performance data exists, this means strategic diversity/quality, not predicted winners.
 
 ## Format generation
 
@@ -197,62 +144,88 @@ A liked concept should support placement-specific variants:
 - 1:1;
 - horizontal only when needed.
 
-Variants remain one concept family and should be recomposed for the target aspect ratio rather than naively cropped.
+Variants stay within one concept family and should be recomposed for the target aspect ratio rather than naively cropped.
 
-Preserve:
-- concept identity;
-- human source;
-- message/hypothesis;
-- logo handling;
-- readable hierarchy;
-- CTA readability.
+Preserve concept identity, human source, message/hypothesis, logo handling, readable hierarchy, and CTA readability.
+
+Each placement variant must respect its placement-safe zones so critical text, CTA content, the approved logo, faces, and other essential information are not obscured or cropped by platform UI. Safe zones are composition constraints, not decorative borders.
+
+## Quality and compliance release gate
+
+The absence of a separate AI reviewer does not remove output-quality requirements. Reject/regenerate or clearly surface any creative with a material failure such as:
+
+- obvious AI artifacts or implausible humans;
+- malformed or unreadable text;
+- awkward spacing, conflicting layout, clutter, or weak hierarchy;
+- weak/irrelevant imagery or obvious brand mismatch;
+- unsupported claims or missing required disclaimer;
+- Layout Reference copying or third-party identity/branding transfer;
+- near-duplicate concepts or insufficient dimensional change;
+- placement/safe-zone failure;
+- incorrect/redrawn TRA logo or no viable deterministic logo placement;
+- output that would still require material designer cleanup before use.
+
+Where practical, enforce hard compliance, source-role, identity, schema, logo, and placement/file rules deterministically rather than relying on model judgment.
 
 ## Library and editing
 
-Accepted creatives must be savable to TRA Creatives.
+Accepted creatives must be savable to TRA Creatives with enough structured metadata to reconstruct the experiment and later connect performance/revenue to the exact creative. Retain, where applicable:
 
-Store enough information to retain:
-- Creative ID;
-- source provenance;
-- layout reference provenance;
+- concept-level Creative ID;
+- per-format/media IDs;
+- source type and source/reference identity;
+- selected video-frame provenance and timestamps;
+- layout-reference provenance;
+- parent/child variation lineage;
 - creative fingerprint;
-- generation brief/prompt metadata needed for reproduction;
-- aspect-ratio family;
-- parent/child lineage;
-- edit history.
+- angle, persona, pain point, desired outcome, awareness stage, emotion, hook/message, offer/CTA dimensions;
+- `SO WHAT?` outcome chain;
+- visual direction and execution dimensions;
+- requested/generated placements and aspect ratios;
+- generation model/version and brief/prompt context needed for reproduction;
+- QA/review results;
+- approval/lifecycle state;
+- later Meta IDs plus attribution/performance/revenue identity when those systems exist;
+- edit/version history.
 
-Editing must:
-- start from the selected creative;
-- accept plain-language instructions;
-- preserve unrequested parts as much as practical;
-- never replace the approved TRA human with an invented person or a Layout Reference person;
-- preserve prior versions instead of overwriting them.
+Rejected and paused creatives should remain available when practical as future learning data rather than being silently destroyed.
 
-## Current release-gate checklist
+Editing must start from the selected creative, accept plain-language instructions, preserve unrequested parts where practical, never replace an approved TRA human with an invented/Layout Reference person, and preserve previous versions instead of overwriting them.
 
-The current image workflow is ready when all of the following work end-to-end:
+## Current release gate
 
-- video upload;
-- TRA reference upload;
-- layout reference upload;
-- layout reference produces an on-brand TRA adaptation;
-- generated humans come only from TRA Video or TRA Reference sources;
-- meaningful variation planning follows the strategic/execution matrix;
-- small batches select the strongest distinct hypotheses;
+The current image workflow is ready when these work end-to-end:
+
+- TRA Video, TRA Reference, and Layout Reference inputs, including multiple typed assets where needed;
+- source roles remain separated and provenance is preserved;
+- selected video frames can safely supply approved human pixels to generation;
+- layout references produce on-brand TRA adaptations without carrying external identity/content;
+- generated humans come only from TRA Video or TRA Reference;
+- complete company/brand context reaches GPT-6 Astra;
+- GPT-6 Astra uses medium reasoning for creative planning/prompting;
+- each strategic hypothesis has a retained `SO WHAT?` outcome chain;
+- meaningful variation planning follows strategic/execution dimensions;
+- small batches choose the strongest distinct hypotheses;
+- quality/compliance failures above are rejected, regenerated, or clearly surfaced;
 - 9:16, 4:5, and 1:1 variants can be created from a liked concept;
-- liked creatives can be saved to TRA Creatives;
-- creatives can be edited;
-- previous versions remain stored and traceable.
+- placement variants preserve required safe zones for critical content;
+- liked creatives save to TRA Creatives with provenance/metadata sufficient for future attribution;
+- creatives can be edited while previous versions remain traceable.
 
 ## Immediate implementation order
 
-1. Multi-source media/input foundation: TRA Video, TRA Reference, Layout Reference, multiple assets, role-preserving request contract.
-2. Company-profile/Sol context contract.
-3. Reference preprocessing foundations: layout-reference -> cached `LayoutBlueprint` and TRA-video -> approved representative frames, without duplicating Sol's planning responsibility.
-4. Variation planner and small-batch selection.
-5. Placement-aware format generation.
-6. Save-to-library provenance/metadata.
-7. Editing and version history.
-8. Production hardening for this workflow.
+Treat already-merged foundations as complete unless current code/tests show a regression. Do not reopen completed historical Issues merely because an older document still describes them as future work.
 
-Do not skip to later items while the source-role contract is unresolved. In particular, Issue #26 should establish only the safe source/media foundation; do not pull Issue #27 layout analysis or Issue #28 video frame extraction into that branch.
+Company-profile grounding and the cached `LayoutBlueprint` foundation are already implemented foundations. Only reopen them for a specific observed regression or a clearly identified missing contract.
+
+Remaining current priorities:
+
+1. Wire GPT-6 Astra with medium reasoning as the creative planning/prompting model for the active pipeline.
+2. Complete variation planner, including `SO WHAT?` outcome-chain capture, and small-batch selection.
+3. Complete placement-aware format generation, including safe-zone enforcement.
+4. Complete save-to-library provenance/metadata across all source paths.
+5. Complete editing/regeneration and version history.
+6. Productionize the local-only video-intelligence/selection path where needed.
+7. Production hardening for the image workflow, including the quality/compliance release gate.
+
+Use GitHub Issues for task-specific acceptance criteria, but verify completion against code/tests and keep every Issue subordinate to the active product direction in this document unless it explicitly records a newer product decision.
