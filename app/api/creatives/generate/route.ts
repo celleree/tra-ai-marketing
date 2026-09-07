@@ -23,6 +23,7 @@ import {
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
@@ -540,6 +541,7 @@ export async function POST(request: Request) {
             });
           }
 
+          await validateGeneratedCreativeImage(imageResult.buffer, parsed.data.placement);
           const generatedFile = new File(
             [new Uint8Array(imageResult.buffer)],
             `tra-creative-${item.index}.png`,
@@ -642,7 +644,9 @@ export async function POST(request: Request) {
               failedIndexes.push(item.index);
               emit('error', {
                 index: item.index,
-                error: `Creative ${item.index} could not be generated.`,
+                error: error instanceof GeneratedImageValidationError
+                  ? error.message
+                  : `Creative ${item.index} could not be generated.`,
               });
             }
           }
