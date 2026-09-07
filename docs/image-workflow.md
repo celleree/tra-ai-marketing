@@ -9,7 +9,8 @@ Use this hierarchy when sources disagree:
 1. Runtime code and tests define what is actually implemented now.
 2. `docs/image-workflow.md` defines the active Stage 1 image-product direction and intended architecture.
 3. GitHub Issues define task-specific implementation work and acceptance criteria underneath this direction. An Issue overrides this file only when it explicitly records a newer product decision and states what it supersedes.
-4. `docs/roadmap.md` is long-term/future direction and does not override this file for active Stage 1 image work.
+4. `docs/architecture.md` defines stable system boundaries and future-stage architecture; it does not override the active Stage 1 image workflow.
+5. `docs/roadmap.md` is long-term/future direction and does not override this file for active Stage 1 image work.
 
 Do not reopen or restore older architecture merely because it still appears in a stale Issue, roadmap section, PR description, or historical planning note.
 
@@ -121,6 +122,8 @@ The real TRA logo is the source of truth. Image models must not redraw it; reser
 
 GPT-6 Astra plans the batch before image generation using medium reasoning.
 
+For each strategic hypothesis, require a concise `SO WHAT?` outcome chain that connects the surface message to a functional consequence and then to a meaningful customer outcome. Use that chain to sharpen the concept rather than treating it as decorative metadata, and retain it with the creative's structured strategy metadata.
+
 Strategic dimensions may include customer problem, desired outcome, objection, approved proof/statistics, comparison, price/offer positioning, feature-led angle, emotional/educational/aspirational/curiosity/urgency framing, before/after when supportable, persona, awareness stage, core message/hook, and CTA/offer framing.
 
 Execution dimensions may include visual archetype, subject, environment, composition/layout, image treatment, photography/illustration treatment, text density, copy structure, image/text balance, graphic treatment, CTA treatment, and typography hierarchy.
@@ -145,6 +148,8 @@ Variants stay within one concept family and should be recomposed for the target 
 
 Preserve concept identity, human source, message/hypothesis, logo handling, readable hierarchy, and CTA readability.
 
+Each placement variant must respect its placement-safe zones so critical text, CTA content, the approved logo, faces, and other essential information are not obscured or cropped by platform UI. Safe zones are composition constraints, not decorative borders.
+
 ## Library and editing
 
 Accepted creatives must be savable to TRA Creatives with enough information to retain:
@@ -152,6 +157,7 @@ Accepted creatives must be savable to TRA Creatives with enough information to r
 - source and selected-frame provenance;
 - layout-reference provenance;
 - creative fingerprint;
+- strategic/execution dimensions and the `SO WHAT?` outcome chain;
 - generation brief/prompt metadata needed for reproduction;
 - aspect-ratio family;
 - parent/child lineage;
@@ -170,9 +176,11 @@ The current image workflow is ready when these work end-to-end:
 - generated humans come only from TRA Video or TRA Reference;
 - complete company/brand context reaches GPT-6 Astra;
 - GPT-6 Astra uses medium reasoning for creative planning/prompting;
+- each strategic hypothesis has a retained `SO WHAT?` outcome chain;
 - meaningful variation planning follows strategic/execution dimensions;
 - small batches choose the strongest distinct hypotheses;
 - 9:16, 4:5, and 1:1 variants can be created from a liked concept;
+- placement variants preserve required safe zones for critical content;
 - liked creatives save to TRA Creatives with provenance/metadata;
 - creatives can be edited while previous versions remain traceable.
 
@@ -185,8 +193,8 @@ Company-profile grounding and the cached `LayoutBlueprint` foundation are alread
 Remaining current priorities:
 
 1. Wire GPT-6 Astra with medium reasoning as the creative planning/prompting model for the active pipeline.
-2. Complete variation planner and small-batch selection.
-3. Complete placement-aware format generation.
+2. Complete variation planner, including `SO WHAT?` outcome-chain capture, and small-batch selection.
+3. Complete placement-aware format generation, including safe-zone enforcement.
 4. Complete save-to-library provenance/metadata across all source paths.
 5. Complete editing/regeneration and version history.
 6. Productionize the local-only video-intelligence/selection path where needed.
