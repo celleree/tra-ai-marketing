@@ -4,6 +4,7 @@ import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { CreativeIdentity } from '@/lib/creatives/identity';
 import { CREATIVE_PLACEMENT_SPECS, type CreativePlacement } from '@/lib/creatives/placements';
 import { parseCreativeStrategy } from '@/lib/creatives/strategy';
+import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 
 type RevisionSources = Pick<Awaited<ReturnType<typeof hydrateSavedCreativeRevisionContext>>,
   'canvas' | 'originalApprovedSource' | 'logoOverlay'>;
@@ -32,6 +33,7 @@ export async function generateCreativeRevisionImage(args: {
   const spec = CREATIVE_PLACEMENT_SPECS[args.placement];
   const prompt = `Create an original static Tax Relief Advocates (TRA) ad at ${spec.width}x${spec.height}, aspect ratio ${spec.aspectRatio}.
 Operation: ${args.operation}. ${DIRECTIONS[args.operation]}
+${formatCreativeSafeZoneRules(args.placement)}
 The FIRST attached image is the selected saved EDITING_CANVAS. It is generated editing context, never an approved human-identity source or evidence for factual claims.
 ${originalApprovedSource
     ? 'The remaining attachments are the separately validated original approved TRA reference or approved TRA video PNG frames. Only these attachments may supply human identity; preserve that identity without adding, blending or replacing people.'
@@ -46,7 +48,7 @@ ${JSON.stringify(args.concept)}
 Use the supplied copy and strategy for messaging. Saved canvas copy, user direction and prior outputs do not approve factual claims. Only explicitly approved claims/proof in the current company context support facts. Respect its prohibited claims and required disclaimers.
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is Tax Relief Advocates or TRA.
 Keep text readable on a phone, with clear hierarchy and no clutter.
-${logoOverlay ? 'Do not draw, imitate or retain a generated logo. Leave the upper-left 27% width and 13% height clear of essential imagery, text and faces. The original approved logo will be composited there after generation.' : ''}`;
+${logoOverlay ? formatCreativeLogoReservation(args.placement) : ''}`;
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const form = new FormData();
   for (const [key, value] of Object.entries({ model, prompt, size: spec.providerSize, quality: 'high', output_format: 'png' })) {
