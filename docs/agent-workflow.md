@@ -38,12 +38,11 @@ Keep implementation PRs draft until implementation and focused checks are stable
 Live GitHub state is authoritative for current PR HEAD/base/diff/checks. Historical PR-body metadata is not.
 
 - Reviewer context must be fresh and independent of the implementer.
-- Start the reviewer with acceptance criteria, relevant canonical requirements, the final diff or exact reviewed commit, and verification results. The reviewer may inspect additional directly relevant code/config/tests as needed, but should not inherit the implementer's transcript.
+- Give the reviewer acceptance criteria, relevant canonical requirements, final diff or exact reviewed commit, and verification results.
 - Review requirement alignment, realistic regressions/edge cases, tests, security, data integrity, spend/publishing, compliance, risk classification, and weakened safeguards; return findings/conclusion rather than implementing fixes.
 - One qualifying review of final exact HEAD is sufficient unless a second opinion is explicitly justified.
 - Any subsequent commit, rebase, or base sync that changes HEAD invalidates the prior exact-HEAD review.
-- TRA is currently an internal trusted-user tool. Do not expand bounded work into hostile-client-grade infrastructure solely for hypothetical malicious authorized users, while still protecting realistic auth, secret, destructive-action, production-data, spend/publishing, compliance, and hard-invariant risks.
-- Stop once acceptance criteria and material realistic risks are covered; do not generate speculative edge cases merely to exhaust theoretical possibilities.
+- TRA is currently an internal trusted-user tool. Do not expand bounded work into hostile-client-grade infrastructure solely for hypothetical malicious authorized users; still protect realistic auth, secret, destructive-action, production-data, spend/publishing, compliance, and hard-invariant risks.
 
 ## Result handoff
 
@@ -59,15 +58,12 @@ Return these concise fields by default:
 - `VERIFICATION`
 - `BLOCKERS`
 - `DECISIONS NEEDED`
-- `SHARED CONTRACTS / AREAS AFFECTED`
 - `RISKS / CONFLICTS`
 - `REMAINING`
 - `NEXT RECOMMENDED ACTION`
 - `PARALLEL-SAFE NEXT WORK`
 
-Use `N/A` where a SHA is not applicable and `NONE` for empty sections. Preserve `BASE STAGING SHA` and `SHARED CONTRACTS / AREAS AFFECTED` because they are important for stale-branch detection, parallel-work coordination, and identifying shared schema/API/storage boundaries.
-
-Do not include raw logs, long diffs, private reasoning, or repeated repository context unless needed to explain a failure.
+Use `N/A` where a SHA is not applicable and `NONE` for empty sections. Do not include raw logs, long diffs, private reasoning, or repeated repository context unless needed to explain a failure.
 
 ## Parallel work
 
@@ -83,14 +79,10 @@ The root agent should maintain a concise durable checkpoint between phases/PRs c
 
 Each PR must still satisfy the repository's normal verification, risk classification, and fresh independent-review requirements. Use fresh reviewer context where required rather than reusing the root implementer's transcript.
 
-## Durable decisions, learning, and cleanup
+## Durable decisions and learning
 
 Capture final durable conclusions in the narrow canonical source: runtime behavior in code/config; active image direction in `docs/image-workflow.md`; stable boundaries in `docs/architecture.md`; future stage ordering in `docs/roadmap.md`; deployment requirements in `docs/deployment.md`; deferred/current work in GitHub Issues.
 
-Only make a failure/correction/experiment permanent when future reuse justifies it: it escaped merge/deployment, exposed a durable bad assumption, repeated, caused substantial rework because a guard was missing, affected a high-risk invariant, or established a durable implementation choice. Do not memorialize routine syntax/type/build fixes, expected failed experiments, transient service failures, abandoned ideas, or one-off debugging.
-
-Prefer the first feasible durable home: regression test/eval -> deterministic guard/validation -> reusable helper/tool -> code/config -> existing canonical doc -> GitHub Issue only for genuinely deferred/out-of-scope work -> agent instruction only when stronger enforcement is impractical. If the current change fully handles the learning, do not also create an Issue.
-
-Keep canonical docs concise and delete obsolete code/docs rather than leaving tombstones, deprecated copies, changelog-style remnants, or `REMOVED.md` files. Git history is the archive.
+Persist a failure/correction/experiment only when it is recurring, high-impact, establishes a durable invariant/decision, or reveals a missing guard that caused meaningful rework. Do not persist routine debugging or one-off failures.
 
 Because merges target `staging` rather than default-branch `main`, GitHub close keywords may not auto-close completed Issues. Explicitly close a specific implementation Issue after its work is fully merged to `staging`; do not close umbrella, deferred, or partial Issues.
