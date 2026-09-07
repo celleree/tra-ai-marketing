@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
@@ -230,7 +231,7 @@ const layoutBlueprint: LayoutBlueprint = {
 
 const layoutResolution = {
   blueprint: layoutBlueprint,
-  contentHash: 'layout-content-hash',
+  contentHash: contentHash(PNG),
   analyzerModel: 'gpt-5.6-terra',
   cacheHit: false,
 };
@@ -253,7 +254,8 @@ const generationRequest = (
   companyProfile?: object,
   variationCount = 2,
   videoFrameSelection?: object,
-  placement?: unknown
+  placement?: unknown,
+  requestExtras?: object
 ) =>
   new Request('http://localhost/api/creatives/generate', {
     method: 'POST',
@@ -263,6 +265,7 @@ const generationRequest = (
       ...(companyProfile ? { companyProfile } : {}),
       ...(videoFrameSelection ? { videoFrameSelection } : {}),
       ...(placement !== undefined ? { placement } : {}),
+      ...requestExtras,
       context: 'Create compliant TRA concepts.',
       variationCount,
     }),
@@ -285,6 +288,7 @@ const readStreamEvents = async (response: Response) => {
 
 let storedById: Record<string, StoredCreativeSourceMediaFile>;
 let readMediaById: ReturnType<typeof vi.fn>;
+let readImageById: ReturnType<typeof vi.fn>;
 let saveImage: ReturnType<typeof vi.fn>;
 
 it('returns the exact prompt and resolved model sent for prompt-only generation', async () => {
@@ -317,6 +321,7 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   storedById = {};
   readMediaById = vi.fn(async (id: string) => storedById[id] || null);
+  readImageById = vi.fn(async () => null);
   saveImage = vi.fn(async (_file: File) => {
     const id = mediaId(String(saveImage.mock.calls.length));
     return {
@@ -330,7 +335,7 @@ beforeEach(() => {
   });
   mocks.getMediaStorage.mockReturnValue({
     readMediaById,
-    readImageById: vi.fn(async () => null),
+    readImageById,
     saveImage,
   });
   mocks.getOrAnalyzeLayoutBlueprint.mockResolvedValue(layoutResolution);
@@ -341,30 +346,31 @@ beforeEach(() => {
     async ({ count }: { count: number }) => batchPlan(count)
   );
   mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(imageResult);
-  mocks.generateApprovedTraVideoFrameCreativeImage.mockResolvedValue({
-    ...imageResult,
-    providerFrames: [],
-  });
+  mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(
+    async ({ frames }) => ({ ...imageResult, providerFrames: [frames.at(-1)] })
+  );
   mocks.loadVideoFrameLibrary.mockResolvedValue(null);
   mocks.getApprovedTraVideoFrames.mockImplementation(async (source) => ({
     source,
-    sourceVideoContentHash: 'a'.repeat(64),
+    sourceVideoContentHash: contentHash(source.stored.buffer),
     durationMs: 1_000,
     reused: false,
-    frames: [
-      {
-        frameIndex: 0,
-        timestampMs: 0,
+    frames: [0, 500].map((timestampMs, frameIndex) =>
+      ({
+        frameIndex,
+        timestampMs,
         mimeType: 'image/png',
         buffer: PNG,
+        frameSha256: contentHash(PNG),
+        byteLength: PNG.byteLength,
         sourceRole: 'TRA_VIDEO',
         sourceVideoMediaId: source.media.id,
         sourceVideoFileName: source.media.fileName,
-        sourceVideoContentHash: 'a'.repeat(64),
+        sourceVideoContentHash: contentHash(source.stored.buffer),
         approvedHumanSource: true,
-        cacheKey: `derived/video-frames/${source.media.id}/${'a'.repeat(64)}/frame-000.png`,
-      },
-    ],
+        cacheKey: `derived/video-frames/${source.media.id}/${contentHash(source.stored.buffer)}/frame-${String(frameIndex).padStart(3, '0')}.png`,
+      })
+    ),
   }));
   vi.stubGlobal(
     'fetch',
@@ -398,6 +404,31 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(response.status).toBe(200);
     expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+    for (const { data } of events.filter(({ event }) => event === 'creative')) {
+      const provenance = parseCreativeGenerationProvenance(
+        (data.creative as { generationProvenance?: unknown }).generationProvenance
+      );
+      expect(provenance).toMatchObject({
+        imageGeneration: { model: 'gpt-image-2' },
+        requestedSources: [
+          { role: 'LAYOUT_REFERENCE', mediaId: layoutId, sha256: contentHash(PNG) },
+        ],
+        attachedSource: null,
+        analysisSources: [
+          {
+            type: 'LAYOUT_REFERENCE',
+            mediaId: layoutId,
+            sha256: contentHash(PNG),
+            layoutCache: {
+              sourceSha256: contentHash(PNG),
+              analyzerModel: layoutResolution.analyzerModel,
+              schemaVersion: 1,
+            },
+          },
+        ],
+      });
+      expect(provenance?.imageGeneration.prompt).toContain('STRUCTURED LAYOUT BLUEPRINT');
+    }
     expect(events.at(-1)).toMatchObject({
       event: 'complete',
       data: { requestedCount: 2, successfulCount: 2, failedCount: 0 },
@@ -451,20 +482,55 @@ describe('layout blueprint and final image-provider boundaries', () => {
       )
     ).toEqual([PNG, PNG]);
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+    for (const { data } of events.filter(({ event }) => event === 'creative')) {
+      expect(
+        parseCreativeGenerationProvenance(
+          (data.creative as { generationProvenance?: unknown }).generationProvenance
+        )
+      ).toMatchObject({
+        requestedSources: [
+          { role: 'TRA_VIDEO', mediaId: videoId, sha256: contentHash(MP4) },
+        ],
+        attachedSource: {
+          type: 'TRA_VIDEO_FRAMES',
+          mediaId: videoId,
+          sourceSha256: contentHash(MP4),
+          selectionMode: 'AUTOMATIC',
+          frames: [
+            { timestampMs: 500, approvedPngSha256: contentHash(PNG) },
+          ],
+        },
+      });
+    }
   });
 
   it('regenerates only selected library frames for analysis and image generation and streams their provenance', async () => {
     const videoId = mediaId('9');
     storedById[videoId] = video('9');
     const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
-    const selectedFrames = [{ frameIndex: 0, buffer: PNG }];
+    const selectedFrames = [
+      {
+        frameIndex: 0,
+        timestampMs: 250,
+        mimeType: 'image/png',
+        buffer: PNG,
+        frameSha256: contentHash(PNG),
+        byteLength: PNG.byteLength,
+        sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: videoId,
+        sourceVideoFileName: storedById[videoId].fileName,
+        sourceVideoContentHash,
+        approvedHumanSource: true,
+        cacheKey: `derived/video-frames/${videoId}/${sourceVideoContentHash}/frame-000.png`,
+      },
+    ];
     const selectionProvenance = [
       {
         frameIndex: 0,
         libraryFrameId: LIBRARY_FRAME_ID,
         candidateFrameSha256: 'c'.repeat(64),
         timestampMs: 250,
-        approvedPngSha256: 'd'.repeat(64),
+        approvedPngSha256: contentHash(PNG),
       },
     ];
     const library = {
@@ -518,7 +584,23 @@ describe('layout blueprint and final image-provider boundaries', () => {
           sourceVideoContentHash,
           frames: selectionProvenance,
         },
+        generationProvenance: {
+          attachedSource: {
+            type: 'TRA_VIDEO_FRAMES',
+            mediaId: videoId,
+            sourceSha256: sourceVideoContentHash,
+            selectionMode: 'USER_SELECTED',
+            frames: [
+              { timestampMs: 250, approvedPngSha256: contentHash(PNG) },
+            ],
+          },
+        },
       });
+      expect(
+        parseCreativeGenerationProvenance(
+          (data.creative as { generationProvenance?: unknown }).generationProvenance
+        )
+      ).not.toBeNull();
     }
   });
 
@@ -652,6 +734,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
         { brandGuidelines: { voiceTone: 'Runtime calm and direct.' } }
       )
     );
+    const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
     expect(readMediaById).toHaveBeenCalledTimes(3);
@@ -669,13 +752,36 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(call.context).toContain('STRUCTURED LAYOUT BLUEPRINT');
     }
     expect(fetch).not.toHaveBeenCalled();
+    for (const { data } of events.filter(({ event }) => event === 'creative')) {
+      expect(
+        parseCreativeGenerationProvenance(
+          (data.creative as { generationProvenance?: unknown }).generationProvenance
+        )
+      ).toMatchObject({
+        requestedSources: [
+          { role: 'TRA_REFERENCE', mediaId: traId, sha256: contentHash(PNG) },
+          { role: 'TRA_VIDEO', mediaId: videoId, sha256: contentHash(MP4) },
+          { role: 'LAYOUT_REFERENCE', mediaId: layoutId, sha256: contentHash(PNG) },
+        ],
+        attachedSource: {
+          type: 'TRA_REFERENCE_IMAGE',
+          mediaId: traId,
+          sha256: contentHash(PNG),
+        },
+        analysisSources: [
+          { type: 'LAYOUT_REFERENCE', mediaId: layoutId, sha256: contentHash(PNG) },
+        ],
+      });
+    }
   });
 
   it('uses external library references only as selection metadata', async () => {
     const traId = mediaId('f');
+    const logoId = mediaId('7');
     const firstReference = libraryItem('1');
     const secondReference = libraryItem('2');
     storedById[traId] = image('f');
+    readImageById.mockResolvedValue(image('7'));
     mocks.listReferenceLibrary.mockResolvedValue([
       firstReference,
       secondReference,
@@ -694,7 +800,14 @@ describe('layout blueprint and final image-provider boundaries', () => {
     ]);
 
     const response = await POST(
-      generationRequest([{ mediaId: traId, role: 'TRA_REFERENCE' }])
+      generationRequest(
+        [{ mediaId: traId, role: 'TRA_REFERENCE' }],
+        undefined,
+        2,
+        undefined,
+        undefined,
+        { brandLogoMediaId: logoId }
+      )
     );
     const events = await readStreamEvents(response);
 
@@ -734,6 +847,25 @@ describe('layout blueprint and final image-provider boundaries', () => {
       model: 'gpt-6-astra',
       reasoningEffort: 'medium',
     });
+    for (const { data } of events.filter(({ event }) => event === 'creative')) {
+      expect(
+        parseCreativeGenerationProvenance(
+          (data.creative as { generationProvenance?: unknown }).generationProvenance
+        )
+      ).toMatchObject({
+        requestedSources: [
+          { role: 'TRA_REFERENCE', mediaId: traId, sha256: contentHash(PNG) },
+        ],
+        attachedSource: {
+          type: 'TRA_REFERENCE_IMAGE', mediaId: traId, sha256: contentHash(PNG),
+        },
+        analysisSources: [
+          { type: 'REFERENCE_LIBRARY', mediaId: firstReference.id },
+          { type: 'REFERENCE_LIBRARY', mediaId: secondReference.id },
+        ],
+        logoOverlaySource: { mediaId: logoId, sha256: contentHash(PNG) },
+      });
+    }
   });
 
   it('allows TRA reference generation with an empty optional reference library', async () => {
@@ -787,6 +919,26 @@ describe('layout blueprint and final image-provider boundaries', () => {
 });
 
 describe('progressive creative delivery', () => {
+  it('streams exact prompt-only image provenance without fabricated sources', async () => {
+    const response = await POST(generationRequest([], undefined, 2));
+    const events = await readStreamEvents(response);
+    const creative = events.find(({ event }) => event === 'creative')?.data.creative as {
+      generationProvenance?: unknown;
+    };
+    const provenance = parseCreativeGenerationProvenance(
+      creative.generationProvenance
+    );
+
+    expect(provenance).toMatchObject({
+      version: 1,
+      imageGeneration: { model: 'gpt-image-2' },
+      requestedSources: [],
+      attachedSource: null,
+      analysisSources: [],
+    });
+    expect(provenance?.imageGeneration.prompt).toContain('PLANNED CREATIVE BRIEF');
+  });
+
   it('rejects a genuinely duplicate planner batch before image generation or saving', async () => {
     const duplicate = plannedCreative(2);
     mocks.planCreativeBatch.mockResolvedValue({

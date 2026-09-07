@@ -7,6 +7,7 @@ import {
   type CreativeFormatId,
 } from '@/lib/creative-formats';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
+import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import {
   isCreativePlacement,
@@ -74,6 +75,10 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
     creative.planning === undefined
       ? undefined
       : parseCreativePlanning(creative.planning);
+  const generationProvenance =
+    creative.generationProvenance === undefined
+      ? undefined
+      : parseCreativeGenerationProvenance(creative.generationProvenance);
 
   if (
     typeof creative.id !== 'string' ||
@@ -89,7 +94,8 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
     typeof copy !== 'object' ||
     Array.isArray(copy) ||
     (creative.videoFrameSelection !== undefined && !videoFrameSelection) ||
-    (creative.planning !== undefined && !planning)
+    (creative.planning !== undefined && !planning) ||
+    (creative.generationProvenance !== undefined && !generationProvenance)
   ) {
     return null;
   }
@@ -132,6 +138,7 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
       : {}),
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
     ...(planning ? { planning } : {}),
+    ...(generationProvenance ? { generationProvenance } : {}),
   };
 };
 
