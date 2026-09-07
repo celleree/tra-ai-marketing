@@ -8,7 +8,10 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { isCreativeCategory } from '@/lib/creative-categories';
+import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
+import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { isCreativePlacement } from '@/lib/creatives/placements';
 import {
   getStoredImageMimeType,
   isAllowedImageMimeType,
@@ -93,6 +96,14 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const description =
     typeof copy?.description === 'string' ? copy.description : '';
   const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
+  const planning = parseCreativePlanning(record.planning);
+  const format =
+    typeof record.format === 'string' && isCreativeFormat(record.format)
+      ? record.format
+      : undefined;
+  const placement = isCreativePlacement(record.placement)
+    ? record.placement
+    : undefined;
   const referenceImageId =
     typeof record.referenceImageId === 'string'
       ? record.referenceImageId
@@ -112,8 +123,11 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     !url ||
     !primaryText ||
     !headline ||
+    (record.format !== undefined && !format) ||
+    (record.placement !== undefined && !placement) ||
     (referenceImageId !== undefined && !isSafeMediaId(referenceImageId))
     || (record.videoFrameSelection !== undefined && !videoFrameSelection)
+    || (record.planning !== undefined && !planning)
   ) {
     return null;
   }
@@ -131,8 +145,11 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     },
     category,
     copy: { primaryText, headline, description },
+    ...(format ? { format } : {}),
+    ...(placement ? { placement } : {}),
     ...(referenceImageId ? { referenceImageId } : {}),
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
+    ...(planning ? { planning } : {}),
   };
 };
 

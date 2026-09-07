@@ -215,6 +215,9 @@ export function CreativeGenerator() {
                       image: creative.image,
                       category: creative.category,
                       copy: creative.copy,
+                      format: creative.format,
+                      placement: creative.placement,
+                      planning: creative.planning,
                       ...(creative.referenceImageId
                         ? { referenceImageId: creative.referenceImageId }
                         : {}),
