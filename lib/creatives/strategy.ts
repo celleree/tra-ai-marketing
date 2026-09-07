@@ -1,0 +1,91 @@
+import {
+  CREATIVE_CATEGORIES,
+  isCreativeCategory,
+  type CreativeCategoryId,
+} from '@/lib/creative-categories';
+
+const awarenessStages = ['problem-aware', 'solution-aware', 'service-aware', 'action-ready'] as const;
+const subjectSources = ['approved-tra-human', 'non-human'] as const;
+const compositions = ['single-focus', 'split', 'stacked', 'grid', 'comparison'] as const;
+const imageTreatments = ['photographic', 'illustrative', 'mixed-media', 'minimal-graphic', 'documentary'] as const;
+const textDensities = ['low', 'medium', 'high'] as const;
+const ctaTreatments = ['button', 'banner', 'inline', 'footer'] as const;
+const typographyHierarchies = ['headline-dominant', 'balanced', 'proof-dominant', 'cta-dominant'] as const;
+
+type AwarenessStage = (typeof awarenessStages)[number];
+type SubjectSource = (typeof subjectSources)[number];
+
+export type CreativeStrategy = {
+  category: CreativeCategoryId;
+  awarenessStage: AwarenessStage;
+  persona: string;
+  painPoint: string;
+  desiredOutcome: string;
+  emotion: string;
+  hook: string;
+  cta: string;
+  offer: string | null;
+  soWhat: { surfaceMessage: string; functionalConsequence: string; meaningfulOutcome: string };
+  execution: {
+    subjectSource: SubjectSource;
+    composition: (typeof compositions)[number];
+    imageTreatment: (typeof imageTreatments)[number];
+    textDensity: (typeof textDensities)[number];
+    ctaTreatment: (typeof ctaTreatments)[number];
+    typographyHierarchy: (typeof typographyHierarchies)[number];
+  };
+  visualDirection: string;
+};
+
+const stringSchema = { type: 'string', minLength: 1, maxLength: 1000 };
+const stringFields = ['persona', 'painPoint', 'desiredOutcome', 'emotion', 'hook', 'cta', 'visualDirection'] as const;
+const soWhatFields = ['surfaceMessage', 'functionalConsequence', 'meaningfulOutcome'] as const;
+
+export const CREATIVE_STRATEGY_JSON_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['category', 'awarenessStage', ...stringFields, 'offer', 'soWhat', 'execution'],
+  properties: {
+    category: { type: 'string', enum: CREATIVE_CATEGORIES }, awarenessStage: { type: 'string', enum: awarenessStages },
+    ...Object.fromEntries(stringFields.map((field) => [field, stringSchema])),
+    offer: { anyOf: [stringSchema, { type: 'null' }] },
+    soWhat: { type: 'object', additionalProperties: false, required: soWhatFields,
+      properties: Object.fromEntries(soWhatFields.map((field) => [field, stringSchema])) },
+    execution: { type: 'object', additionalProperties: false,
+      required: ['subjectSource', 'composition', 'imageTreatment', 'textDensity', 'ctaTreatment', 'typographyHierarchy'],
+      properties: { subjectSource: { type: 'string', enum: subjectSources }, composition: { type: 'string', enum: compositions },
+        imageTreatment: { type: 'string', enum: imageTreatments }, textDensity: { type: 'string', enum: textDensities },
+        ctaTreatment: { type: 'string', enum: ctaTreatments }, typographyHierarchy: { type: 'string', enum: typographyHierarchies } } },
+  },
+} as const;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const hasOnly = (value: Record<string, unknown>, keys: readonly string[]) =>
+  Object.keys(value).length === keys.length && keys.every((key) => key in value);
+const isEnum = <T extends readonly string[]>(value: unknown, values: T): value is T[number] =>
+  typeof value === 'string' && values.includes(value as T[number]);
+const parseString = (value: unknown) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= 1000 ? trimmed : null;
+};
+
+export function parseCreativeStrategy(value: unknown, hasApprovedHumanSource: boolean): CreativeStrategy | null {
+  if (!isRecord(value) || !hasOnly(value, [...stringFields, 'category', 'awarenessStage', 'offer', 'soWhat', 'execution'])) return null;
+  if (!isEnum(value.awarenessStage, awarenessStages) || typeof value.category !== 'string' || !isCreativeCategory(value.category)) return null;
+  const strings = Object.fromEntries(stringFields.map((field) => [field, parseString(value[field])])) as Record<(typeof stringFields)[number], string | null>;
+  if (Object.values(strings).some((field) => !field) || (value.offer !== null && !parseString(value.offer))) return null;
+  if (!isRecord(value.soWhat) || !hasOnly(value.soWhat, soWhatFields)) return null;
+  const soWhatValue = value.soWhat;
+  const soWhat = Object.fromEntries(soWhatFields.map((field) => [field, parseString(soWhatValue[field])]));
+  if (Object.values(soWhat).some((field) => !field) || !isRecord(value.execution)) return null;
+  const execution = value.execution;
+  if (!hasOnly(execution, ['subjectSource', 'composition', 'imageTreatment', 'textDensity', 'ctaTreatment', 'typographyHierarchy'])
+    || !isEnum(execution.subjectSource, subjectSources) || !isEnum(execution.composition, compositions)
+    || !isEnum(execution.imageTreatment, imageTreatments) || !isEnum(execution.textDensity, textDensities)
+    || !isEnum(execution.ctaTreatment, ctaTreatments) || !isEnum(execution.typographyHierarchy, typographyHierarchies)
+    || (execution.subjectSource === 'approved-tra-human' && !hasApprovedHumanSource)) return null;
+  return { category: value.category, awarenessStage: value.awarenessStage, ...strings as Record<(typeof stringFields)[number], string>,
+    offer: value.offer === null ? null : parseString(value.offer)!,
+    soWhat: soWhat as CreativeStrategy['soWhat'], execution: execution as CreativeStrategy['execution'] };
+}
