@@ -21,6 +21,19 @@ afterEach(() => {
 });
 
 describe('approved TRA final image-provider boundary', () => {
+  it('gives the reference provider the Stories content and logo bounds', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: TRA_SOURCE_BYTES.toString('base64') }] })));
+    vi.stubGlobal('fetch', fetchMock);
+    await generateApprovedTraReferenceCreativeImage({
+      source, primaryFormat: 'direct-response', placement: 'VERTICAL_9_16', context: 'Approved context',
+      copy: { headline: 'Headline', primaryText: 'Primary', description: '' }, reserveLogoArea: true,
+    });
+    const prompt = (fetchMock.mock.calls[0][1].body as FormData).get('prompt');
+    expect(prompt).toContain('x=70..1081, y=287..1330');
+    expect(prompt).toContain('x=105..401, y=322..546');
+    expect(prompt).not.toContain('left 27%');
+  });
   it('attaches exactly the one approved TRA source passed by the route gate', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const output = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -99,6 +112,7 @@ describe('approved TRA final image-provider boundary', () => {
       frames: [frame],
       primaryFormat: 'direct-response',
       placement: 'VERTICAL_9_16',
+      reserveLogoArea: true,
       context: 'Approved company context',
       copy: {
         headline: 'Get clear next steps',
@@ -110,6 +124,8 @@ describe('approved TRA final image-provider boundary', () => {
     const formData = fetchMock.mock.calls[0][1]?.body as FormData;
     expect(formData.get('size')).toBe('1152x2048');
     expect(String(formData.get('prompt'))).toContain('9:16 canvas (1152x2048)');
+    expect(formData.get('prompt')).toContain('x=70..1081, y=287..1330');
+    expect(formData.get('prompt')).toContain('x=105..401, y=322..546');
     expect(String(formData.get('prompt'))).toContain('rather than cropping or stretching a square design');
     expect(result.prompt).toBe(formData.get('prompt'));
     expect(result.model).toBe(formData.get('model'));

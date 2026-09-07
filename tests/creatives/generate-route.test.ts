@@ -304,7 +304,7 @@ let readMediaById: ReturnType<typeof vi.fn>;
 let readImageById: ReturnType<typeof vi.fn>;
 let saveImage: ReturnType<typeof vi.fn>;
 
-it('returns the exact prompt and resolved model sent for prompt-only generation', async () => {
+it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model and placement rules for prompt-only %s', async (placement) => {
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   vi.stubEnv('OPENAI_IMAGE_MODEL', 'test-image-model');
   const fetchMock = vi.fn().mockResolvedValue(
@@ -317,16 +317,22 @@ it('returns the exact prompt and resolved model sent for prompt-only generation'
 
   const result = await generatePromptOnlyCreativeImage({
     primaryFormat: 'direct-response',
-    placement: 'SQUARE_1_1',
+    placement,
     context: 'Approved prompt-only context',
     copy: { headline: 'Headline', primaryText: 'Primary', description: 'Description' },
-    reserveLogoArea: false,
+    reserveLogoArea: placement === 'VERTICAL_9_16',
   });
   const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
 
   expect(result.buffer).toEqual(PNG);
   expect(result.prompt).toBe(body.prompt);
   expect(result.model).toBe(body.model);
+  if (placement === 'VERTICAL_9_16') {
+    expect(body.prompt).toContain('x=70..1081, y=287..1330');
+    expect(body.prompt).toContain('x=105..401, y=322..546');
+  } else {
+    expect(body.prompt).not.toContain('Stories');
+  }
 });
 
 beforeEach(() => {
