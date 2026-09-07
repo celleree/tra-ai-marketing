@@ -21,15 +21,15 @@ Do not expand into autonomous media buying, winner prediction, budget optimizati
 
 Use the narrowest current source that actually governs the task:
 
-1. Current GitHub Issue/task acceptance criteria.
-2. Runtime source code/config for actual behavior.
-3. `docs/image-workflow.md` for the active image-generation workflow and current implementation order.
-4. `docs/architecture.md` for stable system boundaries.
-5. `docs/roadmap.md` for stage ordering and future direction.
+1. Runtime source code/tests for what is actually implemented.
+2. `docs/image-workflow.md` for the active Stage 1 image-product direction and intended architecture.
+3. Current GitHub Issue/task acceptance criteria underneath that direction; an Issue overrides `docs/image-workflow.md` only when it explicitly records a newer product decision and states what it supersedes.
+4. `docs/architecture.md` for stable system boundaries and future-stage architecture; it does not override the active Stage 1 image workflow.
+5. `docs/roadmap.md` for long-term/future direction; it does not override the active Stage 1 image workflow.
 6. `docs/deployment.md` for external deployment/setup requirements.
 7. `.env.example` for environment-variable names/examples.
 
-If documentation conflicts with executable code/config, code/config is authoritative for current runtime behavior. Correct stale documentation when the conflict represents a durable project-state change.
+Do not restore old architecture from stale Issues, PR descriptions, roadmap text, architecture text, or historical planning. If documentation conflicts with executable code/config about current runtime behavior, code/config is authoritative. Correct stale documentation when the conflict represents a durable project-state change.
 
 ## Context limits
 
