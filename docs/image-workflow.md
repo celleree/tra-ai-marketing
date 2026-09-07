@@ -150,6 +150,8 @@ Preserve concept identity, human source, message/hypothesis, logo handling, read
 
 Each placement variant must respect its placement-safe zones so critical text, CTA content, the approved logo, faces, and other essential information are not obscured or cropped by platform UI. Safe zones are composition constraints, not decorative borders.
 
+Stage 1 9:16 output targets Facebook and Instagram Stories only; Reels are outside this scope. For Stories images, reserve 14% at the top, 35% at the bottom and 6% on each side for platform overlays, following the [Facebook Stories](https://www.facebook.com/business/ads-guide/update/image/facebook-story) and [Instagram Stories](https://www.facebook.com/business/ads-guide/update/image/instagram-story) image guides verified on 2026-09-07. Place essential content and the deterministic original-logo overlay inside that area. Human review must confirm that the final content respects these boundaries; dimensions alone do not certify compliance.
+
 ## Quality and compliance release gate
 
 The absence of a separate AI reviewer does not remove output-quality requirements. Reject/regenerate or clearly surface any creative with a material failure such as:
