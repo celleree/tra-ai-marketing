@@ -46,6 +46,7 @@ const planning = {
 
 const generationProvenance: CreativeGenerationProvenance = {
   version: 1,
+  revision: { parentCreativeId: `creative_${'f'.repeat(32)}`, canvasMediaId: `media_${'a'.repeat(32)}`, canvasSha256: 'a'.repeat(64), instruction: 'Improve headline contrast.' },
   imageGeneration: { prompt: '  Exact provider prompt\nwith retained whitespace  ', model: 'gpt-image-2' },
   requestedSources: [{ role: 'TRA_REFERENCE', mediaId: `media_${'c'.repeat(32)}`, sha256: 'd'.repeat(64) }],
   attachedSource: { type: 'TRA_REFERENCE_IMAGE', mediaId: `media_${'c'.repeat(32)}`, sha256: 'd'.repeat(64) },
