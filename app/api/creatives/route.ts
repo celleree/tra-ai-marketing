@@ -4,6 +4,7 @@ import { isCreativeCategory } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { isCreativePlacement } from '@/lib/creatives/placements';
 import {
   isSafeCreativeId,
@@ -73,6 +74,7 @@ const normalizeCreative = (
     typeof copy?.description === 'string' ? copy.description.trim() : '';
   const videoFrameSelection = parseGeneratedVideoFrameSelection(input.videoFrameSelection);
   const planning = parseCreativePlanning(input.planning);
+  const generationProvenance = parseCreativeGenerationProvenance(input.generationProvenance);
   const format =
     typeof input.format === 'string' && isCreativeFormat(input.format)
       ? input.format
@@ -96,6 +98,7 @@ const normalizeCreative = (
     (referenceImageId !== undefined && !isSafeMediaId(referenceImageId))
     || (input.videoFrameSelection !== undefined && !videoFrameSelection)
     || (input.planning !== undefined && !planning)
+    || (input.generationProvenance !== undefined && !generationProvenance)
   ) {
     return null;
   }
@@ -111,6 +114,7 @@ const normalizeCreative = (
     ...(referenceImageId ? { referenceImageId } : {}),
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
     ...(planning ? { planning } : {}),
+    ...(generationProvenance ? { generationProvenance } : {}),
   };
 };
 

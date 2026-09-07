@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
 const mocks = vi.hoisted(() => ({
+  validateGeneratedCreativeImage: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
   generateApprovedTraReferenceCreativeImage: vi.fn(),
   planCreativeBatch: vi.fn(),
@@ -18,6 +20,11 @@ const mocks = vi.hoisted(() => ({
   getOrAnalyzeLayoutBlueprint: vi.fn(),
   listReferenceLibrary: vi.fn(),
   selectBestReferenceCreatives: vi.fn(),
+}));
+
+vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
+  ...(await original<typeof import('@/lib/creatives/generated-image-validation')>()),
+  validateGeneratedCreativeImage: mocks.validateGeneratedCreativeImage,
 }));
 
 vi.mock('@/lib/ai/openai', () => ({
@@ -318,6 +325,7 @@ it('returns the exact prompt and resolved model sent for prompt-only generation'
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   storedById = {};
   readMediaById = vi.fn(async (id: string) => storedById[id] || null);
@@ -919,6 +927,18 @@ describe('layout blueprint and final image-provider boundaries', () => {
 });
 
 describe('progressive creative delivery', () => {
+  it('surfaces invalid image output without saving it and retains successful siblings', async () => {
+    mocks.validateGeneratedCreativeImage.mockRejectedValueOnce(new GeneratedImageValidationError('Generated image must be 1024x1280. Regenerate this creative.'));
+    const response = await POST(generationRequest([], undefined, 2, undefined, 'PORTRAIT_4_5'));
+    const events = await readStreamEvents(response);
+    expect(mocks.validateGeneratedCreativeImage).toHaveBeenCalledTimes(2);
+    expect(mocks.validateGeneratedCreativeImage).toHaveBeenCalledWith(PNG, 'PORTRAIT_4_5');
+    expect(saveImage).toHaveBeenCalledTimes(1);
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(1);
+    expect(events.find(({ event }) => event === 'error')?.data.error).toContain('Regenerate this creative');
+    expect(events.at(-1)?.data).toMatchObject({ successfulCount: 1, failedCount: 1 });
+  });
+
   it('streams exact prompt-only image provenance without fabricated sources', async () => {
     const response = await POST(generationRequest([], undefined, 2));
     const events = await readStreamEvents(response);

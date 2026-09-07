@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 
 const { getMediaStorageMock, saveCreativeBatchMock } = vi.hoisted(() => ({
   getMediaStorageMock: vi.fn(),
@@ -43,7 +44,34 @@ const planning = {
   }, selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium',
 };
 
+const generationProvenance: CreativeGenerationProvenance = {
+  version: 1,
+  imageGeneration: { prompt: '  Exact provider prompt\nwith retained whitespace  ', model: 'gpt-image-2' },
+  requestedSources: [{ role: 'TRA_REFERENCE', mediaId: `media_${'c'.repeat(32)}`, sha256: 'd'.repeat(64) }],
+  attachedSource: { type: 'TRA_REFERENCE_IMAGE', mediaId: `media_${'c'.repeat(32)}`, sha256: 'd'.repeat(64) },
+  analysisSources: [{ type: 'REFERENCE_LIBRARY', mediaId: `media_${'e'.repeat(32)}` }],
+  logoOverlaySource: { mediaId: `media_${'f'.repeat(32)}`, sha256: 'a'.repeat(64) },
+};
+
+beforeEach(() => {
+  getMediaStorageMock.mockReset();
+  saveCreativeBatchMock.mockReset();
+});
+
 describe('TRA creatives API validation', () => {
+  it('retains full provenance and rejects malformed supplied provenance before saving', async () => {
+    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue(creative.image) });
+    saveCreativeBatchMock.mockImplementation(async (records) => records);
+    const response = await POST(request(JSON.stringify({ creatives: [{ ...creative, generationProvenance }] })));
+    expect(response.status).toBe(201);
+    expect(saveCreativeBatchMock).toHaveBeenCalledWith([expect.objectContaining({ generationProvenance })]);
+    saveCreativeBatchMock.mockClear();
+    for (const invalid of [null, { ...generationProvenance, version: 2 }]) {
+      expect((await POST(request(JSON.stringify({ creatives: [{ ...creative, generationProvenance: invalid }] })))).status).toBe(400);
+    }
+    expect(saveCreativeBatchMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['malformed JSON', '{'],
     ['null', 'null'],
