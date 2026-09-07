@@ -263,14 +263,7 @@ export function CreativeResults({
           pageId: config.pageId,
           destinationUrl: config.destinationUrl,
           dailyBudgetCents: Math.round(config.dailyBudget * 100),
-          creatives: selectedCreatives.map((creative) => ({
-            id: creative.id,
-            imageId: creative.image.id,
-            source: creative.source,
-            category: creative.category,
-            format: creative.format,
-            copy: creative.copy,
-          })),
+          creativeIds: selectedCreatives.map((creative) => creative.id),
         }),
       });
       const payload = await response.json();
