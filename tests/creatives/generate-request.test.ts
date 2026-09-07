@@ -57,7 +57,26 @@ describe('multi-source creative generation request', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.sourceAssets).toEqual([]);
+    expect(result.data.placement).toBe('SQUARE_1_1');
     expectGroundedContext(result.data.context);
+  });
+
+  it('accepts a supported requested placement', () => {
+    const result = validateGenerateCreativeRequest({
+      ...baseRequest,
+      placement: 'PORTRAIT_4_5',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.placement).toBe('PORTRAIT_4_5');
+  });
+
+  it.each([null, '', 'LANDSCAPE_16_9'])('rejects unsupported placement %j', (placement) => {
+    expect(validateGenerateCreativeRequest({ ...baseRequest, placement })).toEqual({
+      success: false,
+      error: 'placement is unsupported',
+    });
   });
 
   it('accepts a strict selected-frame contract for exactly one TRA video', () => {

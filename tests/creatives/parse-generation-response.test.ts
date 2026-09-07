@@ -152,6 +152,28 @@ describe('parseGenerationResponse', () => {
     expect(received).toEqual(videoFrameSelection);
   });
 
+  it('preserves a supported placement in an SSE creative', async () => {
+    let received: unknown;
+    await consumeGenerationEventStream(
+      streamResponse([
+        `event: creative\ndata: {"creative":${JSON.stringify({ ...creative, placement: 'PORTRAIT_4_5' })}}\n\n`,
+      ]),
+      (event) => {
+        if (event.type === 'creative') received = event.creative.placement;
+      }
+    );
+
+    expect(received).toBe('PORTRAIT_4_5');
+  });
+
+  it('rejects a malformed provided placement in an SSE creative', async () => {
+    const body = `event: creative\ndata: {"creative":${JSON.stringify({ ...creative, placement: 'LANDSCAPE_16_9' })}}\n\n`;
+
+    await expect(
+      consumeGenerationEventStream(streamResponse([body]), () => undefined)
+    ).rejects.toThrow('Creative generation returned an invalid creative event.');
+  });
+
   it.each([
     'event: creative\ndata: {"creative":{"index":1}}\n\n',
     'event: error\ndata: {"index":0,"error":"No"}\n\n',
