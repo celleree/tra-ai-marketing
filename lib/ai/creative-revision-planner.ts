@@ -67,7 +67,7 @@ export async function planCreativeRevision(args: {
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, reasoning: { effort: 'medium' }, input: [
+    body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, input: [
       { role: 'system', content: [{ type: 'input_text', text: RULES }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(args) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_creative_revision', strict: true, schema: SCHEMA } } }),

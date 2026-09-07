@@ -28,6 +28,7 @@ describe('single-creative revision planning', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.reasoning).toEqual({ effort: 'medium' });
+    expect(body.store).toBe(false);
     expect(body.text.format.strict).toBe(true);
     expect(JSON.parse(body.input[1].content[0].text)).toEqual(args);
     expect(body.input[0].content[0].text).toContain('not evidence that its claims are approved');
