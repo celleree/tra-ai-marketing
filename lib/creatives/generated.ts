@@ -5,6 +5,7 @@ import type { CreativePlanningMetadata } from '@/lib/creatives/planning-metadata
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import type { MediaAsset } from '@/lib/media/types';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import type { CreativeIdentity } from '@/lib/creatives/identity';
 
 export interface CreativeCopy {
   primaryText: string;
@@ -30,6 +31,7 @@ export interface GeneratedCreative {
   videoFrameSelection?: GeneratedVideoFrameSelection;
   planning?: CreativePlanningMetadata;
   generationProvenance?: CreativeGenerationProvenance;
+  identity?: CreativeIdentity;
 }
 
 export interface CreativeRecord {
@@ -44,4 +46,5 @@ export interface CreativeRecord {
   videoFrameSelection?: GeneratedVideoFrameSelection;
   planning?: CreativePlanningMetadata;
   generationProvenance?: CreativeGenerationProvenance;
+  identity?: CreativeIdentity;
 }

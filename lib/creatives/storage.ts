@@ -12,6 +12,10 @@ import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import {
+  parseCreativeIdentity,
+  validateCreativeIdentityTransition,
+} from '@/lib/creatives/identity';
 import { isCreativePlacement } from '@/lib/creatives/placements';
 import {
   getStoredImageMimeType,
@@ -99,6 +103,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
   const planning = parseCreativePlanning(record.planning);
   const generationProvenance = parseCreativeGenerationProvenance(record.generationProvenance);
+  const identity = parseCreativeIdentity(record.identity, id);
   const format =
     typeof record.format === 'string' && isCreativeFormat(record.format)
       ? record.format
@@ -131,6 +136,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     || (record.videoFrameSelection !== undefined && !videoFrameSelection)
     || (record.planning !== undefined && !planning)
     || (record.generationProvenance !== undefined && !generationProvenance)
+    || (record.identity !== undefined && !identity)
   ) {
     return null;
   }
@@ -154,6 +160,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
     ...(planning ? { planning } : {}),
     ...(generationProvenance ? { generationProvenance } : {}),
+    ...(identity ? { identity } : {}),
   };
 };
 
@@ -298,6 +305,15 @@ const mergeBatch = (
   const existingIds = new Set(index.items.map((record) => record.id));
   if (records.some((record) => existingIds.has(record.id))) {
     throw new Error('A creative with this ID already exists.');
+  }
+  const persistedRecords = new Map(index.items.map((record) => [record.id, record]));
+  for (const record of records) {
+    if (!record.identity) continue;
+    const parentId = record.identity.parentCreativeId;
+    const parent = parentId ? persistedRecords.get(parentId) ?? null : null;
+    if (!validateCreativeIdentityTransition(record.identity, record.id, parent)) {
+      throw new Error('Creative identity transition is invalid.');
+    }
   }
   return { version: 1, items: [...records, ...index.items] };
 };

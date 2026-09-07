@@ -87,6 +87,13 @@ const generationProvenance = {
   },
 };
 
+const identity = {
+  conceptId: `creative_${'b'.repeat(32)}`,
+  parentCreativeId: null,
+  operation: 'GENERATE',
+  fingerprint: 'c'.repeat(64),
+};
+
 describe('parseGenerationResponse', () => {
   it('reports an empty response with its HTTP status', async () => {
     await expect(parseGenerationResponse(response(''))).resolves.toEqual({
@@ -228,6 +235,39 @@ describe('parseGenerationResponse', () => {
     );
 
     expect(received).toEqual(generationProvenance);
+  });
+
+  it('validates and preserves supplied creative identity in SSE creatives', async () => {
+    const identityCreative = { ...creative, id: identity.conceptId, identity };
+    let received: unknown;
+    await consumeGenerationEventStream(
+      streamResponse([
+        `event: creative\ndata: {"creative":${JSON.stringify(identityCreative)}}\n\n`,
+      ]),
+      (event) => {
+        if (event.type === 'creative') received = event.creative.identity;
+      }
+    );
+
+    expect(received).toEqual(identity);
+  });
+
+  it('rejects malformed supplied creative identity while allowing legacy absence', async () => {
+    const malformed = { ...creative, id: identity.conceptId, identity: { ...identity, conceptId: creative.id } };
+    await expect(
+      consumeGenerationEventStream(
+        streamResponse([
+          `event: creative\ndata: {"creative":${JSON.stringify(malformed)}}\n\n`,
+        ]),
+        () => undefined
+      )
+    ).rejects.toThrow('Creative generation returned an invalid creative event.');
+    await expect(
+      consumeGenerationEventStream(
+        streamResponse([`event: creative\ndata: {"creative":${JSON.stringify(creative)}}\n\n`]),
+        () => undefined
+      )
+    ).resolves.toBeUndefined();
   });
 
   it('rejects malformed supplied generation provenance while allowing legacy absence', async () => {

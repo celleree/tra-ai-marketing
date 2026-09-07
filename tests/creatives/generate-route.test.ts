@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import { parseCreativeIdentity } from '@/lib/creatives/identity';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
@@ -957,6 +958,21 @@ describe('progressive creative delivery', () => {
       analysisSources: [],
     });
     expect(provenance?.imageGeneration.prompt).toContain('PLANNED CREATIVE BRIEF');
+  });
+
+  it('streams a GENERATE identity for initial portrait generation', async () => {
+    const response = await POST(generationRequest([], undefined, 2, undefined, 'PORTRAIT_4_5'));
+    const events = await readStreamEvents(response);
+    const creative = events.find(({ event }) => event === 'creative')?.data.creative as {
+      id: string;
+      identity?: unknown;
+    };
+
+    expect(parseCreativeIdentity(creative.identity, creative.id)).toMatchObject({
+      conceptId: creative.id,
+      parentCreativeId: null,
+      operation: 'GENERATE',
+    });
   });
 
   it('rejects a genuinely duplicate planner batch before image generation or saving', async () => {
