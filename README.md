@@ -33,9 +33,8 @@ npm run build
 - `knowledge/` — concise business/customer knowledge intended for selective AI use
 - `docs/image-workflow.md` — active Stage 1 image-workflow product direction and implementation order; read this before older planning
 - `docs/roadmap.md` — staged long-term/future product roadmap
-- `docs/architecture.md` — stable system boundaries
+- `docs/architecture.md` — stable system boundaries and future-stage architecture
 - `docs/deployment.md` — external deployment/setup requirements
-- `docs/agent-workflow.md` — detailed Codex planning/review/handoff/routing rules; load only when coordination work needs them
 - `docs/parallel-coding.md` — parallel-agent rules; load only when parallel execution is being considered
 - `.env.example` — canonical environment-variable names and examples
 - `AGENTS.md` — concise repository-wide AI-agent map and invariant rules
@@ -45,6 +44,7 @@ When sources disagree, use this hierarchy:
 1. Runtime code and tests define what is actually implemented.
 2. `docs/image-workflow.md` defines the active Stage 1 image-product direction and intended architecture.
 3. GitHub Issues are task-specific implementation specs underneath that direction. They override `docs/image-workflow.md` only when they explicitly record a newer product decision and state what they supersede.
-4. `docs/roadmap.md` is long-term/future direction and does not override the active Stage 1 image workflow.
+4. `docs/architecture.md` defines stable system boundaries and future-stage architecture; it does not override the active Stage 1 image workflow.
+5. `docs/roadmap.md` is long-term/future direction and does not override the active Stage 1 image workflow.
 
-Do not restore old architecture from stale Issues, PR descriptions, roadmap text, or historical planning. The current active image-workflow model decision is GPT-6 Astra with medium reasoning for creative planning/prompting, followed by GPT Image 2 for generation; see `docs/image-workflow.md` for the full current contract.
+Do not restore old architecture from stale Issues, PR descriptions, roadmap text, architecture text, or historical planning. The current active image-workflow model decision is GPT-6 Astra with medium reasoning for creative planning/prompting, followed by GPT Image 2 for generation; see `docs/image-workflow.md` for the full current contract.
