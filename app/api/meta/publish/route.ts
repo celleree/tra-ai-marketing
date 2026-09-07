@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import { recordCreativeMetaAttribution } from '@/lib/creatives/attribution';
+import { isSafeCreativeId, listCreatives } from '@/lib/creatives/storage';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { getPublicMediaUrl } from '@/lib/media/storage';
 import {
@@ -28,7 +29,7 @@ interface PublishBody {
   pageId?: string;
   destinationUrl?: string;
   dailyBudgetCents?: number;
-  creatives?: MetaPublishCreativeInput[];
+  creativeIds?: unknown;
 }
 
 const isValidUrl = (value: string) => {
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
     const adAccountId = body.adAccountId?.trim() || '';
     const requestedPageId = body.pageId?.trim() || '';
     const destinationUrl = body.destinationUrl?.trim() || '';
-    const creatives = Array.isArray(body.creatives) ? body.creatives : [];
+    const creativeIds = body.creativeIds;
     const dailyBudgetCents = Number(body.dailyBudgetCents || 2000);
 
     if (!adAccountId || !requestedPageId) {
@@ -85,12 +86,33 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (!creatives.length || creatives.length > 30) {
+    if (!Array.isArray(creativeIds) || !creativeIds.length || creativeIds.length > 30 ||
+      !creativeIds.every((id): id is string => typeof id === 'string' && isSafeCreativeId(id)) ||
+      new Set(creativeIds).size !== creativeIds.length) {
       return NextResponse.json(
-        { error: 'Select between 1 and 30 creatives.' },
+        { error: 'Select between 1 and 30 distinct saved creatives.' },
         { status: 400 }
       );
     }
+
+    // Release the saved image and copy that were reviewed, never client-supplied content.
+    const saved = new Map((await listCreatives()).map(creative => [creative.id, creative]));
+    const blocked = creativeIds.flatMap(id => {
+      const creative = saved.get(id);
+      const reason = !creative ? 'not found' : creative.humanReview?.status !== 'APPROVED'
+        ? 'human review required' : creative.lifecycle?.status === 'PAUSED'
+          ? 'paused in library' : !creative.format ? 'missing saved format' : null;
+      return reason ? [{ id, reason }] : [];
+    });
+    if (blocked.length) return NextResponse.json({
+      error: `Review and activate all selected creatives in TRA Creatives before sending to Meta. Blocked: ${blocked.map(item => `${item.id} (${item.reason})`).join(', ')}.`,
+      blocked,
+    }, { status: 409 });
+    const creatives: MetaPublishCreativeInput[] = creativeIds.map(id => {
+      const creative = saved.get(id)!;
+      return { id, imageId: creative.image.id, category: creative.category,
+        format: creative.format!, source: creative.source ?? 'generated', copy: creative.copy };
+    });
 
     const promotablePages = await listMetaPromotablePages(adAccountId);
     const requestedPage = promotablePages.find((page) => page.id === requestedPageId);
