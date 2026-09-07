@@ -21,3 +21,23 @@ export const CREATIVE_PLACEMENT_SPECS: Readonly<Record<CreativePlacement, Creati
 export function isCreativePlacement(value: unknown): value is CreativePlacement {
   return typeof value === 'string' && CREATIVE_PLACEMENTS.some((placement) => placement === value);
 }
+
+const PLACEMENT_RATIO_TOLERANCE = 0.01;
+
+export function placementForImageDimensions(
+  width: number,
+  height: number
+): CreativePlacement | undefined {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return undefined;
+  }
+
+  const actualRatio = width / height;
+  return CREATIVE_PLACEMENTS.find((placement) => {
+    const [ratioWidth, ratioHeight] = CREATIVE_PLACEMENT_SPECS[placement].aspectRatio
+      .split(':')
+      .map(Number);
+    const expectedRatio = ratioWidth / ratioHeight;
+    return Math.abs(actualRatio - expectedRatio) / expectedRatio <= PLACEMENT_RATIO_TOLERANCE + Number.EPSILON;
+  });
+}

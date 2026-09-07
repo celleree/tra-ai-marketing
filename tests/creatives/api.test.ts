@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import sharp from 'sharp';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 
 const { getMediaStorageMock, saveCreativeBatchMock } = vi.hoisted(() => ({
@@ -114,7 +115,8 @@ describe('TRA creatives API validation', () => {
   });
 
   it('defaults an omitted source to generated and retains uploaded source', async () => {
-    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue(creative.image) });
+    const upload = await sharp({ create: { width: 1000, height: 1000, channels: 3, background: '#123047' } }).png().toBuffer();
+    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue({ ...creative.image, buffer: upload }) });
     saveCreativeBatchMock.mockImplementation(async (records) => records);
 
     expect((await POST(request(JSON.stringify({ creatives: [creative] })))).status).toBe(201);
@@ -124,10 +126,41 @@ describe('TRA creatives API validation', () => {
 
     expect((await POST(request(JSON.stringify({ creatives: [{ ...creative, source: 'uploaded' }] })))).status).toBe(201);
     expect(saveCreativeBatchMock).toHaveBeenLastCalledWith([
-      expect.objectContaining({ source: 'uploaded' }),
+      expect.objectContaining({ source: 'uploaded', placement: 'SQUARE_1_1' }),
     ]);
 
     expect((await POST(request(JSON.stringify({ creatives: [{ ...creative, source: 'manual' }] })))).status).toBe(400);
+  });
+
+  it('derives uploaded placements from stored display dimensions and omits unsupported ratios', async () => {
+    const rotated = await sharp({ create: { width: 1600, height: 900, channels: 3, background: '#123047' } })
+      .jpeg()
+      .withMetadata({ orientation: 6 })
+      .toBuffer();
+    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue({ ...creative.image, fileName: creative.image.fileName.replace('.png', '.jpg'), mimeType: 'image/jpeg', buffer: rotated }) });
+    saveCreativeBatchMock.mockImplementation(async (records) => records);
+    const uploaded = { ...creative, image: { ...creative.image, fileName: creative.image.fileName.replace('.png', '.jpg'), mimeType: 'image/jpeg' }, source: 'uploaded', placement: 'LANDSCAPE_16_9' };
+
+    expect((await POST(request(JSON.stringify({ creatives: [uploaded] })))).status).toBe(201);
+    expect(saveCreativeBatchMock).toHaveBeenLastCalledWith([
+      expect.objectContaining({ source: 'uploaded', placement: 'VERTICAL_9_16' }),
+    ]);
+
+    const unsupported = await sharp({ create: { width: 1200, height: 630, channels: 3, background: '#123047' } }).jpeg().toBuffer();
+    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue({ ...uploaded.image, buffer: unsupported }) });
+    expect((await POST(request(JSON.stringify({ creatives: [uploaded] })))).status).toBe(201);
+    expect(saveCreativeBatchMock).toHaveBeenLastCalledWith([
+      expect.not.objectContaining({ placement: expect.anything() }),
+    ]);
+  });
+
+  it('rejects an unreadable stored upload instead of assigning a placement', async () => {
+    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue({ ...creative.image, buffer: Buffer.from('not-an-image') }) });
+    const response = await POST(request(JSON.stringify({ creatives: [{ ...creative, source: 'uploaded' }] })));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'One or more uploaded creative images could not be read.' });
+    expect(saveCreativeBatchMock).not.toHaveBeenCalled();
   });
 
   it('accepts legacy records without generated metadata and rejects malformed supplied metadata', async () => {
