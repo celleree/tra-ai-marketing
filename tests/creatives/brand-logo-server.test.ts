@@ -17,9 +17,22 @@ describe('server logo composition', () => {
     const pixel = (x: number, y: number) => Array.from(data.subarray((y * width + x) * 4, (y * width + x) * 4 + 4));
     expect(pixel(width - 1, height - 1)).toEqual([17, 34, 51, 255]);
     expect(pixel(0, 0)).toEqual([17, 34, 51, 255]);
-    const left = Math.round(width * 0.03) + Math.round(width * 0.014);
-    const top = Math.round(width * 0.03) + Math.round(height * 0.012);
+    const left = (placement === 'VERTICAL_9_16' ? 70 : 0) + Math.round(width * 0.03) + Math.round(width * 0.014);
+    const top = (placement === 'VERTICAL_9_16' ? 287 : 0) + Math.round(width * 0.03) + Math.round(height * 0.012);
     expect(pixel(left + 2, top + 2)).toEqual([255, 0, 0, 255]);
+    if (placement === 'VERTICAL_9_16') {
+      // Every changed pixel, including the translucent panel, stays out of platform overlays.
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          if (x < 70 || x >= 1082 || y < 287 || y >= 1331) {
+            const offset = (y * width + x) * 4;
+            if (data[offset] !== 17 || data[offset + 1] !== 34 || data[offset + 2] !== 51) {
+              throw new Error(`Logo composition entered Stories overlay area at ${x},${y}`);
+            }
+          }
+        }
+      }
+    }
   });
 
   it('preserves a tall logo aspect ratio and transparent artwork', async () => {

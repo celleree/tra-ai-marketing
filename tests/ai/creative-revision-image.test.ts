@@ -58,6 +58,7 @@ describe('revision image provider', () => {
     await generateCreativeRevisionImage({ ...args(), operation, placement: 'VERTICAL_9_16' });
     expect(body().get('prompt')).toContain(`Operation: ${operation}.`);
     expect(body().get('size')).toBe('1152x2048');
+    expect(body().get('prompt')).toContain('x=70..1081, y=287..1330');
     expect(body().get('model')).toBe('configured-image-model');
   });
   it('rejects human strategy without original approval before spending', async () => {
