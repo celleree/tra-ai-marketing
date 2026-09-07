@@ -34,7 +34,7 @@ describe('approved TRA video-frame provider boundary', () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
-    await generateApprovedTraVideoFrameCreativeImage({
+    const result = await generateApprovedTraVideoFrameCreativeImage({
       frames: makeFrames(),
       primaryFormat: 'direct-response',
       context: 'Approved company context',
@@ -49,6 +49,9 @@ describe('approved TRA video-frame provider boundary', () => {
     expect(formData.get('prompt')).toContain('Raw video is NOT attached');
     expect(formData.get('prompt')).toContain('No layout-reference pixels');
     expect(formData.get('prompt')).toContain(MEDIA_ID);
+    expect(result.prompt).toBe(formData.get('prompt'));
+    expect(result.model).toBe(formData.get('model'));
+    expect(result.providerFrames.map((frame) => frame.frameIndex)).toEqual([0, 2, 5]);
   });
 
   it('rejects forged non-TRA frame provenance before any provider call', async () => {
