@@ -50,7 +50,7 @@ Use this as the default first scope; expand only when evidence requires it.
 - Layout/reference processing -> `lib/layouts/`, `lib/references/`, relevant API routes, `tests/layouts/` / reference tests.
 - Media/storage -> `lib/media/`, `app/api/media/`, `tests/media/`.
 - Meta integration -> `lib/meta/`, `app/api/meta/`, `tests/meta/`.
-- Coordination/review/parallel-work rules -> load `docs/agent-workflow.md`; load `docs/parallel-coding.md` only when parallelism is actually being considered.
+- Planning/meaningful implementation-cycle/coordination/review/parallel-work rules -> load `docs/agent-workflow.md`; load `docs/parallel-coding.md` only when parallelism is actually being considered.
 
 ## PR size and branch safety
 
@@ -91,7 +91,7 @@ When review is required:
 
 Each PR must keep the fields in `.github/pull_request_template.md` current, including acceptance criteria, verification, risk, required independent-review status, and reusable-learning outcome.
 
-Detailed review/handoff rules live in `docs/agent-workflow.md` and should be loaded only for coordination/review work.
+Detailed planning/implementation-cycle/review/handoff rules live in `docs/agent-workflow.md` and should be loaded only for work that needs those rules.
 
 ## Model and reasoning routing
 
