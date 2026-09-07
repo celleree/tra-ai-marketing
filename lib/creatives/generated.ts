@@ -36,6 +36,9 @@ export interface CreativeRecord {
   image: MediaAsset;
   category: CreativeCategoryId;
   copy: CreativeCopy;
+  format?: CreativeFormatId;
+  placement?: CreativePlacement;
   referenceImageId?: string;
   videoFrameSelection?: GeneratedVideoFrameSelection;
+  planning?: CreativePlanningMetadata;
 }

@@ -66,6 +66,14 @@ const configureR2 = () => {
   vi.stubEnv('R2_BUCKET_NAME', 'bucket-name');
 };
 
+const planning: NonNullable<CreativeRecord['planning']> = {
+  strategy: {
+    category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Busy taxpayer', painPoint: 'Growing notices', desiredOutcome: 'A clear resolution path', emotion: 'Relief', hook: 'Open the letter with confidence', cta: 'Get a consultation', offer: null,
+    soWhat: { surfaceMessage: 'We help organize your tax case', functionalConsequence: 'You understand the next step', meaningfulOutcome: 'You can move forward with confidence' },
+    execution: { subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'photographic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'A clean desk and organized documents',
+  }, selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium' as const,
+};
+
 beforeEach(() => {
   vi.stubEnv('NODE_ENV', 'test');
   mkdirMock.mockReset().mockResolvedValue(undefined);
@@ -79,6 +87,25 @@ afterEach(() => {
 });
 
 describe('TRA creative storage', () => {
+  it('round-trips generated metadata while retaining legacy records', async () => {
+    const legacy = record('a', '2026-08-20T12:00:00.000Z');
+    const generated = { ...record('b', '2026-08-25T12:00:00.000Z'), format: 'direct-response' as const, placement: 'PORTRAIT_4_5' as const, planning };
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [legacy] }));
+    await saveCreativeBatch([generated]);
+    const encoded = writeFileMock.mock.calls[0][1] as string;
+    readFileMock.mockResolvedValueOnce(encoded);
+    await expect(listCreatives()).resolves.toEqual([generated, legacy]);
+  });
+
+  it.each([
+    ['format', { format: 'unsupported' }],
+    ['placement', { placement: 'LANDSCAPE_16_9' }],
+    ['planning', { planning: { ...planning, reasoningEffort: 'high' } }],
+  ])('rejects malformed supplied %s metadata', async (_label, metadata) => {
+    await expect(saveCreativeBatch([{ ...record('b', '2026-08-25T12:00:00.000Z'), ...metadata } as CreativeRecord])).rejects.toThrow('One or more creative records are invalid.');
+    expect(writeFileMock).not.toHaveBeenCalled();
+  });
+
   it('merges a generation batch in one read-modify-write cycle', async () => {
     const existing = record('a', '2026-08-20T12:00:00.000Z');
     const generated = [
