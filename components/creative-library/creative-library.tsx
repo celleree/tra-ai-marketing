@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { CreativeRecord } from '@/lib/creatives/generated';
+import { RevisionControls } from '@/components/creative-library/revision-controls';
 import styles from '@/components/creative-generator/creative-results.module.css';
 
 interface CreativeLibraryItem extends CreativeRecord {
@@ -107,6 +108,7 @@ export function CreativeLibrary() {
                     ))}</ul>
                   </details>
                 ) : null}
+                <RevisionControls creative={creative} onSaved={saved => setItems(current => [saved, ...current.filter(item => item.id !== saved.id)])} />
                 {creative.referenceImageId ? (
                   <p className={styles.creativeId}>
                     Reference ID: {creative.referenceImageId}

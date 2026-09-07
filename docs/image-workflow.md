@@ -26,7 +26,7 @@ Claude is not currently required in the active image-generation path. Any roadma
 
 There is no separate AI QA/reviewer pass in the current image workflow. Keep deterministic technical/compliance safeguards where practical.
 
-Editing/regeneration and version history remain implementation work; do not treat them as already shipped merely because they are part of the Stage 1 target scope.
+TRA Creatives supports plain-language edits, regeneration, meaningful variations and placement variants for saved generated creatives with complete identity/planning/source context. Each operation saves a new record and preserves prior versions. Legacy records without that context require a fresh saved generation; selected-video revisions retain the local-only video-intelligence restriction. Saving a version does not constitute human quality/compliance approval.
 
 ## Source roles
 
