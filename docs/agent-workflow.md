@@ -53,6 +53,16 @@ Do not include raw logs, long diffs, private reasoning, or repeated repository c
 
 Default to one implementation agent. Load `docs/parallel-coding.md` only when parallel execution is being considered. Add another implementation agent only when tasks are bounded, independently verifiable, low-overlap, free of unresolved shared-contract dependencies, and likely to save net time.
 
+For subagents, the root agent retains architecture, sequencing, integration, and final acceptance. Route each delegated task independently instead of automatically inheriting the root model/reasoning. Use the minimum number of subagents that materially improves speed, independence, or quality, and avoid overlapping edits unless explicitly coordinated.
+
+## Long-running root/orchestrator sessions
+
+A long-running root/orchestrator session may own multiple roadmap phases or an end-to-end flow when explicitly asked to do so, but it must still execute through bounded checkpoints and the smallest coherent PRs. Persistent ownership is not permission to collapse planning, implementation, testing, review, fixes, and merge into one giant change.
+
+The root agent should maintain a concise durable checkpoint between phases/PRs containing completed scope, important decisions, verification state, unresolved risks, and the next bounded task. Prefer canonical repo sources and these checkpoints over repeatedly reloading broad chat or repository history.
+
+Each PR must still satisfy the repository's normal verification, risk classification, and fresh independent-review requirements. Use fresh reviewer context where required rather than reusing the root implementer's transcript.
+
 ## Durable decisions and issue completion
 
 Capture final durable conclusions in the narrow canonical source: runtime behavior in code/config; active image direction in `docs/image-workflow.md`; stable boundaries in `docs/architecture.md`; future stage ordering in `docs/roadmap.md`; deployment requirements in `docs/deployment.md`; deferred/current work in GitHub Issues.
