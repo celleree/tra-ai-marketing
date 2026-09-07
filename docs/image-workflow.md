@@ -2,17 +2,30 @@
 
 ## Status and authority
 
-This document is the current implementation source of truth for the Stage 1 static-image workflow. When this file conflicts with future-role descriptions in `docs/roadmap.md`, use this file for current implementation work and treat the roadmap description as future direction unless a newer GitHub Issue explicitly changes the decision.
+This document is the current product-direction source of truth for the Stage 1 static-image workflow. Its purpose is to prevent older planning from being treated as current when agents or Codex read the repository.
 
-Current scope only: static-image creative generation and editing. Do not implement Claude ad-account management, autonomous Meta decisions, budget optimization, automatic pause/scale behavior, performance dashboards, or autonomous publishing unless explicitly reactivated.
+Use this hierarchy when sources disagree:
 
-The current creative pipeline is:
+1. Runtime code and tests define what is actually implemented now.
+2. `docs/image-workflow.md` defines the active Stage 1 image-product direction and intended architecture.
+3. GitHub Issues define task-specific implementation work and acceptance criteria underneath this direction. An Issue overrides this file only when it explicitly records a newer product decision and states what it supersedes.
+4. `docs/roadmap.md` is long-term/future direction and does not override this file for active Stage 1 image work.
 
-`User/Kinetiq inputs -> GPT-5.6 Sol creative planning/prompting -> GPT Image 2 generation -> user edit/regenerate -> save to TRA Creatives`
+Do not reopen or restore older architecture merely because it still appears in a stale Issue, roadmap section, PR description, or historical planning note.
 
-Claude is not currently required in the active image-generation path. The roadmap's Claude strategist/orchestrator role is future architecture to validate/reintroduce only when the project explicitly activates it.
+Current Stage 1 scope: static-image creative generation and editing. Do not implement Claude ad-account management, autonomous Meta decisions, budget optimization, automatic pause/scale behavior, performance dashboards, or autonomous publishing unless explicitly reactivated.
+
+The active target creative pipeline is:
+
+`User/Kinetiq inputs -> GPT-6 Astra (medium reasoning) creative planning/prompting -> GPT Image 2 generation -> user review/select -> save to TRA Creatives`
+
+GPT-6 Astra is the current creative-planning/prompting model decision. When this path is wired through the OpenAI Responses API, use model `gpt-6-astra` with `reasoning.effort: medium`. Narrow preprocessing/analyzer tasks may continue to use cheaper models when they reliably satisfy their structured contract.
+
+Claude is not currently required in the active image-generation path. Any roadmap or historical plan that assigns Claude a strategist/orchestrator role is future/deferred architecture unless this document or an explicit newer product-decision Issue reactivates it.
 
 There is no separate AI QA/reviewer pass in the current image workflow. Keep deterministic technical/compliance safeguards where practical.
+
+Editing/regeneration and version history remain implementation work; do not treat them as already shipped merely because they are part of the Stage 1 target scope.
 
 ## Source roles
 
@@ -54,7 +67,7 @@ A `LAYOUT_REFERENCE` or external Reference Library ad is analysis-only source ma
 
 Current intended flow:
 
-`LAYOUT_REFERENCE -> low-cost vision/layout analyzer -> cached LayoutBlueprint -> Sol planning -> image generation`
+`LAYOUT_REFERENCE -> low-cost vision/layout analyzer -> cached LayoutBlueprint -> GPT-6 Astra (medium) planning -> image generation`
 
 The analyzer has one narrow job: describe reusable design mechanisms. Prefer the cheapest vision-capable route that reliably returns the required structured blueprint.
 
@@ -66,11 +79,11 @@ Cache/reuse unchanged layout analysis by media identity/content hash where pract
 
 ### TRA video
 
-The video preprocessing path is implemented locally through the merged video-intelligence/selection work. Do not rebuild it from the old deferred Issue #28 description.
+The video preprocessing/selection path is implemented for local development through the merged video-intelligence and selected-frame generation work. It is not yet production-complete. Do not rebuild it from the old deferred Issue #28 description.
 
-Current flow:
+Current implemented local flow:
 
-`TRA_VIDEO -> validation/hydration -> candidate extraction -> technical grouping + transcript + visual observations -> source-bound frame library -> user selects 1-3 known representative frames -> fresh approved PNG extraction from original video -> Sol/image generation -> provenance saved with creative`
+`TRA_VIDEO -> validation/hydration -> candidate extraction -> technical grouping + transcript + visual observations -> source-bound frame library -> user selects 1-3 known representative frames -> fresh approved PNG extraction from original video -> Astra/image generation -> provenance saved with creative`
 
 Current invariants:
 
@@ -79,7 +92,7 @@ Current invariants:
 - selected generation frames must be re-extracted as fresh approved PNGs from the original server-hydrated TRA video;
 - selected frames retain source-video identity, source hash, candidate/frame identity, and timestamps;
 - invalid, stale, mixed-source, or unknown selections fail before paid generation calls;
-- the local video-intelligence prototype remains development-only unless production architecture is explicitly added later;
+- the local video-intelligence prototype remains development-only until production architecture is explicitly added;
 - unchanged source analysis should be cached/reused rather than repeating provider work.
 
 The layout and video preprocessing systems remain separate:
@@ -87,11 +100,11 @@ The layout and video preprocessing systems remain separate:
 - `TRA_VIDEO -> approved human/reference frames`;
 - `LAYOUT_REFERENCE -> LayoutBlueprint`.
 
-Sol combines approved TRA context, approved TRA source pixels, layout instructions, user direction, and variation requirements. The layout analyzer is not a second creative planner.
+GPT-6 Astra combines approved TRA context, approved TRA source pixels, layout instructions, user direction, and variation requirements. The layout analyzer is not a second creative planner.
 
 ## Company and brand grounding
 
-Sol must receive relevant approved TRA context automatically rather than relying only on logo/colors/fonts.
+GPT-6 Astra must receive relevant approved TRA context automatically rather than relying only on logo/colors/fonts.
 
 Canonical context includes:
 - `knowledge/tra-knowledge-base.md`;
@@ -106,7 +119,7 @@ The real TRA logo is the source of truth. Image models must not redraw it; reser
 
 ## Variation planner
 
-Sol plans the batch before image generation.
+GPT-6 Astra plans the batch before image generation using medium reasoning.
 
 Strategic dimensions may include customer problem, desired outcome, objection, approved proof/statistics, comparison, price/offer positioning, feature-led angle, emotional/educational/aspirational/curiosity/urgency framing, before/after when supportable, persona, awareness stage, core message/hook, and CTA/offer framing.
 
@@ -155,7 +168,8 @@ The current image workflow is ready when these work end-to-end:
 - selected video frames can safely supply approved human pixels to generation;
 - layout references produce on-brand TRA adaptations without carrying external identity/content;
 - generated humans come only from TRA Video or TRA Reference;
-- complete company/brand context reaches Sol;
+- complete company/brand context reaches GPT-6 Astra;
+- GPT-6 Astra uses medium reasoning for creative planning/prompting;
 - meaningful variation planning follows strategic/execution dimensions;
 - small batches choose the strongest distinct hypotheses;
 - 9:16, 4:5, and 1:1 variants can be created from a liked concept;
@@ -166,14 +180,16 @@ The current image workflow is ready when these work end-to-end:
 
 Treat already-merged foundations as complete unless current code/tests show a regression. Do not reopen completed historical Issues merely because an older document still describes them as future work.
 
+Company-profile grounding and the cached `LayoutBlueprint` foundation are already implemented foundations. Only reopen them for a specific observed regression or a clearly identified missing contract.
+
 Remaining current priorities:
 
-1. Complete company-profile/Sol context contract where gaps remain.
-2. Complete layout-reference -> cached `LayoutBlueprint` behavior and downstream safety where gaps remain.
-3. Complete variation planner and small-batch selection.
-4. Complete placement-aware format generation.
-5. Complete save-to-library provenance/metadata across all source paths.
-6. Complete editing/version history.
+1. Wire GPT-6 Astra with medium reasoning as the creative planning/prompting model for the active pipeline.
+2. Complete variation planner and small-batch selection.
+3. Complete placement-aware format generation.
+4. Complete save-to-library provenance/metadata across all source paths.
+5. Complete editing/regeneration and version history.
+6. Productionize the local-only video-intelligence/selection path where needed.
 7. Production hardening for the image workflow.
 
-Use current GitHub Issues for exact acceptance criteria and completion state.
+Use GitHub Issues for task-specific acceptance criteria, but verify completion against code/tests and keep every Issue subordinate to the active product direction in this document unless it explicitly records a newer product decision.
