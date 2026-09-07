@@ -30,7 +30,7 @@ Editing/regeneration and version history remain implementation work; do not trea
 
 ## Source roles
 
-The Create flow supports explicitly typed source assets.
+The Create flow supports multiple explicitly typed source assets in one request while preserving each asset's role.
 
 ### TRA Video
 
@@ -70,7 +70,7 @@ Current intended flow:
 
 `LAYOUT_REFERENCE -> low-cost vision/layout analyzer -> cached LayoutBlueprint -> GPT-6 Astra (medium) planning -> image generation`
 
-The analyzer has one narrow job: describe reusable design mechanisms. Prefer the cheapest vision-capable route that reliably returns the required structured blueprint.
+The analyzer has one narrow job: describe reusable design mechanisms. Prefer the cheapest vision-capable route that reliably returns the required strict structured blueprint; do not use a stronger reasoning model unless testing shows it is necessary.
 
 The blueprint may contain composition, subject placeholder location without identity, image/text split, hierarchy, CTA treatment, whitespace, overlays, background/geometric mechanisms, typography feel, text density, image treatment, spacing, and alignment.
 
@@ -116,7 +116,7 @@ Canonical context includes:
 
 Unsupported claims remain unknown rather than inferred.
 
-The real TRA logo is the source of truth. Image models must not redraw it; reserve space and composite the approved logo deterministically.
+The real TRA logo is the source of truth. Image models must not redraw it; reserve space and composite the approved logo deterministically. Preserve its artwork, aspect ratio, colors, shapes, and spacing; proportional resizing is allowed.
 
 ## Variation planner
 
@@ -150,18 +150,45 @@ Preserve concept identity, human source, message/hypothesis, logo handling, read
 
 Each placement variant must respect its placement-safe zones so critical text, CTA content, the approved logo, faces, and other essential information are not obscured or cropped by platform UI. Safe zones are composition constraints, not decorative borders.
 
+## Quality and compliance release gate
+
+The absence of a separate AI reviewer does not remove output-quality requirements. Reject/regenerate or clearly surface any creative with a material failure such as:
+
+- obvious AI artifacts or implausible humans;
+- malformed or unreadable text;
+- awkward spacing, conflicting layout, clutter, or weak hierarchy;
+- weak/irrelevant imagery or obvious brand mismatch;
+- unsupported claims or missing required disclaimer;
+- Layout Reference copying or third-party identity/branding transfer;
+- near-duplicate concepts or insufficient dimensional change;
+- placement/safe-zone failure;
+- incorrect/redrawn TRA logo or no viable deterministic logo placement;
+- output that would still require material designer cleanup before use.
+
+Where practical, enforce hard compliance, source-role, identity, schema, logo, and placement/file rules deterministically rather than relying on model judgment.
+
 ## Library and editing
 
-Accepted creatives must be savable to TRA Creatives with enough information to retain:
-- Creative ID;
-- source and selected-frame provenance;
+Accepted creatives must be savable to TRA Creatives with enough structured metadata to reconstruct the experiment and later connect performance/revenue to the exact creative. Retain, where applicable:
+
+- concept-level Creative ID;
+- per-format/media IDs;
+- source type and source/reference identity;
+- selected video-frame provenance and timestamps;
 - layout-reference provenance;
+- parent/child variation lineage;
 - creative fingerprint;
-- strategic/execution dimensions and the `SO WHAT?` outcome chain;
-- generation brief/prompt metadata needed for reproduction;
-- aspect-ratio family;
-- parent/child lineage;
-- edit history.
+- angle, persona, pain point, desired outcome, awareness stage, emotion, hook/message, offer/CTA dimensions;
+- `SO WHAT?` outcome chain;
+- visual direction and execution dimensions;
+- requested/generated placements and aspect ratios;
+- generation model/version and brief/prompt context needed for reproduction;
+- QA/review results;
+- approval/lifecycle state;
+- later Meta IDs plus attribution/performance/revenue identity when those systems exist;
+- edit/version history.
+
+Rejected and paused creatives should remain available when practical as future learning data rather than being silently destroyed.
 
 Editing must start from the selected creative, accept plain-language instructions, preserve unrequested parts where practical, never replace an approved TRA human with an invented/Layout Reference person, and preserve previous versions instead of overwriting them.
 
@@ -169,7 +196,7 @@ Editing must start from the selected creative, accept plain-language instruction
 
 The current image workflow is ready when these work end-to-end:
 
-- TRA Video, TRA Reference, and Layout Reference inputs;
+- TRA Video, TRA Reference, and Layout Reference inputs, including multiple typed assets where needed;
 - source roles remain separated and provenance is preserved;
 - selected video frames can safely supply approved human pixels to generation;
 - layout references produce on-brand TRA adaptations without carrying external identity/content;
@@ -179,9 +206,10 @@ The current image workflow is ready when these work end-to-end:
 - each strategic hypothesis has a retained `SO WHAT?` outcome chain;
 - meaningful variation planning follows strategic/execution dimensions;
 - small batches choose the strongest distinct hypotheses;
+- quality/compliance failures above are rejected, regenerated, or clearly surfaced;
 - 9:16, 4:5, and 1:1 variants can be created from a liked concept;
 - placement variants preserve required safe zones for critical content;
-- liked creatives save to TRA Creatives with provenance/metadata;
+- liked creatives save to TRA Creatives with provenance/metadata sufficient for future attribution;
 - creatives can be edited while previous versions remain traceable.
 
 ## Immediate implementation order
@@ -198,6 +226,6 @@ Remaining current priorities:
 4. Complete save-to-library provenance/metadata across all source paths.
 5. Complete editing/regeneration and version history.
 6. Productionize the local-only video-intelligence/selection path where needed.
-7. Production hardening for the image workflow.
+7. Production hardening for the image workflow, including the quality/compliance release gate.
 
 Use GitHub Issues for task-specific acceptance criteria, but verify completion against code/tests and keep every Issue subordinate to the active product direction in this document unless it explicitly records a newer product decision.
