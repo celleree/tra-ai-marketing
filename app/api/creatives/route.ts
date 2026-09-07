@@ -6,7 +6,7 @@ import type { CreativeRecord } from '@/lib/creatives/generated';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { parseCreativeIdentity } from '@/lib/creatives/identity';
-import { isCreativePlacement } from '@/lib/creatives/placements';
+import { isCreativePlacement, placementForImageDimensions } from '@/lib/creatives/placements';
 import {
   isSafeCreativeId,
   listCreatives,
@@ -21,8 +21,22 @@ import {
   isAllowedImageMimeType,
   isSafeMediaId,
 } from '@/lib/media/storage';
+import sharp from 'sharp';
 
 export const runtime = 'nodejs';
+
+class InvalidUploadedCreativeImageError extends Error {}
+
+const placementForStoredUpload = async (buffer: Buffer) => {
+  try {
+    const { autoOrient } = await sharp(buffer, { failOn: 'warning' }).metadata();
+    return placementForImageDimensions(autoOrient.width, autoOrient.height);
+  } catch {
+    throw new InvalidUploadedCreativeImageError(
+      'One or more uploaded creative images could not be read.'
+    );
+  }
+};
 
 const normalizeMediaAsset = (value: unknown): MediaAsset | null => {
   if (!value || typeof value !== 'object') return null;
@@ -186,9 +200,18 @@ export async function POST(request: Request) {
     }
 
     const createdAt = new Date().toISOString();
-    const records = rawCreatives.map((creative) =>
-      normalizeCreative(creative, createdAt)
-    );
+    const records = rawCreatives.map((creative) => {
+      if (
+        creative &&
+        typeof creative === 'object' &&
+        !Array.isArray(creative) &&
+        (creative as Record<string, unknown>).source === 'uploaded'
+      ) {
+        const { placement: _placement, ...uploadedCreative } = creative as Record<string, unknown>;
+        return normalizeCreative(uploadedCreative, createdAt);
+      }
+      return normalizeCreative(creative, createdAt);
+    });
     if (records.some((record) => !record)) {
       return NextResponse.json(
         { error: 'One or more completed creatives were invalid.' },
@@ -215,17 +238,26 @@ export async function POST(request: Request) {
       );
     }
 
+    const recordsWithDerivedUploadPlacement = await Promise.all(
+      validRecords.map(async (record, index) => {
+        if (record.source !== 'uploaded') return record;
+        const placement = await placementForStoredUpload(storedImages[index]!.buffer);
+        return { ...record, ...(placement ? { placement } : {}) };
+      })
+    );
+
     return NextResponse.json(
-      { items: await saveCreativeBatch(validRecords) },
+      { items: await saveCreativeBatch(recordsWithDerivedUploadPlacement) },
       { status: 201 }
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
+    const invalidUpload = error instanceof InvalidUploadedCreativeImageError;
     const duplicate = message.includes('already exists') || message.includes('unique');
     console.error('Could not save TRA creatives', error);
     return NextResponse.json(
-      { error: duplicate ? message : 'TRA creatives could not be saved.' },
-      { status: duplicate ? 409 : 500 }
+      { error: invalidUpload || duplicate ? message : 'TRA creatives could not be saved.' },
+      { status: invalidUpload ? 400 : duplicate ? 409 : 500 }
     );
   }
 }

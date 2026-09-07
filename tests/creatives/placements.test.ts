@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CREATIVE_PLACEMENTS, CREATIVE_PLACEMENT_SPECS, isCreativePlacement } from '@/lib/creatives/placements';
+import { CREATIVE_PLACEMENTS, CREATIVE_PLACEMENT_SPECS, isCreativePlacement, placementForImageDimensions } from '@/lib/creatives/placements';
 
 describe('creative placement dimensions', () => {
   it.each(CREATIVE_PLACEMENTS)('renders %s at its exact ratio within provider limits', (placement) => {
@@ -27,5 +27,19 @@ describe('creative placement dimensions', () => {
     for (const value of ['proof', 'educational', '1024x1536', '9:16', '', null, {}, 1]) {
       expect(isCreativePlacement(value)).toBe(false);
     }
+  });
+
+  it.each([
+    [1000, 1000, 'SQUARE_1_1'],
+    [1080, 1350, 'PORTRAIT_4_5'],
+    [1080, 1920, 'VERTICAL_9_16'],
+    [1010, 1000, 'SQUARE_1_1'],
+  ])('derives %s by %s as %s', (width, height, placement) => {
+    expect(placementForImageDimensions(width, height)).toBe(placement);
+  });
+
+  it('does not assign a placement outside the one-percent ratio tolerance', () => {
+    expect(placementForImageDimensions(1020, 1000)).toBeUndefined();
+    expect(placementForImageDimensions(1200, 630)).toBeUndefined();
   });
 });
