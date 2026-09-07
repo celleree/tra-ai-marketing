@@ -63,7 +63,7 @@ PRs should be the smallest coherent, self-contained change. Canonical thresholds
 - If splitting would reduce correctness or leave an invalid intermediate state, keep the coherent change together and provide the required justification/review order.
 - Keep unrelated work out of the branch.
 
-Any PR changing `.github/workflows/**`, `.github/pr-reviewability-policy.json`, or weakening/removing repository safeguard/risk-review rules is HIGH risk and requires a fresh independent review of the exact current HEAD before merge.
+Any PR changing `.github/workflows/**`, `.github/pr-reviewability-policy.json`, or any safeguard/risk-review rule in `AGENTS.md` or `docs/agent-workflow.md` is HIGH risk and requires a fresh independent review of the exact current HEAD before merge.
 
 ## Verification
 
@@ -86,8 +86,10 @@ LOW needs normal verification. MEDIUM requires independent review when runtime b
 When review is required:
 - reviewer context must be fresh and independent of the implementer;
 - one qualifying review of the final exact HEAD is sufficient unless a second opinion is explicitly justified;
-- a material code change/rebase/base sync after review invalidates the prior review;
+- any subsequent commit, rebase, or base sync that changes HEAD invalidates the prior review;
 - live GitHub state, not stale PR-body metadata, is authoritative for current HEAD/base/diff/checks.
+
+Each PR must keep the fields in `.github/pull_request_template.md` current, including acceptance criteria, verification, risk, required independent-review status, and reusable-learning outcome.
 
 Detailed review/handoff rules live in `docs/agent-workflow.md` and should be loaded only for coordination/review work.
 
