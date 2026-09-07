@@ -242,7 +242,7 @@ export async function generateCreativeCopy(
   context: string,
   analysis: CreativeReferenceAnalysis
 ): Promise<Map<number, CreativeCopy>> {
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
   const requested = plan.map((item) => ({
     index: item.index,
     category: CREATIVE_CATEGORY_LABELS[item.category],
@@ -260,6 +260,7 @@ export async function generateCreativeCopy(
     },
     body: JSON.stringify({
       model,
+      reasoning: { effort: 'medium' },
       store: false,
       input: [
         {
