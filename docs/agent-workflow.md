@@ -38,16 +38,32 @@ Keep implementation PRs draft until implementation and focused checks are stable
 Live GitHub state is authoritative for current PR HEAD/base/diff/checks. Historical PR-body metadata is not.
 
 - Reviewer context must be fresh and independent of the implementer.
+- Give the reviewer acceptance criteria, relevant canonical requirements, final diff or exact reviewed commit, and verification results.
+- Review requirement alignment, realistic regressions/edge cases, tests, security, data integrity, spend/publishing, compliance, risk classification, and weakened safeguards; return findings/conclusion rather than implementing fixes.
 - One qualifying review of final exact HEAD is sufficient unless a second opinion is explicitly justified.
 - Any subsequent commit, rebase, or base sync that changes HEAD invalidates the prior exact-HEAD review.
-- Review realistic requirement, regression, security, data-integrity, spend/publishing, compliance, and hard-invariant risks; stop once material risks are covered.
-- TRA is currently an internal trusted-user tool. Do not expand bounded work into hostile-client-grade infrastructure solely for hypothetical malicious authorized users.
+- TRA is currently an internal trusted-user tool. Do not expand bounded work into hostile-client-grade infrastructure solely for hypothetical malicious authorized users; still protect realistic auth, secret, destructive-action, production-data, spend/publishing, compliance, and hard-invariant risks.
 
 ## Result handoff
 
-Return concise fields only: `STATUS`, `TASK`, `BRANCH`, `HEAD SHA`, relevant `FILES`, `IMPLEMENTATION/FINDINGS`, `VERIFICATION`, `BLOCKERS`, `DECISIONS NEEDED`, `RISKS/CONFLICTS`, `REMAINING`, `NEXT RECOMMENDED ACTION`, and `PARALLEL-SAFE NEXT WORK`.
+Return these concise fields by default:
 
-Do not include raw logs, long diffs, private reasoning, or repeated repository context unless needed to explain a failure.
+- `STATUS`
+- `TASK`
+- `BRANCH`
+- `BASE STAGING SHA` when branch ancestry matters
+- `HEAD SHA`
+- relevant `FILES INSPECTED/CHANGED`
+- `IMPLEMENTATION / FINDINGS`
+- `VERIFICATION`
+- `BLOCKERS`
+- `DECISIONS NEEDED`
+- `RISKS / CONFLICTS`
+- `REMAINING`
+- `NEXT RECOMMENDED ACTION`
+- `PARALLEL-SAFE NEXT WORK`
+
+Use `N/A` where a SHA is not applicable and `NONE` for empty sections. Do not include raw logs, long diffs, private reasoning, or repeated repository context unless needed to explain a failure.
 
 ## Parallel work
 
@@ -63,8 +79,10 @@ The root agent should maintain a concise durable checkpoint between phases/PRs c
 
 Each PR must still satisfy the repository's normal verification, risk classification, and fresh independent-review requirements. Use fresh reviewer context where required rather than reusing the root implementer's transcript.
 
-## Durable decisions and issue completion
+## Durable decisions and learning
 
 Capture final durable conclusions in the narrow canonical source: runtime behavior in code/config; active image direction in `docs/image-workflow.md`; stable boundaries in `docs/architecture.md`; future stage ordering in `docs/roadmap.md`; deployment requirements in `docs/deployment.md`; deferred/current work in GitHub Issues.
+
+Persist a failure/correction/experiment only when it is recurring, high-impact, establishes a durable invariant/decision, or reveals a missing guard that caused meaningful rework. Do not persist routine debugging or one-off failures.
 
 Because merges target `staging` rather than default-branch `main`, GitHub close keywords may not auto-close completed Issues. Explicitly close a specific implementation Issue after its work is fully merged to `staging`; do not close umbrella, deferred, or partial Issues.
