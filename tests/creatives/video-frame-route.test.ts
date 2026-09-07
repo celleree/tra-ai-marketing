@@ -6,7 +6,7 @@ import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
 const {
   analyzeApprovedTraVideoFramesMock,
-  generateCreativeCopyMock,
+  planCreativeBatchMock,
   generateApprovedTraVideoFrameCreativeImageMock,
   getApprovedTraVideoFramesMock,
   readMediaByIdMock,
@@ -14,7 +14,7 @@ const {
   saveImageMock,
 } = vi.hoisted(() => ({
   analyzeApprovedTraVideoFramesMock: vi.fn(),
-  generateCreativeCopyMock: vi.fn(),
+  planCreativeBatchMock: vi.fn(),
   generateApprovedTraVideoFrameCreativeImageMock: vi.fn(),
   getApprovedTraVideoFramesMock: vi.fn(),
   readMediaByIdMock: vi.fn(),
@@ -25,8 +25,10 @@ const {
 vi.mock('@/lib/ai/openai', () => ({
   analyzeReferenceCreative: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
-  generateCreativeCopy: generateCreativeCopyMock,
   generateApprovedTraReferenceCreativeImage: vi.fn(),
+}));
+vi.mock('@/lib/ai/creative-planner', () => ({
+  planCreativeBatch: planCreativeBatchMock,
 }));
 vi.mock('@/lib/ai/video-frame-generation', () => ({
   analyzeApprovedTraVideoFrames: analyzeApprovedTraVideoFramesMock,
@@ -59,10 +61,46 @@ beforeEach(() => {
   readImageByIdMock.mockResolvedValue(null);
   getApprovedTraVideoFramesMock.mockImplementation(async (source) => makeFrameSet(source));
   analyzeApprovedTraVideoFramesMock.mockResolvedValue(analysis);
-  generateCreativeCopyMock.mockResolvedValue(new Map([
-    [1, { headline: 'Clear next steps', primaryText: 'Talk with TRA.', description: 'No-pressure consultation.' }],
-    [2, { headline: 'Understand options', primaryText: 'Get a clearer path.', description: 'Talk with TRA.' }],
-  ]));
+  const concept = (index: number) => ({
+    index,
+    format: 'direct-response',
+    copy: {
+      headline: `Clear next step ${index}`,
+      primaryText: 'Talk with TRA.',
+      description: 'No-pressure consultation.',
+    },
+    strategy: {
+      category: 'customer-problems',
+      awarenessStage: index === 1 ? 'problem-aware' : 'solution-aware',
+      persona: 'Taxpayer',
+      painPoint: 'Unclear options',
+      desiredOutcome: 'Clarity',
+      emotion: 'reassured',
+      hook: `Option ${index}`,
+      cta: 'Talk with TRA',
+      offer: null,
+      soWhat: {
+        surfaceMessage: `Message ${index}`,
+        functionalConsequence: `Consequence ${index}`,
+        meaningfulOutcome: `Outcome ${index}`,
+      },
+      execution: {
+        subjectSource: 'approved-tra-human',
+        composition: index === 1 ? 'single-focus' : 'split',
+        imageTreatment: index === 1 ? 'photographic' : 'mixed-media',
+        textDensity: 'medium',
+        ctaTreatment: 'button',
+        typographyHierarchy: 'headline-dominant',
+      },
+      visualDirection: `Source-bound direction ${index}`,
+    },
+    selectionReason: `Distinct fit ${index}`,
+  });
+  planCreativeBatchMock.mockResolvedValue({
+    creatives: [concept(1), concept(2)],
+    plannerModel: 'gpt-6-astra',
+    reasoningEffort: 'medium',
+  });
   generateApprovedTraVideoFrameCreativeImageMock.mockResolvedValue(PNG);
   saveImageMock.mockResolvedValue({ id: `media_${'9'.repeat(32)}`, fileName: `media_${'9'.repeat(32)}.png`, originalName: 'generated.png', mimeType: 'image/png', size: PNG.length, url: '/generated.png' });
 });
@@ -85,6 +123,9 @@ describe('creative generation TRA video integration', () => {
     expect(response.status).toBe(200);
     expect(getApprovedTraVideoFramesMock).toHaveBeenCalledTimes(1);
     expect(analyzeApprovedTraVideoFramesMock).toHaveBeenCalledWith(expect.objectContaining({ context: expect.stringContaining('USER CREATIVE DIRECTION') }));
+    expect(planCreativeBatchMock).toHaveBeenCalledWith(
+      expect.objectContaining({ hasApprovedHumanSource: true })
+    );
     expect(generateApprovedTraVideoFrameCreativeImageMock).toHaveBeenCalledTimes(2);
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
     expect(events.at(-1)).toMatchObject({
@@ -100,7 +141,7 @@ describe('creative generation TRA video integration', () => {
     expect(response.status).toBe(400);
     expect((await response.json()).error).toContain('could not be decoded');
     expect(analyzeApprovedTraVideoFramesMock).not.toHaveBeenCalled();
-    expect(generateCreativeCopyMock).not.toHaveBeenCalled();
+    expect(planCreativeBatchMock).not.toHaveBeenCalled();
     expect(generateApprovedTraVideoFrameCreativeImageMock).not.toHaveBeenCalled();
   });
 });

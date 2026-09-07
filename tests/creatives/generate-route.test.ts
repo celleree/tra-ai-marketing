@@ -7,7 +7,7 @@ import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 const mocks = vi.hoisted(() => ({
   analyzeTraSourceCreative: vi.fn(),
   generateApprovedTraReferenceCreativeImage: vi.fn(),
-  generateCreativeCopy: vi.fn(),
+  planCreativeBatch: vi.fn(),
   analyzeApprovedTraVideoFrames: vi.fn(),
   generateApprovedTraVideoFrameCreativeImage: vi.fn(),
   getApprovedTraVideoFrames: vi.fn(),
@@ -23,7 +23,10 @@ vi.mock('@/lib/ai/openai', () => ({
   analyzeTraSourceCreative: mocks.analyzeTraSourceCreative,
   generateApprovedTraReferenceCreativeImage:
     mocks.generateApprovedTraReferenceCreativeImage,
-  generateCreativeCopy: mocks.generateCreativeCopy,
+}));
+
+vi.mock('@/lib/ai/creative-planner', () => ({
+  planCreativeBatch: mocks.planCreativeBatch,
 }));
 
 vi.mock('@/lib/ai/video-frame-generation', () => ({
@@ -103,6 +106,65 @@ const analysis = {
   unknowns: [],
   dominantCategory: 'customer-problems' as const,
 };
+
+const awarenessStages = [
+  'problem-aware',
+  'solution-aware',
+  'service-aware',
+  'action-ready',
+] as const;
+const compositions = ['single-focus', 'split', 'stacked', 'grid'] as const;
+const imageTreatments = [
+  'minimal-graphic',
+  'illustrative',
+  'mixed-media',
+  'photographic',
+] as const;
+const plannedCreative = (
+  index: number,
+  subjectSource: 'approved-tra-human' | 'non-human' = 'non-human'
+) => ({
+  index,
+  format: 'direct-response' as const,
+  copy: {
+    headline: `Headline ${index}`,
+    primaryText: `Primary ${index}`,
+    description: `Description ${index}`,
+  },
+  strategy: {
+    category: 'customer-problems' as const,
+    awarenessStage: awarenessStages[index - 1] || 'action-ready',
+    persona: 'Taxpayer seeking clarity',
+    painPoint: `Unclear tax options ${index}`,
+    desiredOutcome: `A clear next step ${index}`,
+    emotion: 'reassured',
+    hook: `Understand option ${index}`,
+    cta: 'Talk with TRA',
+    offer: null,
+    soWhat: {
+      surfaceMessage: `Surface message ${index}`,
+      functionalConsequence: `Functional consequence ${index}`,
+      meaningfulOutcome: `Meaningful outcome ${index}`,
+    },
+    execution: {
+      subjectSource,
+      composition: compositions[index - 1] || 'comparison',
+      imageTreatment: imageTreatments[index - 1] || 'documentary',
+      textDensity: 'medium' as const,
+      ctaTreatment: 'button' as const,
+      typographyHierarchy: 'headline-dominant' as const,
+    },
+    visualDirection: `Distinct visual direction ${index}`,
+  },
+  selectionReason: `Distinct strategic fit ${index}`,
+});
+const batchPlan = (count: number) => ({
+  creatives: Array.from({ length: count }, (_, index) =>
+    plannedCreative(index + 1)
+  ),
+  plannerModel: 'gpt-6-astra',
+  reasoningEffort: 'medium' as const,
+});
 
 const layoutBlueprint: LayoutBlueprint = {
   version: 1,
@@ -245,17 +307,9 @@ beforeEach(() => {
   mocks.getOrAnalyzeLayoutBlueprint.mockResolvedValue(layoutResolution);
   mocks.analyzeTraSourceCreative.mockResolvedValue(analysis);
   mocks.analyzeApprovedTraVideoFrames.mockResolvedValue(analysis);
-  mocks.generateCreativeCopy.mockImplementation(async (plan: Array<{ index: number }>) =>
-    new Map(
-      plan.map((item) => [
-        item.index,
-        {
-          headline: `Headline ${item.index}`,
-          primaryText: `Primary ${item.index}`,
-          description: `Description ${item.index}`,
-        },
-      ])
-    )
+  mocks.listReferenceLibrary.mockResolvedValue([]);
+  mocks.planCreativeBatch.mockImplementation(
+    async ({ count }: { count: number }) => batchPlan(count)
   );
   mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(PNG);
   mocks.generateApprovedTraVideoFrameCreativeImage.mockResolvedValue(PNG);
@@ -316,10 +370,10 @@ describe('layout blueprint and final image-provider boundaries', () => {
       event: 'complete',
       data: { requestedCount: 2, successfulCount: 2, failedCount: 0 },
     });
-    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('APPROVED TRA COMPANY CONTEXT');
-    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('Runtime approved TRA summary.');
-    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('Runtime approved claim.');
-    expect(mocks.generateCreativeCopy.mock.calls[0][1]).toContain('STRUCTURED LAYOUT BLUEPRINT');
+    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('APPROVED TRA COMPANY CONTEXT');
+    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('Runtime approved TRA summary.');
+    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('Runtime approved claim.');
+    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('STRUCTURED LAYOUT BLUEPRINT');
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
 
@@ -478,7 +532,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
     expect(mocks.getApprovedSelectedTraVideoFrames).not.toHaveBeenCalled();
     expect(mocks.analyzeApprovedTraVideoFrames).not.toHaveBeenCalled();
-    expect(mocks.generateCreativeCopy).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -498,7 +552,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.getMediaStorage).not.toHaveBeenCalled();
     expect(mocks.loadVideoFrameLibrary).not.toHaveBeenCalled();
     expect(mocks.getApprovedSelectedTraVideoFrames).not.toHaveBeenCalled();
-    expect(mocks.generateCreativeCopy).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -612,16 +666,103 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
+    expect(mocks.planCreativeBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ hasApprovedHumanSource: true })
+    );
+    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain(
+      `Reference ${firstReference.id}`
+    );
     expect(
       mocks.generateApprovedTraReferenceCreativeImage.mock.calls.every(
         ([call]) => call.source === storedById[traId]
       )
     ).toBe(true);
+    const firstCall = mocks.generateApprovedTraReferenceCreativeImage.mock.calls[0][0];
+    expect(firstCall.copy).toEqual(plannedCreative(1).copy);
+    expect(firstCall.context).toContain('Selection reason: Distinct strategic fit 1');
+    expect(firstCall.context).toContain('Surface message: Surface message 1');
+    expect(firstCall.context).toContain('Composition: single-focus');
+    expect(firstCall.context).toContain('Visual direction: Distinct visual direction 1');
+    expect(firstCall.context).toContain('This planned concept is explicitly non-human');
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+  });
+
+  it('allows TRA reference generation with an empty optional reference library', async () => {
+    const traId = mediaId('6');
+    storedById[traId] = image('6');
+
+    const response = await POST(
+      generationRequest([{ mediaId: traId, role: 'TRA_REFERENCE' }])
+    );
+    const events = await readStreamEvents(response);
+
+    expect(response.status).toBe(200);
+    expect(mocks.selectBestReferenceCreatives).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
+    expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+  });
+
+  it('uses at most the available optional references without constraining the full batch', async () => {
+    const traId = mediaId('5');
+    const reference = libraryItem('4');
+    storedById[traId] = image('5');
+    mocks.listReferenceLibrary.mockResolvedValue([reference]);
+    mocks.selectBestReferenceCreatives.mockResolvedValue([
+      {
+        item: reference,
+        imageUrl: `http://localhost${reference.url}`,
+        selectionReason: 'Useful optional layout cue',
+      },
+    ]);
+
+    const response = await POST(
+      generationRequest([{ mediaId: traId, role: 'TRA_REFERENCE' }])
+    );
+    const events = await readStreamEvents(response);
+
+    expect(response.status).toBe(200);
+    expect(mocks.selectBestReferenceCreatives).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedCount: 1 })
+    );
+    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain(
+      'do not need to be used by every output'
+    );
+    expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
+    const creatives = events
+      .filter(({ event }) => event === 'creative')
+      .map(({ data }) => data.creative as { index: number; referenceImageId?: string });
+    expect(creatives.find(({ index }) => index === 1)?.referenceImageId).toBe(reference.id);
+    expect(creatives.find(({ index }) => index === 2)?.referenceImageId).toBeUndefined();
   });
 });
 
 describe('progressive creative delivery', () => {
+  it('rejects a genuinely duplicate planner batch before image generation or saving', async () => {
+    const duplicate = plannedCreative(2);
+    mocks.planCreativeBatch.mockResolvedValue({
+      ...batchPlan(2),
+      creatives: [
+        plannedCreative(1),
+        { ...duplicate, copy: { ...duplicate.copy, headline: 'Headline 1' } },
+      ],
+    });
+
+    const response = await POST(generationRequest([]));
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'Creative planner returned an insufficiently diverse batch: Variations 1 and 2 have duplicate headlines.',
+    });
+    expect(mocks.selectBestReferenceCreatives).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(saveImage).not.toHaveBeenCalled();
+  });
+
   it('requests and streams a vertical placement for prompt-only generation', async () => {
     const response = await POST(
       generationRequest([], undefined, 2, undefined, 'VERTICAL_9_16')
@@ -629,6 +770,9 @@ describe('progressive creative delivery', () => {
     const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
+    expect(mocks.planCreativeBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ hasApprovedHumanSource: false })
+    );
     for (const [, options] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
       const body = JSON.parse(String(options?.body)) as {
         prompt: string;
@@ -746,7 +890,7 @@ describe('progressive creative delivery', () => {
       error: 'placement is unsupported',
     });
     expect(mocks.getMediaStorage).not.toHaveBeenCalled();
-    expect(mocks.generateCreativeCopy).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 });
