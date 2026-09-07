@@ -45,6 +45,12 @@ import { POST } from '@/app/api/creatives/generate/route';
 import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
+const imageResult = {
+  buffer: PNG,
+  prompt: 'Mock final image prompt',
+  model: 'gpt-image-2',
+  providerFrames: [],
+};
 const VIDEO_ID = `media_${'1'.repeat(32)}`;
 const HASH = '3'.repeat(64);
 const analysis = { summary: 'Approved TRA video source.', visibleText: [], visualStructure: 'Talking-head source context.', hookOrAngle: 'clarity', offerOrCta: 'consultation', styleNotes: 'Use identity, not old layout.', preserve: ['visible person identity'], avoid: ['old captions'], unknowns: [], dominantCategory: 'customer-problems' };
@@ -101,7 +107,7 @@ beforeEach(() => {
     plannerModel: 'gpt-6-astra',
     reasoningEffort: 'medium',
   });
-  generateApprovedTraVideoFrameCreativeImageMock.mockResolvedValue(PNG);
+  generateApprovedTraVideoFrameCreativeImageMock.mockResolvedValue(imageResult);
   saveImageMock.mockResolvedValue({ id: `media_${'9'.repeat(32)}`, fileName: `media_${'9'.repeat(32)}.png`, originalName: 'generated.png', mimeType: 'image/png', size: PNG.length, url: '/generated.png' });
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -127,6 +133,13 @@ describe('creative generation TRA video integration', () => {
       expect.objectContaining({ hasApprovedHumanSource: true })
     );
     expect(generateApprovedTraVideoFrameCreativeImageMock).toHaveBeenCalledTimes(2);
+    expect(
+      await Promise.all(
+        saveImageMock.mock.calls.map(async ([file]) =>
+          Buffer.from(await (file as File).arrayBuffer())
+        )
+      )
+    ).toEqual([PNG, PNG]);
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
     expect(events.at(-1)).toMatchObject({
       event: 'complete',
