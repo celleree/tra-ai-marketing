@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
+import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
 import {
@@ -153,14 +154,7 @@ export const generatePromptOnlyCreativeImage = async (args: {
 
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
-  const logoDirection = args.reserveLogoArea
-    ? `
-Approved-logo placement:
-- Do NOT draw, imitate, typeset, or invent a TRA logo in the generated image.
-- Leave the upper-left area clear of important text, faces, CTA buttons, and essential imagery: approximately the left 27% of the canvas and top 13% of the canvas.
-- The exact approved TRA logo asset will be composited into that reserved space after image generation.
-`
-    : '';
+  const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
   const prompt = `
 Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
@@ -175,6 +169,7 @@ Primary text idea: ${args.copy.primaryText}
 Description: ${args.copy.description}
 
 ${logoDirection}
+${formatCreativeSafeZoneRules(args.placement)}
 TRA guardrails:
 - This request has no reference image. Invent the visual composition from scratch.
 - Do not depict a person, face, spokesperson, or human figure. No approved TRA human identity is attached to this image-generation call, so use a non-human concept.
