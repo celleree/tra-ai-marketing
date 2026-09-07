@@ -122,6 +122,9 @@ export function SelectedFrameGeneration({
                     image: completedCreative.image,
                     category: completedCreative.category,
                     copy: completedCreative.copy,
+                    format: completedCreative.format,
+                    placement: completedCreative.placement,
+                    planning: completedCreative.planning,
                     ...(completedCreative.videoFrameSelection
                       ? { videoFrameSelection: completedCreative.videoFrameSelection }
                       : {}),

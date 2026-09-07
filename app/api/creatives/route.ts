@@ -1,7 +1,10 @@
 import { parseGeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { NextResponse } from 'next/server';
 import { isCreativeCategory } from '@/lib/creative-categories';
+import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
+import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { isCreativePlacement } from '@/lib/creatives/placements';
 import {
   isSafeCreativeId,
   listCreatives,
@@ -69,6 +72,14 @@ const normalizeCreative = (
   const description =
     typeof copy?.description === 'string' ? copy.description.trim() : '';
   const videoFrameSelection = parseGeneratedVideoFrameSelection(input.videoFrameSelection);
+  const planning = parseCreativePlanning(input.planning);
+  const format =
+    typeof input.format === 'string' && isCreativeFormat(input.format)
+      ? input.format
+      : undefined;
+  const placement = isCreativePlacement(input.placement)
+    ? input.placement
+    : undefined;
   const referenceImageId =
     typeof input.referenceImageId === 'string'
       ? input.referenceImageId
@@ -80,8 +91,11 @@ const normalizeCreative = (
     !isCreativeCategory(category) ||
     !primaryText ||
     !headline ||
+    (input.format !== undefined && !format) ||
+    (input.placement !== undefined && !placement) ||
     (referenceImageId !== undefined && !isSafeMediaId(referenceImageId))
     || (input.videoFrameSelection !== undefined && !videoFrameSelection)
+    || (input.planning !== undefined && !planning)
   ) {
     return null;
   }
@@ -92,8 +106,11 @@ const normalizeCreative = (
     image,
     category,
     copy: { primaryText, headline, description },
+    ...(format ? { format } : {}),
+    ...(placement ? { placement } : {}),
     ...(referenceImageId ? { referenceImageId } : {}),
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
+    ...(planning ? { planning } : {}),
   };
 };
 
