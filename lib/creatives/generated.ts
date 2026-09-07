@@ -2,6 +2,7 @@ import type { CreativeCategoryId } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import type { CreativePlanningMetadata } from '@/lib/creatives/planning-metadata';
+import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import type { MediaAsset } from '@/lib/media/types';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 
@@ -28,6 +29,7 @@ export interface GeneratedCreative {
   referenceSelectionReason?: string;
   videoFrameSelection?: GeneratedVideoFrameSelection;
   planning?: CreativePlanningMetadata;
+  generationProvenance?: CreativeGenerationProvenance;
 }
 
 export interface CreativeRecord {
@@ -41,4 +43,5 @@ export interface CreativeRecord {
   referenceImageId?: string;
   videoFrameSelection?: GeneratedVideoFrameSelection;
   planning?: CreativePlanningMetadata;
+  generationProvenance?: CreativeGenerationProvenance;
 }
