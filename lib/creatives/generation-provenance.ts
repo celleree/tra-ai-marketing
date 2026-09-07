@@ -38,6 +38,13 @@ export type CreativeGenerationProvenance = {
     | { type: 'REFERENCE_LIBRARY'; mediaId: string }
   >;
   logoOverlaySource?: { mediaId: string; sha256: string };
+  // A saved rendition used as an editing canvas is separate from approved human sources.
+  revision?: {
+    parentCreativeId: string;
+    canvasMediaId: string;
+    canvasSha256: string;
+    instruction?: string;
+  };
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -65,8 +72,9 @@ export const parseCreativeGenerationProvenance = (
   if (!isRecord(value)) return null;
 
   const rootKeys = ['version', 'imageGeneration', 'requestedSources', 'attachedSource', 'analysisSources'];
+  for (const key of ['logoOverlaySource', 'revision']) if (key in value) rootKeys.push(key);
   if (
-    !hasExactKeys(value, 'logoOverlaySource' in value ? [...rootKeys, 'logoOverlaySource'] : rootKeys) ||
+    !hasExactKeys(value, rootKeys) ||
     value.version !== 1 ||
     !isRecord(value.imageGeneration) ||
     !hasExactKeys(value.imageGeneration, ['prompt', 'model']) ||
@@ -167,6 +175,17 @@ export const parseCreativeGenerationProvenance = (
     logoOverlaySource = { mediaId: value.logoOverlaySource.mediaId, sha256: value.logoOverlaySource.sha256 };
   }
 
+  let revision: CreativeGenerationProvenance['revision'];
+  if ('revision' in value) {
+    const source = value.revision;
+    if (!isRecord(source) || !hasExactKeys(source, ['parentCreativeId', 'canvasMediaId', 'canvasSha256', ...('instruction' in source ? ['instruction'] : [])]) ||
+      typeof source.parentCreativeId !== 'string' || !/^creative_[a-f0-9]{32}$/.test(source.parentCreativeId) ||
+      !isMediaId(source.canvasMediaId) || !isHash(source.canvasSha256) ||
+      ('instruction' in source && (typeof source.instruction !== 'string' || !source.instruction.trim() || source.instruction.length > 4000))) return null;
+    revision = { parentCreativeId: source.parentCreativeId, canvasMediaId: source.canvasMediaId, canvasSha256: source.canvasSha256,
+      ...(typeof source.instruction === 'string' ? { instruction: source.instruction } : {}) };
+  }
+
   return {
     version: 1,
     imageGeneration: { prompt: value.imageGeneration.prompt, model: value.imageGeneration.model },
@@ -174,5 +193,6 @@ export const parseCreativeGenerationProvenance = (
     attachedSource,
     analysisSources: analysisSources as CreativeGenerationProvenance['analysisSources'],
     ...(logoOverlaySource ? { logoOverlaySource } : {}),
+    ...(revision ? { revision } : {}),
   };
 };
