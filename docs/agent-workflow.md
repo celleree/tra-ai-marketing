@@ -23,23 +23,23 @@ Send only the current checkpoint: `TASK`, minimal `CONTEXT`, exact `SOURCE OF TR
 ## Implementation cycle
 
 1. Inspect the smallest relevant file set and plan the smallest coherent change.
-2. Resolve material scope/design questions before editing.
-3. Implement only that plan.
+2. For meaningful non-mechanical work, return the plan to the coordinator and resolve material scope/design questions before editing. Trivial mechanical work may combine planning and implementation when no meaningful decision or review boundary exists.
+3. Implement only the approved plan.
 4. Run focused verification while iterating.
 5. Let CI perform the full regression/typecheck/build pass by default.
 6. Use one fresh independent review of the final exact HEAD when policy requires it.
-7. Repair findings in the implementation session, reverify, and re-review only if HEAD materially changes.
+7. Repair findings in the implementation session and reverify. Any subsequent commit, rebase, or base sync that changes HEAD invalidates an exact-HEAD review and requires a fresh review when policy requires review.
 8. Merge only with current required verification/review.
 
-Keep implementation PRs draft until implementation and focused checks are stable, then mark ready for final review.
+Keep implementation PRs draft until implementation and focused checks are stable, then mark ready for final review. Keep the fields in `.github/pull_request_template.md` current throughout the PR lifecycle.
 
 ## Review freshness and proportionality
 
 Live GitHub state is authoritative for current PR HEAD/base/diff/checks. Historical PR-body metadata is not.
 
 - Reviewer context must be fresh and independent of the implementer.
-- One qualifying review of final HEAD is sufficient unless a second opinion is explicitly justified.
-- Material code changes, rebases, or base syncs invalidate prior review.
+- One qualifying review of final exact HEAD is sufficient unless a second opinion is explicitly justified.
+- Any subsequent commit, rebase, or base sync that changes HEAD invalidates the prior exact-HEAD review.
 - Review realistic requirement, regression, security, data-integrity, spend/publishing, compliance, and hard-invariant risks; stop once material risks are covered.
 - TRA is currently an internal trusted-user tool. Do not expand bounded work into hostile-client-grade infrastructure solely for hypothetical malicious authorized users.
 
