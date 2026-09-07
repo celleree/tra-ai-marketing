@@ -28,7 +28,11 @@ vi.mock('@aws-sdk/client-s3', async (importOriginal) => {
   };
 });
 
-import { listCreatives, saveCreativeBatch } from '@/lib/creatives/storage';
+import {
+  listCreatives,
+  saveCreativeBatch,
+  updateCreativeReviewState,
+} from '@/lib/creatives/storage';
 
 const record = (hex: string, createdAt: string): CreativeRecord => ({
   id: `creative_${hex.repeat(32)}`,
@@ -46,6 +50,29 @@ const record = (hex: string, createdAt: string): CreativeRecord => ({
     primaryText: 'Primary text',
     headline: 'Headline',
     description: 'Description',
+  },
+});
+
+const persisted = (creative: CreativeRecord): CreativeRecord => ({
+  ...creative,
+  humanReview: { status: 'PENDING' },
+  lifecycle: { status: 'ACTIVE', updatedAt: creative.createdAt },
+});
+
+const rejectedReview = () => ({
+  status: 'REJECTED' as const,
+  reviewedAt: '2026-08-22T12:00:00.000Z',
+  checklist: {
+    artifactIntegrity: 'FAIL' as const,
+    textReadability: 'PASS' as const,
+    layoutAndHierarchy: 'PASS' as const,
+    imageryAndBrandFit: 'PASS' as const,
+    claimsAndDisclaimers: 'PASS' as const,
+    sourceAndThirdPartyCompliance: 'PASS' as const,
+    conceptDistinctness: 'PASS' as const,
+    placementSafety: 'PASS' as const,
+    logoIntegrity: 'PASS' as const,
+    productionReadiness: 'PASS' as const,
   },
 });
 
@@ -118,7 +145,7 @@ describe('TRA creative storage', () => {
     await saveCreativeBatch([generated]);
     const encoded = writeFileMock.mock.calls[0][1] as string;
     readFileMock.mockResolvedValueOnce(encoded);
-    await expect(listCreatives()).resolves.toEqual([generated, legacy]);
+    await expect(listCreatives()).resolves.toEqual([persisted(generated), legacy]);
   });
 
   it.each([
@@ -143,7 +170,7 @@ describe('TRA creative storage', () => {
       JSON.stringify({ version: 1, items: [existing] })
     );
 
-    await expect(saveCreativeBatch(generated)).resolves.toEqual(generated);
+    await expect(saveCreativeBatch(generated)).resolves.toEqual(generated.map(persisted));
 
     expect(readFileMock).toHaveBeenCalledTimes(1);
     expect(writeFileMock).toHaveBeenCalledTimes(1);
@@ -159,7 +186,7 @@ describe('TRA creative storage', () => {
     const parent = { ...record('a', '2026-08-20T12:00:00.000Z'), identity: generatedIdentity(`creative_${'a'.repeat(32)}`) };
     const child = { ...record('b', '2026-08-25T12:00:00.000Z'), identity: placementIdentity(`creative_${'b'.repeat(32)}`, parent.id) };
     readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [parent] }));
-    await expect(saveCreativeBatch([child])).resolves.toEqual([child]);
+    await expect(saveCreativeBatch([child])).resolves.toEqual([persisted(child)]);
 
     readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));
     await expect(saveCreativeBatch([child])).rejects.toThrow('Creative identity transition is invalid.');
@@ -243,7 +270,7 @@ describe('TRA creative storage', () => {
       .mockRejectedValueOnce({ name: 'NoSuchKey' })
       .mockResolvedValueOnce({});
 
-    await expect(saveCreativeBatch([generated])).resolves.toEqual([generated]);
+    await expect(saveCreativeBatch([generated])).resolves.toEqual([persisted(generated)]);
 
     expect(sendMock.mock.calls[0][0]).toBeInstanceOf(GetObjectCommand);
     const put = sendMock.mock.calls[1][0];
@@ -269,7 +296,7 @@ describe('TRA creative storage', () => {
       .mockResolvedValueOnce(r2Response([concurrent, existing], 'etag-2'))
       .mockResolvedValueOnce({});
 
-    await expect(saveCreativeBatch([generated])).resolves.toEqual([generated]);
+    await expect(saveCreativeBatch([generated])).resolves.toEqual([persisted(generated)]);
 
     const firstPut = sendMock.mock.calls[1][0] as PutObjectCommand;
     const retryPut = sendMock.mock.calls[3][0] as PutObjectCommand;
@@ -328,6 +355,118 @@ describe('TRA creative storage', () => {
 
     await expect(listCreatives()).resolves.toEqual([newer, older]);
   });
+
+  it('round-trips valid review state and rejects malformed present review metadata', async () => {
+    const saved = {
+      ...persisted(record('a', '2026-08-20T12:00:00.000Z')),
+      humanReview: { status: 'PENDING' as const },
+      lifecycle: { status: 'PAUSED' as const, updatedAt: '2026-08-21T12:00:00.000Z' },
+    };
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [saved] }));
+    await expect(listCreatives()).resolves.toEqual([saved]);
+
+    await expect(saveCreativeBatch([{
+      ...record('b', '2026-08-25T12:00:00.000Z'),
+      humanReview: { status: 'PENDING', unexpected: true },
+    } as CreativeRecord])).rejects.toThrow('One or more creative records are invalid.');
+    await expect(saveCreativeBatch([{
+      ...record('c', '2026-08-25T12:00:00.000Z'),
+      lifecycle: { status: 'ACTIVE', updatedAt: 'not-a-date' },
+    } as CreativeRecord])).rejects.toThrow('One or more creative records are invalid.');
+  });
+
+  it('assigns server-owned pending and active defaults to every newly saved record', async () => {
+    const incoming = {
+      ...record('b', '2026-08-25T12:00:00.000Z'),
+      humanReview: rejectedReview(),
+      lifecycle: { status: 'PAUSED' as const, updatedAt: '2026-08-26T12:00:00.000Z' },
+    };
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));
+
+    await expect(saveCreativeBatch([incoming])).resolves.toEqual([persisted(incoming)]);
+    const saved = JSON.parse(writeFileMock.mock.calls[0][1] as string).items[0];
+    expect(saved.humanReview).toEqual({ status: 'PENDING' });
+    expect(saved.lifecycle).toEqual({ status: 'ACTIVE', updatedAt: incoming.createdAt });
+  });
+
+  it('round-trips a saved record whose valid createdAt is not canonical UTC', async () => {
+    const incoming = record('b', '2026-08-25T12:00:00Z');
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));
+
+    await saveCreativeBatch([incoming]);
+    const encoded = writeFileMock.mock.calls[0][1] as string;
+    readFileMock.mockResolvedValueOnce(encoded);
+
+    await expect(listCreatives()).resolves.toEqual([{
+      ...persisted(incoming),
+      lifecycle: { status: 'ACTIVE', updatedAt: '2026-08-25T12:00:00.000Z' },
+    }]);
+  });
+
+  it('updates only review state metadata and leaves core data and the other state unchanged', async () => {
+    const existing = persisted(record('a', '2026-08-20T12:00:00.000Z'));
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [existing] }));
+
+    const lifecycle = { status: 'PAUSED' as const, updatedAt: '2026-08-21T12:00:00.000Z' };
+    await expect(updateCreativeReviewState(existing.id, { lifecycle })).resolves.toEqual({
+      ...existing,
+      lifecycle,
+    });
+    const lifecycleSaved = JSON.parse(writeFileMock.mock.calls[0][1] as string).items[0];
+    expect(lifecycleSaved).toMatchObject({ ...existing, lifecycle });
+    expect(lifecycleSaved.humanReview).toEqual(existing.humanReview);
+
+    const review = rejectedReview();
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [{ ...existing, lifecycle }] }));
+    await updateCreativeReviewState(existing.id, { humanReview: review });
+    const reviewSaved = JSON.parse(writeFileMock.mock.calls[1][1] as string).items[0];
+    expect(reviewSaved.humanReview).toEqual(review);
+    expect(reviewSaved.lifecycle).toEqual(lifecycle);
+    expect(reviewSaved.image).toEqual(existing.image);
+    expect(reviewSaved.copy).toEqual(existing.copy);
+    expect(reviewSaved.createdAt).toEqual(existing.createdAt);
+  });
+
+  it('returns null without writing when the requested creative does not exist', async () => {
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));
+
+    await expect(updateCreativeReviewState(
+      `creative_${'a'.repeat(32)}`,
+      { lifecycle: { status: 'PAUSED', updatedAt: '2026-08-21T12:00:00.000Z' } }
+    )).resolves.toBeNull();
+    expect(writeFileMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid IDs and review updates with more than one state', async () => {
+    await expect(updateCreativeReviewState('creative_invalid', {
+      lifecycle: { status: 'ACTIVE', updatedAt: '2026-08-21T12:00:00.000Z' },
+    })).rejects.toThrow('Creative ID is invalid.');
+    await expect(updateCreativeReviewState(`creative_${'a'.repeat(32)}`, {
+      humanReview: { status: 'PENDING' },
+      lifecycle: { status: 'ACTIVE', updatedAt: '2026-08-21T12:00:00.000Z' },
+    } as never)).rejects.toThrow('exactly one property');
+    expect(readFileMock).not.toHaveBeenCalled();
+    expect(writeFileMock).not.toHaveBeenCalled();
+  });
+
+  it('retries a conflicting R2 review update without losing concurrent records', async () => {
+    configureR2();
+    const existing = persisted(record('a', '2026-08-20T12:00:00.000Z'));
+    const concurrent = persisted(record('b', '2026-08-21T12:00:00.000Z'));
+    const lifecycle = { status: 'PAUSED' as const, updatedAt: '2026-08-22T12:00:00.000Z' };
+    sendMock
+      .mockResolvedValueOnce(r2Response([existing], 'etag-1'))
+      .mockRejectedValueOnce({ name: 'PreconditionFailed', $metadata: { httpStatusCode: 412 } })
+      .mockResolvedValueOnce(r2Response([concurrent, existing], 'etag-2'))
+      .mockResolvedValueOnce({});
+
+    await updateCreativeReviewState(existing.id, { lifecycle });
+
+    const retryPut = sendMock.mock.calls[3][0] as PutObjectCommand;
+    const saved = JSON.parse(retryPut.input.Body as string);
+    expect(retryPut.input.IfMatch).toBe('etag-2');
+    expect(saved.items).toEqual([concurrent, { ...existing, lifecycle }]);
+  });
 });
 
 it('preserves video frame provenance through saving and reloading without dropping older records', async () => {
@@ -341,7 +480,7 @@ it('preserves video frame provenance through saving and reloading without droppi
   await saveCreativeBatch([generated]);
   const encoded = writeFileMock.mock.calls[0][1] as string;
   readFileMock.mockResolvedValueOnce(encoded);
-  expect(await listCreatives()).toEqual([generated, previous]);
+  expect(await listCreatives()).toEqual([persisted(generated), previous]);
   writeFileMock.mockClear();
   await expect(saveCreativeBatch([{ ...generated, videoFrameSelection: { ...generated.videoFrameSelection, frames: [] } }])).rejects.toThrow();
   expect(writeFileMock).not.toHaveBeenCalled();

@@ -10,6 +10,12 @@ import {
 import { isCreativeCategory } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
+import {
+  parseCreativeHumanReview,
+  parseCreativeLifecycle,
+  type CreativeHumanReview,
+  type CreativeLifecycle,
+} from '@/lib/creatives/human-review';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import {
@@ -104,6 +110,8 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const planning = parseCreativePlanning(record.planning);
   const generationProvenance = parseCreativeGenerationProvenance(record.generationProvenance);
   const identity = parseCreativeIdentity(record.identity, id);
+  const humanReview = parseCreativeHumanReview(record.humanReview);
+  const lifecycle = parseCreativeLifecycle(record.lifecycle);
   const format =
     typeof record.format === 'string' && isCreativeFormat(record.format)
       ? record.format
@@ -137,6 +145,8 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     || (record.planning !== undefined && !planning)
     || (record.generationProvenance !== undefined && !generationProvenance)
     || (record.identity !== undefined && !identity)
+    || (record.humanReview !== undefined && !humanReview)
+    || (record.lifecycle !== undefined && !lifecycle)
   ) {
     return null;
   }
@@ -161,6 +171,8 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     ...(planning ? { planning } : {}),
     ...(generationProvenance ? { generationProvenance } : {}),
     ...(identity ? { identity } : {}),
+    ...(humanReview ? { humanReview } : {}),
+    ...(lifecycle ? { lifecycle } : {}),
   };
 };
 
@@ -320,11 +332,17 @@ const mergeBatch = (
 
 let localSaveQueue: Promise<void> = Promise.resolve();
 
-const saveLocalCreativeBatch = (records: CreativeRecord[]) => {
+const mutateLocalIndex = <Result>(
+  mutate: (index: CreativeLibraryIndex) => {
+    index: CreativeLibraryIndex;
+    result: Result;
+    changed: boolean;
+  }
+) => {
   const operation = localSaveQueue.then(async () => {
-    const nextIndex = mergeBatch(await readLocalIndex(), records);
-    await writeLocalIndex(nextIndex);
-    return records;
+    const outcome = mutate(await readLocalIndex());
+    if (outcome.changed) await writeLocalIndex(outcome.index);
+    return outcome.result;
   });
   localSaveQueue = operation.then(
     () => undefined,
@@ -333,13 +351,20 @@ const saveLocalCreativeBatch = (records: CreativeRecord[]) => {
   return operation;
 };
 
-const saveR2CreativeBatch = async (records: CreativeRecord[]) => {
+const mutateR2Index = async <Result>(
+  mutate: (index: CreativeLibraryIndex) => {
+    index: CreativeLibraryIndex;
+    result: Result;
+    changed: boolean;
+  }
+) => {
   for (let attempt = 1; attempt <= R2_SAVE_ATTEMPTS; attempt += 1) {
     const snapshot = await readR2Index();
-    const nextIndex = mergeBatch(snapshot.index, records);
+    const outcome = mutate(snapshot.index);
+    if (!outcome.changed) return outcome.result;
     try {
-      await writeR2Index(nextIndex, snapshot);
-      return records;
+      await writeR2Index(outcome.index, snapshot);
+      return outcome.result;
     } catch (error) {
       if (!isPreconditionError(error) || attempt === R2_SAVE_ATTEMPTS) {
         throw error;
@@ -348,6 +373,57 @@ const saveR2CreativeBatch = async (records: CreativeRecord[]) => {
   }
 
   throw new Error('Creative library save attempts were exhausted.');
+};
+
+const saveLocalCreativeBatch = (records: CreativeRecord[]) =>
+  mutateLocalIndex((index) => ({
+    index: mergeBatch(index, records),
+    result: records,
+    changed: true,
+  }));
+
+const saveR2CreativeBatch = (records: CreativeRecord[]) =>
+  mutateR2Index((index) => ({
+    index: mergeBatch(index, records),
+    result: records,
+    changed: true,
+  }));
+
+type CreativeReviewStateUpdate =
+  | { humanReview: CreativeHumanReview }
+  | { lifecycle: CreativeLifecycle };
+
+const validateReviewStateUpdate = (update: CreativeReviewStateUpdate) => {
+  const keys = Object.keys(update);
+  if (keys.length !== 1 || (keys[0] !== 'humanReview' && keys[0] !== 'lifecycle')) {
+    throw new Error('Creative review state update must contain exactly one property.');
+  }
+
+  if ('humanReview' in update) {
+    const humanReview = parseCreativeHumanReview(update.humanReview);
+    if (!humanReview) throw new Error('Creative human review is invalid.');
+    return { humanReview } as const;
+  }
+
+  const lifecycle = parseCreativeLifecycle(update.lifecycle);
+  if (!lifecycle) throw new Error('Creative lifecycle is invalid.');
+  return { lifecycle } as const;
+};
+
+const updateReviewState = (
+  index: CreativeLibraryIndex,
+  creativeId: string,
+  update: ReturnType<typeof validateReviewStateUpdate>
+) => {
+  const itemIndex = index.items.findIndex((item) => item.id === creativeId);
+  if (itemIndex === -1) {
+    return { index, result: null, changed: false };
+  }
+
+  const updated = { ...index.items[itemIndex], ...update };
+  const items = [...index.items];
+  items[itemIndex] = updated;
+  return { index: { version: 1 as const, items }, result: updated, changed: true };
 };
 
 export const listCreatives = async (): Promise<CreativeRecord[]> => {
@@ -374,7 +450,33 @@ export const saveCreativeBatch = async (
     throw new Error('Creative IDs must be unique within a batch.');
   }
 
+  const persistedRecords = validRecords.map((record) => ({
+    ...record,
+    humanReview: { status: 'PENDING' } as const,
+    lifecycle: {
+      status: 'ACTIVE' as const,
+      updatedAt: new Date(record.createdAt).toISOString(),
+    },
+  }));
+
   return process.env.NODE_ENV === 'production'
-    ? saveR2CreativeBatch(validRecords)
-    : saveLocalCreativeBatch(validRecords);
+    ? saveR2CreativeBatch(persistedRecords)
+    : saveLocalCreativeBatch(persistedRecords);
+};
+
+export const updateCreativeReviewState = async (
+  creativeId: string,
+  update: CreativeReviewStateUpdate
+): Promise<CreativeRecord | null> => {
+  if (!isSafeCreativeId(creativeId)) {
+    throw new Error('Creative ID is invalid.');
+  }
+
+  const validUpdate = validateReviewStateUpdate(update);
+  const mutate = (index: CreativeLibraryIndex) =>
+    updateReviewState(index, creativeId, validUpdate);
+
+  return process.env.NODE_ENV === 'production'
+    ? mutateR2Index(mutate)
+    : mutateLocalIndex(mutate);
 };
