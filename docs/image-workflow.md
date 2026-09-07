@@ -212,6 +212,39 @@ The current image workflow is ready when these work end-to-end:
 - liked creatives save to TRA Creatives with provenance/metadata sufficient for future attribution;
 - creatives can be edited while previous versions remain traceable.
 
+## Current remaining roadmap for Astra
+
+This is the current active implementation roadmap for completing the Stage 1 static-image workflow.
+
+Astra should use this roadmap for orchestration and delegation, while still verifying current code/tests before treating any item as incomplete.
+
+Treat already-merged foundations as complete unless current code/tests show a regression or a clearly missing contract.
+
+### Current remaining implementation order
+
+1. **Wire GPT-6 Astra (medium reasoning)** as the creative planning and prompt-building model for the active image pipeline.
+2. **Finish meaningful variation planning**, including `SO WHAT?` outcome-chain capture and small-batch strategic hypothesis selection.
+3. **Finish placement-aware format generation**, including 9:16, 4:5, and 1:1 variants plus safe-zone enforcement.
+4. **Finish provenance and metadata saving** across all supported source paths.
+5. **Finish editing/regeneration and version history** for saved creatives.
+6. **Productionize the currently local-only video intelligence and frame-selection path** where needed.
+7. **Finish production hardening and the quality/compliance release gate** for the image workflow.
+
+### Astra execution rule
+
+Before delegating implementation work, Astra should:
+
+1. inspect current `staging`;
+2. compare current code/tests against this roadmap and the release gate in this document;
+3. mark each item as COMPLETE, PARTIAL, NOT STARTED, or BLOCKED based on executable evidence;
+4. avoid reopening already-completed foundations unless code/tests show a regression or missing contract;
+5. convert only the real remaining work into small coherent PRs;
+6. parallelize only work that is truly independent.
+
+This section is the active implementation roadmap for Stage 1 image work.
+
+`docs/roadmap.md` remains long-term/future direction and does not override this section.
+
 ## Immediate implementation order
 
 Treat already-merged foundations as complete unless current code/tests show a regression. Do not reopen completed historical Issues merely because an older document still describes them as future work.
