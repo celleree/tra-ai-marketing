@@ -44,13 +44,15 @@ describe('approved TRA final image-provider boundary', () => {
       },
     });
 
-    expect(result).toEqual(output);
+    expect(result.buffer).toEqual(output);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe('https://api.openai.com/v1/images/edits');
     expect(options?.body).toBeInstanceOf(FormData);
 
     const formData = options?.body as FormData;
+    expect(result.prompt).toBe(formData.get('prompt'));
+    expect(result.model).toBe(formData.get('model'));
     expect(formData.get('quality')).toBe('high');
     expect(formData.get('size')).toBe('1024x1280');
     const images = formData.getAll('image[]');
@@ -93,7 +95,7 @@ describe('approved TRA final image-provider boundary', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await generateApprovedTraVideoFrameCreativeImage({
+    const result = await generateApprovedTraVideoFrameCreativeImage({
       frames: [frame],
       primaryFormat: 'direct-response',
       placement: 'VERTICAL_9_16',
@@ -109,5 +111,8 @@ describe('approved TRA final image-provider boundary', () => {
     expect(formData.get('size')).toBe('1152x2048');
     expect(String(formData.get('prompt'))).toContain('9:16 canvas (1152x2048)');
     expect(String(formData.get('prompt'))).toContain('rather than cropping or stretching a square design');
+    expect(result.prompt).toBe(formData.get('prompt'));
+    expect(result.model).toBe(formData.get('model'));
+    expect(result.providerFrames).toEqual([frame]);
   });
 });

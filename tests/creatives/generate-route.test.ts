@@ -64,9 +64,13 @@ vi.mock('@/lib/references/storage', () => ({
   listReferenceLibrary: mocks.listReferenceLibrary,
 }));
 
-import { POST } from '@/app/api/creatives/generate/route';
+import {
+  generatePromptOnlyCreativeImage,
+  POST,
+} from '@/app/api/creatives/generate/route';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const imageResult = { buffer: PNG, prompt: 'Mock final image prompt', model: 'gpt-image-2' };
 const MP4 = Buffer.from(REAL_ENCODED_MP4);
 const LIBRARY_ID = `video-library:${'a'.repeat(64)}`;
 const LIBRARY_FRAME_ID = `video-frame:${'b'.repeat(64)}`;
@@ -283,6 +287,31 @@ let storedById: Record<string, StoredCreativeSourceMediaFile>;
 let readMediaById: ReturnType<typeof vi.fn>;
 let saveImage: ReturnType<typeof vi.fn>;
 
+it('returns the exact prompt and resolved model sent for prompt-only generation', async () => {
+  vi.stubEnv('OPENAI_API_KEY', 'test-key');
+  vi.stubEnv('OPENAI_IMAGE_MODEL', 'test-image-model');
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  );
+  vi.stubGlobal('fetch', fetchMock);
+
+  const result = await generatePromptOnlyCreativeImage({
+    primaryFormat: 'direct-response',
+    placement: 'SQUARE_1_1',
+    context: 'Approved prompt-only context',
+    copy: { headline: 'Headline', primaryText: 'Primary', description: 'Description' },
+    reserveLogoArea: false,
+  });
+  const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+
+  expect(result.buffer).toEqual(PNG);
+  expect(result.prompt).toBe(body.prompt);
+  expect(result.model).toBe(body.model);
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
@@ -311,8 +340,11 @@ beforeEach(() => {
   mocks.planCreativeBatch.mockImplementation(
     async ({ count }: { count: number }) => batchPlan(count)
   );
-  mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(PNG);
-  mocks.generateApprovedTraVideoFrameCreativeImage.mockResolvedValue(PNG);
+  mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(imageResult);
+  mocks.generateApprovedTraVideoFrameCreativeImage.mockResolvedValue({
+    ...imageResult,
+    providerFrames: [],
+  });
   mocks.loadVideoFrameLibrary.mockResolvedValue(null);
   mocks.getApprovedTraVideoFrames.mockImplementation(async (source) => ({
     source,
