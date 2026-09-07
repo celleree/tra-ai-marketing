@@ -93,7 +93,7 @@ CHECKPOINT:
 [what to return to ChatGPT when a workstream finishes or blocks]
 ```
 
-If `PARALLEL: NO`, provide the next single Codex task instead.
+For parallel work, each workstream checkpoint must also report `SHARED CONTRACTS / AREAS AFFECTED` so the coordinator can detect schema/API/storage/central-type overlap before integration. If `PARALLEL: NO`, omit that field and provide the next single Codex task instead.
 
 ## Self-improvement
 
