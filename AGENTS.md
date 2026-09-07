@@ -155,23 +155,35 @@ Simple low-risk mechanical changes may combine planning and implementation when 
 
 ## Sources of truth
 
-- Runtime behavior, prompts, categories, formats, validation, defaults, and integration logic: source code.
+When sources disagree, use this order for the current image-workflow work:
+
+1. Runtime code and tests define what is actually implemented now.
+2. `docs/image-workflow.md` defines the active Stage 1 image-product direction and intended architecture.
+3. GitHub Issues define task-specific implementation work and acceptance criteria underneath that direction. An Issue overrides `docs/image-workflow.md` only when it explicitly records a newer product decision and states what it supersedes.
+4. `docs/architecture.md` defines stable system boundaries and future-stage architecture; it does not override the active Stage 1 image workflow.
+5. `docs/roadmap.md` defines long-term/future product direction and ordering; it does not override the active Stage 1 image workflow.
+
+Additional source roles:
+
 - Environment-variable names and examples: `.env.example`.
-- Staged product roadmap and ordering: `docs/roadmap.md`.
-- Stable system boundaries: `docs/architecture.md`.
 - External deployment/setup requirements: `docs/deployment.md`.
 - Customer research summary: `knowledge/customer-insights.md`.
-- Current implementation work and acceptance criteria: GitHub Issues.
 
-If documentation conflicts with executable code/config, treat code/config as authoritative and correct or delete the stale documentation.
+Do not restore older Stage 1 architecture merely because it appears in stale Issues, PR descriptions, roadmap text, architecture text, or historical planning. If documentation conflicts with executable code/config about implemented behavior, code/config is authoritative.
 
 ## Current project direction
 
-Follow `docs/roadmap.md` for stage ordering. Until TRA provides the required performance/revenue data, advertising-account access, and Claude/API access, keep implementation focused on the Stage 1 creative system. Do not expand into autonomous media buying, winner prediction, custom ML training, budget optimization, automatic pause/scale logic, or performance dashboards unless explicitly requested.
+Follow `docs/image-workflow.md` for active Stage 1 image-workflow product direction and implementation order. Runtime code and tests remain authoritative for what is actually implemented; do not assume a target architecture is already wired until code/tests show it.
 
-Current-phase goal: turn references plus approved TRA knowledge into high-quality, compliant, meaningfully different static creatives that are saved with persistent identity and structured metadata. The creative pipeline should support reference/brand context, creative strategy including a `SO WHAT?` outcome chain, dimensional variation, placement-aware image generation, quality/compliance checks, and storage of enough metadata to join future performance and revenue back to the exact creative.
+The active Stage 1 target creative path is:
 
-Before paying for or wiring the final multi-model API chain, validate the intended Claude -> GPT-5.6 Sol -> GPT Image 2 workflow manually in the Claude and ChatGPT web apps where practical. Treat these web-app tests as prototype/behavior discovery for the future API architecture, capture durable conclusions only, and revalidate the behavior when it is later implemented through APIs. Do not spend personal API money merely to prove behavior that can be tested manually in the web apps.
+`User/Kinetiq inputs -> GPT-6 Astra (medium reasoning) creative planning/prompting -> GPT Image 2 generation -> user review/select -> save to TRA Creatives`
+
+Claude is deferred from the active image-generation path. Do not validate, implement, or restore the historical `Claude -> GPT-5.6 Sol -> GPT Image 2` chain as current Stage 1 behavior unless `docs/image-workflow.md` or an explicit newer product-decision Issue reactivates it and states what it supersedes.
+
+Keep implementation focused on the Stage 1 creative system. Do not expand into autonomous media buying, winner prediction, custom ML training, budget optimization, automatic pause/scale logic, performance dashboards, or autonomous publishing unless explicitly reactivated.
+
+Current-phase goal: turn references plus approved TRA knowledge into high-quality, compliant, meaningfully different static creatives that are saved with persistent identity and structured metadata. The active workflow should preserve approved source roles and human provenance, complete company/brand grounding, meaningful dimensional variation, placement-aware generation, deterministic compliance safeguards, and enough metadata to support later performance/revenue attribution.
 
 Once the required access exists, add the performance system in this order: verified Meta + TRA revenue attribution -> Claude read-only analysis/recommendations -> supervised execution -> bounded automation. The long-term agent objective is an ongoing acquisition system that maximizes verified attributable revenue within hard spending, compliance, and experimentation constraints; intermediate metrics are diagnostic signals, not the objective.
 
@@ -182,13 +194,13 @@ Preserve these future-stage rules even while Stage 1 remains the only active imp
 - maximize verified attributable revenue over the long term, with spend/efficiency/compliance rules as constraints;
 - keep intermediate metrics diagnostic rather than letting them silently replace the revenue objective;
 - balance exploitation of winners with continued exploration of substantially different concepts;
-- use Claude as advertising strategist/orchestrator, GPT-5.6 Sol as creative director/visual QA, and GPT Image 2 as the image-generation engine;
+- for future performance/autonomy stages only, preserve the documented Claude strategist/orchestrator and GPT-5.6 Sol creative-director/visual-QA roles unless future architecture explicitly changes them; these are not the active Stage 1 image-generation path;
 - keep financial, attribution, compliance, and execution safety rules in deterministic code outside the LLM;
 - verify/normalize metrics before Claude reasons from them;
 - preserve persistent creative IDs, structured metadata, and reusable learnings so future revenue can be tied back to exact hypotheses and creatives;
 - ground taste in references, brand context, and accumulated heuristics rather than assuming the base model has the right aesthetic by default.
 
-Detailed stage ordering belongs in `docs/roadmap.md`; stable future-stage boundaries belong in `docs/architecture.md`.
+Detailed active Stage 1 image-workflow direction belongs in `docs/image-workflow.md`; long-term/future stage ordering belongs in `docs/roadmap.md`; stable system boundaries and future-stage architecture belong in `docs/architecture.md`.
 
 ## Decision capture
 
@@ -196,17 +208,18 @@ When a chat or AI session establishes a durable project decision, constraint, ar
 
 - Record the final decision and only the rationale needed to understand it later; do not preserve raw conversation transcripts or step-by-step reasoning.
 - Runtime behavior or implementation decisions -> code/config.
-- Product stage/order changes -> `docs/roadmap.md`.
-- Architecture changes or stable system boundaries -> `docs/architecture.md`.
+- Active Stage 1 image-product direction or implementation order -> `docs/image-workflow.md`.
+- Long-term/future product stage or ordering changes -> `docs/roadmap.md`.
+- Stable system-boundary or future-stage architecture changes -> `docs/architecture.md`.
 - Deployment or external platform requirements -> `docs/deployment.md`.
-- Current/deferred implementation work -> GitHub Issue.
+- Current/deferred implementation work -> GitHub Issue, subordinate to the active workflow unless the Issue explicitly records a newer product decision and states what it supersedes.
 - Temporary brainstorming, abandoned ideas, and routine debugging stay in chat/Git history unless they produce a durable decision.
 - When experiments establish a durable choice, document what was chosen and why, not the full sequence of failed approaches.
 
 ## Context limits
 
 - Do not recursively load the repository, `/docs`, Git history, old PRs, or external source material by default.
-- Start with `AGENTS.md`, the task-relevant code/config, and only the specific supporting document needed.
+- Start with `AGENTS.md`, the task-relevant code/config, and only the specific supporting document needed. For active Stage 1 image work, load `docs/image-workflow.md` before older roadmap/architecture planning.
 - Prefer summaries over raw source data. Retrieve raw evidence only when exact verification is required.
 
 ## Documentation and deletion
