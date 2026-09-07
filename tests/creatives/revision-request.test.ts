@@ -27,6 +27,7 @@ describe('saved creative revision requests', () => {
     { operation: 'REGENERATE', identity: { conceptId: 'caller-value' } },
     { operation: 'REGENERATE', sourceAssets: [] },
     { operation: 'REGENERATE', companyProfile: 'invalid' },
+    { operation: 'REGENERATE', companyProfile: null },
   ])('rejects malformed or ambiguous operation input %#', (input) => {
     expect(validateCreativeRevisionRequest(input).success).toBe(false);
   });

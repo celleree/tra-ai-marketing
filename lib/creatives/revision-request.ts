@@ -26,7 +26,7 @@ export function validateCreativeRevisionRequest(input: unknown):
   if (Object.keys(body).some((key) => !keys.includes(key))) {
     return invalid('Revision request contains fields that do not apply to this operation.');
   }
-  if (body.companyProfile != null && (typeof body.companyProfile !== 'object' || Array.isArray(body.companyProfile))) {
+  if (body.companyProfile !== undefined && (!body.companyProfile || typeof body.companyProfile !== 'object' || Array.isArray(body.companyProfile))) {
     return invalid('Company profile must be a JSON object.');
   }
   const companyProfile = normalizeRuntimeCompanyProfile(body.companyProfile);
