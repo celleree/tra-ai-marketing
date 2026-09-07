@@ -130,6 +130,7 @@ export function SelectedFrameGeneration({
                     placement: completedCreative.placement,
                     planning: completedCreative.planning,
                     generationProvenance: completedCreative.generationProvenance,
+                    identity: completedCreative.identity,
                     ...(completedCreative.videoFrameSelection
                       ? { videoFrameSelection: completedCreative.videoFrameSelection }
                       : {}),
