@@ -22,6 +22,14 @@ const creative = (index: number): GeneratedCreative => ({
 });
 
 describe('progressive client completion', () => {
+  it('skips browser branding and duplicate persistence for server-saved creatives', async () => {
+    const saved = { ...creative(1), finalization: { status: 'SAVED' as const, createdAt: '2026-09-07T20:00:00.000Z' } };
+    const applyBrandLogo = vi.fn();
+    const persist = vi.fn();
+    await expect(completeProgressiveCreative({ creative: saved, logoUrl: '/logo.png', applyBrandLogo, persist })).resolves.toBe(saved);
+    expect(applyBrandLogo).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
+  });
   it('persists only the branded creative and returns it for display', async () => {
     const generated = creative(2);
     const branded = { ...generated, image: { ...generated.image, id: `media_${'b'.repeat(32)}` } };

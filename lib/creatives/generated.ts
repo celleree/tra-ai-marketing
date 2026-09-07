@@ -16,6 +16,7 @@ export interface CreativeCopy {
 export type CreativeSource = 'generated' | 'uploaded';
 
 export interface GeneratedCreative {
+  finalization?: { status: 'SAVED'; createdAt: string };
   id: string;
   index: number;
   category: CreativeCategoryId;

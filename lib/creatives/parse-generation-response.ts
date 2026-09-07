@@ -68,6 +68,12 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
   const copy = creative.copy;
   const category = creative.category;
   const format = creative.format;
+  const finalization = creative.finalization as Record<string, unknown> | undefined;
+  if (finalization !== undefined && (
+    !finalization || typeof finalization !== 'object' || Array.isArray(finalization) ||
+    Object.keys(finalization).length !== 2 || finalization.status !== 'SAVED' ||
+    typeof finalization.createdAt !== 'string' || !Number.isFinite(Date.parse(finalization.createdAt))
+  )) return null;
   const videoFrameSelection =
     creative.videoFrameSelection === undefined
       ? undefined
@@ -117,6 +123,7 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
 
   return {
     id: creative.id,
+    ...(finalization ? { finalization: { status: 'SAVED' as const, createdAt: finalization.createdAt as string } } : {}),
     index: creative.index,
     category: category as CreativeCategoryId,
     format: format as CreativeFormatId,
