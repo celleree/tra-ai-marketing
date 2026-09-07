@@ -28,6 +28,20 @@ const provenance = (): CreativeGenerationProvenance => ({
 });
 
 describe('creative generation provenance', () => {
+  it('retains revision canvas identity and instructions separately from human-source provenance', () => {
+    const revision = { parentCreativeId: `creative_${'f'.repeat(32)}`, canvasMediaId: mediaId('f'), canvasSha256: hash('f'), instruction: 'Make the headline easier to read.' };
+    const parsed = parseCreativeGenerationProvenance({ ...provenance(), revision });
+    expect(parsed?.revision).toEqual(revision);
+    expect(parsed?.attachedSource).toEqual(provenance().attachedSource);
+    expect(parsed?.requestedSources.some((source) => source.mediaId === revision.canvasMediaId)).toBe(false);
+    const { instruction: _instruction, ...placementRevision } = revision;
+    expect(parseCreativeGenerationProvenance({ ...provenance(), revision: placementRevision })?.revision).toEqual(placementRevision);
+    for (const invalid of [null, { ...revision, parentCreativeId: 'invalid' }, { ...revision, canvasMediaId: '../image' }, { ...revision, canvasSha256: 'invalid' }, { ...revision, instruction: ' ' }, { ...revision, instruction: 'x'.repeat(4001) }, { ...revision, approvedHumanSource: true }]) {
+      expect(parseCreativeGenerationProvenance({ ...provenance(), revision: invalid })).toBeNull();
+    }
+    expect(parseCreativeGenerationProvenance(provenance())?.revision).toBeUndefined();
+  });
+
   it('accepts every source union arm and preserves the prompt verbatim', () => {
     const parsed = parseCreativeGenerationProvenance(provenance());
     expect(parsed?.imageGeneration.prompt).toBe('  Preserve this exact prompt.  ');

@@ -10,6 +10,11 @@ interface CreativeLibraryItem extends CreativeRecord {
   metaCreativeId?: string;
 }
 
+const operationLabels = {
+  GENERATE: 'Original concept', PLACEMENT: 'Placement variant', EDIT: 'Edited version',
+  REGENERATE: 'Regenerated concept', VARIATION: 'New variation',
+};
+
 export function CreativeLibrary() {
   const [items, setItems] = useState<CreativeLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,7 +70,7 @@ export function CreativeLibrary() {
       {items.length ? (
         <div className={styles.grid}>
           {items.map((creative) => (
-            <article className={styles.card} key={creative.id}>
+            <article className={styles.card} key={creative.id} id={creative.id}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 className={styles.image}
@@ -73,6 +78,9 @@ export function CreativeLibrary() {
                 alt={`TRA creative ${creative.id}`}
               />
               <div className={styles.body}>
+                <h3>{creative.copy.headline}</h3>
+                <p>{creative.copy.primaryText}</p>
+                {creative.copy.description ? <p className={styles.description}>{creative.copy.description}</p> : null}
                 <div className={styles.pills}>
                   <span className={styles.pill}>
                     {CREATIVE_CATEGORY_LABELS[creative.category]}
@@ -82,6 +90,23 @@ export function CreativeLibrary() {
                 <p className={styles.description}>
                   Created {new Date(creative.createdAt).toLocaleString()}
                 </p>
+                {creative.identity ? (
+                  <details style={{ overflowWrap: 'anywhere' }}>
+                    <summary>Version history</summary>
+                    <p>{operationLabels[creative.identity.operation]}</p>
+                    {creative.identity.parentCreativeId ? (
+                      <p><a href={`#${creative.identity.parentCreativeId}`}>View the parent creative</a></p>
+                    ) : null}
+                    <p className={styles.creativeId}>Concept ID: {creative.identity.conceptId}</p>
+                    <ul>{items.filter((item) => item.identity?.conceptId === creative.identity?.conceptId).map((version) => (
+                      <li key={version.id}>
+                        <a href={`#${version.id}`}>{version.copy.headline}</a>
+                        {' · '}{operationLabels[version.identity!.operation]}
+                        {' · '}{new Date(version.createdAt).toLocaleString()}
+                      </li>
+                    ))}</ul>
+                  </details>
+                ) : null}
                 {creative.referenceImageId ? (
                   <p className={styles.creativeId}>
                     Reference ID: {creative.referenceImageId}
