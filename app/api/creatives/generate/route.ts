@@ -22,6 +22,7 @@ import {
   validateGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
+import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
@@ -497,6 +498,12 @@ export async function POST(request: Request) {
     const renderCreative = async (
       item: PlannedCreativeConcept
     ): Promise<GeneratedCreative> => {
+          const creativeId = `creative_${randomUUID().replaceAll('-', '')}`;
+          const identity = buildCreativeIdentity({
+            creativeId,
+            operation: 'GENERATE',
+            strategy: item.strategy,
+          });
           const copy = item.copy;
           const selectedReference = selectedReferences[item.index - 1];
           const singleReferenceContract = selectedReference
@@ -586,7 +593,7 @@ export async function POST(request: Request) {
           };
 
           return {
-            id: `creative_${randomUUID().replaceAll('-', '')}`,
+            id: creativeId,
             index: item.index,
             category: item.strategy.category,
             format: item.format,
@@ -594,6 +601,7 @@ export async function POST(request: Request) {
             image,
             copy,
             generationProvenance,
+            identity,
             planning: {
               strategy: item.strategy,
               selectionReason: item.selectionReason,
