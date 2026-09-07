@@ -4,6 +4,10 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import {
+  isCreativePlacement,
+  type CreativePlacement,
+} from '@/lib/creatives/placements';
+import {
   buildCreativeCompanyContext,
   formatCreativeCompanyContext,
   normalizeRuntimeCompanyProfile,
@@ -23,15 +27,17 @@ export type GenerateCreativeRequest = {
   brandFontNames?: string[];
   companyProfile?: RuntimeCompanyProfileSnapshot;
   videoFrameSelection?: GenerateVideoFrameSelection;
+  placement?: CreativePlacement;
   context: string;
   variationCount: number;
 };
 
 export type ValidGenerateCreativeRequest = Omit<
   GenerateCreativeRequest,
-  'sourceAssets'
+  'sourceAssets' | 'placement'
 > & {
   sourceAssets: CreativeSourceSelection[];
+  placement: CreativePlacement;
 };
 
 export type PlannedCreative = {
@@ -95,6 +101,8 @@ export function validateGenerateCreativeRequest(input: unknown):
     body.videoFrameSelection === undefined
       ? undefined
       : parseGenerateVideoFrameSelection(body.videoFrameSelection);
+  const placement =
+    body.placement === undefined ? 'SQUARE_1_1' : body.placement;
   const brandLogoMediaId =
     typeof body.brandLogoMediaId === 'string'
       ? body.brandLogoMediaId.trim()
@@ -120,6 +128,10 @@ export function validateGenerateCreativeRequest(input: unknown):
       error:
         'videoFrameSelection must contain a valid libraryId, sourceVideoContentHash, and 1 to 3 unique frameIds',
     };
+  }
+
+  if (!isCreativePlacement(placement)) {
+    return { success: false, error: 'placement is unsupported' };
   }
 
   if (
@@ -187,6 +199,7 @@ export function validateGenerateCreativeRequest(input: unknown):
     success: true,
     data: {
       sourceAssets,
+      placement,
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),

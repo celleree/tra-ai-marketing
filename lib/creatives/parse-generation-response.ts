@@ -7,6 +7,10 @@ import {
   type CreativeFormatId,
 } from '@/lib/creative-formats';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
+import {
+  isCreativePlacement,
+  type CreativePlacement,
+} from '@/lib/creatives/placements';
 import type { MediaAsset } from '@/lib/media/types';
 import { parseGeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 
@@ -73,6 +77,8 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
     !isCreativeCategory(category) ||
     typeof format !== 'string' ||
     !isCreativeFormat(format) ||
+    (creative.placement !== undefined &&
+      !isCreativePlacement(creative.placement)) ||
     !isMediaAsset(creative.image) ||
     !copy ||
     typeof copy !== 'object' ||
@@ -96,6 +102,9 @@ const parseCreative = (value: unknown): GeneratedCreative | null => {
     index: creative.index,
     category: category as CreativeCategoryId,
     format: format as CreativeFormatId,
+    ...(creative.placement
+      ? { placement: creative.placement as CreativePlacement }
+      : {}),
     image: creative.image,
     copy: {
       primaryText: copyRecord.primaryText,
