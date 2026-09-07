@@ -74,6 +74,15 @@ const planning: NonNullable<CreativeRecord['planning']> = {
   }, selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium' as const,
 };
 
+const generationProvenance: NonNullable<CreativeRecord['generationProvenance']> = {
+  version: 1,
+  imageGeneration: { prompt: '  Exact provider prompt\nwith retained whitespace  ', model: 'gpt-image-2' },
+  requestedSources: [{ role: 'TRA_REFERENCE', mediaId: `media_${'c'.repeat(32)}`, sha256: 'd'.repeat(64) }],
+  attachedSource: { type: 'TRA_REFERENCE_IMAGE', mediaId: `media_${'c'.repeat(32)}`, sha256: 'd'.repeat(64) },
+  analysisSources: [{ type: 'REFERENCE_LIBRARY', mediaId: `media_${'e'.repeat(32)}` }],
+  logoOverlaySource: { mediaId: `media_${'f'.repeat(32)}`, sha256: 'a'.repeat(64) },
+};
+
 beforeEach(() => {
   vi.stubEnv('NODE_ENV', 'test');
   mkdirMock.mockReset().mockResolvedValue(undefined);
@@ -89,7 +98,7 @@ afterEach(() => {
 describe('TRA creative storage', () => {
   it('round-trips generated metadata while retaining legacy records', async () => {
     const legacy = record('a', '2026-08-20T12:00:00.000Z');
-    const generated = { ...record('b', '2026-08-25T12:00:00.000Z'), format: 'direct-response' as const, placement: 'PORTRAIT_4_5' as const, planning };
+    const generated = { ...record('b', '2026-08-25T12:00:00.000Z'), format: 'direct-response' as const, placement: 'PORTRAIT_4_5' as const, planning, generationProvenance };
     readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [legacy] }));
     await saveCreativeBatch([generated]);
     const encoded = writeFileMock.mock.calls[0][1] as string;
@@ -101,6 +110,8 @@ describe('TRA creative storage', () => {
     ['format', { format: 'unsupported' }],
     ['placement', { placement: 'LANDSCAPE_16_9' }],
     ['planning', { planning: { ...planning, reasoningEffort: 'high' } }],
+    ['generation provenance', { generationProvenance: { ...generationProvenance, version: 2 } }],
+    ['null generation provenance', { generationProvenance: null }],
   ])('rejects malformed supplied %s metadata', async (_label, metadata) => {
     await expect(saveCreativeBatch([{ ...record('b', '2026-08-25T12:00:00.000Z'), ...metadata } as CreativeRecord])).rejects.toThrow('One or more creative records are invalid.');
     expect(writeFileMock).not.toHaveBeenCalled();
