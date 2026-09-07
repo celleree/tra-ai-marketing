@@ -1,9 +1,7 @@
 ## Checkpoint
 
-- Status: IN PROGRESS / READY FOR REVIEW / BLOCKED / READY TO MERGE
+- Status: IN PROGRESS / READY FOR REVIEW / BLOCKED
 - Branch:
-- HEAD SHA:
-- Last verified:
 - Next action:
 - Blockers: NONE
 
@@ -14,18 +12,16 @@
 
 ## Reviewability
 
-- Substantive diff: [approx. lines / files]
-- Mechanical diff: NONE
 - PR scope: [single coherent change]
 - Stack: NONE
 - Large PR justification: N/A
 - Review order: N/A
 
+Live GitHub state is authoritative for current HEAD/base/diff/check status. Do not maintain those volatile values manually in this body.
+
 ## Verification
 
-- `command` — result
-- CI `verify`: pending / passed
-- CI `pr-reviewability`: pending / passed / N/A
+- Focused/local: `command` — result
 
 ## Risk
 
@@ -38,9 +34,11 @@
 - Status: not required / pending / passed / findings open
 - Reviewer:
 - Fresh context confirmed: yes / no
-- Reviewed diff/commit:
+- Reviewed SHA:
 - Findings/conclusion:
 - Resolution and re-verification:
+
+A passing review is current only when `Reviewed SHA` equals the live PR HEAD.
 
 ## Reusable learning
 
