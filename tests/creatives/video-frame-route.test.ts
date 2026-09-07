@@ -14,6 +14,7 @@ const {
   readMediaByIdMock,
   readImageByIdMock,
   saveImageMock,
+  saveCreativeBatchMock,
   validateGeneratedCreativeImageMock,
 } = vi.hoisted(() => ({
   analyzeApprovedTraVideoFramesMock: vi.fn(),
@@ -23,8 +24,11 @@ const {
   readMediaByIdMock: vi.fn(),
   readImageByIdMock: vi.fn(),
   saveImageMock: vi.fn(),
+  saveCreativeBatchMock: vi.fn(),
   validateGeneratedCreativeImageMock: vi.fn(),
 }));
+
+vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: saveCreativeBatchMock }));
 
 vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
   ...(await original<typeof import('@/lib/creatives/generated-image-validation')>()),
@@ -70,6 +74,7 @@ const makeRequest = () => new Request('https://tra.example/api/creatives/generat
 
 beforeEach(() => {
   vi.clearAllMocks();
+  saveCreativeBatchMock.mockReset().mockImplementation(async (records) => records);
   validateGeneratedCreativeImageMock.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   readMediaByIdMock.mockResolvedValue({ fileName: `${VIDEO_ID}.mp4`, buffer: REAL_ENCODED_MP4, mimeType: 'video/mp4', mediaType: 'VIDEO' });

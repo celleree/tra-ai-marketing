@@ -8,6 +8,8 @@ import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
 const mocks = vi.hoisted(() => ({
+  compositeCreativeBrandLogo: vi.fn(),
+  saveCreativeBatch: vi.fn(),
   validateGeneratedCreativeImage: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
   generateApprovedTraReferenceCreativeImage: vi.fn(),
@@ -22,6 +24,9 @@ const mocks = vi.hoisted(() => ({
   listReferenceLibrary: vi.fn(),
   selectBestReferenceCreatives: vi.fn(),
 }));
+
+vi.mock('@/lib/creatives/brand-logo.server', () => ({ compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo }));
+vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveCreativeBatch }));
 
 vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
   ...(await original<typeof import('@/lib/creatives/generated-image-validation')>()),
@@ -326,6 +331,8 @@ it('returns the exact prompt and resolved model sent for prompt-only generation'
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.compositeCreativeBrandLogo.mockReset().mockImplementation(async (buffer) => buffer);
+  mocks.saveCreativeBatch.mockReset().mockImplementation(async (records) => records);
   mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   storedById = {};
@@ -928,6 +935,36 @@ describe('layout blueprint and final image-provider boundaries', () => {
 });
 
 describe('progressive creative delivery', () => {
+  it('saves final logo pixels and metadata before marking a creative as saved', async () => {
+    const finalPixels = Buffer.from('composited PNG fixture');
+    readImageById.mockResolvedValue(image('7'));
+    mocks.compositeCreativeBrandLogo.mockResolvedValue(finalPixels);
+    const response = await POST(generationRequest([], undefined, 2, undefined, 'PORTRAIT_4_5', { brandLogoMediaId: mediaId('7') }));
+    const events = await readStreamEvents(response);
+    expect(mocks.compositeCreativeBrandLogo).toHaveBeenCalledTimes(2);
+    expect(mocks.compositeCreativeBrandLogo).toHaveBeenCalledWith(PNG, PNG, 'PORTRAIT_4_5');
+    expect(await Promise.all(saveImage.mock.calls.map(async ([file]) => Buffer.from(await file.arrayBuffer())))).toEqual([finalPixels, finalPixels]);
+    expect(mocks.compositeCreativeBrandLogo.mock.invocationCallOrder[0]).toBeLessThan(saveImage.mock.invocationCallOrder[0]);
+    expect(saveImage.mock.invocationCallOrder[0]).toBeLessThan(mocks.saveCreativeBatch.mock.invocationCallOrder[0]);
+    const saved = mocks.saveCreativeBatch.mock.calls.flatMap(([records]) => records);
+    for (const { data } of events.filter(({ event }) => event === 'creative')) {
+      const creative = data.creative as { id: string; image: unknown; finalization: unknown };
+      const record = saved.find((item) => item.id === creative.id);
+      expect(record).toMatchObject({ image: creative.image, placement: 'PORTRAIT_4_5', identity: expect.any(Object), planning: expect.any(Object), generationProvenance: expect.any(Object) });
+      expect(creative.finalization).toEqual({ status: 'SAVED', createdAt: record.createdAt });
+    }
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+  });
+
+  it('does not report success when a library save fails and retains saved siblings', async () => {
+    mocks.saveCreativeBatch.mockRejectedValueOnce(new Error('fixture storage failure'));
+    const events = await readStreamEvents(await POST(generationRequest([], undefined, 2)));
+    expect(mocks.compositeCreativeBrandLogo).not.toHaveBeenCalled();
+    expect(mocks.saveCreativeBatch).toHaveBeenCalledTimes(2);
+    expect(events.filter(({ event }) => event === 'creative')).toHaveLength(1);
+    expect(events.find(({ event }) => event === 'error')?.data.error).toContain('could not be completed');
+    expect(events.at(-1)?.data).toMatchObject({ successfulCount: 1, failedCount: 1 });
+  });
   it('surfaces invalid image output without saving it and retains successful siblings', async () => {
     mocks.validateGeneratedCreativeImage.mockRejectedValueOnce(new GeneratedImageValidationError('Generated image must be 1024x1280. Regenerate this creative.'));
     const response = await POST(generationRequest([], undefined, 2, undefined, 'PORTRAIT_4_5'));
@@ -1082,7 +1119,7 @@ describe('progressive creative delivery', () => {
 
     expect(events).toContainEqual({
       event: 'error',
-      data: { index: 1, error: 'Creative 1 could not be generated.' },
+      data: { index: 1, error: 'Creative 1 could not be completed.' },
     });
     expect(
       events

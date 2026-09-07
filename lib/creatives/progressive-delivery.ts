@@ -16,6 +16,7 @@ export const completeProgressiveCreative = async ({
   applyBrandLogo: ApplyBrandLogo;
   persist: (creative: GeneratedCreative) => Promise<void>;
 }) => {
+  if (creative.finalization?.status === 'SAVED') return creative;
   let completedCreative = creative;
   if (logoUrl) {
     const [brandedCreative] = await applyBrandLogo([creative], logoUrl);

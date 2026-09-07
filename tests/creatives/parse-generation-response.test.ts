@@ -36,6 +36,18 @@ const creative = {
   copy: { primaryText: 'Primary', headline: 'Headline', description: 'Description' },
 };
 
+it('preserves a valid server completion marker and rejects malformed markers', async () => {
+  const finalization = { status: 'SAVED', createdAt: '2026-09-07T20:00:00.000Z' };
+  let received: unknown;
+  await consumeGenerationEventStream(streamResponse([`event: creative\ndata: ${JSON.stringify({ creative: { ...creative, finalization } })}\n\n`]), (event) => {
+    if (event.type === 'creative') received = event.creative.finalization;
+  });
+  expect(received).toEqual(finalization);
+  for (const invalid of [null, { status: 'SAVED' }, { ...finalization, status: 'PENDING' }, { ...finalization, createdAt: 'invalid' }, { ...finalization, extra: true }]) {
+    await expect(consumeGenerationEventStream(streamResponse([`event: creative\ndata: ${JSON.stringify({ creative: { ...creative, finalization: invalid } })}\n\n`]), () => undefined)).rejects.toThrow('invalid creative event');
+  }
+});
+
 const videoFrameSelection = {
   libraryId: `video-library:${'b'.repeat(64)}`,
   sourceVideoMediaId: `media_${'c'.repeat(32)}`,

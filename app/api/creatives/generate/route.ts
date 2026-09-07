@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
+import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
+import { saveCreativeBatch } from '@/lib/creatives/storage';
 import {
   analyzeTraSourceCreative,
   generateApprovedTraReferenceCreativeImage,
@@ -549,8 +551,11 @@ export async function POST(request: Request) {
           }
 
           await validateGeneratedCreativeImage(imageResult.buffer, parsed.data.placement);
+          const finalImage = brandLogo
+            ? await compositeCreativeBrandLogo(imageResult.buffer, brandLogo.buffer, parsed.data.placement)
+            : imageResult.buffer;
           const generatedFile = new File(
-            [new Uint8Array(imageResult.buffer)],
+            [new Uint8Array(finalImage)],
             `tra-creative-${item.index}.png`,
             { type: 'image/png' }
           );
@@ -592,7 +597,7 @@ export async function POST(request: Request) {
             ...(logoOverlaySource ? { logoOverlaySource } : {}),
           };
 
-          return {
+          const creative: GeneratedCreative = {
             id: creativeId,
             index: item.index,
             category: item.strategy.category,
@@ -622,6 +627,8 @@ export async function POST(request: Request) {
                 ? { referenceImageId: uploadedReferenceImageId }
                 : {}),
           };
+          const [saved] = await saveCreativeBatch([{ ...creative, createdAt: new Date().toISOString() }]);
+          return { ...creative, finalization: { status: 'SAVED', createdAt: saved.createdAt } };
     };
 
     const encoder = new TextEncoder();
@@ -654,7 +661,7 @@ export async function POST(request: Request) {
                 index: item.index,
                 error: error instanceof GeneratedImageValidationError
                   ? error.message
-                  : `Creative ${item.index} could not be generated.`,
+                  : `Creative ${item.index} could not be completed.`,
               });
             }
           }
