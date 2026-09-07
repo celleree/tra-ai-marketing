@@ -61,11 +61,12 @@ describe('creative copy Responses request', () => {
   ])('%s', async (_label, override, expectedModel) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     vi.stubEnv('OPENAI_TEXT_MODEL', override);
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify(responseWithCopy), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify(responseWithCopy), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
     );
     vi.stubGlobal('fetch', fetchMock);
 
