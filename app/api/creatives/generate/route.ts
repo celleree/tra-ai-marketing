@@ -3,9 +3,9 @@ import { NextResponse } from 'next/server';
 import {
   analyzeTraSourceCreative,
   generateApprovedTraReferenceCreativeImage,
-  generateCreativeCopy,
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
+import { planCreativeBatch } from '@/lib/ai/creative-planner';
 import {
   analyzeApprovedTraVideoFrames,
   generateApprovedTraVideoFrameCreativeImage,
@@ -18,12 +18,11 @@ import {
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import {
-  buildCreativePlan,
   validateGenerateCreativeRequest,
-  type PlannedCreative,
-  type ValidGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
+import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
+import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
   CREATIVE_PLACEMENT_SPECS,
   type CreativePlacement,
@@ -81,8 +80,7 @@ const getOpenAIError = async (response: Response) => {
 };
 
 const buildPromptOnlyAnalysis = (
-  context: string,
-  plan: PlannedCreative[]
+  context: string
 ): CreativeReferenceAnalysis => ({
   summary: 'No source image was supplied. Create original TRA concepts from the user direction.',
   visibleText: [],
@@ -100,12 +98,11 @@ const buildPromptOnlyAnalysis = (
     'people, faces, spokespersons, or human figures without an attached approved TRA human source',
   ],
   unknowns: [],
-  dominantCategory: plan[0]?.category || 'customer-problems',
+  dominantCategory: 'customer-problems',
 });
 
 const buildLayoutReferenceAnalysis = (
-  blueprint: LayoutBlueprint,
-  plan: PlannedCreative[]
+  blueprint: LayoutBlueprint
 ): CreativeReferenceAnalysis => ({
   summary:
     'External layout reference reduced to a validated design-only LayoutBlueprint. It supplies no creative strategy, copy, claims, brand identity, trademark identity, or person identity.',
@@ -126,7 +123,7 @@ const buildLayoutReferenceAnalysis = (
     'reference testimonials, statistics, claims, or proof content',
   ],
   unknowns: [],
-  dominantCategory: plan[0]?.category || 'customer-problems',
+  dominantCategory: 'customer-problems',
 });
 
 const generatePromptOnlyCreativeImage = async (args: {
@@ -214,18 +211,6 @@ const buildReferenceCandidates = (
     item,
     imageUrl: new URL(item.url, requestUrl).toString(),
   }));
-
-const buildPlanFromSelectedReferences = (
-  request: ValidGenerateCreativeRequest,
-  selections: SelectedReferenceCreative[]
-): PlannedCreative[] =>
-  selections.map((selection, offset) => {
-    const [template] = buildCreativePlan(
-      { ...request, variationCount: 1 },
-      selection.item.angle
-    );
-    return { ...template, index: offset + 1 };
-  });
 
 const findGenerationSource = (
   sources: HydratedCreativeSourceAsset[]
@@ -368,68 +353,48 @@ export async function POST(request: Request) {
     const reserveLogoArea = Boolean(brandLogo);
 
     let analysis: CreativeReferenceAnalysis;
-    let creativePlan: PlannedCreative[];
     let layoutBlueprint: ResolvedLayoutBlueprint | null = null;
     let selectedReferences: SelectedReferenceCreative[] = [];
-    let librarySelections = new Map<number, SelectedReferenceCreative>();
 
     if (source && generationSourceAsset?.role === 'LAYOUT_REFERENCE') {
       layoutBlueprint = await getOrAnalyzeLayoutBlueprint(source);
-      creativePlan = buildCreativePlan(parsed.data);
-      analysis = buildLayoutReferenceAnalysis(layoutBlueprint.blueprint, creativePlan);
+      analysis = buildLayoutReferenceAnalysis(layoutBlueprint.blueprint);
     } else if (source && generationSourceAsset?.role === 'TRA_REFERENCE') {
       analysis = await analyzeTraSourceCreative(source, parsed.data.context);
 
       const library = await listReferenceLibrary();
-      if (library.length < parsed.data.variationCount) {
-        return NextResponse.json(
-          {
-            error: `TRA ad mode needs at least ${parsed.data.variationCount} reference images to create ${parsed.data.variationCount} separate reference remakes. Only ${library.length} are currently available.`,
-          },
-          { status: 409 }
-        );
-      }
-
-      const chosen = await selectBestReferenceCreatives({
-        candidates: buildReferenceCandidates(library, request.url),
-        requestedCount: parsed.data.variationCount,
-        userContext: parsed.data.context,
-        traSummary: analysis.summary,
-        traPreserve: analysis.preserve,
-      });
-      selectedReferences = chosen;
-      creativePlan = buildPlanFromSelectedReferences(parsed.data, selectedReferences);
-      librarySelections = new Map(
-        selectedReferences.map((selection, index) => [index + 1, selection])
+      const requestedReferenceCount = Math.min(
+        parsed.data.variationCount,
+        library.length
       );
+      if (requestedReferenceCount > 0) {
+        selectedReferences = await selectBestReferenceCreatives({
+          candidates: buildReferenceCandidates(library, request.url),
+          requestedCount: requestedReferenceCount,
+          userContext: parsed.data.context,
+          traSummary: analysis.summary,
+          traPreserve: analysis.preserve,
+        });
+      }
     } else if (videoFrameSet) {
       analysis = await analyzeApprovedTraVideoFrames({
         frames: videoFrameSet.frames,
         context: parsed.data.context,
       });
-      creativePlan = buildCreativePlan(parsed.data);
     } else {
-      creativePlan = buildCreativePlan(parsed.data);
-      analysis = buildPromptOnlyAnalysis(parsed.data.context, creativePlan);
+      analysis = buildPromptOnlyAnalysis(parsed.data.context);
     }
 
-    const categoryDirections = creativePlan
-      .map(
-        (item) =>
-          `Creative ${item.index}: ${CREATIVE_CATEGORY_LABELS[item.category]}`
-      )
-      .join('\n');
     const referenceDirections = selectedReferences.length
       ? selectedReferences
-          .map(
-            (selection, index) =>
-              `Creative ${index + 1}: use ONLY reference ${selection.item.id} (${CREATIVE_CATEGORY_LABELS[selection.item.angle]}). Selection reason: ${selection.selectionReason}`
+          .map((selection) =>
+            `- Reference ${selection.item.id} (${CREATIVE_CATEGORY_LABELS[selection.item.angle]}): ${selection.selectionReason}`
           )
           .join('\n')
       : '';
     const modeDirection = source
       ? generationSourceAsset?.role === 'TRA_REFERENCE'
-        ? 'TRA ad mode: AI has selected one individual library reference for each requested creative. Each output must be a separate TRA adaptation of its own single reference. Never combine, merge, collage, or borrow visual systems from multiple references. The validated uploaded TRA reference may be the only raw image attached to final generation; library references are analysis-only.'
+        ? 'TRA ad mode: the validated uploaded TRA reference may be attached to final generation. Any selected library references are optional analysis-only design guidance for planning. They do not dictate a creative category, do not need to be used by every output, and their raw pixels are never attached to final generation.'
         : 'Layout-reference mode: the uploaded external image has already been reduced to a validated structured LayoutBlueprint. Use only that design mechanism plus approved TRA context. Its raw pixels and any person identity in it must never reach final image generation.'
       : videoFrameSet
         ? `Video-source mode: the raw TRA video ${videoFrameSet.source.media.id} remains server-side and is never attached to the image provider. A bounded set of server-extracted approved still frames is available as TRA human/content source pixels. Do not treat old video framing, captions, or graphics as a required static-ad layout.`
@@ -468,24 +433,38 @@ export async function POST(request: Request) {
         ? `Approved TRA video-frame source analysis:\nSummary: ${analysis.summary}\nVisible source structure/context: ${analysis.visualStructure}\nStyle notes: ${analysis.styleNotes}\nPreserve approved TRA cues: ${analysis.preserve.join('; ') || 'none'}\nAvoid: ${analysis.avoid.join('; ') || 'none'}`
         : '';
 
-    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}${referenceDirections ? `\n\nSingle-reference assignments:\n${referenceDirections}` : ''}\n\nTreat each assigned reference as separate analysis-only creative guidance. Do not blend references.`;
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
+    const batchPlan = await planCreativeBatch({
+      count: parsed.data.variationCount,
+      context: generationContext,
+      analysis,
+      hasApprovedHumanSource: hasUsableApprovedHumanSource,
+    });
+    const creativePlan = batchPlan.creatives;
+    const diversityIssue = getCreativeDiversityIssue(creativePlan);
+    if (diversityIssue) {
+      return NextResponse.json(
+        {
+          error: `Creative planner returned an insufficiently diverse batch: ${diversityIssue}`,
+        },
+        { status: 502 }
+      );
+    }
 
-    const copyByIndex = await generateCreativeCopy(
-      creativePlan,
-      generationContext,
-      analysis
-    );
-    const renderCreative = async (item: PlannedCreative): Promise<GeneratedCreative> => {
-          const copy = copyByIndex.get(item.index);
-          if (!copy) {
-            throw new Error(`Missing copy for creative ${item.index}.`);
-          }
-
-          const selectedReference = librarySelections.get(item.index);
+    const renderCreative = async (
+      item: PlannedCreativeConcept
+    ): Promise<GeneratedCreative> => {
+          const copy = item.copy;
+          const selectedReference = selectedReferences[item.index - 1];
           const singleReferenceContract = selectedReference
-            ? `\n\nANALYSIS-ONLY SINGLE-REFERENCE GUIDANCE:\n- Selected external reference: ${selectedReference.item.id} (${CREATIVE_CATEGORY_LABELS[selectedReference.item.angle]}).\n- Its raw pixels are NOT attached to final generation.\n- Use only its category and AI selection reason as high-level direction; do not claim or recreate an exact unseen blueprint.\n- Do NOT combine it with another ad style, another reference, a collage, extra panels, unrelated decorative systems, or multiple competing concepts.\n- Preserve one dominant visual idea. Simpler is better.\n- Do not copy third-party identity or unsupported claims.\n- AI selection reason: ${selectedReference.selectionReason}`
+            ? `\n\nOPTIONAL ANALYSIS-ONLY REFERENCE GUIDANCE:\n- External reference: ${selectedReference.item.id}.\n- Its raw pixels are NOT attached to final generation.\n- Use it only when compatible with the planned strategy and visual direction; its library category is not a requirement.\n- Do not recreate unseen details, copy third-party identity or unsupported claims, or combine competing visual systems.\n- Selection reason: ${selectedReference.selectionReason}`
             : '';
-          const itemContext = `${parsed.data.context}${videoFrameSet ? `\n\n${modeDirection}` : ''}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.${singleReferenceContract}`;
+          const itemHumanDirection =
+            item.strategy.execution.subjectSource === 'non-human'
+              ? 'This planned concept is explicitly non-human. Do not depict any person, face, spokesperson, body, or human figure even though approved TRA source pixels may be attached.'
+              : humanSourceDirection;
+          const execution = item.strategy.execution;
+          const itemContext = `${parsed.data.context}${videoFrameSet ? `\n\n${modeDirection}` : ''}\n\n${itemHumanDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\n\nPLANNED CREATIVE BRIEF:\nSelection reason: ${item.selectionReason}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.strategy.category]}\nSO WHAT outcome chain:\n- Surface message: ${item.strategy.soWhat.surfaceMessage}\n- Functional consequence: ${item.strategy.soWhat.functionalConsequence}\n- Meaningful customer outcome: ${item.strategy.soWhat.meaningfulOutcome}\nExecution:\n- Subject source: ${execution.subjectSource}\n- Composition: ${execution.composition}\n- Image treatment: ${execution.imageTreatment}\n- Text density: ${execution.textDensity}\n- CTA treatment: ${execution.ctaTreatment}\n- Typography hierarchy: ${execution.typographyHierarchy}\nVisual direction: ${item.strategy.visualDirection}${singleReferenceContract}`;
           let imageBuffer: Buffer;
 
           if (providerImageSource) {
@@ -530,7 +509,7 @@ export async function POST(request: Request) {
           return {
             id: `creative_${randomUUID().replaceAll('-', '')}`,
             index: item.index,
-            category: item.category,
+            category: item.strategy.category,
             format: item.format,
             placement: parsed.data.placement,
             image,
