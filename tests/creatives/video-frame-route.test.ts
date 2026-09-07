@@ -14,6 +14,7 @@ const {
   readMediaByIdMock,
   readImageByIdMock,
   saveImageMock,
+  validateGeneratedCreativeImageMock,
 } = vi.hoisted(() => ({
   analyzeApprovedTraVideoFramesMock: vi.fn(),
   planCreativeBatchMock: vi.fn(),
@@ -22,6 +23,12 @@ const {
   readMediaByIdMock: vi.fn(),
   readImageByIdMock: vi.fn(),
   saveImageMock: vi.fn(),
+  validateGeneratedCreativeImageMock: vi.fn(),
+}));
+
+vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
+  ...(await original<typeof import('@/lib/creatives/generated-image-validation')>()),
+  validateGeneratedCreativeImage: validateGeneratedCreativeImageMock,
 }));
 
 vi.mock('@/lib/ai/openai', () => ({
@@ -63,6 +70,7 @@ const makeRequest = () => new Request('https://tra.example/api/creatives/generat
 
 beforeEach(() => {
   vi.clearAllMocks();
+  validateGeneratedCreativeImageMock.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   readMediaByIdMock.mockResolvedValue({ fileName: `${VIDEO_ID}.mp4`, buffer: REAL_ENCODED_MP4, mimeType: 'video/mp4', mediaType: 'VIDEO' });
   readImageByIdMock.mockResolvedValue(null);
@@ -136,6 +144,8 @@ describe('creative generation TRA video integration', () => {
       expect.objectContaining({ hasApprovedHumanSource: true })
     );
     expect(generateApprovedTraVideoFrameCreativeImageMock).toHaveBeenCalledTimes(2);
+    expect(validateGeneratedCreativeImageMock).toHaveBeenCalledTimes(2);
+    expect(validateGeneratedCreativeImageMock).toHaveBeenCalledWith(PNG, 'SQUARE_1_1');
     expect(
       await Promise.all(
         saveImageMock.mock.calls.map(async ([file]) =>
