@@ -266,6 +266,7 @@ export function CreativeResults({
           creatives: selectedCreatives.map((creative) => ({
             id: creative.id,
             imageId: creative.image.id,
+            source: creative.source,
             category: creative.category,
             format: creative.format,
             copy: creative.copy,

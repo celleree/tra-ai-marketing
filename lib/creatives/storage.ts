@@ -106,6 +106,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const headline = typeof copy?.headline === 'string' ? copy.headline : '';
   const description =
     typeof copy?.description === 'string' ? copy.description : '';
+  const source = record.source === undefined ? 'generated' : record.source;
   const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
   const planning = parseCreativePlanning(record.planning);
   const generationProvenance = parseCreativeGenerationProvenance(record.generationProvenance);
@@ -138,6 +139,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     !url ||
     !primaryText ||
     !headline ||
+    (source !== 'generated' && source !== 'uploaded') ||
     (record.format !== undefined && !format) ||
     (record.placement !== undefined && !placement) ||
     (referenceImageId !== undefined && !isSafeMediaId(referenceImageId))
@@ -164,6 +166,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     },
     category,
     copy: { primaryText, headline, description },
+    source,
     ...(format ? { format } : {}),
     ...(placement ? { placement } : {}),
     ...(referenceImageId ? { referenceImageId } : {}),
