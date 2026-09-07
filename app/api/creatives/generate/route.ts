@@ -514,6 +514,12 @@ export async function POST(request: Request) {
             placement: parsed.data.placement,
             image,
             copy,
+            planning: {
+              strategy: item.strategy,
+              selectionReason: item.selectionReason,
+              model: batchPlan.plannerModel,
+              reasoningEffort: batchPlan.reasoningEffort,
+            },
             ...(generatedVideoFrameSelection
               ? { videoFrameSelection: generatedVideoFrameSelection }
               : {}),
