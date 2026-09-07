@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import type { MediaStorage } from '@/lib/media/storage';
 import { getVideoFrameIntegrity } from '@/lib/video/frame-cache';
 import type { ApprovedTraVideoFrameSet } from '@/lib/video/types';
@@ -49,10 +51,9 @@ const imageResult = {
   buffer: PNG,
   prompt: 'Mock final image prompt',
   model: 'gpt-image-2',
-  providerFrames: [],
 };
 const VIDEO_ID = `media_${'1'.repeat(32)}`;
-const HASH = '3'.repeat(64);
+const HASH = createHash('sha256').update(REAL_ENCODED_MP4).digest('hex');
 const analysis = { summary: 'Approved TRA video source.', visibleText: [], visualStructure: 'Talking-head source context.', hookOrAngle: 'clarity', offerOrCta: 'consultation', styleNotes: 'Use identity, not old layout.', preserve: ['visible person identity'], avoid: ['old captions'], unknowns: [], dominantCategory: 'customer-problems' };
 const makeFrameSet = (source: unknown): ApprovedTraVideoFrameSet => ({
   source: source as ApprovedTraVideoFrameSet['source'], sourceVideoContentHash: HASH, durationMs: 10_000, reused: false,
@@ -107,7 +108,9 @@ beforeEach(() => {
     plannerModel: 'gpt-6-astra',
     reasoningEffort: 'medium',
   });
-  generateApprovedTraVideoFrameCreativeImageMock.mockResolvedValue(imageResult);
+  generateApprovedTraVideoFrameCreativeImageMock.mockImplementation(
+    async ({ frames }) => ({ ...imageResult, providerFrames: frames })
+  );
   saveImageMock.mockResolvedValue({ id: `media_${'9'.repeat(32)}`, fileName: `media_${'9'.repeat(32)}.png`, originalName: 'generated.png', mimeType: 'image/png', size: PNG.length, url: '/generated.png' });
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -141,6 +144,29 @@ describe('creative generation TRA video integration', () => {
       )
     ).toEqual([PNG, PNG]);
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
+    for (const { data } of events.filter(({ event }) => event === 'creative')) {
+      const provenance = parseCreativeGenerationProvenance(
+        (data.creative as { generationProvenance?: unknown }).generationProvenance
+      );
+      expect(provenance).toMatchObject({
+        imageGeneration: { prompt: imageResult.prompt, model: imageResult.model },
+        requestedSources: [
+          { role: 'TRA_VIDEO', mediaId: VIDEO_ID, sha256: HASH },
+        ],
+        attachedSource: {
+          type: 'TRA_VIDEO_FRAMES',
+          mediaId: VIDEO_ID,
+          sourceSha256: HASH,
+          selectionMode: 'AUTOMATIC',
+          frames: [
+            {
+              timestampMs: 0,
+              approvedPngSha256: getVideoFrameIntegrity(PNG).frameSha256,
+            },
+          ],
+        },
+      });
+    }
     expect(events.at(-1)).toMatchObject({
       event: 'complete',
       data: { requestedCount: 2, successfulCount: 2, failedCount: 0 },
