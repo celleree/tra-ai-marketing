@@ -443,6 +443,13 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+    expect(
+      await Promise.all(
+        saveImage.mock.calls.map(async ([file]) =>
+          Buffer.from(await (file as File).arrayBuffer())
+        )
+      )
+    ).toEqual([PNG, PNG]);
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
   });
 
