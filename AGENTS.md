@@ -15,6 +15,8 @@ Keep normal AI/Codex context small. Read only what the current task requires.
 
 The active build is the Stage 1 static-image creative system. For current implementation behavior and ordering, use `docs/image-workflow.md` before the long-term roadmap.
 
+For the current remaining Stage 1 implementation order, use the `Current remaining roadmap for Astra` section in `docs/image-workflow.md`.
+
 Do not expand into autonomous media buying, winner prediction, budget optimization, automatic pause/scale logic, performance dashboards, or unrestricted Meta execution unless explicitly reactivated.
 
 ## Source-of-truth precedence

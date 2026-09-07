@@ -77,6 +77,18 @@ A long-running root/orchestrator session may own multiple roadmap phases or an e
 
 The root agent should maintain a concise durable checkpoint between phases/PRs containing completed scope, important decisions, verification state, unresolved risks, and the next bounded task. Prefer canonical repo sources and these checkpoints over repeatedly reloading broad chat or repository history.
 
+### Roadmap orchestration
+
+When Astra is coordinating the Stage 1 image roadmap:
+
+1. Inspect current `staging` and the relevant code/tests.
+2. Classify each roadmap item as COMPLETE, PARTIAL, NOT STARTED, or BLOCKED.
+3. Convert only confirmed remaining work into the smallest coherent PRs.
+4. Keep architecture, sequencing, and integration ownership at the root-agent level.
+5. Delegate bounded implementation, review, or testing work only where responsibilities are independently verifiable.
+6. Parallelize only tasks with low overlap and no unresolved shared-contract dependency.
+7. Reassess roadmap status after each merged PR before delegating the next work.
+
 Each PR must still satisfy the repository's normal verification, risk classification, and fresh independent-review requirements. Use fresh reviewer context where required rather than reusing the root implementer's transcript.
 
 ## Durable decisions and learning

@@ -212,20 +212,22 @@ The current image workflow is ready when these work end-to-end:
 - liked creatives save to TRA Creatives with provenance/metadata sufficient for future attribution;
 - creatives can be edited while previous versions remain traceable.
 
-## Immediate implementation order
+## Current remaining roadmap for Astra
 
-Treat already-merged foundations as complete unless current code/tests show a regression. Do not reopen completed historical Issues merely because an older document still describes them as future work.
+This is the active Stage 1 implementation order. Astra must verify current `staging` and relevant code/tests before treating any item as incomplete.
+
+Treat already-merged foundations as complete unless current code/tests show a regression or a clearly missing contract. Do not reopen completed historical Issues merely because an older document still describes them as future work.
 
 Company-profile grounding and the cached `LayoutBlueprint` foundation are already implemented foundations. Only reopen them for a specific observed regression or a clearly identified missing contract.
 
-Remaining current priorities:
-
 1. Wire GPT-6 Astra with medium reasoning as the creative planning/prompting model for the active pipeline.
 2. Complete variation planner, including `SO WHAT?` outcome-chain capture, and small-batch selection.
-3. Complete placement-aware format generation, including safe-zone enforcement.
+3. Complete placement-aware format generation, including 9:16, 4:5, and 1:1 variants plus safe-zone enforcement.
 4. Complete save-to-library provenance/metadata across all source paths.
 5. Complete editing/regeneration and version history.
 6. Productionize the local-only video-intelligence/selection path where needed.
-7. Production hardening for the image workflow, including the quality/compliance release gate.
+7. Complete production hardening for the image workflow, including the quality/compliance release gate.
 
-Use GitHub Issues for task-specific acceptance criteria, but verify completion against code/tests and keep every Issue subordinate to the active product direction in this document unless it explicitly records a newer product decision.
+Before delegation, Astra must classify each item as COMPLETE, PARTIAL, NOT STARTED, or BLOCKED based on current code/tests. Detailed orchestration, delegation, and parallel-work rules live in `docs/agent-workflow.md`.
+
+Use GitHub Issues for task-specific acceptance criteria, but verify completion against code/tests and keep every Issue subordinate to the active product direction in this document unless it explicitly records a newer product decision. `docs/roadmap.md` remains long-term/future direction and does not override this section.
