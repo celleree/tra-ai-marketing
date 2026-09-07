@@ -57,6 +57,8 @@ const isMediaId = (value: unknown): value is string =>
 const isNonBlankModel = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0 && value.length <= 200;
 
+// Informational shape validation only. Editing/generation must independently
+// hydrate and validate original sources; this metadata never grants eligibility.
 export const parseCreativeGenerationProvenance = (
   value: unknown
 ): CreativeGenerationProvenance | null => {
