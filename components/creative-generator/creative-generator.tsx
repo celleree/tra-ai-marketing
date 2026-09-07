@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
+import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
+import type { CreativePlacement } from '@/lib/creatives/placements';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
 import createStyles from '@/components/creative-generator/creative-create-mode.module.css';
@@ -48,6 +50,7 @@ export function CreativeGenerator() {
   const [sourceAssets, setSourceAssets] = useState<CreativeSourceAsset[]>([]);
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
+  const [placement, setPlacement] = useState<CreativePlacement>('SQUARE_1_1');
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generating, setGenerating] = useState(false);
   const [generationComplete, setGenerationComplete] = useState(true);
@@ -167,6 +170,7 @@ export function CreativeGenerator() {
           ...(companyProfile ? { companyProfile } : {}),
           context: context.trim(),
           variationCount,
+          placement,
         }),
       });
       if (!response.ok || !isGenerationEventStream(response)) {
@@ -355,6 +359,8 @@ export function CreativeGenerator() {
                 </div>
 
                 {creationMode === 'generate' ? (
+                  <>
+                  <CreativePlacementSelect value={placement} onChange={setPlacement} disabled={generating} />
                   <CreativeComposer
                     value={context}
                     onChange={setContext}
@@ -369,6 +375,7 @@ export function CreativeGenerator() {
                     ready={ready}
                     generating={generating}
                   />
+                  </>
                 ) : (
                   <DirectCreativeUploader
                     onUploadStart={handleUploadStart}
