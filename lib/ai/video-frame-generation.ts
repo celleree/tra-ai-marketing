@@ -4,6 +4,7 @@ import {
 } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS, type CreativeFormatId } from '@/lib/creative-formats';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
+import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import type { CreativeCopy } from '@/lib/creatives/generated';
 import {
   CREATIVE_PLACEMENT_SPECS,
@@ -131,6 +132,10 @@ export async function analyzeApprovedTraVideoFrames(args: {
   return JSON.parse(text) as CreativeReferenceAnalysis;
 }
 
+export interface VideoImageGenerationResult extends ImageGenerationResult {
+  providerFrames: ApprovedTraVideoFrame[];
+}
+
 export async function generateApprovedTraVideoFrameCreativeImage(args: {
   frames: ApprovedTraVideoFrame[];
   primaryFormat: CreativeFormatId;
@@ -138,12 +143,13 @@ export async function generateApprovedTraVideoFrameCreativeImage(args: {
   context: string;
   copy: CreativeCopy;
   reserveLogoArea?: boolean;
-}): Promise<Buffer> {
+}): Promise<VideoImageGenerationResult> {
   const frames = selectProviderVideoFrames(args.frames);
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'];
+  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attached images are server-extracted still frames from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels, external reference-library pixels, third-party people, or unrelated images are attached. Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. User direction: ${args.context}. Headline: ${args.copy.headline}. Primary text: ${args.copy.primaryText}. Description: ${args.copy.description}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.reserveLogoArea ? 'Leave the upper-left logo area clear; do not draw a TRA logo.' : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable.`;
   const formData = new FormData();
-  formData.set('model', process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2');
+  formData.set('model', model);
   formData.set('prompt', prompt);
   formData.set('size', placement.providerSize);
   formData.set('quality', 'high');
@@ -160,5 +166,5 @@ export async function generateApprovedTraVideoFrameCreativeImage(args: {
   const payload = (await response.json()) as { data?: Array<{ b64_json?: string }> };
   const base64 = payload.data?.[0]?.b64_json;
   if (!base64) throw new Error('OpenAI returned no generated image.');
-  return Buffer.from(base64, 'base64');
+  return { buffer: Buffer.from(base64, 'base64'), prompt, model, providerFrames: frames };
 }

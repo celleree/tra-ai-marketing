@@ -11,6 +11,7 @@ import {
 } from '@/lib/creatives/placements';
 import type { PlannedCreativeFormat } from '@/lib/creatives/generate-request';
 import type { CreativeCopy } from '@/lib/creatives/generated';
+import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import type { StoredMediaFile } from '@/lib/media/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -435,7 +436,7 @@ const generateImageEdit = async (
   prompt: string,
   images: Array<{ source: StoredMediaFile; fileName: string }>,
   providerSize: string
-): Promise<Buffer> => {
+): Promise<ImageGenerationResult> => {
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const formData = new FormData();
   formData.set('model', model);
@@ -466,7 +467,7 @@ const generateImageEdit = async (
     throw new Error('OpenAI returned no generated image.');
   }
 
-  return Buffer.from(base64, 'base64');
+  return { buffer: Buffer.from(base64, 'base64'), prompt, model };
 };
 
 export async function generateApprovedTraReferenceCreativeImage(args: {
@@ -477,16 +478,17 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
   context: string;
   copy: CreativeCopy;
   reserveLogoArea?: boolean;
-}): Promise<Buffer> {
-  return generateImageEdit(
-    buildApprovedTraSourceImagePrompt(
+}): Promise<ImageGenerationResult> {
+  const prompt = buildApprovedTraSourceImagePrompt(
       args.primaryFormat,
       args.secondaryFormat,
       args.placement ?? 'SQUARE_1_1',
       args.context,
       args.copy,
       Boolean(args.reserveLogoArea)
-    ),
+    );
+  return generateImageEdit(
+    prompt,
     [
       {
         source: args.source,

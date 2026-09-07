@@ -5,6 +5,7 @@ import {
   generateApprovedTraReferenceCreativeImage,
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
+import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { planCreativeBatch } from '@/lib/ai/creative-planner';
 import {
   analyzeApprovedTraVideoFrames,
@@ -126,13 +127,13 @@ const buildLayoutReferenceAnalysis = (
   dominantCategory: 'customer-problems',
 });
 
-const generatePromptOnlyCreativeImage = async (args: {
+export const generatePromptOnlyCreativeImage = async (args: {
   primaryFormat: keyof typeof CREATIVE_FORMAT_LABELS;
   placement: CreativePlacement;
   context: string;
   copy: CreativeCopy;
   reserveLogoArea: boolean;
-}) => {
+}): Promise<ImageGenerationResult> => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is not configured.');
@@ -200,7 +201,7 @@ TRA guardrails:
     throw new Error('OpenAI returned no generated image.');
   }
 
-  return Buffer.from(base64, 'base64');
+  return { buffer: Buffer.from(base64, 'base64'), prompt, model };
 };
 
 const buildReferenceCandidates = (
@@ -465,10 +466,10 @@ export async function POST(request: Request) {
               : humanSourceDirection;
           const execution = item.strategy.execution;
           const itemContext = `${parsed.data.context}${videoFrameSet ? `\n\n${modeDirection}` : ''}\n\n${itemHumanDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\n\nPLANNED CREATIVE BRIEF:\nSelection reason: ${item.selectionReason}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.strategy.category]}\nSO WHAT outcome chain:\n- Surface message: ${item.strategy.soWhat.surfaceMessage}\n- Functional consequence: ${item.strategy.soWhat.functionalConsequence}\n- Meaningful customer outcome: ${item.strategy.soWhat.meaningfulOutcome}\nExecution:\n- Subject source: ${execution.subjectSource}\n- Composition: ${execution.composition}\n- Image treatment: ${execution.imageTreatment}\n- Text density: ${execution.textDensity}\n- CTA treatment: ${execution.ctaTreatment}\n- Typography hierarchy: ${execution.typographyHierarchy}\nVisual direction: ${item.strategy.visualDirection}${singleReferenceContract}`;
-          let imageBuffer: Buffer;
+          let imageResult: ImageGenerationResult;
 
           if (providerImageSource) {
-            imageBuffer = await generateApprovedTraReferenceCreativeImage({
+            imageResult = await generateApprovedTraReferenceCreativeImage({
               source: providerImageSource.stored,
               primaryFormat: item.format,
               placement: parsed.data.placement,
@@ -477,7 +478,7 @@ export async function POST(request: Request) {
               reserveLogoArea,
             });
           } else if (videoFrameSet) {
-            imageBuffer = await generateApprovedTraVideoFrameCreativeImage({
+            imageResult = await generateApprovedTraVideoFrameCreativeImage({
               frames: videoFrameSet.frames,
               primaryFormat: item.format,
               placement: parsed.data.placement,
@@ -486,7 +487,7 @@ export async function POST(request: Request) {
               reserveLogoArea,
             });
           } else {
-            imageBuffer = await generatePromptOnlyCreativeImage({
+            imageResult = await generatePromptOnlyCreativeImage({
               primaryFormat: item.format,
               placement: parsed.data.placement,
               context: itemContext,
@@ -496,7 +497,7 @@ export async function POST(request: Request) {
           }
 
           const generatedFile = new File(
-            [new Uint8Array(imageBuffer)],
+            [new Uint8Array(imageResult.buffer)],
             `tra-creative-${item.index}.png`,
             { type: 'image/png' }
           );
