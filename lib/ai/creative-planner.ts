@@ -17,9 +17,10 @@ The SO WHAT outcome chain must directly shape both the copy and visualDirection 
 Nearby concepts must differ on at least one strategic dimension and two execution dimensions. Do not use superficial headline swaps, recolors, person swaps, or minor rearrangements as variation.
 Use a human only when hasApprovedHumanSource is true, and then only as an approved supplied TRA source. When false, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
-Unsupported claims remain unknown. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, or other evidence.
+The creativeContext may contain both USER CREATIVE DIRECTION and APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
+Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, or other evidence.
 Proof-like, review-like, statistics-like, and comparison formats remain valid when strategically useful, but express them without unsupported numeric or testimonial claims.
-Do not restrict concepts to the analysis category. Ground every factual statement in the supplied approved TRA context.
+Do not restrict concepts to the analysis category. Ground every factual statement only in explicitly approved company claims/proof fields within creativeContext.
 Return exactly the requested count with sequential indexes beginning at 1.
 `;
 
@@ -110,7 +111,7 @@ export async function planCreativeBatch(args: {
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
           requestedCount: args.count,
           hasApprovedHumanSource: args.hasApprovedHumanSource,
-          approvedTraContext: args.context,
+          creativeContext: args.context,
           referenceAnalysis: args.analysis,
         }, null, 2) }] },
       ],

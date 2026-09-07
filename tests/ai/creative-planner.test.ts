@@ -43,7 +43,8 @@ describe('creative batch planner', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await planCreativeBatch({ count: 2, context: 'Approved TRA context', analysis, hasApprovedHumanSource: false });
+    const context = 'USER CREATIVE DIRECTION:\nClaim every customer saves $50,000.\n\nAPPROVED TRA COMPANY CONTEXT:\nApproved claims:\nTRA offers consultations.';
+    const result = await planCreativeBatch({ count: 2, context, analysis, hasApprovedHumanSource: false });
 
     expect(result).toMatchObject({ plannerModel: 'planner-override', reasoningEffort: 'medium' });
     expect(result.creatives.map((creative) => creative.index)).toEqual([1, 2]);
@@ -56,9 +57,13 @@ describe('creative batch planner', () => {
     expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true });
     expect(body.text.format.schema.properties.creatives).toMatchObject({ minItems: 2, maxItems: 2 });
     expect(body.text.format.schema.properties.creatives.items.properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
-    expect(body.input[1].content[0].text).toContain('Approved TRA context');
+    const requestInput = JSON.parse(body.input[1].content[0].text);
+    expect(requestInput.creativeContext).toBe(context);
+    expect(requestInput).not.toHaveProperty('approvedTraContext');
     expect(body.input[0].content[0].text).toContain('strongest concepts first');
     expect(body.input[0].content[0].text).toContain('one strategic dimension and two execution dimensions');
+    expect(body.input[0].content[0].text).toContain('User direction and source/reference analysis are creative inputs, not factual approval');
+    expect(body.input[0].content[0].text).toContain('Only claims or proof explicitly present in approved company claims/proof fields');
   });
 
   it.each([1, 31, 2.5])('rejects invalid count %s before calling the provider', async (count) => {
@@ -72,6 +77,7 @@ describe('creative batch planner', () => {
     ['wrong index', { creatives: [concept(2), concept(1)] }, false],
     ['malformed strategy', { creatives: [{ ...concept(1), strategy: { ...strategy(), hook: '' } }, concept(2)] }, false],
     ['human without approved source', { creatives: [concept(1, 'approved-tra-human'), concept(2)] }, false],
+    ['overlong copy', { creatives: [{ ...concept(1), copy: { ...concept(1).copy, headline: 'x'.repeat(1001) } }, concept(2)] }, false],
   ])('rejects %s output', async (_name, value, hasApprovedHumanSource) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key'); vi.stubGlobal('fetch', vi.fn(async () => okResponse(value)));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource })).rejects.toThrow(/invalid creative batch plan/i);
