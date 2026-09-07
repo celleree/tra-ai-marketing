@@ -69,7 +69,7 @@ describe('local video-intelligence artifact storage', () => {
     }
   });
 
-  it.each(['', '/absolute', '../escape', 'folder/../escape', 'folder\\escape'])(
+  it.each(['', '/absolute', 'C:/absolute', '../escape', 'folder/../escape', 'folder\\escape'])(
     'rejects an unsafe relative key: %s',
     async (key) => {
       expect(isSafeVideoIntelligenceArtifactKey(key)).toBe(false);
@@ -100,6 +100,17 @@ describe('video-intelligence storage provider selection', () => {
 });
 
 describe('R2 video-intelligence artifact storage', () => {
+  it('keeps the same artifact key separate in preview and production', async () => {
+    sendMock.mockResolvedValue({});
+    await new R2VideoIntelligenceStorage(R2_CONFIG).write(KEY, Buffer.from('preview'), null);
+    await new R2VideoIntelligenceStorage({ ...R2_CONFIG, environment: 'production' }).write(KEY, Buffer.from('production'), null);
+    const keys = sendMock.mock.calls.map(([command]) => command.input.Key);
+    expect(keys).toEqual([
+      '_metadata/tra-video-intelligence/v1/preview/jobs/job-1/manifest.bin',
+      '_metadata/tra-video-intelligence/v1/production/jobs/job-1/manifest.bin',
+    ]);
+  });
+
   it('uses the private environment prefix, opaque ETags, and conditional headers', async () => {
     sendMock.mockResolvedValue({});
     const storage = new R2VideoIntelligenceStorage(R2_CONFIG);

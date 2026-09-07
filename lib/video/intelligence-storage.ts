@@ -21,6 +21,7 @@ const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex
 export const isSafeVideoIntelligenceArtifactKey = (key: string) =>
   key.length > 0 &&
   !key.startsWith('/') &&
+  !/^[a-z]:/i.test(key) &&
   !key.includes('\\') &&
   key.split('/').every((part) => part && part !== '.' && part !== '..');
 
@@ -98,7 +99,10 @@ const withLocalWriteLock = async <Result>(
 };
 
 export class LocalVideoIntelligenceStorage implements VideoIntelligenceStorage {
-  constructor(private readonly rootDir = path.resolve(process.cwd(), '.runtime', 'video-intelligence-artifacts')) {}
+  private readonly rootDir: string;
+  constructor(rootDir = path.resolve(process.cwd(), '.runtime', 'video-intelligence-artifacts')) {
+    this.rootDir = path.resolve(rootDir);
+  }
 
   private pathForKey(key: string) {
     if (!isSafeVideoIntelligenceArtifactKey(key)) {
