@@ -22,8 +22,6 @@ Live GitHub state is authoritative for current HEAD/base/diff/check status. Do n
 ## Verification
 
 - Focused/local: `command` — result
-- CI `verify`: pending / passed
-- CI `pr-reviewability`: pending / passed / N/A
 
 ## Risk
 
