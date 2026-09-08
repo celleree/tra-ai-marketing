@@ -1,5 +1,7 @@
+import { lookup } from 'node:dns';
 import { resolve4, resolve6 } from 'node:dns/promises';
-import { isIP } from 'node:net';
+import { BlockList, isIP, type LookupFunction } from 'node:net';
+import { Agent, fetch as undiciFetch } from 'undici';
 import type { CompanyFields, CompanySectionId } from '@/lib/company/profile';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -7,6 +9,7 @@ const MAX_PAGES = 6;
 const MAX_PAGE_CHARS = 18000;
 const MAX_TOTAL_CHARS = 70000;
 const MAX_REDIRECTS = 4;
+const PRIVATE_URL_ERROR = 'Private or local website URLs are not allowed.';
 
 export interface WebsiteCompanyAnalysis {
   websiteUrl: string;
@@ -46,41 +49,39 @@ const extractOutputText = (payload: unknown) => {
   return '';
 };
 
-const isPrivateIpv4 = (address: string) => {
-  const parts = address.split('.').map(Number);
-  if (parts.length !== 4 || parts.some(Number.isNaN)) return true;
-  const [a, b] = parts;
-  return (
-    a === 0 || a === 10 || a === 127 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    a >= 224
-  );
-};
+const disallowedIpv4 = new BlockList();
+for (const [network, prefix] of [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+  ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
+  ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
+  ['203.0.113.0', 24],
+  ['224.0.0.0', 4], ['240.0.0.0', 4],
+] as const) disallowedIpv4.addSubnet(network, prefix, 'ipv4');
+const disallowedIpv6 = new BlockList();
+for (const [network, prefix] of [
+  ['2001::', 23], ['2001:db8::', 32], ['2002::', 16], ['3fff::', 20],
+] as const) disallowedIpv6.addSubnet(network, prefix, 'ipv6');
+const publicIpv6 = new BlockList();
+publicIpv6.addSubnet('2000::', 3, 'ipv6');
 
-const isPrivateIpv6 = (address: string) => {
-  const value = address.toLowerCase();
-  return (
-    value === '::' || value === '::1' || value.startsWith('fc') ||
-    value.startsWith('fd') || value.startsWith('fe8') || value.startsWith('fe9') ||
-    value.startsWith('fea') || value.startsWith('feb')
-  );
+const isDisallowedAddress = (address: string) => {
+  const family = isIP(address);
+  if (family === 4) return disallowedIpv4.check(address, 'ipv4');
+  if (family === 6) {
+    return !publicIpv6.check(address, 'ipv6') || disallowedIpv6.check(address, 'ipv6');
+  }
+  return true;
 };
 
 const assertPublicHostname = async (hostname: string) => {
   const normalized = hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (normalized === 'localhost' || normalized.endsWith('.local') || normalized.endsWith('.internal')) {
-    throw new Error('Private or local website URLs are not allowed.');
+    throw new Error(PRIVATE_URL_ERROR);
   }
 
   const ipVersion = isIP(normalized);
-  if (ipVersion === 4) {
-    if (isPrivateIpv4(normalized)) throw new Error('Private or local website URLs are not allowed.');
-    return;
-  }
-  if (ipVersion === 6) {
-    if (isPrivateIpv6(normalized)) throw new Error('Private or local website URLs are not allowed.');
+  if (ipVersion) {
+    if (isDisallowedAddress(normalized)) throw new Error(PRIVATE_URL_ERROR);
     return;
   }
 
@@ -89,9 +90,21 @@ const assertPublicHostname = async (hostname: string) => {
     resolve6(normalized).catch(() => [] as string[]),
   ]);
   if (ipv4.length === 0 && ipv6.length === 0) throw new Error('The website hostname could not be resolved.');
-  if (ipv4.some(isPrivateIpv4) || ipv6.some(isPrivateIpv6)) {
-    throw new Error('Private or local website URLs are not allowed.');
+  if (ipv4.some(isDisallowedAddress) || ipv6.some(isDisallowedAddress)) {
+    throw new Error(PRIVATE_URL_ERROR);
   }
+};
+
+const publicAddressLookup: LookupFunction = (hostname, options, callback) => {
+  lookup(hostname, { ...options, all: true }, (error, addresses) => {
+    if (error) return callback(error, '');
+    if (addresses.length === 0) return callback(new Error('The website hostname could not be resolved.'), '');
+    if (addresses.some(({ address }) => isDisallowedAddress(address))) {
+      return callback(new Error(PRIVATE_URL_ERROR), '');
+    }
+    if (options.all) return callback(null, addresses);
+    return callback(null, addresses[0].address, addresses[0].family);
+  });
 };
 
 const assertPublicUrl = async (url: URL) => {
@@ -178,11 +191,12 @@ const extractInternalLinks = (html: string, baseUrl: URL) => {
   return [...links];
 };
 
-const fetchWithSafeRedirects = async (initialUrl: URL, signal: AbortSignal) => {
+const fetchWithSafeRedirects = async (initialUrl: URL, signal: AbortSignal, dispatcher: Agent) => {
   let current = initialUrl;
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
     await assertPublicUrl(current);
-    const response = await fetch(current, {
+    const response = await undiciFetch(current, {
+      dispatcher,
       redirect: 'manual',
       signal,
       headers: {
@@ -193,6 +207,7 @@ const fetchWithSafeRedirects = async (initialUrl: URL, signal: AbortSignal) => {
 
     if (![301, 302, 303, 307, 308].includes(response.status)) return { response, finalUrl: current };
     const location = response.headers.get('location');
+    await response.body?.cancel();
     if (!location) throw new Error('Website redirect was missing a destination.');
     current = new URL(location, current);
   }
@@ -202,11 +217,16 @@ const fetchWithSafeRedirects = async (initialUrl: URL, signal: AbortSignal) => {
 const fetchPage = async (url: URL): Promise<{ page: CrawledPage; links: string[] }> => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
+  const dispatcher = new Agent({ connect: { lookup: publicAddressLookup }, autoSelectFamily: true });
   try {
-    const { response, finalUrl } = await fetchWithSafeRedirects(url, controller.signal);
-    if (!response.ok) throw new Error(`Website returned ${response.status}.`);
+    const { response, finalUrl } = await fetchWithSafeRedirects(url, controller.signal, dispatcher);
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`Website returned ${response.status}.`);
+    }
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
+      await response.body?.cancel();
       throw new Error('The URL did not return a readable web page.');
     }
     const html = await response.text();
@@ -222,6 +242,7 @@ const fetchPage = async (url: URL): Promise<{ page: CrawledPage; links: string[]
     };
   } finally {
     clearTimeout(timeout);
+    await dispatcher.close();
   }
 };
 
