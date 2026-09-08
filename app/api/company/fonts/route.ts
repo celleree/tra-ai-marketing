@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import {
   BrandFontValidationError,
   saveBrandFont,
@@ -7,6 +8,9 @@ import {
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const formData = await request.formData();
     const file = formData.get('file');

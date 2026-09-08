@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { getMediaStorage } from '@/lib/media/local-storage';
 
 export const runtime = 'nodejs';
@@ -30,6 +31,9 @@ const extractOutputText = (payload: unknown) => {
 };
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as { mediaId?: unknown };
     const mediaId = typeof body.mediaId === 'string' ? body.mediaId.trim() : '';
