@@ -159,7 +159,8 @@ export const readVideoIntelligenceSource = async (
   const source = await hydrateSource(mediaId, dependencies);
   const identity = currentIdentity(mediaId, createHash('sha256').update(source.stored.buffer).digest('hex'));
   const stored = await readVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now });
-  return { source: source.media as CreativeSourceVideoAsset, locator: locatorFor(identity), status: stored ? statusFor(identity, stored.job, (dependencies.now ?? Date.now)()) : null };
+  const publicSource: CreativeSourceVideoAsset = { ...source.media, originalName: source.media.fileName };
+  return { source: publicSource, locator: locatorFor(identity), status: stored ? statusFor(identity, stored.job, (dependencies.now ?? Date.now)()) : null };
 };
 
 const runClaim = async (

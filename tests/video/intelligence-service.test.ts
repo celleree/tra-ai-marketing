@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
+import { parseCreativeSourceAsset } from '@/lib/media/source-contract';
 import { checkpointVideoIntelligenceJob, claimVideoIntelligenceJob, startVideoIntelligenceJob } from '@/lib/video/intelligence-job-store';
 import { createVideoIntelligenceAnalyzerFingerprint } from '@/lib/video/intelligence-preparation';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
@@ -18,8 +19,8 @@ const mediaId = `media_${'a'.repeat(32)}`;
 const bytes = Buffer.from('trusted-video-bytes');
 const jpeg = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#663399' } }).jpeg().toBuffer();
 const source = (): HydratedTraVideoSource => ({
-  role: 'TRA_VIDEO', media: { id: mediaId, fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO', size: bytes.length, url: '/source.mp4' },
-  stored: { fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO', buffer: Buffer.from(bytes) },
+  role: 'TRA_VIDEO', media: { id: mediaId, fileName: `${mediaId}.mp4`, mimeType: 'video/mp4', mediaType: 'VIDEO', size: bytes.length, url: `/api/media/files/${mediaId}.mp4` },
+  stored: { fileName: `${mediaId}.mp4`, mimeType: 'video/mp4', mediaType: 'VIDEO', buffer: Buffer.from(bytes) },
 });
 
 class MemoryStorage implements VideoIntelligenceStorage {
@@ -63,7 +64,8 @@ describe('video intelligence service', () => {
   it('hydrates once for reopen, binds the current source hash, and never starts work', async () => {
     const state = setup();
     const result = await readVideoIntelligenceSource(mediaId, state.deps);
-    expect(result).toMatchObject({ source: { id: mediaId, fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO', size: bytes.length, url: '/source.mp4' }, locator: locator(), status: null });
+    expect(result).toMatchObject({ source: { id: mediaId, fileName: `${mediaId}.mp4`, originalName: `${mediaId}.mp4`, mimeType: 'video/mp4', mediaType: 'VIDEO', size: bytes.length, url: `/api/media/files/${mediaId}.mp4` }, locator: locator(), status: null });
+    expect(parseCreativeSourceAsset({ role: 'TRA_VIDEO', media: result.source })).toMatchObject({ success: true, data: { role: 'TRA_VIDEO', media: result.source } });
     expect(result.source).not.toHaveProperty('stored');
     expect(JSON.stringify(result.source)).not.toContain('trusted-video-bytes');
     expect(state.hydrateSource).toHaveBeenCalledTimes(1);
