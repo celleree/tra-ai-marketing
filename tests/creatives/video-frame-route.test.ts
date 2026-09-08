@@ -16,7 +16,8 @@ const {
   saveImageMock,
   saveCreativeBatchMock,
   validateGeneratedCreativeImageMock,
-  requireOperatorAccessMock,
+  getOperatorAccessMock,
+  requireOperatorQuotaMock,
 } = vi.hoisted(() => ({
   analyzeApprovedTraVideoFramesMock: vi.fn(),
   planCreativeBatchMock: vi.fn(),
@@ -27,11 +28,15 @@ const {
   saveImageMock: vi.fn(),
   saveCreativeBatchMock: vi.fn(),
   validateGeneratedCreativeImageMock: vi.fn(),
-  requireOperatorAccessMock: vi.fn(),
+  getOperatorAccessMock: vi.fn(),
+  requireOperatorQuotaMock: vi.fn(),
 }));
 
-vi.mock('@/lib/auth/require-operator', () => ({
-  requireOperatorAccess: requireOperatorAccessMock,
+vi.mock('@/lib/auth/server-access', () => ({
+  getOperatorAccess: getOperatorAccessMock,
+}));
+vi.mock('@/lib/quotas/require-quota', () => ({
+  requireOperatorQuota: requireOperatorQuotaMock,
 }));
 
 vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: saveCreativeBatchMock }));
@@ -80,7 +85,8 @@ const makeRequest = () => new Request('https://tra.example/api/creatives/generat
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requireOperatorAccessMock.mockResolvedValue(null);
+  getOperatorAccessMock.mockResolvedValue({ allowed: true, userId: 'operator' });
+  requireOperatorQuotaMock.mockResolvedValue(null);
   saveCreativeBatchMock.mockReset().mockImplementation(async (records) => records);
   validateGeneratedCreativeImageMock.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
