@@ -6,6 +6,8 @@ import * as meta from '@/lib/meta/client';
 import { CREATIVE_HUMAN_REVIEW_CHECKLIST_KEYS } from '@/lib/creatives/human-review';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 
+const requireOperatorAccess = vi.hoisted(() => vi.fn(async () => null));
+vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess }));
 vi.mock('@/lib/creatives/storage', () => ({ listCreatives: vi.fn(), isSafeCreativeId: (id: string) => /^creative_[a-f0-9]{32}$/.test(id) }));
 vi.mock('@/lib/creatives/attribution', () => ({ recordCreativeMetaAttribution: vi.fn() }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({ readImageById: vi.fn(async (id: string) => ({ id, fileName: `${id}.png`, mimeType: 'image/png', buffer: Buffer.from('fixture') })) }) }));
@@ -29,6 +31,7 @@ const expectNoMetaCalls = () => {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  requireOperatorAccess.mockResolvedValue(null);
   vi.mocked(listCreatives).mockResolvedValue([saved()]);
   vi.mocked(meta.listMetaPromotablePages).mockResolvedValue([{ id: 'page_fixture', name: 'Fixture page' }] as never);
   vi.mocked(meta.createPausedMetaCampaign).mockResolvedValue('campaign');
