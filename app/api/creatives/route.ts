@@ -1,4 +1,5 @@
 import { parseGeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { NextResponse } from 'next/server';
 import { isCreativeCategory } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
@@ -140,6 +141,9 @@ const normalizeCreative = (
 };
 
 export async function GET() {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const records = await listCreatives();
     const items = await Promise.all(
@@ -167,6 +171,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   let body: Record<string, unknown>;
   try {
     const parsed = (await request.json()) as unknown;

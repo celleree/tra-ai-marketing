@@ -2,15 +2,44 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 
-const { getMediaStorageMock, saveCreativeBatchMock } = vi.hoisted(() => ({
+const {
+  addToReferenceLibraryMock,
+  getMediaStorageMock,
+  listAllReferenceLibraryMock,
+  listCreativesMock,
+  removeFromReferenceLibraryMock,
+  requireOperatorAccessMock,
+  saveCreativeBatchMock,
+  updateCreativeReviewStateMock,
+  updateReferenceAngleMock,
+} = vi.hoisted(() => ({
+  addToReferenceLibraryMock: vi.fn(),
   getMediaStorageMock: vi.fn(),
+  listAllReferenceLibraryMock: vi.fn(),
+  listCreativesMock: vi.fn(),
+  removeFromReferenceLibraryMock: vi.fn(),
+  requireOperatorAccessMock: vi.fn(),
   saveCreativeBatchMock: vi.fn(),
+  updateCreativeReviewStateMock: vi.fn(),
+  updateReferenceAngleMock: vi.fn(),
+}));
+
+vi.mock('@/lib/auth/require-operator', () => ({
+  requireOperatorAccess: requireOperatorAccessMock,
 }));
 
 vi.mock('@/lib/creatives/storage', () => ({
   isSafeCreativeId: (value: string) => /^creative_[a-f0-9]{32}$/.test(value),
-  listCreatives: vi.fn(),
+  listCreatives: listCreativesMock,
   saveCreativeBatch: saveCreativeBatchMock,
+  updateCreativeReviewState: updateCreativeReviewStateMock,
+}));
+
+vi.mock('@/lib/references/storage', () => ({
+  addToReferenceLibrary: addToReferenceLibraryMock,
+  listAllReferenceLibrary: listAllReferenceLibraryMock,
+  removeFromReferenceLibrary: removeFromReferenceLibraryMock,
+  updateReferenceAngle: updateReferenceAngleMock,
 }));
 
 vi.mock('@/lib/creatives/attribution', () => ({
@@ -21,7 +50,10 @@ vi.mock('@/lib/media/local-storage', () => ({
   getMediaStorage: getMediaStorageMock,
 }));
 
-import { POST } from '@/app/api/creatives/route';
+import { GET as listCreativesRoute, POST } from '@/app/api/creatives/route';
+import { PATCH as reviewCreative } from '@/app/api/creatives/[creativeId]/route';
+import { GET as listFormats } from '@/app/api/creative-formats/route';
+import { DELETE as deleteReferences, GET as listReferences, PATCH as updateReference, POST as addReferences } from '@/app/api/references/route';
 
 const request = (body: string) =>
   new Request('http://localhost/api/creatives', {
@@ -64,7 +96,14 @@ const identity = {
 
 beforeEach(() => {
   getMediaStorageMock.mockReset();
+  listCreativesMock.mockReset();
   saveCreativeBatchMock.mockReset();
+  updateCreativeReviewStateMock.mockReset();
+  listAllReferenceLibraryMock.mockReset();
+  addToReferenceLibraryMock.mockReset();
+  updateReferenceAngleMock.mockReset();
+  removeFromReferenceLibraryMock.mockReset();
+  requireOperatorAccessMock.mockReset().mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -72,6 +111,37 @@ afterEach(() => {
 });
 
 describe('TRA creatives API validation', () => {
+  it.each([401, 403, 503].flatMap(status => {
+    const json = vi.fn();
+    const request = { json } as unknown as Request;
+    const params = vi.fn();
+    const context = { params: { then: params } } as unknown as { params: Promise<{ creativeId: string }> };
+    const guardedRoutes: Array<readonly [string, () => Promise<Response>]> = [
+      ['creatives GET', () => listCreativesRoute()],
+      ['creatives POST', () => POST(request)],
+      ['creative review PATCH', () => reviewCreative(request, context)],
+      ['references GET', () => listReferences()],
+      ['references POST', () => addReferences(request)],
+      ['references PATCH', () => updateReference(request)],
+      ['references DELETE', () => deleteReferences(request)],
+      ['creative formats GET', () => listFormats()],
+    ];
+    return guardedRoutes.map(([route, invoke]) => [status, route, invoke, json, params] as const);
+  }))('returns %i from %s before accessing route inputs or storage', async (status, _route, invoke, json, params) => {
+    requireOperatorAccessMock.mockResolvedValue(new Response('denied', { status }));
+    expect((await invoke()).status).toBe(status);
+    expect(json).not.toHaveBeenCalled();
+    expect(params).not.toHaveBeenCalled();
+    expect(getMediaStorageMock).not.toHaveBeenCalled();
+    expect(listCreativesMock).not.toHaveBeenCalled();
+    expect(saveCreativeBatchMock).not.toHaveBeenCalled();
+    expect(updateCreativeReviewStateMock).not.toHaveBeenCalled();
+    expect(listAllReferenceLibraryMock).not.toHaveBeenCalled();
+    expect(addToReferenceLibraryMock).not.toHaveBeenCalled();
+    expect(updateReferenceAngleMock).not.toHaveBeenCalled();
+    expect(removeFromReferenceLibraryMock).not.toHaveBeenCalled();
+  });
+
   it('normalizes saved media URLs to the same-origin route', async () => {
     vi.stubEnv('CREATIVE_PUBLIC_BASE_URL', 'https://creative.example.test');
     getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue(creative.image) });

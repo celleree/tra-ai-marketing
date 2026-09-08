@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PATCH } from '@/app/api/creatives/[creativeId]/route';
 import { CREATIVE_HUMAN_REVIEW_CHECKLIST_KEYS } from '@/lib/creatives/human-review';
 
-const mocks = vi.hoisted(() => ({ update: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireOperatorAccess: vi.fn(), update: vi.fn() }));
+vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess: mocks.requireOperatorAccess }));
 vi.mock('@/lib/creatives/storage', async original => ({ ...await original<object>(), updateCreativeReviewState: mocks.update }));
 const id = `creative_${'a'.repeat(32)}`;
 const now = '2026-09-07T12:00:00.000Z';
 const checklist = () => Object.fromEntries(CREATIVE_HUMAN_REVIEW_CHECKLIST_KEYS.map(key => [key, 'PASS']));
 const call = (body: unknown, creativeId = id) => PATCH(new Request('http://localhost/api/creatives/review', { method: 'PATCH', body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(now)); mocks.update.mockReset().mockImplementation(async (creativeId, update) => ({ id: creativeId, ...update })); });
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(now)); mocks.requireOperatorAccess.mockReset().mockResolvedValue(null); mocks.update.mockReset().mockImplementation(async (creativeId, update) => ({ id: creativeId, ...update })); });
 afterEach(() => vi.useRealTimers());
 
 describe('server-owned creative human review API', () => {
