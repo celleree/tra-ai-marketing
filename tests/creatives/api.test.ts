@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 
@@ -67,7 +67,24 @@ beforeEach(() => {
   saveCreativeBatchMock.mockReset();
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe('TRA creatives API validation', () => {
+  it('normalizes saved media URLs to the same-origin route', async () => {
+    vi.stubEnv('CREATIVE_PUBLIC_BASE_URL', 'https://creative.example.test');
+    getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue(creative.image) });
+    saveCreativeBatchMock.mockImplementation(async (records) => records);
+
+    expect((await POST(request(JSON.stringify({ creatives: [creative] })))).status).toBe(201);
+    expect(saveCreativeBatchMock).toHaveBeenCalledWith([
+      expect.objectContaining({
+        image: expect.objectContaining({ url: `/api/media/files/${creative.image.fileName}` }),
+      }),
+    ]);
+  });
+
   it('retains full provenance and rejects malformed supplied provenance before saving', async () => {
     getMediaStorageMock.mockReturnValue({ readImageById: vi.fn().mockResolvedValue(creative.image) });
     saveCreativeBatchMock.mockImplementation(async (records) => records);

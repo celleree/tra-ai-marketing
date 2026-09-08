@@ -6,7 +6,7 @@ This file contains only setup requirements that live outside application code.
 
 - Production deploys from `main`; `staging` is the combined pre-production branch and feature branches are temporary previews.
 - Configure the server-side environment variables listed in `.env.example` in the appropriate Vercel environments. Do not expose secrets through `NEXT_PUBLIC_*` variables.
-- The app can use Vercel's `VERCEL_PROJECT_PRODUCTION_URL` system variable as a fallback when constructing stable public creative URLs; set `CREATIVE_PUBLIC_BASE_URL` when an explicit canonical origin is required.
+- Authenticated application media paths use same-origin `/api/media/files/...` URLs. The app can use Vercel's `VERCEL_PROJECT_PRODUCTION_URL` system variable as a fallback when constructing canonical public attribution URLs; set `CREATIVE_PUBLIC_BASE_URL` when an explicit canonical origin is required.
 - After changing environment variables, verify a fresh deployment receives the new values.
 
 The connected Vercel account should be treated as the authority for actual project/domain/environment state; do not copy dashboard state into repository documentation.

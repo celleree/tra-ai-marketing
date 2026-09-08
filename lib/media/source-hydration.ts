@@ -1,5 +1,5 @@
 import {
-  getPublicMediaUrl,
+  getPrivateMediaUrl,
   validateStoredMedia,
   type MediaStorage,
 } from '@/lib/media/storage';
@@ -71,7 +71,7 @@ export const hydrateCreativeSourceSelections = async (
       mimeType: stored.mimeType,
       mediaType: stored.mediaType,
       size: stored.buffer.byteLength,
-      url: getPublicMediaUrl(stored.fileName),
+      url: getPrivateMediaUrl(stored.fileName),
     } as CanonicalCreativeSourceMediaAsset;
 
     hydrated.push({ role: selection.role, media, stored });
