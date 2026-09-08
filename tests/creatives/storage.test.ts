@@ -139,6 +139,29 @@ afterEach(() => {
 });
 
 describe('TRA creative storage', () => {
+  it('normalizes legacy absolute image URLs to the authenticated media route on read', async () => {
+    const original = record('a', '2026-08-20T12:00:00.000Z');
+    const legacy = {
+      ...original,
+      image: {
+        ...original.image,
+        url: 'https://creative.example.test/api/media/files/legacy.png',
+      },
+    };
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [legacy] }));
+
+    await expect(listCreatives()).resolves.toEqual([
+      {
+        ...legacy,
+        image: {
+          ...legacy.image,
+          url: `/api/media/files/${legacy.image.fileName}`,
+        },
+        source: 'generated',
+      },
+    ]);
+  });
+
   it('preserves uploaded source through saving, reload and human review updates', async () => {
     const uploaded = { ...record('b', '2026-08-25T12:00:00.000Z'), source: 'uploaded' as const };
     readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));

@@ -16,7 +16,7 @@ import { getCreativeAttribution } from '@/lib/creatives/attribution';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import type { MediaAsset } from '@/lib/media/types';
 import {
-  getPublicMediaUrl,
+  getPrivateMediaUrl,
   getStoredImageMimeType,
   isAllowedImageMimeType,
   isSafeMediaId,
@@ -65,7 +65,7 @@ const normalizeMediaAsset = (value: unknown): MediaAsset | null => {
     originalName,
     mimeType,
     size,
-    url: getPublicMediaUrl(fileName),
+    url: getPrivateMediaUrl(fileName),
   };
 };
 

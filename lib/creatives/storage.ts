@@ -24,6 +24,7 @@ import {
 } from '@/lib/creatives/identity';
 import { isCreativePlacement } from '@/lib/creatives/placements';
 import {
+  getPrivateMediaUrl,
   getStoredImageMimeType,
   isAllowedImageMimeType,
   isSafeMediaId,
@@ -162,7 +163,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
       originalName,
       mimeType,
       size,
-      url,
+      url: getPrivateMediaUrl(fileName),
     },
     category,
     copy: { primaryText, headline, description },

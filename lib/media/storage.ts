@@ -207,6 +207,9 @@ export const getPublicMediaUrl = (fileName: string) => {
   return baseUrl ? new URL(path, baseUrl).toString() : path;
 };
 
+export const getPrivateMediaUrl = (fileName: string) =>
+  `/api/media/files/${fileName}`;
+
 export const validateStoredMedia = (stored: StoredCreativeSourceMediaFile) => {
   if (stored.buffer.length > getMaxUploadBytes(stored.mimeType)) {
     throw new MediaValidationError(
@@ -254,7 +257,7 @@ export const prepareMedia = async (file: File): Promise<PreparedMedia> => {
     mimeType: detectedMimeType,
     mediaType: getMediaTypeForMimeType(detectedMimeType),
     size: file.size,
-    url: getPublicMediaUrl(fileName),
+    url: getPrivateMediaUrl(fileName),
     buffer,
   } as PreparedMedia;
 };

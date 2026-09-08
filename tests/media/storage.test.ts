@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  getPrivateMediaUrl,
+  getPublicMediaUrl,
   getStoredMediaMimeType,
   getStoredImageMimeType,
   isSupportedMp4Container,
@@ -100,6 +102,16 @@ describe('media validation contract', () => {
       expect(getStoredImageMimeType(prepared.fileName)).toBe(mimeType);
     }
   );
+
+  it('keeps prepared media private when a canonical public origin is configured', async () => {
+    vi.stubEnv('CREATIVE_PUBLIC_BASE_URL', 'https://creative.example.test/path');
+    const prepared = await prepareMediaImage(makeFile(PNG_SIGNATURE, 'image/png'));
+
+    expect(prepared.url).toBe(getPrivateMediaUrl(prepared.fileName));
+    expect(getPublicMediaUrl(prepared.fileName)).toBe(
+      `https://creative.example.test/api/media/files/${prepared.fileName}`
+    );
+  });
 
   it('accepts a real encoded MP4 as video media', async () => {
     const prepared = await prepareMedia(

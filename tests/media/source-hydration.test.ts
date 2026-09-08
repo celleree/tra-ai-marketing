@@ -38,6 +38,7 @@ afterEach(() => {
 
 describe('server-side creative source hydration', () => {
   it('hydrates every source in order from authoritative stored metadata', async () => {
+    vi.stubEnv('CREATIVE_PUBLIC_BASE_URL', 'https://creative.example.test');
     const videoId = mediaId('a');
     const imageId = mediaId('b');
     const storage = storageWith({
