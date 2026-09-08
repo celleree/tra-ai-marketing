@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { hydrateCreativeSourceSelections } from '@/lib/media/source-hydration';
+import type { CreativeSourceVideoAsset } from '@/lib/media/types';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { runVideoIntelligenceFinalizationJob } from '@/lib/video/intelligence-finalization-runner';
@@ -15,6 +16,7 @@ import { MAX_TRANSCRIPTION_UPLOAD_BYTES } from '@/lib/video/transcript';
 
 const MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+const isMediaId = (value: unknown): value is string => typeof value === 'string' && MEDIA_ID.test(value);
 
 export interface VideoIntelligenceJobLocator {
   version: 1;
@@ -151,13 +153,13 @@ export const resolveExistingVideoIntelligenceJob = async (
 export const readVideoIntelligenceSource = async (
   mediaId: string,
   dependencies: VideoIntelligenceServiceDependencies
-): Promise<{ source: HydratedTraVideoSource; locator: VideoIntelligenceJobLocator; status: CompactVideoIntelligenceJobStatus | null }> => {
+): Promise<{ source: CreativeSourceVideoAsset; locator: VideoIntelligenceJobLocator; status: CompactVideoIntelligenceJobStatus | null }> => {
   validateDeadline(dependencies.deadlineAtMs);
-  if (!MEDIA_ID.test(mediaId)) serviceError('Video media ID is invalid.', 400);
+  if (!isMediaId(mediaId)) serviceError('Video media ID is invalid.', 400);
   const source = await hydrateSource(mediaId, dependencies);
   const identity = currentIdentity(mediaId, createHash('sha256').update(source.stored.buffer).digest('hex'));
   const stored = await readVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now });
-  return { source, locator: locatorFor(identity), status: stored ? statusFor(identity, stored.job, (dependencies.now ?? Date.now)()) : null };
+  return { source: source.media as CreativeSourceVideoAsset, locator: locatorFor(identity), status: stored ? statusFor(identity, stored.job, (dependencies.now ?? Date.now)()) : null };
 };
 
 const runClaim = async (
@@ -189,7 +191,7 @@ export const executeVideoIntelligenceStep = async (
   const now = dependencies.now ?? Date.now;
   if (!input || typeof input !== 'object' || !('action' in input)) serviceError('Video intelligence action is invalid.', 400);
   if (input.action === 'START') {
-    if (!MEDIA_ID.test(input.mediaId)) serviceError('Video media ID is invalid.', 400);
+    if (!isMediaId(input.mediaId)) serviceError('Video media ID is invalid.', 400);
     const source = await hydrateSource(input.mediaId, dependencies);
     const identity = currentIdentity(input.mediaId, createHash('sha256').update(source.stored.buffer).digest('hex'));
     const started = await startVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now });
