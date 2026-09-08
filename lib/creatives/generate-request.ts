@@ -70,6 +70,7 @@ const FORMAT_BY_CATEGORY: Record<CreativeCategoryId, CreativeFormatId> = {
 
 const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const SAFE_HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
+const MAX_CREATIVE_DIRECTION_LENGTH = 4000;
 
 const stringArray = (value: unknown, max: number) =>
   Array.isArray(value)
@@ -166,6 +167,13 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   if (!userContext) {
     return { success: false, error: 'context is required' };
+  }
+
+  if (userContext.length > MAX_CREATIVE_DIRECTION_LENGTH) {
+    return {
+      success: false,
+      error: `context must be ${MAX_CREATIVE_DIRECTION_LENGTH} characters or fewer`,
+    };
   }
 
   if (
