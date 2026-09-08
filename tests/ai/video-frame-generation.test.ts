@@ -43,7 +43,7 @@ describe('approved TRA video-frame provider boundary', () => {
     expect(selectProviderVideoFrames(makeFrames()).map((frame) => frame.frameIndex)).toEqual([0, 2, 5]);
   });
 
-  it('sends only content-bound approved PNG frame pixels to image editing and never raw MP4 pixels', async () => {
+  it.each([false, true])('sends approved PNG pixels and preserves invisible logo reservation when enabled: %s', async (reserveLogoArea) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
@@ -51,6 +51,7 @@ describe('approved TRA video-frame provider boundary', () => {
       frames: makeFrames(),
       primaryFormat: 'direct-response',
       context: 'Approved company context',
+      reserveLogoArea,
       copy: { headline: 'Get clear next steps', primaryText: 'Talk with TRA.', description: 'No-pressure consultation.' },
     });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -62,6 +63,13 @@ describe('approved TRA video-frame provider boundary', () => {
     expect(formData.get('prompt')).toContain('Raw video is NOT attached');
     expect(formData.get('prompt')).toContain('No layout-reference pixels');
     expect(formData.get('prompt')).toContain(MEDIA_ID);
+    if (reserveLogoArea) {
+      expect(formData.get('prompt')).toContain('invisible composition constraint');
+      expect(formData.get('prompt')).toContain('do not render a placeholder, box, panel, border, dashed outline');
+      expect(formData.get('prompt')).toContain('Continue the surrounding background naturally');
+    } else {
+      expect(formData.get('prompt')).not.toContain('invisible composition constraint');
+    }
     expect(result.prompt).toBe(formData.get('prompt'));
     expect(result.model).toBe(formData.get('model'));
     expect(result.providerFrames.map((frame) => frame.frameIndex)).toEqual([0, 2, 5]);

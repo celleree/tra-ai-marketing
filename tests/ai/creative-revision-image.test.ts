@@ -44,6 +44,8 @@ describe('revision image provider', () => {
     expect(Buffer.from(await files()[1].arrayBuffer()).toString()).toBe('original');
     expect(body().get('prompt')).toContain('Do not depict people even if original approved sources contain people');
     expect(body().get('prompt')).toContain('original approved logo will be composited');
+    expect(body().get('prompt')).toContain('invisible composition constraint');
+    expect(body().get('prompt')).toContain('do not render a placeholder, box, panel, border, dashed outline');
   });
   it('retains the exact approved video frame subset and order', async () => {
     const input = args();
