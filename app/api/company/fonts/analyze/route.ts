@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { requireOperatorAccess } from '@/lib/auth/require-operator';
+import { getOperatorAccess } from '@/lib/auth/server-access';
+import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { getMediaStorage } from '@/lib/media/local-storage';
+import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 
 export const runtime = 'nodejs';
 
@@ -31,8 +33,8 @@ const extractOutputText = (payload: unknown) => {
 };
 
 export async function POST(request: Request) {
-  const denied = await requireOperatorAccess();
-  if (denied) return denied;
+  const access = await getOperatorAccess();
+  if (!access.allowed) return operatorAccessDeniedResponse(access);
 
   try {
     const body = (await request.json()) as { mediaId?: unknown };
@@ -45,6 +47,8 @@ export async function POST(request: Request) {
     if (!apiKey) {
       return NextResponse.json({ error: 'OpenAI is not configured.' }, { status: 503 });
     }
+    const quotaDenied = await requireOperatorQuota(access.userId, 'FONT_ANALYSIS', 1);
+    if (quotaDenied) return quotaDenied;
 
     const specimen = await getMediaStorage().readImageById(mediaId);
     if (!specimen) {

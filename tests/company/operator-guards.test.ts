@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getOperatorAccess: vi.fn(),
   readBrandFont: vi.fn(),
   readImageById: vi.fn(),
+  requireOperatorQuota: vi.fn(),
   saveBrandFont: vi.fn(),
 }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.getOperatorAccess }));
@@ -21,6 +22,7 @@ vi.mock('@/lib/company/website-analyzer', () => ({
 vi.mock('@/lib/media/local-storage', () => ({
   getMediaStorage: mocks.getMediaStorage,
 }));
+vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.requireOperatorQuota }));
 
 import { POST as analyzeWebsite } from '@/app/api/company/analyze-website/route';
 import { POST as uploadFont } from '@/app/api/company/fonts/route';
@@ -64,5 +66,6 @@ describe('company operator guards', () => {
     expect(mocks.deleteBrandFont).not.toHaveBeenCalled();
     expect(mocks.getMediaStorage).not.toHaveBeenCalled();
     expect(mocks.readImageById).not.toHaveBeenCalled();
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
   });
 });
