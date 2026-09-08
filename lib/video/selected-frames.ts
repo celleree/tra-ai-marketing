@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
-import type { TemporaryVideoFrameCandidate } from '@/lib/video/candidate-types';
 import { runFfmpeg } from '@/lib/video/ffmpeg';
 import { isStructurallyValidPng } from '@/lib/video/frame-cache';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
@@ -28,7 +27,7 @@ const reanalyze = (reason: string): never => {
   throw new Error(`Selected TRA video frames require reanalysis: ${reason}`);
 };
 
-const selectedRepresentatives = (
+export const selectedRepresentatives = (
   source: HydratedTraVideoSource,
   library: VideoFrameLibrary,
   frameIds: readonly string[]
@@ -83,9 +82,12 @@ const selectedRepresentatives = (
   });
 };
 
-const extractPng = async (
+export const extractPng = async (
   sourcePath: string,
-  candidate: TemporaryVideoFrameCandidate,
+  candidate: Pick<
+    VideoFrameLibrary['candidates'][number],
+    'timestampMs' | 'extractionReasons'
+  >,
   effectiveIntervalFps: number,
   maxWidth: number
 ) => {
