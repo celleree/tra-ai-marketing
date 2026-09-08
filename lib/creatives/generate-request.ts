@@ -15,6 +15,7 @@ import {
 } from '@/lib/company/creative-context';
 import type { CreativeSourceSelection } from '@/lib/media/types';
 import { parseCreativeSourceSelection } from '@/lib/media/source-contract';
+import { getCreativeSourceCountError } from '@/lib/media/source-limits';
 import {
   parseGenerateVideoFrameSelection,
   type GenerateVideoFrameSelection,
@@ -97,7 +98,14 @@ export function validateGenerateCreativeRequest(input: unknown):
     };
   }
 
+  if (body.sourceAssets !== undefined && !Array.isArray(body.sourceAssets)) {
+    return { success: false, error: 'sourceAssets must be an array' };
+  }
+
   const sourceValues = Array.isArray(body.sourceAssets) ? body.sourceAssets : [];
+  const sourceCountError = getCreativeSourceCountError(sourceValues.length);
+  if (sourceCountError) return { success: false, error: sourceCountError };
+
   const videoFrameSelection =
     body.videoFrameSelection === undefined
       ? undefined
@@ -118,10 +126,6 @@ export function validateGenerateCreativeRequest(input: unknown):
     typeof body.variationCount === 'number'
       ? body.variationCount
       : Number(body.variationCount);
-
-  if (body.sourceAssets !== undefined && !Array.isArray(body.sourceAssets)) {
-    return { success: false, error: 'sourceAssets must be an array' };
-  }
 
   if (body.videoFrameSelection !== undefined && !videoFrameSelection) {
     return {

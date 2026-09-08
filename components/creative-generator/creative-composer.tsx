@@ -12,6 +12,10 @@ import type {
   CreativeSourceMediaAsset,
   CreativeSourceRole,
 } from '@/lib/media/types';
+import {
+  getCreativeSourceCountError,
+  MAX_CREATIVE_SOURCE_ASSETS,
+} from '@/lib/media/source-limits';
 import styles from './creative-composer.module.css';
 
 interface CreativeComposerProps {
@@ -72,11 +76,14 @@ export function CreativeComposer({
 }: CreativeComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
+  const uploadInFlightRef = useRef(false);
   const [localPreview, setLocalPreview] = useState('');
   const [pendingName, setPendingName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState('');
+  const sourceLimitReached =
+    allowMultipleSources && sourceAssets.length >= MAX_CREATIVE_SOURCE_ASSETS;
 
   useEffect(() => {
     return () => {
@@ -187,14 +194,22 @@ export function CreativeComposer({
   };
 
   const acceptFiles = async (files: File[]) => {
-    if (!files.length || uploading) return;
+    if (!files.length || uploadInFlightRef.current || generating) return;
 
     const selectedFiles = allowMultipleSources ? files : files.slice(0, 1);
+    const sourceCountError = getCreativeSourceCountError(
+      (allowMultipleSources ? sourceAssets.length : 0) + selectedFiles.length
+    );
+    if (sourceCountError) {
+      setError(sourceCountError);
+      return;
+    }
     const previewFile = selectedFiles.find((file) =>
       ALLOWED_IMAGE_TYPES.includes(file.type)
     );
     setLocalPreview(previewFile ? URL.createObjectURL(previewFile) : '');
     setPendingName(previewFile?.name || '');
+    uploadInFlightRef.current = true;
     setUploading(true);
     setError('');
     onUploadStart();
@@ -222,6 +237,7 @@ export function CreativeComposer({
         }
       }
     } finally {
+      uploadInFlightRef.current = false;
       setUploading(false);
       setLocalPreview('');
       setPendingName('');
@@ -269,7 +285,7 @@ export function CreativeComposer({
     }
 
     event.preventDefault();
-    if (ready && !generating) onSubmit();
+    if (ready && !generating && !uploadInFlightRef.current) onSubmit();
   };
 
   const sliderProgress =
@@ -294,6 +310,7 @@ export function CreativeComposer({
         type="file"
         accept="image/png,image/jpeg,image/webp,video/mp4"
         multiple={allowMultipleSources}
+        disabled={uploading || generating || sourceLimitReached}
         onChange={handleFileChange}
       />
 
@@ -405,14 +422,16 @@ export function CreativeComposer({
             aria-label="Add creative source assets"
             title="Add creative source assets"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || generating || sourceLimitReached}
           >
             +
           </button>
           <span className={styles.hint}>
             {uploading
               ? 'Uploading source assets…'
-              : 'Images default to TRA_REFERENCE · MP4 uses TRA_VIDEO'}
+              : sourceLimitReached
+                ? `Maximum of ${MAX_CREATIVE_SOURCE_ASSETS} sources attached. Remove one to add another.`
+                : 'Images default to TRA_REFERENCE · MP4 uses TRA_VIDEO'}
           </span>
         </div>
 
