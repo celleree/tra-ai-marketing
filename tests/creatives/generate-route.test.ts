@@ -23,6 +23,11 @@ const mocks = vi.hoisted(() => ({
   getOrAnalyzeLayoutBlueprint: vi.fn(),
   listReferenceLibrary: vi.fn(),
   selectBestReferenceCreatives: vi.fn(),
+  requireOperatorAccess: vi.fn(),
+}));
+
+vi.mock('@/lib/auth/require-operator', () => ({
+  requireOperatorAccess: mocks.requireOperatorAccess,
 }));
 
 vi.mock('@/lib/creatives/brand-logo.server', () => ({ compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo }));
@@ -333,6 +338,7 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireOperatorAccess.mockResolvedValue(null);
   mocks.compositeCreativeBrandLogo.mockReset().mockImplementation(async (buffer) => buffer);
   mocks.saveCreativeBatch.mockReset().mockImplementation(async (records) => records);
   mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);

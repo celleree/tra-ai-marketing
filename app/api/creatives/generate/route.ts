@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
@@ -227,6 +228,9 @@ const findGenerationSource = (
   ) || sources.find((source) => source.media.mediaType === 'IMAGE');
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const parsed = validateGenerateCreativeRequest(body);

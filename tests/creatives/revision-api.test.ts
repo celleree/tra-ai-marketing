@@ -6,7 +6,8 @@ import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-v
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), requireOperatorAccess: vi.fn() }));
+vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess: mocks.requireOperatorAccess }));
 vi.mock('@/lib/creatives/storage', async importOriginal => ({ ...await importOriginal<object>(), listCreatives: mocks.list, saveCreativeBatch: mocks.save }));
 vi.mock('@/lib/creatives/revision-source-hydration', async importOriginal => ({ ...await importOriginal<object>(), hydrateSavedCreativeRevisionContext: mocks.hydrate }));
 vi.mock('@/lib/creatives/generated-image-validation', async importOriginal => ({ ...await importOriginal<object>(), validateGeneratedCreativeImage: mocks.validate }));
@@ -34,6 +35,7 @@ const call = (body: unknown, creativeId = parentId) => POST(new Request('http://
 const hydrate = (record: CreativeRecord) => ({ parent: { record, identity: record.identity, planning: record.planning, provenance: record.generationProvenance }, canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId, sha256: 'c'.repeat(64) }, originalApprovedSource: null, logoOverlay: null });
 beforeEach(() => {
   Object.values(mocks).forEach(mock => mock.mockReset());
+  mocks.requireOperatorAccess.mockResolvedValue(null);
   const record = parent();
   mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrate(record));
   mocks.generate.mockResolvedValue({ buffer: Buffer.from('raw'), prompt: 'actual revision prompt', model: 'actual-image-model' });
