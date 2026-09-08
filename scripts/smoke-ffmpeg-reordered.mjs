@@ -26,11 +26,11 @@ try {
     '-hide_banner', '-nostdin', '-v', 'error', '-i', fixturePath,
     '-map', '0:v:0', '-fps_mode', 'passthrough', '-f', 'null', '-',
     '-progress', 'pipe:1', '-nostats',
-  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 45_000 });
   const lines = stdout.trim().split(/\r?\n/);
   const progressEnd = lines.lastIndexOf('progress=end');
-  const outTimeUs = lines.lastIndexOf('out_time_us=1034367');
-  if (progressEnd !== lines.length - 1 || outTimeUs < 0 || outTimeUs > progressEnd) {
+  const finalOutTimeUs = [...lines.slice(0, progressEnd)].reverse().find((line) => /^out_time_us=\d+$/.test(line));
+  if (progressEnd !== lines.length - 1 || finalOutTimeUs !== 'out_time_us=1034367') {
     throw new Error('FFmpeg reordered-video smoke check did not report final out_time_us=1034367 and progress=end.');
   }
 } finally {
