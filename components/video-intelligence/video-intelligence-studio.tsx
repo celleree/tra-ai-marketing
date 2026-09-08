@@ -1,20 +1,21 @@
 'use client';
 
-import { type ChangeEvent, type FormEvent, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import type { CreativeSourceVideoAsset } from '@/lib/media/types';
 import type { VideoConceptSelection } from '@/lib/video/concept-selection';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
+import {
+  readVideoIntelligence,
+  runVideoIntelligence,
+  selectVideoIntelligenceFrames,
+  type CachedVideoSelectionResult,
+} from '@/lib/video/intelligence-client';
+import type { CompactVideoIntelligenceJobStatus, VideoIntelligenceJobLocator } from '@/lib/video/intelligence-service';
 import { uploadTraVideo } from '@/lib/video/upload-client';
 import { SelectedFrameGeneration } from './selected-frame-generation';
 import styles from './video-intelligence-studio.module.css';
 
-type StreamEvent = {
-  type: 'progress' | 'complete' | 'error';
-  message?: string;
-  error?: string;
-  library?: VideoFrameLibrary;
-  source?: CreativeSourceVideoAsset;
-};
+type PendingSelection = Exclude<CachedVideoSelectionResult, { status: 'COMPLETE' }> & { concept: string };
 
 const formatTime = (milliseconds: number) => {
   const minutes = Math.floor(milliseconds / 60_000);
@@ -23,10 +24,15 @@ const formatTime = (milliseconds: number) => {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(remainder).padStart(3, '0')}`;
 };
 
-const readError = async (response: Response) => {
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-  return payload.error || `Request failed (HTTP ${response.status}).`;
+const phaseMessage = (status: CompactVideoIntelligenceJobStatus) => {
+  if (status.phase === 'COMPLETE') return 'Analysis complete.';
+  if (status.phase === 'FAILED') return status.failure?.message || 'Video analysis failed.';
+  if (status.phase === 'RETRY_REQUIRED') return status.retry?.message || `Analysis needs an explicit retry (${status.retry?.reason || 'provider work was not completed'}).`;
+  const progress = status.totalRepresentatives === null ? '' : ` · ${status.completedRepresentatives}/${status.totalRepresentatives} representative frames`;
+  return `${status.phase[0]}${status.phase.slice(1).toLowerCase()}${status.busy ? ' in progress' : ' ready to resume'}${progress}.`;
 };
+
+const aborted = (reason: unknown, signal: AbortSignal) => signal.aborted || (reason instanceof DOMException && reason.name === 'AbortError');
 
 export function VideoIntelligenceStudio() {
   const [media, setMedia] = useState<CreativeSourceVideoAsset | null>(null);
@@ -38,6 +44,11 @@ export function VideoIntelligenceStudio() {
   const [busy, setBusy] = useState(false);
   const [concept, setConcept] = useState('');
   const [selections, setSelections] = useState<VideoConceptSelection[]>([]);
+  const [locator, setLocator] = useState<VideoIntelligenceJobLocator | null>(null);
+  const [status, setStatus] = useState<CompactVideoIntelligenceJobStatus | null>(null);
+  const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
+  const mounted = useRef(false);
+  const controller = useRef<AbortController | null>(null);
 
   const replaceLibrary = (
     nextMedia: CreativeSourceVideoAsset,
@@ -46,38 +57,87 @@ export function VideoIntelligenceStudio() {
     setMedia(nextMedia);
     setLibrary(nextLibrary);
     setSelections([]);
+    setPendingSelection(null);
   };
 
-  const refresh = async (mediaId: string) => {
-    const response = await fetch(
-      `/api/video/intelligence?mediaId=${encodeURIComponent(mediaId)}`,
-      { cache: 'no-store' }
-    );
-    if (!response.ok) throw new Error(await readError(response));
-    const payload = (await response.json()) as {
-      source: CreativeSourceVideoAsset;
-      library: VideoFrameLibrary | null;
-    };
-    replaceLibrary(payload.source, payload.library);
+  const isCurrent = (next: AbortController) => mounted.current && controller.current === next && !next.signal.aborted;
+  const begin = () => {
+    controller.current?.abort();
+    const next = new AbortController();
+    controller.current = next;
+    return next;
   };
+  const rememberMediaId = (mediaId: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('mediaId', mediaId);
+    window.history.replaceState(null, '', url);
+  };
+  const clearSource = () => {
+    setMedia(null);
+    setLibrary(null);
+    setLocator(null);
+    setStatus(null);
+    setSelections([]);
+    setPendingSelection(null);
+  };
+  const readSaved = async (mediaId: string, next: AbortController) => {
+    try {
+      const saved = await readVideoIntelligence(mediaId, { signal: next.signal });
+      if (!isCurrent(next)) return false;
+      replaceLibrary(saved.source, saved.library);
+      setStoredMediaId(mediaId);
+      setLocator(saved.locator);
+      setStatus(saved.status);
+      setProgress(saved.status ? phaseMessage(saved.status) : 'No saved analysis. Start when ready.');
+      return true;
+    } catch (reason) {
+      if (!isCurrent(next) || aborted(reason, next.signal)) return false;
+      clearSource();
+      setError(reason instanceof Error ? reason.message : 'Stored video could not be loaded.');
+      setProgress('');
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    mounted.current = true;
+    const next = begin();
+    const mediaId = new URL(window.location.href).searchParams.get('mediaId');
+    if (mediaId) {
+      setBusy(true);
+      setProgress('Loading saved TRA video');
+      void readSaved(mediaId, next).finally(() => { if (isCurrent(next)) setBusy(false); });
+    }
+    return () => {
+      mounted.current = false;
+      controller.current?.abort();
+    };
+  // This intentionally runs once: reopening must only read the URL-selected saved job.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const upload = async () => {
     if (!file || busy) return;
+    const next = begin();
     setBusy(true);
     setError('');
     setProgress('Uploading TRA video');
-    setLibrary(null);
-    setSelections([]);
+    clearSource();
 
     try {
       const uploaded = await uploadTraVideo(file);
+      if (!isCurrent(next)) return;
       setStoredMediaId(uploaded.id);
+      rememberMediaId(uploaded.id);
       setProgress('Video stored. Loading any matching local evidence library.');
-      await refresh(uploaded.id);
+      await readSaved(uploaded.id, next);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Video upload failed.');
+      if (isCurrent(next) && !aborted(reason, next.signal)) {
+        clearSource();
+        setError(reason instanceof Error ? reason.message : 'Video upload failed.');
+      }
     } finally {
-      setBusy(false);
+      if (isCurrent(next)) setBusy(false);
     }
   };
 
@@ -85,102 +145,69 @@ export function VideoIntelligenceStudio() {
     event?.preventDefault();
     const mediaId = event ? storedMediaId.trim() : media?.id;
     if (!mediaId || busy) return;
+    const next = begin();
     setBusy(true);
     setError('');
     setProgress('Loading stored TRA video');
 
     try {
-      await refresh(mediaId);
-      setProgress('Stored video loaded.');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Stored video could not be loaded.');
+      rememberMediaId(mediaId);
+      await readSaved(mediaId, next);
     } finally {
-      setBusy(false);
+      if (isCurrent(next)) setBusy(false);
     }
   };
 
-  const analyze = async () => {
-    if (!media || busy) return;
+  const analyze = async (action: 'START' | 'ADVANCE' | 'RETRY') => {
+    if (!media || busy || (action !== 'START' && !locator)) return;
+    const next = begin();
     setBusy(true);
     setError('');
     setSelections([]);
-    setProgress('Preparing a fresh analysis run');
+    setPendingSelection(null);
+    setProgress(action === 'RETRY' ? 'Retrying saved analysis' : action === 'ADVANCE' ? 'Resuming saved analysis' : 'Starting analysis');
 
     try {
-      const response = await fetch('/api/video/intelligence', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mediaId: media.id, force: true }),
+      const result = await runVideoIntelligence(action === 'START' ? { action, mediaId: media.id } : { action, locator: locator! }, {
+        signal: next.signal,
+        onStatus: (nextStatus) => {
+          if (!isCurrent(next)) return;
+          setLocator(nextStatus.locator);
+          setStatus(nextStatus);
+          setProgress(phaseMessage(nextStatus));
+        },
       });
-      if (!response.ok) throw new Error(await readError(response));
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('Video analysis did not start a progress stream.');
-
-      const decoder = new TextDecoder();
-      let buffered = '';
-      let receivedComplete = false;
-      const consumeLine = (line: string) => {
-        if (!line) return;
-        const event = JSON.parse(line) as StreamEvent;
-        if (event.type === 'progress') {
-          setProgress(event.message || 'Analyzing video');
-        } else if (event.type === 'error') {
-          throw new Error(event.error || 'Video analysis failed.');
-        } else if (event.type === 'complete' && event.library && event.source) {
-          receivedComplete = true;
-          replaceLibrary(event.source, event.library);
-          setProgress('Analysis complete.');
-        }
-      };
-
-      try {
-        while (true) {
-          const next = await reader.read();
-          if (next.done) break;
-          buffered += decoder.decode(next.value, { stream: true });
-          const lines = buffered.split('\n');
-          buffered = lines.pop() || '';
-          lines.forEach(consumeLine);
-        }
-        buffered += decoder.decode();
-        if (buffered) consumeLine(buffered);
-      } finally {
-        reader.releaseLock();
-      }
-
-      if (!receivedComplete) {
-        throw new Error('Video analysis ended before reporting completion.');
-      }
+      if (!isCurrent(next)) return;
+      setLocator(result.status.locator);
+      setStatus(result.status);
+      setProgress(phaseMessage(result.status));
+      if (result.library) setLibrary(result.library);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Video analysis failed.');
+      if (isCurrent(next) && !aborted(reason, next.signal)) setError(reason instanceof Error ? reason.message : 'Video analysis failed.');
     } finally {
-      setBusy(false);
+      if (isCurrent(next)) setBusy(false);
     }
   };
 
-  const select = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!media || !concept.trim() || busy) return;
+  const select = async (retry: boolean) => {
+    const selectedConcept = concept.trim();
+    if (!locator || !selectedConcept || busy || (retry && pendingSelection?.concept !== selectedConcept)) return;
+    const next = begin();
     setBusy(true);
     setError('');
 
     try {
-      const response = await fetch('/api/video/selection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mediaId: media.id, concept: concept.trim() }),
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const payload = (await response.json()) as {
-        selection: VideoConceptSelection;
-      };
-      setSelections((current) => [...current, payload.selection]);
-      setConcept('');
+      const result = await selectVideoIntelligenceFrames(locator, selectedConcept, retry, { signal: next.signal });
+      if (!isCurrent(next)) return;
+      if (result.status === 'COMPLETE') {
+        setSelections((current) => [...current, result.selection]);
+        setConcept('');
+        setPendingSelection(null);
+      } else setPendingSelection({ ...result, concept: selectedConcept });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Frame selection failed.');
+      if (isCurrent(next) && !aborted(reason, next.signal)) setError(reason instanceof Error ? reason.message : 'Frame selection failed.');
     } finally {
-      setBusy(false);
+      if (isCurrent(next)) setBusy(false);
     }
   };
 
@@ -206,7 +233,7 @@ export function VideoIntelligenceStudio() {
             <p>1 · Source</p>
             <h2 id="source-title">TRA video</h2>
           </div>
-          {media ? <button className={styles.secondary} type="button" onClick={() => void loadStoredVideo()} disabled={busy}>Refresh saved library</button> : null}
+          {media ? <button className={styles.secondary} type="button" onClick={() => void loadStoredVideo()} disabled={busy}>Refresh saved status</button> : null}
         </div>
         <div className={styles.uploadRow}>
           <label className={styles.fileInput}>
@@ -225,7 +252,9 @@ export function VideoIntelligenceStudio() {
           <div>
             <strong>{media.originalName}</strong>
             <p>{Math.round(media.size / 1024 / 1024 * 10) / 10} MB · stored as TRA_VIDEO</p>
-            <button className={styles.primary} type="button" onClick={() => void analyze()} disabled={busy}>Run fresh analysis (uses model/API)</button>
+            {!status ? <button className={styles.primary} type="button" onClick={() => void analyze('START')} disabled={busy}>Start analysis (uses model/API)</button> : null}
+            {status && !['COMPLETE', 'FAILED', 'RETRY_REQUIRED'].includes(status.phase) ? <button className={styles.primary} type="button" onClick={() => void analyze('ADVANCE')} disabled={busy}>Resume analysis (uses model/API)</button> : null}
+            {status?.phase === 'RETRY_REQUIRED' ? <button className={styles.primary} type="button" onClick={() => void analyze('RETRY')} disabled={busy}>Retry analysis (uses model/API)</button> : null}
           </div>
         </div> : null}
         {progress ? <p className={styles.progress} role="status">{progress}</p> : null}
@@ -259,7 +288,9 @@ export function VideoIntelligenceStudio() {
         </section>
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>4 · Concept selection</p><h2>Compare distinct creative directions</h2></div></div>
-          <form className={styles.conceptForm} onSubmit={select}><label htmlFor="concept">Creative concept</label><textarea id="concept" value={concept} onChange={(event) => setConcept(event.target.value)} maxLength={2000} placeholder="For example: a credibility-focused concept using clear proof graphics" /><button className={styles.primary} disabled={!concept.trim() || busy}>Select 1–3 frames (uses API)</button></form>
+          <form className={styles.conceptForm} onSubmit={(event) => { event.preventDefault(); void select(false); }}><label htmlFor="concept">Creative concept</label><textarea id="concept" value={concept} onChange={(event) => { setConcept(event.target.value); setPendingSelection(null); }} maxLength={2000} placeholder="For example: a credibility-focused concept using clear proof graphics" /><button className={styles.primary} disabled={!concept.trim() || busy}>Select 1–3 frames (uses API)</button></form>
+          {pendingSelection?.status === 'BUSY' ? <p className={styles.progress} role="status">Selection for this exact concept is already in progress. Select again later to check its saved result.</p> : null}
+          {pendingSelection?.status === 'RETRY_REQUIRED' ? <div><p className={styles.error} role="alert">Frame selection needs an explicit retry: {pendingSelection.reason}.</p><button className={styles.secondary} type="button" onClick={() => void select(true)} disabled={busy || concept.trim() !== pendingSelection.concept}>Retry frame selection (uses API)</button></div> : null}
           {selections.length ? <div className={styles.selectionGrid}>{selections.map((selection, index) => <article className={styles.selection} key={`${selection.concept}-${index}`}><strong>{selection.concept}</strong><SelectedFrameGeneration media={media!} library={library} selection={selection} /></article>)}</div> : null}
         </section>
       </> : null}
