@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
-import { requireOperatorAccess } from '@/lib/auth/require-operator';
+import { getOperatorAccess } from '@/lib/auth/server-access';
+import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
+import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import { generateCreativeRevisionImage } from '@/lib/ai/creative-revision-image';
 import { buildCreativeCompanyContext, formatCreativeCompanyContext } from '@/lib/company/creative-context';
@@ -18,8 +20,8 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 export async function POST(request: Request, context: { params: Promise<{ creativeId: string }> }) {
-  const denied = await requireOperatorAccess();
-  if (denied) return denied;
+  const access = await getOperatorAccess();
+  if (!access.allowed) return operatorAccessDeniedResponse(access);
 
   const { creativeId: parentId } = await context.params;
   if (!isSafeCreativeId(parentId)) return NextResponse.json({ error: 'Invalid creative ID.' }, { status: 400 });
@@ -29,6 +31,8 @@ export async function POST(request: Request, context: { params: Promise<{ creati
   }
   const parsed = validateCreativeRevisionRequest(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const quotaDenied = await requireOperatorQuota(access.userId, 'CREATIVE_REVISION', 1);
+  if (quotaDenied) return quotaDenied;
   try {
     const parent = (await listCreatives()).find(record => record.id === parentId);
     if (!parent) return NextResponse.json({ error: 'Saved creative not found.' }, { status: 404 });

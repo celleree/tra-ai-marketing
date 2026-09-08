@@ -23,11 +23,15 @@ const mocks = vi.hoisted(() => ({
   getOrAnalyzeLayoutBlueprint: vi.fn(),
   listReferenceLibrary: vi.fn(),
   selectBestReferenceCreatives: vi.fn(),
-  requireOperatorAccess: vi.fn(),
+  getOperatorAccess: vi.fn(),
+  requireOperatorQuota: vi.fn(),
 }));
 
-vi.mock('@/lib/auth/require-operator', () => ({
-  requireOperatorAccess: mocks.requireOperatorAccess,
+vi.mock('@/lib/auth/server-access', () => ({
+  getOperatorAccess: mocks.getOperatorAccess,
+}));
+vi.mock('@/lib/quotas/require-quota', () => ({
+  requireOperatorQuota: mocks.requireOperatorQuota,
 }));
 
 vi.mock('@/lib/creatives/brand-logo.server', () => ({ compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo }));
@@ -340,7 +344,8 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.requireOperatorAccess.mockResolvedValue(null);
+  mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
+  mocks.requireOperatorQuota.mockResolvedValue(null);
   mocks.compositeCreativeBrandLogo.mockReset().mockImplementation(async (buffer) => buffer);
   mocks.saveCreativeBatch.mockReset().mockImplementation(async (records) => records);
   mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);
@@ -1172,6 +1177,21 @@ describe('progressive creative delivery', () => {
     expect(response.status).toBe(400);
     expect(response.headers.get('content-type')).toContain('application/json');
     await expect(response.json()).resolves.toEqual({ error: 'context is required' });
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+  });
+
+  it.each([429, 503])('rejects quota admission %i before hydration, planning, provider, or saving', async (status) => {
+    mocks.requireOperatorQuota.mockResolvedValue(new Response(JSON.stringify({ error: 'Quota unavailable.' }), {
+      status, headers: { 'Cache-Control': 'private, no-store', ...(status === 429 ? { 'Retry-After': '60' } : {}) },
+    }));
+    const response = await POST(generationRequest([], undefined, 2));
+    expect(response.status).toBe(status);
+    expect(response.headers.get('Retry-After')).toBe(status === 429 ? '60' : null);
+    expect(mocks.requireOperatorQuota).toHaveBeenCalledWith('operator', 'CREATIVE_GENERATION', 2);
+    expect(mocks.getMediaStorage).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();
   });
 
   it('rejects an unsupported placement before storage or provider work', async () => {

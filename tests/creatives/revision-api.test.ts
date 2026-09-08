@@ -6,8 +6,9 @@ import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-v
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), requireOperatorAccess: vi.fn() }));
-vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess: mocks.requireOperatorAccess }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn() }));
+vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.getOperatorAccess }));
+vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.requireOperatorQuota }));
 vi.mock('@/lib/creatives/storage', async importOriginal => ({ ...await importOriginal<object>(), listCreatives: mocks.list, saveCreativeBatch: mocks.save }));
 vi.mock('@/lib/creatives/revision-source-hydration', async importOriginal => ({ ...await importOriginal<object>(), hydrateSavedCreativeRevisionContext: mocks.hydrate }));
 vi.mock('@/lib/creatives/generated-image-validation', async importOriginal => ({ ...await importOriginal<object>(), validateGeneratedCreativeImage: mocks.validate }));
@@ -35,7 +36,8 @@ const call = (body: unknown, creativeId = parentId) => POST(new Request('http://
 const hydrate = (record: CreativeRecord) => ({ parent: { record, identity: record.identity, planning: record.planning, provenance: record.generationProvenance }, canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId, sha256: 'c'.repeat(64) }, originalApprovedSource: null, logoOverlay: null });
 beforeEach(() => {
   Object.values(mocks).forEach(mock => mock.mockReset());
-  mocks.requireOperatorAccess.mockResolvedValue(null);
+  mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
+  mocks.requireOperatorQuota.mockResolvedValue(null);
   const record = parent();
   mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrate(record));
   mocks.generate.mockResolvedValue({ buffer: Buffer.from('raw'), prompt: 'actual revision prompt', model: 'actual-image-model' });
@@ -91,6 +93,18 @@ describe('saved creative revision API', () => {
     mocks.list.mockResolvedValue([]);
     expect((await call({ operation: 'REGENERATE' })).status).toBe(404);
     expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(1);
+  });
+  it.each([429, 503])('rejects quota admission %i before creative storage, hydration, provider, or saving', async status => {
+    mocks.requireOperatorQuota.mockResolvedValue(new Response(JSON.stringify({ error: 'Quota unavailable.' }), { status }));
+    const response = await call({ operation: 'REGENERATE' });
+    expect(response.status).toBe(status);
+    expect(mocks.requireOperatorQuota).toHaveBeenCalledWith('operator', 'CREATIVE_REVISION', 1);
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
   });
   it('preserves actionable hydration errors and rejects invalid images before saving', async () => {
     mocks.hydrate.mockRejectedValueOnce(new CreativeRevisionHydrationError('Reanalyze the original video.', 409));

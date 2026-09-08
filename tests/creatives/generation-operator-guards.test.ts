@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getOperatorAccess: vi.fn(),
   getMediaStorage: vi.fn(),
+  requireOperatorQuota: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/server-access', () => ({
@@ -10,6 +11,9 @@ vi.mock('@/lib/auth/server-access', () => ({
 }));
 vi.mock('@/lib/media/local-storage', () => ({
   getMediaStorage: mocks.getMediaStorage,
+}));
+vi.mock('@/lib/quotas/require-quota', () => ({
+  requireOperatorQuota: mocks.requireOperatorQuota,
 }));
 
 import { POST as generate } from '@/app/api/creatives/generate/route';
@@ -51,5 +55,6 @@ describe('creative generation operator guards', () => {
     expect(deniedRequest.json).not.toHaveBeenCalled();
     expect(revisionParamsRead).toBe(0);
     expect(mocks.getMediaStorage).not.toHaveBeenCalled();
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
   });
 });
