@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createVideoResponse } from '@/lib/media/video-response';
 
 const storage = vi.hoisted(() => ({ readMedia: vi.fn() }));
+const requireOperatorAccess = vi.hoisted(() => vi.fn(async () => null));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => storage }));
+vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess }));
 import { GET } from '@/app/api/media/files/[fileName]/route';
 
 const bytes = Uint8Array.from({ length: 10 }, (_, index) => index);

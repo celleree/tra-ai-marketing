@@ -2,10 +2,14 @@ import { NextResponse } from 'next/server';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { validateSourceRoleForMime } from '@/lib/media/source-contract';
 import { MediaValidationError } from '@/lib/media/storage';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const formData = await request.formData();
     const file = formData.get('file');
