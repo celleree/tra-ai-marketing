@@ -35,7 +35,7 @@ The approved application-authentication provider is Clerk, using email one-time-
 
 Configure Clerk's **Invite-only** access mode (`restricted`) and email verification-code sign-in; disable password, social, and other sign-in methods. Clerk's separate dashboard allowlist applies to Open mode, so it does not replace invite-only signup. Server authorization must independently check the verified primary email against TRA's operator policy.
 
-Use separate development/Preview and Production Clerk instances and scoped environment values. Provisioning, invitations, and authenticated access must be verified before enabling the route-protection layer. Application authentication is not yet active merely because this decision/policy is recorded. Production configuration and deployment still require explicit approval.
+Use separate development/Preview and Production Clerk instances and scoped environment values. Provisioning, invitations, and authenticated access must be verified before enabling the route-protection layer. When both Clerk environment variables are present, the application starts Clerk session handling and the `/studio` layout admits only signed-in approved operators. Without both values, the app remains accessible for local work and auth pages show configuration is unavailable. API resource guards are a separate follow-up and are not yet enforced by this session-entry layer. Production configuration and deployment still require explicit approval.
 
 See [Clerk access restrictions](https://clerk.com/docs/guides/secure/restricting-access) and [email verification-code options](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options).
 
