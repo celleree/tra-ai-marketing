@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { CREATIVE_HUMAN_REVIEW_CHECKLIST_KEYS, parseCreativeHumanReviewChecklist } from '@/lib/creatives/human-review';
 import { isSafeCreativeId, updateCreativeReviewState } from '@/lib/creatives/storage';
 
 export const runtime = 'nodejs';
 
 export async function PATCH(request: Request, context: { params: Promise<{ creativeId: string }> }) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   const invalid = (error: string) => NextResponse.json({ error }, { status: 400 });
   const { creativeId } = await context.params;
   if (!isSafeCreativeId(creativeId)) return invalid('Invalid creative ID.');

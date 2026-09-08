@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { classifyReferenceCreativeAngle } from '@/lib/ai/reference-angle';
 import {
   isCreativeCategory,
@@ -113,6 +114,9 @@ const registerTraReferences = (items: MediaAsset[]): ReferenceLibraryAddition[] 
   }));
 
 export async function GET() {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     return NextResponse.json({ items: await listAllReferenceLibrary() });
   } catch (error) {
@@ -125,6 +129,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const rawItems = Array.isArray(body.items) ? body.items : [];
@@ -168,6 +175,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const id = typeof body.id === 'string' ? body.id : '';
@@ -194,6 +204,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const rawIds = Array.isArray(body.ids) ? body.ids : [];
