@@ -5,7 +5,7 @@ import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-poli
 import { createVideoIntelligenceAnalyzerFingerprint } from '@/lib/video/intelligence-preparation';
 import { parseVideoIntelligenceJob, videoIntelligenceJobKey, type VideoIntelligenceJob } from '@/lib/video/intelligence-job';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
-import { checkpointVideoIntelligenceJob, claimVideoIntelligenceJob, readVideoIntelligenceJob, retryVideoIntelligenceJob, startVideoIntelligenceJob } from '@/lib/video/intelligence-job-store';
+import { checkpointVideoIntelligenceJob, claimVideoIntelligenceJob, readVideoIntelligenceJob, retryVideoIntelligenceJob, startVideoIntelligenceJob, VideoIntelligenceJobLeaseLostError } from '@/lib/video/intelligence-job-store';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const mediaId = `media_${'a'.repeat(32)}`;
@@ -26,13 +26,14 @@ const requireWork = (claim: Awaited<ReturnType<typeof claimVideoIntelligenceJob>
   if (claim.status !== 'WORK') throw new Error('Expected work.');
   return claim;
 };
-const complete = (job: VideoIntelligenceJob, candidateIndex: number) => ({
-  ...job, representatives: [...job.representatives, { candidateIndex, frameSha256: hash(`frame-${candidateIndex}`), thumbnail: {
+const representative = (candidateIndex: number) => ({ candidateIndex, frameSha256: hash(`frame-${candidateIndex}`), thumbnail: {
     sourceVideoMediaId: mediaId, sourceVideoContentHash: identity.sourceVideoContentHash, candidateIndex, timestampMs: 100,
     frameSha256: hash(`frame-${candidateIndex}`), thumbnailDataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
   }, observation: { version: 1 as const, model: 'vision-model', providerEligible: false as const, evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION' as const,
     sourceVideoMediaId: mediaId, sourceVideoContentHash: identity.sourceVideoContentHash, candidateIndex, timestampMs: 100, frameSha256: hash(`frame-${candidateIndex}`),
-    observation: { sceneType: 'OTHER' as const, summary: 'Frame.', composition: 'Frame.', visibleText: [], topics: ['other' as const], uncertainties: [] } } }], lease: null,
+    observation: { sceneType: 'OTHER' as const, summary: 'Frame.', composition: 'Frame.', visibleText: [], topics: ['other' as const], uncertainties: [] } } });
+const complete = (job: VideoIntelligenceJob, candidateIndex: number) => ({
+  ...job, representatives: [...job.representatives, representative(candidateIndex)], lease: null,
 });
 const toObserving = async (deps: ReturnType<typeof setup>, indexes: number[]) => {
   const start = await startVideoIntelligenceJob(identity, deps);
@@ -82,7 +83,11 @@ describe('video intelligence job store', () => {
   it('limits missing observation work to pairs and rejects stale lease completion', async () => {
     const deps = setup(); const prepared = await toObserving(deps, [1, 2, 479]);
     const first = requireWork(await claimVideoIntelligenceJob(identity, deps)); expect(first.job.lease?.candidateIndexes).toEqual([1, 2]);
-    await checkpointVideoIntelligenceJob(identity, first.leaseId, (job) => complete(job, 1), deps);
+    const thumbnail = representative(1).thumbnail;
+    const partial = await checkpointVideoIntelligenceJob(identity, first.leaseId, (job) => ({ ...job, representatives: [{ candidateIndex: 1, frameSha256: hash('frame-1'), thumbnail }] }), deps);
+    await expect(checkpointVideoIntelligenceJob(identity, first.leaseId, (job) => ({ ...job, representatives: [] }), deps)).rejects.toThrow('erase saved work');
+    await expect(checkpointVideoIntelligenceJob(identity, first.leaseId, (job) => ({ ...job, lease: { ...job.lease!, expiresAtMs: job.lease!.expiresAtMs + 1 } }), deps)).rejects.toThrow('may not change a lease');
+    await checkpointVideoIntelligenceJob(identity, partial.lease!.id, (job) => ({ ...job, representatives: [{ ...job.representatives[0], observation: representative(1).observation }], lease: null }), deps);
     const second = requireWork(await claimVideoIntelligenceJob(identity, deps)); expect(second.job.lease?.candidateIndexes).toEqual([2, 479]); deps.clock.value = second.job.lease!.expiresAtMs;
     expect(await claimVideoIntelligenceJob(identity, deps)).toMatchObject({ status: 'RETRY_REQUIRED', job: { retry: { candidateIndexes: [2, 479] } } });
     expect(await retryVideoIntelligenceJob(identity, deps)).toMatchObject({ job: { representatives: [{ candidateIndex: 1 }], lease: { candidateIndexes: [2, 479] } } });
@@ -96,6 +101,6 @@ describe('video intelligence job store', () => {
   });
   it('rejects a checkpoint whose CAS loses to a replacement lease', async () => {
     const deps = setup(); const start = await startVideoIntelligenceJob(identity, deps); deps.storage.replacement = Buffer.from(JSON.stringify({ ...start.job, lease: { ...start.job.lease!, id: 'replacement' } }));
-    await expect(checkpointVideoIntelligenceJob(identity, start.job.lease!.id, (job) => ({ ...job, phase: 'FAILED', lease: null, failure: { phase: 'PREPARING', message: 'bad input' } }), deps)).rejects.toThrow('no longer current');
+    await expect(checkpointVideoIntelligenceJob(identity, start.job.lease!.id, (job) => ({ ...job, phase: 'FAILED', lease: null, failure: { phase: 'PREPARING', message: 'bad input' } }), deps)).rejects.toBeInstanceOf(VideoIntelligenceJobLeaseLostError);
   });
 });

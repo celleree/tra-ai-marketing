@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   VIDEO_INTELLIGENCE_JOB_LEASE_MS,
   parseVideoIntelligenceJob,
@@ -20,6 +21,9 @@ export type VideoIntelligenceJobStoreDependencies = {
 export type VideoIntelligenceJobClaim =
   | { status: 'WORK'; job: VideoIntelligenceJob; leaseId: string }
   | { status: 'BUSY' | 'COMPLETE' | 'FAILED' | 'RETRY_REQUIRED'; job: VideoIntelligenceJob };
+export class VideoIntelligenceJobLeaseLostError extends Error {
+  constructor() { super('Video intelligence job lease is no longer current.'); }
+}
 
 const dependencies = (value: VideoIntelligenceJobStoreDependencies) => ({
   storage: value.storage ?? getVideoIntelligenceStorage(), now: value.now ?? Date.now,
@@ -64,7 +68,12 @@ const sameLease = (left: VideoIntelligenceJob['lease'], right: VideoIntelligence
 const preservesSavedWork = (current: VideoIntelligenceJob, next: VideoIntelligenceJob) =>
   (!current.preparation || JSON.stringify(current.preparation) === JSON.stringify(next.preparation))
   && (!current.transcript || JSON.stringify(current.transcript) === JSON.stringify(next.transcript))
-  && current.representatives.every((entry) => next.representatives.some((candidate) => JSON.stringify(candidate) === JSON.stringify(entry)));
+  && current.representatives.every((entry) => {
+    const candidate = next.representatives.find((value) => value.candidateIndex === entry.candidateIndex);
+    return candidate?.frameSha256 === entry.frameSha256
+      && (!entry.thumbnail || isDeepStrictEqual(candidate.thumbnail, entry.thumbnail))
+      && (!entry.observation || isDeepStrictEqual(candidate.observation, entry.observation));
+  });
 
 /** Internal read includes the storage ETag; public claim/checkpoint results never do. */
 export const readVideoIntelligenceJob = async (identity: VideoIntelligenceJobIdentity, value: VideoIntelligenceJobStoreDependencies = {}) => {
@@ -146,7 +155,7 @@ export const checkpointVideoIntelligenceJob = async (
   const deps = dependencies(value); videoIntelligenceJobKey(identity);
   for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt += 1) {
     const current = requireJob(await read(identity, deps.storage)); const active = current.job.lease;
-    if (!active || active.id !== leaseId || active.phase !== current.job.phase) throw new Error('Video intelligence job lease is no longer current.');
+    if (!active || active.id !== leaseId || active.phase !== current.job.phase) throw new VideoIntelligenceJobLeaseLostError();
     const next = updateCurrentJob(copy(current.job));
     if (next.createdAtMs !== current.job.createdAtMs || !transitionAllowed(active.phase, next.phase)) throw new Error('Video intelligence job checkpoint transition is invalid.');
     if (next.lease && !sameLease(next.lease, active)) throw new Error('Video intelligence job checkpoint may not change a lease.');
