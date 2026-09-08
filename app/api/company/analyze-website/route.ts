@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { analyzeCompanyWebsite } from '@/lib/company/website-analyzer';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as { websiteUrl?: unknown };
     const websiteUrl = typeof body.websiteUrl === 'string' ? body.websiteUrl.trim() : '';

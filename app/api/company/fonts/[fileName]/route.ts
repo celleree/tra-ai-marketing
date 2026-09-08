@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import {
   deleteBrandFont,
   readBrandFont,
@@ -10,6 +11,9 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ fileName: string }> }
 ) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   const { fileName } = await context.params;
   const stored = await readBrandFont(fileName);
 
@@ -29,6 +33,9 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ fileName: string }> }
 ) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   const { fileName } = await context.params;
   await deleteBrandFont(fileName);
   return NextResponse.json({ ok: true });
