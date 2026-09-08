@@ -35,7 +35,8 @@ export async function reserveOperatorQuota(
   dependencies: Dependencies = {},
 ): Promise<{ allowed: true } | { allowed: false; retryAfterSeconds: number }> {
   const maximum = OPERATOR_QUOTA_POLICY[group];
-  if (!operatorId.trim() || !Number.isSafeInteger(units) || units < 1 || units > maximum) return unavailable();
+  if (!Number.isSafeInteger(maximum) || maximum < 1 || !operatorId.trim()
+    || !Number.isSafeInteger(units) || units < 1 || units > maximum) return unavailable();
   const now = dependencies.now ?? Date.now;
   const timestamp = now();
   if (!Number.isSafeInteger(timestamp)) return unavailable();

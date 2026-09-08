@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LocalVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import { OPERATOR_QUOTA_POLICY, OperatorQuotaUnavailableError, reserveOperatorQuota } from '@/lib/quotas/operator-quota';
 
@@ -13,6 +13,14 @@ describe('operator quota', () => {
   it('uses the approved hourly technical limits', () => {
     expect(OPERATOR_QUOTA_POLICY).toEqual({ WEBSITE_ANALYSIS: 12, FONT_ANALYSIS: 12, CREATIVE_GENERATION: 60,
       CREATIVE_REVISION: 24, VIDEO_SELECTION: 24, VIDEO_PROVIDER_WORK: 120, VIDEO_FRAME_PREVIEW: 30, VIDEO_PREPARATION: 12 });
+  });
+
+  it('fails closed before reading storage when a runtime group has no approved limit', async () => {
+    const storage = { read: vi.fn(), write: vi.fn() } as unknown as VideoIntelligenceStorage;
+    await expect(reserveOperatorQuota({ operatorId: 'user_123', group: 'UNKNOWN' as never, units: 1 }, { storage }))
+      .rejects.toBeInstanceOf(OperatorQuotaUnavailableError);
+    expect(storage.read).not.toHaveBeenCalled();
+    expect(storage.write).not.toHaveBeenCalled();
   });
 
   it('allows up to the boundary, then returns a fixed-window retry time', async () => {
