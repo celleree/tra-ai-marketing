@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-const RELEASE = 'ffmpeg-7.0.2-tra.3';
+const RELEASE = 'ffmpeg-7.0.2-tra.4';
 const FFMPEG_VERSION = '7.0.2';
 const FFMPEG_TAG = 'n7.0.2';
 const SOURCE_URL = 'https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz';
@@ -14,22 +14,22 @@ const RUNTIME_DIR = path.join(process.cwd(), '.runtime', 'ffmpeg');
 const TARGETS = {
   'linux-x64': {
     asset: 'ffmpeg-linux-x64.gz',
-    compressedSha256: '7b9d54bb1228f405a9994d2cde29ab59a4691bf307a0a7c008868c1f93a9c804',
-    binarySha256: 'de70fae6e2fa43c1dc318b16ea064fdd67c91418bfcf6557ae674cb64f495bea',
+    compressedSha256: '6df4462722ea35537300ba478ff16962576ee41a82140a023ea365e4d6922a8c',
+    binarySha256: '93fa28078e3ce1aa04912c2cc7103a46bb406b3e143fb0942245e29875b3bb1b',
     licenseAsset: 'linux-x64.LICENSE',
     licenseSha256: 'b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe',
     provenanceAsset: 'linux-x64.provenance.json',
-    provenanceSha256: '57de96866c5bf17ad7123444edb2b8c5d1914bf4ec648293e8986e0325148242',
+    provenanceSha256: '52ce6427360a8d5c54c7dde9fe6ed89385d9dfb5df6dca78fde711e67393b0d1',
     executable: 'ffmpeg',
   },
   'linux-arm64': {
     asset: 'ffmpeg-linux-arm64.gz',
-    compressedSha256: 'eea83e80ed738237c2a305d8fca55d0fe70544245da324bd6bd2849c17dbcd7d',
-    binarySha256: 'bd6557b323edf8dd51198b18f631b5f3fe3d30515ebbf33e6fb5360ab4644cff',
+    compressedSha256: 'c225c71dcf72d53a50e0bc1d11a11962b9f0b6bb33aeea0a89efb6318396af7b',
+    binarySha256: '6f8061dfb9719478f616ffbbe11c46010e62c0f6f0659b34e47369a89236f414',
     licenseAsset: 'linux-arm64.LICENSE',
     licenseSha256: 'b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe',
     provenanceAsset: 'linux-arm64.provenance.json',
-    provenanceSha256: '569126380e640c84123f5b12f90b22ca4e4a95d978ab989e951847e93c37b92a',
+    provenanceSha256: '8030a8d45df1db0e6b8f845a119be46ec490a912be71d22ca6f9f6d32e307131',
     executable: 'ffmpeg',
   },
   'darwin-x64': {
@@ -54,12 +54,12 @@ const TARGETS = {
   },
   'win32-x64': {
     asset: 'ffmpeg-win32-x64.gz',
-    compressedSha256: 'e742fe4af925e483782b36e7487aeeebf8b4acb1dcd83831076864f2ceda269f',
-    binarySha256: '40a08e1db61bc49c045d6d98ea34d8e25bebdf010b1a813290c12e9d734093d0',
+    compressedSha256: '26a8940f2d40cb626cf32186237354f7a930900ae215fd401922b108babfea28',
+    binarySha256: '2dc6695af06538cc3ffa1b4233167ddb2dd91a999aaf770a1cb37eee9317567d',
     licenseAsset: 'win32-x64.LICENSE',
     licenseSha256: 'b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe',
     provenanceAsset: 'win32-x64.provenance.json',
-    provenanceSha256: 'cd7dd473980286a442ffcae9b8d67a2b96826f1d04c1ef869525deb91e71f264',
+    provenanceSha256: 'f5dc18eda3d15453b3816b3030b24808ccf670cd7974b1da460f1376f16559ae',
     executable: 'ffmpeg.exe',
   },
 };
