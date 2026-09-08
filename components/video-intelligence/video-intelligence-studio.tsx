@@ -125,7 +125,7 @@ export function VideoIntelligenceStudio() {
     clearSource();
 
     try {
-      const uploaded = await uploadTraVideo(file);
+      const uploaded = await uploadTraVideo(file, (input, init) => fetch(input, { ...init, signal: next.signal }));
       if (!isCurrent(next)) return;
       setStoredMediaId(uploaded.id);
       rememberMediaId(uploaded.id);
@@ -288,7 +288,7 @@ export function VideoIntelligenceStudio() {
         </section>
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>4 · Concept selection</p><h2>Compare distinct creative directions</h2></div></div>
-          <form className={styles.conceptForm} onSubmit={(event) => { event.preventDefault(); void select(false); }}><label htmlFor="concept">Creative concept</label><textarea id="concept" value={concept} onChange={(event) => { setConcept(event.target.value); setPendingSelection(null); }} maxLength={2000} placeholder="For example: a credibility-focused concept using clear proof graphics" /><button className={styles.primary} disabled={!concept.trim() || busy}>Select 1–3 frames (uses API)</button></form>
+          <form className={styles.conceptForm} onSubmit={(event) => { event.preventDefault(); void select(false); }}><label htmlFor="concept">Creative concept</label><textarea id="concept" value={concept} onChange={(event) => { setConcept(event.target.value); setPendingSelection(null); }} maxLength={2000} placeholder="For example: a credibility-focused concept using clear proof graphics" disabled={busy} /><button className={styles.primary} disabled={!concept.trim() || busy}>Select 1–3 frames (uses API)</button></form>
           {pendingSelection?.status === 'BUSY' ? <p className={styles.progress} role="status">Selection for this exact concept is already in progress. Select again later to check its saved result.</p> : null}
           {pendingSelection?.status === 'RETRY_REQUIRED' ? <div><p className={styles.error} role="alert">Frame selection needs an explicit retry: {pendingSelection.reason}.</p><button className={styles.secondary} type="button" onClick={() => void select(true)} disabled={busy || concept.trim() !== pendingSelection.concept}>Retry frame selection (uses API)</button></div> : null}
           {selections.length ? <div className={styles.selectionGrid}>{selections.map((selection, index) => <article className={styles.selection} key={`${selection.concept}-${index}`}><strong>{selection.concept}</strong><SelectedFrameGeneration media={media!} library={library} selection={selection} /></article>)}</div> : null}
