@@ -4,6 +4,8 @@ import { parseTranscriptSegments, transcribeTraVideo, transcriptAtTimestamp } fr
 import { probeTraVideoAudioTrack } from '@/lib/video/ffmpeg';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { REAL_MULTI_FRAME_MP4 } from '@/tests/fixtures/media';
+import { REAL_MISMATCHED_STREAM_DURATION_MP4 } from '@/tests/fixtures/media';
+import { REAL_REORDERED_MP4 } from '@/tests/fixtures/reordered-video';
 
 const source: HydratedTraVideoSource = {
   role: 'TRA_VIDEO',
@@ -73,7 +75,11 @@ describe('timestamped video transcription', () => {
   });
 
   it('recognizes the real reordered fixture as decodable video without an audio stream', async () => {
-    await expect(probeTraVideoAudioTrack(REAL_MULTI_FRAME_MP4)).resolves.toEqual({ hasAudioTrack: false });
+    await expect(probeTraVideoAudioTrack(REAL_REORDERED_MP4)).resolves.toEqual({ hasAudioTrack: false });
+  });
+
+  it('recognizes an audio track in the real mismatched-stream-duration fixture', async () => {
+    await expect(probeTraVideoAudioTrack(REAL_MISMATCHED_STREAM_DURATION_MP4)).resolves.toEqual({ hasAudioTrack: true });
   });
 
   it('does not treat failed or ambiguous probes as no-audio', async () => {
