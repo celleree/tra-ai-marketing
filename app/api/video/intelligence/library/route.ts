@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { assertDurableVideoIntelligenceAvailable, videoIntelligenceHttpStatus } from '@/lib/video/preview-availability';
 import { loadVideoIntelligenceLibrary, MAX_VIDEO_INTELLIGENCE_LIBRARY_BYTES } from '@/lib/video/intelligence-finalization-runner';
 import { resolveExistingVideoIntelligenceJob, VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
@@ -7,6 +8,8 @@ export const runtime = 'nodejs';
 const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
   try {
     assertDurableVideoIntelligenceAvailable();
     const body = await request.json();

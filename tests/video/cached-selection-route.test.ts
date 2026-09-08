@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), load: vi.fn(), select: vi.fn() }));
+const requireOperatorAccess = vi.hoisted(() => vi.fn(async () => null));
+vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess }));
 vi.mock('@/lib/video/intelligence-service', async (load) => ({
   ...await load<typeof import('@/lib/video/intelligence-service')>(), resolveExistingVideoIntelligenceJob: mocks.resolve,
 }));
@@ -13,7 +15,7 @@ const identity = { analyzerFingerprint: { visionModel: 'frozen-selector' } };
 const artifact = { key: 'private-library', sha256: 'd'.repeat(64), byteLength: 20 };
 const library = { id: 'library' };
 const post = (body: unknown) => new Request('http://localhost/api/video/intelligence/selection', { method: 'POST', body: JSON.stringify(body) });
-beforeEach(() => { vi.resetAllMocks(); vi.stubEnv('NODE_ENV', 'test'); });
+beforeEach(() => { vi.resetAllMocks(); requireOperatorAccess.mockResolvedValue(null); vi.stubEnv('NODE_ENV', 'test'); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 it('uses only server-resolved library digest/model and the request-entry deadline', async () => {

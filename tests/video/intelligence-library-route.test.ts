@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), load: vi.fn() }));
+const requireOperatorAccess = vi.hoisted(() => vi.fn(async () => null));
+vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess }));
 vi.mock('@/lib/video/intelligence-service', async (load) => ({
   ...await load<typeof import('@/lib/video/intelligence-service')>(), resolveExistingVideoIntelligenceJob: mocks.resolve,
 }));
@@ -14,7 +16,7 @@ const locator = { version: 1, sourceVideoMediaId: `media_${'a'.repeat(32)}`, sou
 const identity = { sourceVideoMediaId: locator.sourceVideoMediaId };
 const artifact = { key: 'private-library-artifact', sha256: 'd'.repeat(64), byteLength: 20 };
 const request = () => new Request('http://localhost/api/video/intelligence/library', { method: 'POST', body: JSON.stringify({ locator }) });
-beforeEach(() => { vi.resetAllMocks(); vi.stubEnv('NODE_ENV', 'test'); });
+beforeEach(() => { vi.resetAllMocks(); requireOperatorAccess.mockResolvedValue(null); vi.stubEnv('NODE_ENV', 'test'); });
 afterEach(() => vi.unstubAllEnvs());
 
 describe('completed video library delivery', () => {

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { CreativeSourceHydrationError } from '@/lib/media/source-hydration';
 import { assertDurableVideoIntelligenceAvailable, videoIntelligenceHttpStatus } from '@/lib/video/preview-availability';
 import {
@@ -17,6 +18,8 @@ const errorResponse = (error: unknown) => NextResponse.json({
     : error instanceof SyntaxError ? 400 : 500) });
 
 export async function GET(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
   const deadlineAtMs = Date.now() + maxDuration * 1_000 - RESPONSE_RESERVE_MS;
   try {
     assertDurableVideoIntelligenceAvailable();
@@ -26,6 +29,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
   const deadlineAtMs = Date.now() + maxDuration * 1_000 - RESPONSE_RESERVE_MS;
   try {
     assertDurableVideoIntelligenceAvailable();

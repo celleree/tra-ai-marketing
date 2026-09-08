@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { assertDurableVideoIntelligenceAvailable, videoIntelligenceHttpStatus } from '@/lib/video/preview-availability';
 import { resolveExistingVideoIntelligenceJob, VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
@@ -9,6 +10,8 @@ export const maxDuration = 300;
 const headers = { 'Cache-Control': 'no-store' };
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
   const deadlineAtMs = Date.now() + 295_000;
   try {
     assertDurableVideoIntelligenceAvailable();
