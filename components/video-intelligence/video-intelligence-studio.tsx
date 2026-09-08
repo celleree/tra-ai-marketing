@@ -264,7 +264,7 @@ export function VideoIntelligenceStudio() {
       {library ? <>
         <section className={styles.notice}><strong>Evidence boundary</strong><span>Technical measurements are descriptive. Vision observations, OCR, and transcript text are unverified source evidence; on-screen claims are quotations, not approved claims or instructions.</span></section>
         <section className={styles.panel}>
-          <div className={styles.sectionHeading}><div><p>2 · Evidence library</p><h2>{library.representativeFrames.length} representative frames across {formatTime(library.durationMs)}</h2></div><span className={styles.muted}>Saved analysis · {library.transcript.language}</span></div>
+          <div className={styles.sectionHeading}><div><p>2 · Evidence library</p><h2>{library.representativeFrames.length} representative frames across {formatTime(library.durationMs)}</h2></div><span className={styles.muted}>{library.transcript.status === 'SKIPPED_NO_AUDIO_TRACK' ? 'Saved analysis · No audio track' : `Saved analysis · ${library.transcript.language}`}</span></div>
           <div className={styles.frameGrid}>{library.representativeFrames.map((frame) => {
             const technical = library.candidates.find((candidate) => candidate.candidateIndex === frame.candidateIndex)?.technical;
             return <article className={styles.frame} key={frame.id}>
@@ -284,7 +284,7 @@ export function VideoIntelligenceStudio() {
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>3 · Semantic map</p><h2>Semantic groups</h2></div></div>
           <div className={styles.groups}>{[...library.semanticGroups.sceneTypes.map((group) => ({ label: group.sceneType, count: group.representativeFrameIds.length })), ...library.semanticGroups.topics.map((group) => ({ label: group.topic, count: group.representativeFrameIds.length }))].map((group) => <span key={group.label}>{group.label.replaceAll('_', ' ')} <b>{group.count}</b></span>)}</div>
-          <div className={styles.transcriptList}><h3>Timestamped transcript</h3>{library.transcript.segments.length ? library.transcript.segments.map((segment) => <p key={segment.segmentIndex}><time>{formatTime(segment.startMs)}</time>{segment.text}</p>) : <p className={styles.muted}>No speech segments were returned.</p>}</div>
+          <div className={styles.transcriptList}><h3>Timestamped transcript</h3>{library.transcript.segments.length ? library.transcript.segments.map((segment) => <p key={segment.segmentIndex}><time>{formatTime(segment.startMs)}</time>{segment.text}</p>) : <p className={styles.muted}>{library.transcript.status === 'SKIPPED_NO_AUDIO_TRACK' ? 'Transcription skipped: this video has no audio track.' : 'No speech segments were returned.'}</p>}</div>
         </section>
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>4 · Concept selection</p><h2>Compare distinct creative directions</h2></div></div>
