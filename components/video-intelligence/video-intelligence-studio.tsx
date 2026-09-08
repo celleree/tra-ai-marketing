@@ -248,7 +248,7 @@ export function VideoIntelligenceStudio() {
           <button className={styles.secondary} disabled={!storedMediaId.trim() || busy}>Load</button>
         </form>
         {media ? <div className={styles.videoGrid}>
-          <video controls preload="metadata" src={media.url} className={styles.video} />
+          <video controls preload="metadata" src={`/api/media/files/${encodeURIComponent(media.fileName)}`} className={styles.video} />
           <div>
             <strong>{media.originalName}</strong>
             <p>{Math.round(media.size / 1024 / 1024 * 10) / 10} MB · stored as TRA_VIDEO</p>
