@@ -1,5 +1,6 @@
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { createVideoResponse } from '@/lib/media/video-response';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 
 export const runtime = 'nodejs';
 
@@ -7,6 +8,9 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ fileName: string }> }
 ) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   const { fileName } = await context.params;
   const stored = await getMediaStorage().readMedia(fileName);
 

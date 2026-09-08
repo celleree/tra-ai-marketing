@@ -9,6 +9,7 @@ import {
   EXTENSION_BY_MIME,
   getMaxUploadBytes,
 } from '@/lib/media/storage';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 
 export const runtime = 'nodejs';
 
@@ -20,6 +21,9 @@ const REQUIRED_R2_VARIABLES = [
 ] as const;
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   if (process.env.NODE_ENV !== 'production') {
     return NextResponse.json({ direct: false });
   }

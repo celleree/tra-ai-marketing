@@ -5,10 +5,14 @@ import {
   MediaValidationError,
   validateStoredMedia,
 } from '@/lib/media/storage';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const mediaId = typeof body.mediaId === 'string' ? body.mediaId : '';
