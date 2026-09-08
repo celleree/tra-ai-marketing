@@ -9,6 +9,9 @@ import { VIDEO_CONTENT_TOPICS, VIDEO_SCENE_TYPES, type observeTemporaryVideoFram
 type TechnicalSelection = Awaited<ReturnType<typeof analyzeTemporaryVideoCandidates>>;
 type FrameObservationResult = Awaited<ReturnType<typeof observeTemporaryVideoFrame>>;
 type TechnicalCandidate = TechnicalSelection['candidates'][number];
+type PersistedTranscript = VideoTranscript extends infer Transcript
+  ? Transcript extends VideoTranscript ? Omit<Transcript, 'sourceVideoMediaId' | 'sourceVideoContentHash'> : never
+  : never;
 
 export type VideoFrameLibraryCandidateSet = Pick<TemporaryVideoFrameCandidateSet,
   'sourceVideoMediaId' | 'sourceVideoContentHash' | 'durationMs'> & {
@@ -25,8 +28,8 @@ export interface VideoFrameLibrary {
   sourceVideoMediaId: string;
   sourceVideoContentHash: string;
   durationMs: number;
-  analysisModels: { transcription: string; vision: string[] };
-  transcript: Pick<VideoTranscript, 'version' | 'model' | 'language' | 'segments'>;
+  analysisModels: { transcription: 'whisper-1' | null; vision: string[] };
+  transcript: PersistedTranscript;
   candidates: Array<{
     candidateIndex: number; timestampMs: number; width: number; height: number;
     extractionReasons: readonly string[]; frameSha256: string; technical: TechnicalCandidate['technical'];
@@ -137,7 +140,10 @@ export const assembleVideoFrameLibrary = (
     providerEligible: false, evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', sourceVideoMediaId: set.sourceVideoMediaId,
     sourceVideoContentHash: set.sourceVideoContentHash, durationMs: set.durationMs,
     analysisModels: { transcription: transcript.model, vision: [...new Set(observations.map((result) => result.model))] },
-    transcript: { version: transcript.version, model: transcript.model, language: transcript.language, segments: transcript.segments },
+    transcript: transcript.status === 'SKIPPED_NO_AUDIO_TRACK'
+      ? { version: transcript.version, status: transcript.status, model: transcript.model, language: transcript.language,
+        segments: transcript.segments, evidence: transcript.evidence }
+      : { version: transcript.version, model: transcript.model, language: transcript.language, segments: transcript.segments },
     candidates: [...candidates.values()].sort((a, b) => a.timestampMs - b.timestampMs || a.candidateIndex - b.candidateIndex).map((candidate) => ({
       candidateIndex: candidate.candidateIndex, timestampMs: candidate.timestampMs, width: candidate.width, height: candidate.height,
       extractionReasons: candidate.extractionReasons, frameSha256: candidate.frameSha256, technical: technical.get(candidate.candidateIndex)!.technical,

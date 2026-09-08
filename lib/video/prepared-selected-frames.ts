@@ -29,7 +29,7 @@ const assertPreparedBoundary = (source: HydratedTraVideoSource, library: VideoFr
     reanalyze('the preparation manifest does not match the hydrated source.');
   }
   if (manifest.durationMs !== library.durationMs) reanalyze('the preparation duration does not match the saved library.');
-  if (library.analysisModels.transcription !== manifest.analyzerFingerprint.transcriptionModel
+  if ((library.analysisModels.transcription !== null && library.analysisModels.transcription !== manifest.analyzerFingerprint.transcriptionModel)
     || !isDeepStrictEqual(library.analysisModels.vision, [manifest.analyzerFingerprint.visionModel])) {
     reanalyze('the preparation analyzer does not match the saved library.');
   }

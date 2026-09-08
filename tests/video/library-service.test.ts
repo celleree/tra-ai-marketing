@@ -23,6 +23,7 @@ const request = () => vi.fn<typeof fetch>(async (url) => String(url).endsWith('/
   : Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({
     sceneType: 'OTHER', summary: 'Colored test frame.', composition: 'Full frame.', visibleText: [], topics: ['other'], uncertainties: [],
   }) }] }] }));
+const audioProbe = async () => ({ hasAudioTrack: true });
 
 it('runs real extraction with mocked providers, persists complete analysis, and reuses it without paid calls', async () => {
   root = await mkdtemp(path.join(tmpdir(), 'tra-library-service-test-'));
@@ -30,7 +31,7 @@ it('runs real extraction with mocked providers, persists complete analysis, and 
   vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'test-model');
   const provider = request();
   const progress = vi.fn();
-  const first = await analyzeTraVideoIntelligence(source, { root, request: provider, onProgress: progress });
+  const first = await analyzeTraVideoIntelligence(source, { root, request: provider, probe: audioProbe, onProgress: progress });
   expect(first.reused).toBe(false);
   expect(first.library.representativeFrames.length).toBeGreaterThan(0);
   expect(first.library.representativeFrames[0].thumbnailDataUrl).toMatch(/^data:image\/jpeg;base64,/);
@@ -38,13 +39,13 @@ it('runs real extraction with mocked providers, persists complete analysis, and 
   expect(progress).toHaveBeenCalled();
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toEqual(first.library);
   provider.mockClear();
-  const second = await analyzeTraVideoIntelligence(source, { root, request: provider });
+  const second = await analyzeTraVideoIntelligence(source, { root, request: provider, probe: audioProbe });
   expect(second.reused).toBe(true);
   expect(second.library).toEqual(first.library);
   expect(provider).not.toHaveBeenCalled();
-  const normal = analyzeTraVideoIntelligence(source, { root, request: provider });
-  const forced = analyzeTraVideoIntelligence(source, { root, force: true, request: provider });
-  const forcedFollower = analyzeTraVideoIntelligence(source, { root, force: true, request: provider });
+  const normal = analyzeTraVideoIntelligence(source, { root, request: provider, probe: audioProbe });
+  const forced = analyzeTraVideoIntelligence(source, { root, force: true, request: provider, probe: audioProbe });
+  const forcedFollower = analyzeTraVideoIntelligence(source, { root, force: true, request: provider, probe: audioProbe });
   const [normalResult, forcedResult, forcedFollowerResult] = await Promise.all([normal, forced, forcedFollower]);
   expect(normalResult.reused).toBe(true);
   expect(forcedResult.reused).toBe(false);
@@ -92,8 +93,8 @@ it.each([false, true])('coalesces an uncached owner (force=%s) with force follow
         sceneType: 'OTHER', summary: 'Colored test frame.', composition: 'Full frame.', visibleText: [], topics: ['other'], uncertainties: [],
       }) }] }] });
   });
-  const first = analyzeTraVideoIntelligence(source, { root, force, request: provider });
-  const second = analyzeTraVideoIntelligence(source, { root, force: true, request: provider });
+  const first = analyzeTraVideoIntelligence(source, { root, force, request: provider, probe: audioProbe });
+  const second = analyzeTraVideoIntelligence(source, { root, force: true, request: provider, probe: audioProbe });
   await started;
   release();
   const [firstResult, secondResult] = await Promise.all([first, second]);
@@ -106,10 +107,10 @@ it('does not persist failed provider runs and rejects production or oversized in
   root = await mkdtemp(path.join(tmpdir(), 'tra-library-service-test-'));
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   const provider = vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 429 }));
-  await expect(analyzeTraVideoIntelligence(source, { root, request: provider })).rejects.toThrow('HTTP 429');
+  await expect(analyzeTraVideoIntelligence(source, { root, request: provider, probe: audioProbe })).rejects.toThrow('HTTP 429');
   expect(await loadVideoFrameLibrary(source.media.id, videoSourceHash(source), root)).toBeNull();
   provider.mockImplementation(request());
-  await expect(analyzeTraVideoIntelligence(source, { root, request: provider })).resolves.toMatchObject({ reused: false });
+  await expect(analyzeTraVideoIntelligence(source, { root, request: provider, probe: audioProbe })).resolves.toMatchObject({ reused: false });
   provider.mockClear();
   const oversized = { ...source, stored: { ...source.stored, buffer: Buffer.alloc(25_000_001) } };
   await expect(analyzeTraVideoIntelligence(oversized, { root, request: provider })).rejects.toThrow('25 MB');

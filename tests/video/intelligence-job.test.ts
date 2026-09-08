@@ -36,6 +36,9 @@ const preparation = { manifestKey: `preparations/manifests/sha256/${hash('manife
   manifestSha256: hash('manifest'), durationMs: 2_000, representativeCandidateIndexes: [1] };
 const transcript = { version: 1 as const, model: 'whisper-1' as const, sourceVideoMediaId: mediaId,
   sourceVideoContentHash: contentHash, language: 'en', segments: [{ segmentIndex: 0, startMs: 0, endMs: 1_000, text: 'Speech.' }] };
+const skippedTranscript = { version: 1 as const, status: 'SKIPPED_NO_AUDIO_TRACK' as const, model: null,
+  sourceVideoMediaId: mediaId, sourceVideoContentHash: contentHash, language: null, segments: [] as [],
+  evidence: { method: 'FFMPEG_STREAM_METADATA' as const } };
 const parse = (job: VideoIntelligenceJob) => parseVideoIntelligenceJob(Buffer.from(JSON.stringify(job)), identity);
 const completeProgress = () => [{ candidateIndex: 1, frameSha256: frameHash, thumbnail, observation }];
 
@@ -52,6 +55,8 @@ describe('video intelligence job contract', () => {
     baseJob(),
     { ...baseJob(), phase: 'TRANSCRIBING' as const, preparation },
     { ...baseJob(), phase: 'OBSERVING' as const, preparation, transcript,
+      representatives: [{ candidateIndex: 1, frameSha256: frameHash, thumbnail }] },
+    { ...baseJob(), phase: 'OBSERVING' as const, preparation, transcript: skippedTranscript,
       representatives: [{ candidateIndex: 1, frameSha256: frameHash, thumbnail }] },
     { ...baseJob(), phase: 'FINALIZING' as const, preparation, transcript, representatives: completeProgress() },
     { ...baseJob(), phase: 'COMPLETE' as const, preparation, transcript, representatives: completeProgress(),
@@ -88,6 +93,8 @@ describe('video intelligence job contract', () => {
     ['missing lease field', (job: VideoIntelligenceJob) => { delete (job as Partial<VideoIntelligenceJob>).lease; }],
     ['oversized pair', (job: VideoIntelligenceJob) => { job.phase = 'OBSERVING'; job.preparation = { ...preparation, representativeCandidateIndexes: [1, 2, 3] }; job.transcript = transcript; job.lease = { id: 'lease', phase: 'OBSERVING', candidateIndexes: [1, 2, 3] as unknown as [number], acquiredAtMs: 1, expiresAtMs: 1 + VIDEO_INTELLIGENCE_JOB_LEASE_MS }; }],
     ['transcription retry after transcript', (job: VideoIntelligenceJob) => { job.phase = 'RETRY_REQUIRED'; job.preparation = preparation; job.transcript = transcript; job.retry = { phase: 'TRANSCRIBING', reason: 'PAID_WORK_FAILED' }; }],
+    ['skipped transcript uses a provider model', (job: VideoIntelligenceJob) => { job.phase = 'OBSERVING'; job.preparation = preparation; job.transcript = { ...skippedTranscript, model: 'whisper-1' } as never; job.representatives = [{ candidateIndex: 1, frameSha256: frameHash, thumbnail }]; }],
+    ['skipped transcript has segments', (job: VideoIntelligenceJob) => { job.phase = 'OBSERVING'; job.preparation = preparation; job.transcript = { ...skippedTranscript, segments: transcript.segments } as never; job.representatives = [{ candidateIndex: 1, frameSha256: frameHash, thumbnail }]; }],
     ['observation retry before transcript', (job: VideoIntelligenceJob) => { job.phase = 'RETRY_REQUIRED'; job.preparation = preparation; job.retry = { phase: 'OBSERVING', candidateIndexes: [1], reason: 'PAID_WORK_FAILED' }; }],
     ['failed finalization without completed inputs', (job: VideoIntelligenceJob) => { job.phase = 'FAILED'; job.failure = { phase: 'FINALIZING', message: 'Local save failed.' }; }],
   ])('rejects malformed persisted data: %s', (_name, mutate) => {

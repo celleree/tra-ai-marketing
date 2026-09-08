@@ -53,7 +53,8 @@ describe('persisted video intelligence lifecycle', () => {
       const identity = resolveVideoIntelligenceJobLocator(locator);
       const complete = (await readVideoIntelligenceJob(identity, { storage: reopened }))!.job;
       const library = await loadVideoIntelligenceLibrary(identity, complete.result!, { storage: reopened });
-      expect(request.mock.calls.filter(([url]) => String(url).endsWith('/audio/transcriptions'))).toHaveLength(1);
+      expect(request.mock.calls.filter(([url]) => String(url).endsWith('/audio/transcriptions'))).toHaveLength(0);
+      expect(library.analysisModels.transcription).toBeNull();
       expect(request.mock.calls.filter(([url]) => String(url).endsWith('/responses'))).toHaveLength(library.representativeFrames.length);
       const paidCalls = request.mock.calls.length;
       expect((await executeVideoIntelligenceStep({ action: 'START', mediaId }, deps)).phase).toBe('COMPLETE');

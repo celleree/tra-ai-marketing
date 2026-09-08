@@ -17,6 +17,7 @@ export interface VideoIntelligenceTranscriptionRunnerDependencies {
   storage?: VideoIntelligenceStorage;
   now?: () => number;
   request?: typeof fetch;
+  probe?: NonNullable<Parameters<typeof transcribeTraVideo>[2]>['probe'];
 }
 
 const sourceHash = (source: HydratedTraVideoSource) =>
@@ -76,14 +77,22 @@ export const runVideoIntelligenceTranscriptionJob = async (
     storeDependencies
   );
   const effectiveDeadlineAtMs = Math.min(dependencies.deadlineAtMs, current.job.lease.expiresAtMs);
-  const remainingMs = effectiveDeadlineAtMs - (dependencies.now ?? Date.now)();
-  if (remainingMs < VIDEO_TRANSCRIPTION_TIMEOUT_MS + CHECKPOINT_RESERVE_MS) {
+  const ensureProviderBudget = () => {
+    const remainingMs = effectiveDeadlineAtMs - (dependencies.now ?? Date.now)();
+    if (remainingMs >= VIDEO_TRANSCRIPTION_TIMEOUT_MS + CHECKPOINT_RESERVE_MS) return;
+    throw new Error('Video transcription request not started: insufficient time remaining before the server or lease deadline.');
+  };
+  try {
+    ensureProviderBudget();
+  } catch (error) {
     return retry('Video transcription request not started: insufficient time remaining before the server or lease deadline.');
   }
 
   let transcript;
   try {
-    transcript = await transcribeTraVideo(source, current.job.preparation!.durationMs, { request: dependencies.request });
+    transcript = await transcribeTraVideo(source, current.job.preparation!.durationMs, {
+      request: dependencies.request, probe: dependencies.probe, beforeProviderRequest: ensureProviderBudget,
+    });
   } catch (error) {
     return retry(retryMessage(error));
   }

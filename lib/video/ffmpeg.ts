@@ -101,6 +101,35 @@ export const parseFfmpegDurationMs = (stderr: string) => {
   return Number.isFinite(durationMs) && durationMs > 0 ? durationMs : null;
 };
 
+/** Decodes the selected video stream while reading the container stream metadata.
+ * A missing or unrecognizable probe is deliberately an error: only an explicit
+ * absence of an audio stream may bypass transcription. */
+export const probeTraVideoAudioTrack = async (video: Buffer) => {
+  const workDir = await mkdtemp(path.join(tmpdir(), 'tra-video-audio-probe-'));
+  const inputPath = path.join(workDir, 'source.mp4');
+  try {
+    await writeFile(inputPath, video);
+    let result;
+    try {
+      result = await runFfmpeg([
+        '-hide_banner', '-nostdin', '-v', 'info', '-i', inputPath,
+        '-map', '0:v:0', '-frames:v', '1', '-f', 'null', '-',
+      ]);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error('FFmpeg runtime is unavailable for TRA video transcription probing.');
+      }
+      throw new Error('The hydrated TRA video could not be decoded for transcription probing.');
+    }
+    if (!/Stream\s+#\d+:\d+.*Video:/i.test(result.stderr)) {
+      throw new Error('The hydrated TRA video has no recognizable video-stream metadata for transcription probing.');
+    }
+    return { hasAudioTrack: /Stream\s+#\d+:\d+.*Audio:/i.test(result.stderr) };
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
+};
+
 const toTimestampArg = (timestampMs: number) => (timestampMs / 1000).toFixed(3);
 
 export class FfmpegTraVideoProcessor implements TraVideoProcessor {
