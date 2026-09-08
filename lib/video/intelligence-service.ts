@@ -72,6 +72,8 @@ const currentIdentity = (mediaId: string, contentHash: string): VideoIntelligenc
   ),
 });
 
+export { currentIdentity as createCurrentVideoIntelligenceIdentity };
+
 const locatorFor = (identity: VideoIntelligenceJobIdentity): VideoIntelligenceJobLocator => ({
   version: 1,
   sourceVideoMediaId: identity.sourceVideoMediaId,

@@ -6,8 +6,7 @@ import {
   parseGeneratedVideoFrameSelection,
   type GeneratedVideoFrameSelection,
 } from '@/lib/video/generation-selection-contract';
-import { loadVideoFrameLibrary } from '@/lib/video/library-service';
-import { getApprovedSelectedTraVideoFrames } from '@/lib/video/selected-frames';
+import { extractVideoSelectionFrames, loadVideoSelectionContext } from '@/lib/video/selection-context';
 import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 
@@ -151,18 +150,16 @@ export async function resolveRevisionVideoFrames(
     throw new Error('The saved TRA video selection does not match this creative provenance.');
   }
 
-  const library = await loadVideoFrameLibrary(
-    video.media.id,
-    attachedSource.sourceSha256
-  );
+  const context = await loadVideoSelectionContext(video);
+  const library = context?.library;
   if (!library || library.id !== savedSelection.libraryId) {
     throw new Error(
       'The saved TRA video frame library is missing or invalid. Reanalyze the video before revising this creative.'
     );
   }
-  const approved = await getApprovedSelectedTraVideoFrames(
+  const approved = await extractVideoSelectionFrames(
     video,
-    library,
+    context!,
     savedSelection.frames.map((frame) => frame.libraryFrameId)
   );
   if (
