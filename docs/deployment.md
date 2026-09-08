@@ -11,6 +11,8 @@ This file contains only setup requirements that live outside application code.
 
 The connected Vercel account should be treated as the authority for actual project/domain/environment state; do not copy dashboard state into repository documentation.
 
+Video intelligence requires the pinned FFmpeg binary installed by `postinstall` in the job, generation, and revision function bundles. The resumable job and selection routes need a 300-second function duration; each request performs a bounded unit and stores progress before the next browser request. Verify uploads, MP4 range playback, artifact persistence, and reload/resume on the intended deployment before treating the video workflow as production-ready.
+
 ## Cloudflare R2
 
 Production media storage requires the R2 variables listed in `.env.example`.
