@@ -89,11 +89,13 @@ describe('R2 media storage observable contract', () => {
   });
 
   it('converts a successful R2 response body to a Buffer', async () => {
+    const transformToByteArray = vi
+      .fn()
+      .mockResolvedValue(Uint8Array.from(PNG_SIGNATURE));
     sendMock.mockResolvedValueOnce({
+      ContentLength: PNG_SIGNATURE.length,
       Body: {
-        transformToByteArray: vi
-          .fn()
-          .mockResolvedValue(Uint8Array.from(PNG_SIGNATURE)),
+        transformToByteArray,
       },
     });
 
@@ -102,6 +104,109 @@ describe('R2 media storage observable contract', () => {
       buffer: Buffer.from(PNG_SIGNATURE),
       mimeType: 'image/png',
     });
+    expect(transformToByteArray).toHaveBeenCalledOnce();
+  });
+
+  it('allows a response at the configured image limit', async () => {
+    vi.stubEnv('MAX_UPLOAD_BYTES', String(PNG_SIGNATURE.length));
+    sendMock.mockResolvedValueOnce({
+      ContentLength: PNG_SIGNATURE.length,
+      Body: {
+        transformToByteArray: vi
+          .fn()
+          .mockResolvedValue(Uint8Array.from(PNG_SIGNATURE)),
+      },
+    });
+
+    await expect(makeStorage().readImage(FILE_NAME)).resolves.toMatchObject({
+      buffer: Buffer.from(PNG_SIGNATURE),
+    });
+  });
+
+  it('allows a video response at the configured video limit', async () => {
+    const fileName = `media_${'b'.repeat(32)}.mp4`;
+    vi.stubEnv('MAX_VIDEO_UPLOAD_BYTES', String(MP4_SIGNATURE.length));
+    sendMock.mockResolvedValueOnce({
+      ContentLength: MP4_SIGNATURE.length,
+      Body: {
+        transformToByteArray: vi
+          .fn()
+          .mockResolvedValue(Uint8Array.from(MP4_SIGNATURE)),
+      },
+    });
+
+    await expect(makeStorage().readMedia(fileName)).resolves.toMatchObject({
+      mimeType: 'video/mp4',
+      mediaType: 'VIDEO',
+    });
+  });
+
+  it.each([
+    {
+      name: 'image',
+      fileName: FILE_NAME,
+      envName: 'MAX_UPLOAD_BYTES',
+      limit: PNG_SIGNATURE.length,
+    },
+    {
+      name: 'video',
+      fileName: `media_${'b'.repeat(32)}.mp4`,
+      envName: 'MAX_VIDEO_UPLOAD_BYTES',
+      limit: MP4_SIGNATURE.length,
+    },
+  ])('rejects an oversized $name response before buffering', async ({ fileName, envName, limit }) => {
+    vi.stubEnv(envName, String(limit));
+    const transformToByteArray = vi.fn();
+    const destroy = vi.fn();
+    sendMock.mockResolvedValueOnce({
+      ContentLength: limit + 1,
+      Body: { transformToByteArray, destroy },
+    });
+
+    await expect(makeStorage().readMedia(fileName)).rejects.toMatchObject({
+      name: 'MediaValidationError',
+      message: `The ${fileName.endsWith('.mp4') ? 'video' : 'image'} is larger than the upload limit.`,
+    });
+    expect(transformToByteArray).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it.each([undefined, Number.NaN, -1, 1.5])(
+    'fails closed for an invalid R2 content length of %p',
+    async (ContentLength) => {
+      const transformToByteArray = vi.fn();
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      sendMock.mockResolvedValueOnce({
+        ContentLength,
+        Body: { transformToByteArray, cancel },
+      });
+
+      await expect(makeStorage().readMedia(FILE_NAME)).rejects.toMatchObject({
+        name: 'MediaValidationError',
+        message: `R2 returned an invalid content length for media object ${FILE_NAME}.`,
+      });
+      expect(transformToByteArray).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('preserves the validation error when body cleanup fails', async () => {
+    vi.stubEnv('MAX_UPLOAD_BYTES', String(PNG_SIGNATURE.length));
+    const transformToByteArray = vi.fn();
+    const destroy = vi.fn(() => {
+      throw new Error('cleanup failed');
+    });
+    sendMock.mockResolvedValueOnce({
+      ContentLength: PNG_SIGNATURE.length + 1,
+      Body: { transformToByteArray, destroy },
+    });
+
+    await expect(makeStorage().readMedia(FILE_NAME)).rejects.toMatchObject({
+      name: 'MediaValidationError',
+      message: 'The image is larger than the upload limit.',
+    });
+    expect(transformToByteArray).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledOnce();
   });
 
   it.each([
