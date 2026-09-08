@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { listMetaCampaigns, MetaApiError } from '@/lib/meta/client';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const adAccountId = new URL(request.url).searchParams.get('adAccountId') || '';
     if (!adAccountId) {

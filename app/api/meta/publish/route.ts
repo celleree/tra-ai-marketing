@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import { recordCreativeMetaAttribution } from '@/lib/creatives/attribution';
@@ -54,6 +55,9 @@ const chooseCta = (creative: MetaPublishCreativeInput): MetaCtaType => {
 };
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   let campaignId = '';
 
   try {
