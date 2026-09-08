@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
-import { requireOperatorAccess } from '@/lib/auth/require-operator';
+import { getOperatorAccess } from '@/lib/auth/server-access';
+import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
+import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
@@ -228,8 +230,8 @@ const findGenerationSource = (
   ) || sources.find((source) => source.media.mediaType === 'IMAGE');
 
 export async function POST(request: Request) {
-  const denied = await requireOperatorAccess();
-  if (denied) return denied;
+  const access = await getOperatorAccess();
+  if (!access.allowed) return operatorAccessDeniedResponse(access);
 
   try {
     const body = await request.json();
@@ -255,6 +257,13 @@ export async function POST(request: Request) {
         { status: 503 }
       );
     }
+
+    const quotaDenied = await requireOperatorQuota(
+      access.userId,
+      'CREATIVE_GENERATION',
+      parsed.data.variationCount,
+    );
+    if (quotaDenied) return quotaDenied;
 
     const storage = getMediaStorage();
     let sourceAssets: HydratedCreativeSourceAsset[];
