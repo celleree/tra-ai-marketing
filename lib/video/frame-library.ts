@@ -10,6 +10,13 @@ type TechnicalSelection = Awaited<ReturnType<typeof analyzeTemporaryVideoCandida
 type FrameObservationResult = Awaited<ReturnType<typeof observeTemporaryVideoFrame>>;
 type TechnicalCandidate = TechnicalSelection['candidates'][number];
 
+export type VideoFrameLibraryCandidateSet = Pick<TemporaryVideoFrameCandidateSet,
+  'sourceVideoMediaId' | 'sourceVideoContentHash' | 'durationMs'> & {
+  candidates: Array<Pick<TemporaryVideoFrameCandidateSet['candidates'][number],
+    'candidateIndex' | 'timestampMs' | 'width' | 'height' | 'extractionReasons'
+    | 'frameSha256' | 'sourceVideoMediaId' | 'sourceVideoContentHash'>>;
+};
+
 export interface VideoFrameLibrary {
   version: 1;
   id: string;
@@ -36,7 +43,7 @@ export interface VideoFrameLibrary {
   };
 }
 
-const sourceMatches = (value: { sourceVideoMediaId: string; sourceVideoContentHash: string }, set: TemporaryVideoFrameCandidateSet, name: string) => {
+const sourceMatches = (value: { sourceVideoMediaId: string; sourceVideoContentHash: string }, set: VideoFrameLibraryCandidateSet, name: string) => {
   if (value.sourceVideoMediaId !== set.sourceVideoMediaId || value.sourceVideoContentHash !== set.sourceVideoContentHash) {
     throw new Error(`${name} source provenance does not match the candidate set.`);
   }
@@ -55,7 +62,7 @@ const frameId = (sourceHash: string, timestampMs: number, frameHash: string) =>
   `video-frame:${createHash('sha256').update(`${sourceHash}:${timestampMs}:${frameHash}`).digest('hex')}`;
 
 export const assembleVideoFrameLibrary = (
-  set: TemporaryVideoFrameCandidateSet,
+  set: VideoFrameLibraryCandidateSet,
   technicalSelection: TechnicalSelection,
   transcript: VideoTranscript,
   observations: readonly FrameObservationResult[],
