@@ -69,7 +69,8 @@ describe('website analyzer network boundary', () => {
 
   it.each([
     'http://0.0.0.1', 'http://10.0.0.1', 'http://100.64.0.1', 'http://127.0.0.1',
-    'http://169.254.169.254/latest/meta-data', 'http://192.0.2.1', 'http://198.18.0.1',
+    'http://169.254.169.254/latest/meta-data', 'http://192.0.2.1', 'http://192.88.99.1',
+    'http://198.18.0.1',
     'http://198.51.100.1', 'http://203.0.113.1', 'http://224.0.0.1', 'http://[::1]',
     'http://[::192.168.1.1]', 'http://[::ffff:127.0.0.1]', 'http://[64:ff9b::a9fe:a9fe]',
     'http://[2001:db8::1]', 'http://[fc00::1]', 'http://[fe80::1]', 'http://[fec0::1]',
@@ -119,13 +120,15 @@ describe('website analyzer network boundary', () => {
     expect(mocks.agents[0]).toMatchObject({ closed: true });
   });
 
-  it('fails closed when the connection-time DNS answer rebinds privately', async () => {
-    mocks.useActualWebsiteFetch = true;
-    setLookupAnswers([{ address: '127.0.0.1', family: 4 }]);
+  it.each(['127.0.0.1', '192.88.99.1'])(
+    'fails closed when the connection-time DNS answer rebinds to %s', async (address) => {
+      mocks.useActualWebsiteFetch = true;
+      setLookupAnswers([{ address, family: 4 }]);
 
-    await expect(analyzeCompanyWebsite('https://public.example')).rejects.toThrow('could not be read');
-    expect(mocks.websiteFetch).not.toHaveBeenCalled();
-    expect(mocks.providerFetch).not.toHaveBeenCalled();
-    expect(mocks.agents[0]).toMatchObject({ closed: true });
-  });
+      await expect(analyzeCompanyWebsite('https://public.example')).rejects.toThrow('could not be read');
+      expect(mocks.websiteFetch).not.toHaveBeenCalled();
+      expect(mocks.providerFetch).not.toHaveBeenCalled();
+      expect(mocks.agents[0]).toMatchObject({ closed: true });
+    },
+  );
 });
