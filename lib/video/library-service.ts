@@ -31,7 +31,7 @@ const isTechnicalAnalysis = (value: unknown) => isRecord(value) && value.version
   && ['meanLuminance', 'luminanceDeviation', 'laplacianVariance', 'darkFraction', 'lightFraction', 'qualityScore'].every((key) => isFiniteNumber(value[key]));
 const libraryDigest = (library: unknown) => createHash('sha256').update(JSON.stringify(library)).digest('hex');
 
-const normalizePersistedVideoFrameLibrary = (value: unknown, mediaId: string, hash: string): VideoFrameLibrary | null => {
+export const normalizePersistedVideoFrameLibrary = (value: unknown, mediaId: string, hash: string): VideoFrameLibrary | null => {
   if (!isRecord(value) || value.version !== 1 || value.sourceVideoMediaId !== mediaId || value.sourceVideoContentHash !== hash
     || value.providerEligible !== false || value.evidenceStatus !== 'UNVERIFIED_MODEL_OBSERVATION'
     || !isFiniteNumber(value.durationMs) || value.durationMs <= 0 || value.id !== `video-library:${createHash('sha256').update(`${mediaId}:${hash}`).digest('hex')}`
