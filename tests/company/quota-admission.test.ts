@@ -24,7 +24,26 @@ describe('company analysis quota admission', () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     vi.stubGlobal('fetch', vi.fn());
   });
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+
+  it('preserves successful website and font analysis after admission', async () => {
+    mocks.analyzeCompanyWebsite.mockResolvedValue({ summary: 'Company summary' });
+    mocks.getMediaStorage.mockReturnValue({ readImageById: vi.fn().mockResolvedValue({ mimeType: 'image/png', buffer: Buffer.from('specimen') }) });
+    vi.mocked(fetch).mockResolvedValue(Response.json({ output: [{ content: [{ type: 'output_text', text: 'Geometric sans serif.' }] }] }));
+    expect(await (await analyzeWebsite(request({ websiteUrl: 'https://tra.example' }))).json()).toEqual({ summary: 'Company summary' });
+    expect(await (await analyzeFont(request({ mediaId: `media_${'a'.repeat(32)}` }))).json()).toEqual({ description: 'Geometric sans serif.' });
+    expect(mocks.requireOperatorQuota).toHaveBeenNthCalledWith(1, 'operator', 'WEBSITE_ANALYSIS', 1);
+    expect(mocks.requireOperatorQuota).toHaveBeenNthCalledWith(2, 'operator', 'FONT_ANALYSIS', 1);
+    expect(mocks.requireOperatorQuota.mock.invocationCallOrder[0]).toBeLessThan(mocks.analyzeCompanyWebsite.mock.invocationCallOrder[0]);
+    expect(mocks.requireOperatorQuota.mock.invocationCallOrder[1]).toBeLessThan(mocks.getMediaStorage.mock.invocationCallOrder[0]);
+  });
+
+  it('does not reserve font quota when its provider is unconfigured', async () => {
+    vi.stubEnv('OPENAI_API_KEY', '');
+    expect((await analyzeFont(request({ mediaId: `media_${'a'.repeat(32)}` }))).status).toBe(503);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+    expect(mocks.getMediaStorage).not.toHaveBeenCalled();
+  });
 
   it('keeps malformed website and font inputs free', async () => {
     expect((await analyzeWebsite(request({ websiteUrl: '' }))).status).toBe(400);
