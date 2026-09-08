@@ -61,6 +61,37 @@ describe('multi-source creative generation request', () => {
     expectGroundedContext(result.data.context);
   });
 
+  it('accepts a 4000-character trimmed creative direction', () => {
+    const direction = 'x'.repeat(4000);
+    const result = validateGenerateCreativeRequest({
+      ...baseRequest,
+      context: `  ${direction}  `,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.context).toContain(direction);
+    expect(result.data.context).not.toContain(`  ${direction}  `);
+  });
+
+  it('rejects a creative direction longer than 4000 characters after trimming', () => {
+    expect(
+      validateGenerateCreativeRequest({
+        ...baseRequest,
+        context: `  ${'x'.repeat(4001)}  `,
+      })
+    ).toEqual({
+      success: false,
+      error: 'context must be 4000 characters or fewer',
+    });
+  });
+
+  it('keeps whitespace-only creative direction validation as required context', () => {
+    expect(
+      validateGenerateCreativeRequest({ ...baseRequest, context: '   ' })
+    ).toEqual({ success: false, error: 'context is required' });
+  });
+
   it('accepts a supported requested placement', () => {
     const result = validateGenerateCreativeRequest({
       ...baseRequest,
