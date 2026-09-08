@@ -29,6 +29,16 @@ Preview origins should be added only when those previews need direct uploads. R2
 
 Cloudflare configuration is authoritative for the live bucket. Keep this document to requirements, not copied account IDs, credentials, or dashboard snapshots.
 
+## Clerk authentication
+
+The approved application-authentication provider is Clerk, using email one-time-code sign-in and invite-only access. Initial operators are the exact addresses in `lib/auth/operators.ts`; do not grant whole-domain access or normalize mailbox aliases. The backup operator uses the same verified-email/session requirements as the primary account.
+
+Configure Clerk's **Invite-only** access mode (`restricted`) and email verification-code sign-in; disable password, social, and other sign-in methods. Clerk's separate dashboard allowlist applies to Open mode, so it does not replace invite-only signup. Server authorization must independently check the verified primary email against TRA's operator policy.
+
+Use separate development/Preview and Production Clerk instances and scoped environment values. Provisioning, invitations, and authenticated access must be verified before enabling the route-protection layer. Application authentication is not yet active merely because this decision/policy is recorded. Production configuration and deployment still require explicit approval.
+
+See [Clerk access restrictions](https://clerk.com/docs/guides/secure/restricting-access) and [email verification-code options](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options).
+
 ## OpenAI
 
 - Store `OPENAI_API_KEY` server-side.
