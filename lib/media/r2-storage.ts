@@ -15,9 +15,11 @@ import {
 } from '@/lib/media/types';
 import {
   EXTENSION_BY_MIME,
+  getMaxUploadBytes,
   getStoredMediaMimeType,
   getStoredImageMimeType,
   isSafeMediaId,
+  MediaValidationError,
   MIME_BY_EXTENSION,
   prepareMedia,
   prepareMediaImage,
@@ -38,6 +40,22 @@ const isMissingObjectError = (error: unknown) =>
     (('name' in error && error.name === 'NoSuchKey') ||
       ('Code' in error && error.Code === 'NoSuchKey') ||
       ('code' in error && error.code === 'NoSuchKey')));
+
+const discardUnreadBody = async (body: unknown) => {
+  if (!body || typeof body !== 'object') return;
+
+  try {
+    if ('destroy' in body && typeof body.destroy === 'function') {
+      body.destroy();
+      return;
+    }
+    if ('cancel' in body && typeof body.cancel === 'function') {
+      await body.cancel();
+    }
+  } catch {
+    // Keep the validation failure as the observable error.
+  }
+};
 
 export class R2MediaStorage implements MediaStorage {
   private readonly client: S3Client;
@@ -90,6 +108,26 @@ export class R2MediaStorage implements MediaStorage {
       );
       if (!response.Body) {
         throw new Error(`R2 returned an empty body for media object ${fileName}.`);
+      }
+
+      const contentLength = response.ContentLength;
+      if (
+        !Number.isFinite(contentLength) ||
+        contentLength === undefined ||
+        contentLength < 0 ||
+        !Number.isInteger(contentLength)
+      ) {
+        await discardUnreadBody(response.Body);
+        throw new MediaValidationError(
+          `R2 returned an invalid content length for media object ${fileName}.`
+        );
+      }
+
+      if (contentLength > getMaxUploadBytes(mimeType)) {
+        await discardUnreadBody(response.Body);
+        throw new MediaValidationError(
+          `The ${getMediaTypeForMimeType(mimeType) === 'VIDEO' ? 'video' : 'image'} is larger than the upload limit.`
+        );
       }
 
       return {
