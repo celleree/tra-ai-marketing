@@ -331,6 +331,8 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
   if (placement === 'VERTICAL_9_16') {
     expect(body.prompt).toContain('x=70..1081, y=287..1330');
     expect(body.prompt).toContain('x=105..401, y=322..546');
+    expect(body.prompt).toContain('invisible composition constraint');
+    expect(body.prompt).toContain('do not render a placeholder, box, panel, border, dashed outline');
   } else {
     expect(body.prompt).not.toContain('Stories');
   }
