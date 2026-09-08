@@ -15,11 +15,15 @@ import {
   type BrandFontAsset,
   type BrandFontMimeType,
 } from '@/lib/company/brand-fonts';
+import {
+  BrandFontValidationError,
+  validateBrandFontBuffer,
+} from '@/lib/company/font-validation.server';
+
+export { BrandFontValidationError } from '@/lib/company/font-validation.server';
 
 const R2_PREFIX = '_brand/fonts/';
 const LOCAL_ROOT = resolve(process.cwd(), 'data/brand-fonts');
-
-export class BrandFontValidationError extends Error {}
 
 export interface StoredBrandFontFile {
   fileName: string;
@@ -73,6 +77,7 @@ const prepareBrandFont = async (file: File) => {
   const id = `font_${randomUUID().replaceAll('-', '')}`;
   const fileName = `${id}.${extension}`;
   const buffer = Buffer.from(await file.arrayBuffer());
+  validateBrandFontBuffer(buffer, mimeType);
 
   const asset: BrandFontAsset = {
     id,
