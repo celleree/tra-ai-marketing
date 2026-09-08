@@ -159,6 +159,10 @@ const validateWoff = (buffer: Buffer) => {
     if (privOffset !== physicalEnd) invalid();
     physicalEnd = privOffset + privLength;
   }
+  if (metaLength && !privLength && buffer.byteLength === padded(physicalEnd)) {
+    validateZeroPadding(buffer, physicalEnd, buffer.byteLength);
+    physicalEnd = buffer.byteLength;
+  }
   if (physicalEnd !== buffer.byteLength) invalid();
 };
 interface Cursor { value: number }
@@ -243,6 +247,19 @@ const validateWoff2 = (buffer: Buffer) => {
     ),
   ];
   validateRanges(ranges, compressedOffset, buffer);
+  let physicalEnd = compressedOffset + compressedLength;
+  for (const block of ranges.slice(1)) {
+    if (!block.length) continue;
+    if (block.offset !== padded(physicalEnd)) invalid();
+    validateZeroPadding(buffer, physicalEnd, block.offset);
+    physicalEnd = block.offset + block.length;
+  }
+  // Existing WOFF2 encoders may align the final font/metadata block with null bytes.
+  if (!ranges[2].length && buffer.byteLength === padded(physicalEnd)) {
+    validateZeroPadding(buffer, physicalEnd, buffer.byteLength);
+    physicalEnd = buffer.byteLength;
+  }
+  if (physicalEnd !== buffer.byteLength) invalid();
   try {
     const output = brotliDecompressSync(
       buffer.subarray(compressedOffset, compressedOffset + compressedLength),

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { brotliCompressSync } from 'node:zlib';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrandFontMimeType } from '@/lib/company/brand-fonts';
 const mocks = vi.hoisted(() => ({
@@ -108,7 +109,40 @@ const woff2WithInterveningTable = () => {
   const buffer = fixture('woff2');
   return Buffer.concat([buffer.subarray(0, 74), buffer.subarray(78, 80), buffer.subarray(74, 78), buffer.subarray(80)]);
 };
+const woff2WithBlocks = (metadata = true, privateData = true) => {
+  let buffer = fixture('woff2');
+  const append = (data: Buffer, offsetField: number) => {
+    const offset = Math.ceil(buffer.length / 4) * 4;
+    buffer = Buffer.concat([buffer, Buffer.alloc(offset - buffer.length), data]);
+    buffer.writeUInt32BE(offset, offsetField);
+    buffer.writeUInt32BE(data.length, offsetField + 4);
+  };
+  if (metadata) {
+    const xml = Buffer.from('<metadata version="1.0"/>');
+    append(brotliCompressSync(xml), 28); buffer.writeUInt32BE(xml.length, 36);
+  }
+  if (privateData) append(Buffer.from('private'), 40);
+  buffer.writeUInt32BE(buffer.length, 8);
+  return buffer;
+};
+const woff2LayoutCases = (): Array<[string, Extension, Buffer]> => {
+  const gap = woff2WithBlocks();
+  const offset = gap.readUInt32BE(28);
+  const withGap = Buffer.concat([gap.subarray(0, offset), Buffer.alloc(4), gap.subarray(offset)]);
+  withGap.writeUInt32BE(withGap.length, 8);
+  withGap.writeUInt32BE(offset + 4, 28); withGap.writeUInt32BE(gap.readUInt32BE(40) + 4, 40);
+  const nonzero = woff2WithBlocks();
+  nonzero[nonzero.readUInt32BE(40) - 1] = 1;
+  const reordered = woff2WithBlocks();
+  const meta = Buffer.from(reordered.subarray(28, 36));
+  reordered.copy(reordered, 28, 40, 48); meta.copy(reordered, 40);
+  const trailing = Buffer.concat([fixture('woff2'), Buffer.from([1])]);
+  trailing.writeUInt32BE(trailing.length, 8);
+  return [['WOFF2 block gap', 'woff2', withGap], ['WOFF2 nonzero block padding', 'woff2', nonzero],
+    ['WOFF2 reversed optional blocks', 'woff2', reordered], ['WOFF2 trailing data', 'woff2', trailing]];
+};
 const invalidCases = (): Array<[string, Extension, Buffer]> => [
+  ...woff2LayoutCases(),
   ...EXTENSIONS.map((extension) => [
     `truncated ${extension}`,
     extension,
@@ -173,6 +207,9 @@ describe('brand font content validation', () => {
   it('accepts bounded WOFF2 reference-size differences and intervening tables', () => {
     expect(() => validateBrandFontBuffer(withHeader('woff2', 16, fixture('woff2').readUInt32BE(16) + 4), MIME.woff2)).not.toThrow();
     expect(() => validateBrandFontBuffer(woff2WithInterveningTable(), MIME.woff2)).not.toThrow();
+  });
+  it.each([[true, true], [true, false], [false, true]])('accepts aligned WOFF2 optional blocks (%s, %s)', (metadata, privateData) => {
+    expect(() => validateBrandFontBuffer(woff2WithBlocks(metadata, privateData), MIME.woff2)).not.toThrow();
   });
   it.each(invalidCases())('rejects %s', (_name, extension, buffer) => {
     expect(() => validateBrandFontBuffer(buffer, MIME[extension]))
