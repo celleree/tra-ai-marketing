@@ -9,6 +9,7 @@ readonly FFMPEG_SIGNING_FINGERPRINT='FCF986EA15E6E293A5644F10B4322F04D67658D8'
 
 target_key="${1:?Usage: $0 <target-key>}"
 output_dir="${2:?Usage: $0 <target-key> <output-dir>}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 case "$target_key" in
   linux-x64|linux-arm64|darwin-x64|darwin-arm64) executable='ffmpeg' ;;
   win32-x64) executable='ffmpeg.exe' ;;
@@ -96,7 +97,9 @@ configure_args=(
   --enable-filter=fps,select,scale,showinfo,format
   --enable-encoder=mjpeg,png,wrapped_avframe --enable-muxer=image2,image2pipe,null
 )
-if [[ "$target_key" == 'win32-x64' ]]; then
+if [[ "$target_key" == linux-* ]]; then
+  configure_args+=(--extra-ldflags=-static)
+elif [[ "$target_key" == 'win32-x64' ]]; then
   configure_args+=(--target-os=mingw32 --arch=x86_64 --extra-ldflags=-static)
 fi
 
@@ -119,6 +122,27 @@ grep -q 'version 2.1 of the License' "$output_dir/${target_key}.license-check.tx
 if [[ "$target_key" == 'win32-x64' ]] && objdump -p "$output_dir/$executable" | grep -Eiq 'DLL Name:[[:space:]]+zlib1\.dll'; then
   echo 'Windows FFmpeg must not depend on the MSYS2 zlib1.dll runtime.' >&2
   exit 1
+fi
+
+if [[ "$target_key" == linux-* ]]; then
+  case "$target_key" in
+    linux-x64) expected_machine='Advanced Micro Devices X86-64' ;;
+    linux-arm64) expected_machine='AArch64' ;;
+  esac
+  actual_machine="$(readelf -h "$output_dir/$executable" | awk -F: '/^[[:space:]]*Machine:/ { sub(/^[[:space:]]*/, "", $2); print $2 }')"
+  if [[ "$actual_machine" != "$expected_machine" ]]; then
+    echo "Linux FFmpeg ELF machine is $actual_machine; expected $expected_machine." >&2
+    exit 1
+  fi
+  if readelf -lW "$output_dir/$executable" | awk '$1 == "INTERP" { found = 1 } END { exit found ? 0 : 1 }'; then
+    echo 'Linux FFmpeg must not contain an ELF interpreter program header.' >&2
+    exit 1
+  fi
+  if readelf -dW "$output_dir/$executable" | grep -q '(NEEDED)'; then
+    echo 'Linux FFmpeg must not contain dynamic ELF dependencies.' >&2
+    exit 1
+  fi
+  node "$script_dir/smoke-ffmpeg-reordered.mjs" "$output_dir/$executable"
 fi
 
 cp "$source_dir/COPYING.LGPLv2.1" "$output_dir/${target_key}.LICENSE"
