@@ -26,7 +26,7 @@ Claude is not currently required in the active image-generation path. Any roadma
 
 There is no separate AI QA/reviewer pass in the current image workflow. Keep deterministic technical/compliance safeguards where practical.
 
-TRA Creatives supports plain-language edits, regeneration, meaningful variations and placement variants for saved generated creatives with complete identity/planning/source context. Each operation saves a new record and preserves prior versions. Legacy records without that context require a fresh saved generation; selected-video revisions retain the local-only video-intelligence restriction. Saving a version does not constitute human quality/compliance approval.
+TRA Creatives supports plain-language edits, regeneration, meaningful variations and placement variants for saved generated creatives with complete identity/planning/source context. Each operation saves a new record and preserves prior versions. Legacy records without that context require a fresh saved generation; selected-video revisions require matching source-bound analysis in local development or protected Vercel Preview. Saving a version does not constitute human quality/compliance approval.
 
 ## Source roles
 
@@ -80,9 +80,9 @@ Cache/reuse unchanged layout analysis by media identity/content hash where pract
 
 ### TRA video
 
-The video preprocessing/selection path is implemented for local development through the merged video-intelligence and selected-frame generation work. It is not yet production-complete. Do not rebuild it from the old deferred Issue #28 description.
+The video preprocessing/selection path uses resumable persisted jobs, cached source analysis and concept selection, and fresh selected PNG extraction. It is available in local development and protected Vercel Preview, using isolated private Preview storage. Production access remains gated pending application authorization and production hardening; deployed end-to-end verification is still required. Do not rebuild the completed extraction/selection foundation from old Issue #28 text.
 
-Current implemented local flow:
+Current implemented flow:
 
 `TRA_VIDEO -> validation/hydration -> candidate extraction -> technical grouping + transcript + visual observations -> source-bound frame library -> user selects 1-3 known representative frames -> fresh approved PNG extraction from original video -> Astra/image generation -> provenance saved with creative`
 
@@ -93,7 +93,7 @@ Current invariants:
 - selected generation frames must be re-extracted as fresh approved PNGs from the original server-hydrated TRA video;
 - selected frames retain source-video identity, source hash, candidate/frame identity, and timestamps;
 - invalid, stale, mixed-source, or unknown selections fail before paid generation calls;
-- the local video-intelligence prototype remains development-only until production architecture is explicitly added;
+- legacy prototype endpoints and local filesystem fallback remain development-only; Preview uses validated private persisted jobs and artifacts, with explicit retry after uncertain paid work;
 - unchanged source analysis should be cached/reused rather than repeating provider work.
 
 The layout and video preprocessing systems remain separate:
