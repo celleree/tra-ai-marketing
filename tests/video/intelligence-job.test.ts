@@ -76,7 +76,9 @@ describe('video intelligence job contract', () => {
   it.each([
     ['foreign source', (job: VideoIntelligenceJob) => { job.sourceVideoContentHash = hash('foreign'); }],
     ['changed fingerprint', (job: VideoIntelligenceJob) => { job.analyzerFingerprint.sha256 = hash('fake'); }],
+    ['unnormalized fingerprint model', (job: VideoIntelligenceJob) => { job.analyzerFingerprint.visionModel = ' vision-model '; }],
     ['duplicate indexes', (job: VideoIntelligenceJob) => { job.phase = 'TRANSCRIBING'; job.preparation = { ...preparation, representativeCandidateIndexes: [1, 1] }; }],
+    ['candidate index at hard limit', (job: VideoIntelligenceJob) => { job.phase = 'TRANSCRIBING'; job.preparation = { ...preparation, representativeCandidateIndexes: [480] }; }],
     ['out-of-range timestamp', (job: VideoIntelligenceJob) => { job.phase = 'OBSERVING'; job.preparation = preparation; job.transcript = transcript; job.representatives = [{ candidateIndex: 1, frameSha256: frameHash, thumbnail: { ...thumbnail, timestampMs: 2_000 } }]; }],
     ['observation without thumbnail', (job: VideoIntelligenceJob) => { job.phase = 'OBSERVING'; job.preparation = preparation; job.transcript = transcript; job.representatives = [{ candidateIndex: 1, frameSha256: frameHash, observation }]; }],
     ['observation model drift', (job: VideoIntelligenceJob) => { job.phase = 'OBSERVING'; job.preparation = preparation; job.transcript = transcript; job.representatives = [{ candidateIndex: 1, frameSha256: frameHash, thumbnail, observation: { ...observation, model: 'other' } }]; }],
@@ -87,6 +89,7 @@ describe('video intelligence job contract', () => {
     ['oversized pair', (job: VideoIntelligenceJob) => { job.phase = 'OBSERVING'; job.preparation = { ...preparation, representativeCandidateIndexes: [1, 2, 3] }; job.transcript = transcript; job.lease = { id: 'lease', phase: 'OBSERVING', candidateIndexes: [1, 2, 3] as unknown as [number], acquiredAtMs: 1, expiresAtMs: 1 + VIDEO_INTELLIGENCE_JOB_LEASE_MS }; }],
     ['transcription retry after transcript', (job: VideoIntelligenceJob) => { job.phase = 'RETRY_REQUIRED'; job.preparation = preparation; job.transcript = transcript; job.retry = { phase: 'TRANSCRIBING', reason: 'PAID_WORK_FAILED' }; }],
     ['observation retry before transcript', (job: VideoIntelligenceJob) => { job.phase = 'RETRY_REQUIRED'; job.preparation = preparation; job.retry = { phase: 'OBSERVING', candidateIndexes: [1], reason: 'PAID_WORK_FAILED' }; }],
+    ['failed finalization without completed inputs', (job: VideoIntelligenceJob) => { job.phase = 'FAILED'; job.failure = { phase: 'FINALIZING', message: 'Local save failed.' }; }],
   ])('rejects malformed persisted data: %s', (_name, mutate) => {
     const job = baseJob(); mutate(job); expect(() => parse(job)).toThrow('job rejected');
   });

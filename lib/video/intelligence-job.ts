@@ -98,6 +98,7 @@ const validateFingerprint = (value: unknown): VideoIntelligenceAnalyzerFingerpri
     return reject('analyzer fingerprint is invalid.');
   }
   if (value.pipelineVersion !== expected.pipelineVersion
+    || value.visionModel !== expected.visionModel
     || value.transcriptionModel !== expected.transcriptionModel
     || value.sha256 !== expected.sha256
     || Object.entries(expected.candidatePolicy).some(([key, setting]) => candidatePolicy[key] !== setting)) {
@@ -131,7 +132,8 @@ const validateIndexes = (value: unknown, expected?: ReadonlySet<number>) => {
   }
   let previous = -1;
   for (const index of value) {
-    if (!isSafeInteger(index) || index < 0 || index <= previous || (expected && !expected.has(index))) {
+    if (!isSafeInteger(index) || index < 0 || index >= HARD_MAX_TOTAL_CANDIDATES
+      || index <= previous || (expected && !expected.has(index))) {
       return reject('representative candidate indexes are invalid.');
     }
     previous = index;
@@ -283,10 +285,14 @@ export const parseVideoIntelligenceJob = (
     const entry = job.representatives.find((candidate) => candidate.candidateIndex === candidateIndex);
     return Boolean(entry?.thumbnail && entry.observation);
   });
-  if (job.phase === 'PREPARING' && (preparation || job.transcript || job.representatives.length)) reject('preparing state is invalid.');
-  if (job.phase === 'TRANSCRIBING' && (!preparation || job.transcript || job.representatives.length)) reject('transcribing state is invalid.');
-  if (job.phase === 'OBSERVING' && (!preparation || !job.transcript)) reject('observing state is invalid.');
-  if (job.phase === 'FINALIZING' && (!preparation || !job.transcript || !completeRepresentatives)) reject('finalizing state is invalid.');
+  const validatePhasePrerequisites = (phase: VideoIntelligenceWorkPhase) => {
+    if (phase === 'PREPARING' && (preparation || job.transcript || job.representatives.length)) reject('preparing state is invalid.');
+    if (phase === 'TRANSCRIBING' && (!preparation || job.transcript || job.representatives.length)) reject('transcribing state is invalid.');
+    if (phase === 'OBSERVING' && (!preparation || !job.transcript)) reject('observing state is invalid.');
+    if (phase === 'FINALIZING' && (!preparation || !job.transcript || !completeRepresentatives)) reject('finalizing state is invalid.');
+  };
+  if (WORK_PHASES.includes(job.phase as VideoIntelligenceWorkPhase)) validatePhasePrerequisites(job.phase as VideoIntelligenceWorkPhase);
+  if (failure) validatePhasePrerequisites(failure.phase as VideoIntelligenceWorkPhase);
   if (job.phase === 'COMPLETE') {
     if (!completeRepresentatives || !isRecord(job.result) || !SHA256.test(String(job.result.sha256))
       || job.result.key !== `libraries/sha256/${job.result.sha256}.json`
