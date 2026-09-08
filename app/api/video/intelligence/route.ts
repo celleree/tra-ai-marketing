@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { isSafeMediaId } from '@/lib/media/storage';
 import { CreativeSourceHydrationError, hydrateCreativeSourceSelections } from '@/lib/media/source-hydration';
@@ -19,6 +20,8 @@ const errorResponse = (error: unknown) => NextResponse.json(
 );
 
 export async function GET(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
   try {
     const source = await hydrateSource(new URL(request.url).searchParams.get('mediaId'));
     const library = await loadVideoFrameLibrary(source.media.id, videoSourceHash(source));
@@ -27,6 +30,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
   try {
     assertLocalVideoIntelligence();
     const body = await request.json();

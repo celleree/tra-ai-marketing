@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ hydrate: vi.fn(), load: vi.fn(), select: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireOperatorAccess: vi.fn(async () => null), hydrate: vi.fn(), load: vi.fn(), select: vi.fn() }));
+vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess: mocks.requireOperatorAccess }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({}) }));
 vi.mock('@/lib/media/source-hydration', async (original) => ({ ...await original<typeof import('@/lib/media/source-hydration')>(), hydrateCreativeSourceSelections: mocks.hydrate }));
 vi.mock('@/lib/video/library-service', async (original) => ({ ...await original<typeof import('@/lib/video/library-service')>(), loadVideoFrameLibrary: mocks.load }));
@@ -11,7 +12,7 @@ const id = `media_${'a'.repeat(32)}`;
 const source = { role: 'TRA_VIDEO', media: { id }, stored: { buffer: Buffer.from('server bytes') } };
 const post = (body: unknown) => new Request('http://localhost/api/video/selection', { method: 'POST', body: JSON.stringify(body) });
 
-beforeEach(() => { vi.clearAllMocks(); mocks.hydrate.mockResolvedValue([source]); mocks.load.mockResolvedValue({ id: 'library' }); });
+beforeEach(() => { vi.clearAllMocks(); mocks.requireOperatorAccess.mockResolvedValue(null); mocks.hydrate.mockResolvedValue([source]); mocks.load.mockResolvedValue({ id: 'library' }); });
 afterEach(() => vi.unstubAllEnvs());
 
 it('hydrates the TRA video, uses its cached library, and returns a selection', async () => {

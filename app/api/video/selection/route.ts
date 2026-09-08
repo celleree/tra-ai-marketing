@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { isSafeMediaId } from '@/lib/media/storage';
 import { CreativeSourceHydrationError, hydrateCreativeSourceSelections } from '@/lib/media/source-hydration';
@@ -14,6 +15,8 @@ const errorResponse = (error: unknown) => NextResponse.json(
 );
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
   try {
     assertLocalVideoIntelligence();
     const body = await request.json() as { mediaId?: unknown; concept?: unknown } | null;
