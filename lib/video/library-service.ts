@@ -35,9 +35,14 @@ export const normalizePersistedVideoFrameLibrary = (value: unknown, mediaId: str
   if (!isRecord(value) || value.version !== 1 || value.sourceVideoMediaId !== mediaId || value.sourceVideoContentHash !== hash
     || value.providerEligible !== false || value.evidenceStatus !== 'UNVERIFIED_MODEL_OBSERVATION'
     || !isFiniteNumber(value.durationMs) || value.durationMs <= 0 || value.id !== `video-library:${createHash('sha256').update(`${mediaId}:${hash}`).digest('hex')}`
-    || !isRecord(value.analysisModels) || value.analysisModels.transcription !== 'whisper-1' || !isStringArray(value.analysisModels.vision) || !value.analysisModels.vision.length
-    || !isRecord(value.transcript) || value.transcript.version !== 1 || value.transcript.model !== 'whisper-1' || typeof value.transcript.language !== 'string' || !Array.isArray(value.transcript.segments)
+    || !isRecord(value.analysisModels) || (value.analysisModels.transcription !== 'whisper-1' && value.analysisModels.transcription !== null) || !isStringArray(value.analysisModels.vision) || !value.analysisModels.vision.length
+    || !isRecord(value.transcript) || value.transcript.version !== 1 || !Array.isArray(value.transcript.segments)
     || !Array.isArray(value.candidates) || !value.candidates.length || !Array.isArray(value.representativeFrames) || !value.representativeFrames.length) return null;
+  const skippedTranscript = value.transcript.status === 'SKIPPED_NO_AUDIO_TRACK';
+  if (skippedTranscript
+    ? (value.analysisModels.transcription !== null || value.transcript.model !== null || value.transcript.language !== null
+      || value.transcript.segments.length !== 0 || !isRecord(value.transcript.evidence) || value.transcript.evidence.method !== 'FFMPEG_STREAM_METADATA')
+    : (value.transcript.status !== undefined || value.analysisModels.transcription !== 'whisper-1' || value.transcript.model !== 'whisper-1' || typeof value.transcript.language !== 'string')) return null;
   const candidates = new Map<number, Record<string, unknown>>();
   for (const candidate of value.candidates) {
     if (!isRecord(candidate) || !isInteger(candidate.candidateIndex) || candidate.candidateIndex < 0 || candidates.has(candidate.candidateIndex)
@@ -79,7 +84,9 @@ export const normalizePersistedVideoFrameLibrary = (value: unknown, mediaId: str
     previousStart = segment.startMs;
   }
   const library = value as unknown as VideoFrameLibrary;
-  const transcript: VideoTranscript = { ...library.transcript, sourceVideoMediaId: mediaId, sourceVideoContentHash: hash };
+  const transcript: VideoTranscript = library.transcript.status === 'SKIPPED_NO_AUDIO_TRACK'
+    ? { ...library.transcript, sourceVideoMediaId: mediaId, sourceVideoContentHash: hash }
+    : { ...library.transcript, sourceVideoMediaId: mediaId, sourceVideoContentHash: hash };
   const representativeFrames = library.representativeFrames.map((frame) => ({ ...frame,
     transcriptSegments: transcriptAtTimestamp(transcript, frame.timestampMs),
   })).sort((a, b) => a.timestampMs - b.timestampMs || a.candidateIndex - b.candidateIndex);
@@ -112,7 +119,7 @@ export const loadVideoFrameLibrary = async (mediaId: string, hash: string, root 
 
 export const analyzeTraVideoIntelligence = async (
   source: HydratedTraVideoSource,
-  options: { root?: string; force?: boolean; request?: typeof fetch; onProgress?: (message: string) => void } = {}
+  options: { root?: string; force?: boolean; request?: typeof fetch; probe?: NonNullable<Parameters<typeof transcribeTraVideo>[2]>['probe']; onProgress?: (message: string) => void } = {}
 ): Promise<{ library: VideoFrameLibrary; reused: boolean }> => {
   assertLocalVideoIntelligence();
   if (source.role !== 'TRA_VIDEO' || source.media.mediaType !== 'VIDEO' || source.stored.mimeType !== 'video/mp4') {
@@ -137,7 +144,7 @@ export const analyzeTraVideoIntelligence = async (
     const library = await withTemporaryTraVideoFrameCandidates(source, async (set) => {
     const technical = await analyzeTemporaryVideoCandidates(set);
     options.onProgress?.(`Transcribing speech; ${technical.groups.length} visual representatives`);
-    const transcript = await transcribeTraVideo(source, set.durationMs, { request: options.request });
+    const transcript = await transcribeTraVideo(source, set.durationMs, { request: options.request, probe: options.probe });
     const observations: Awaited<ReturnType<typeof observeTemporaryVideoFrame>>[] = [];
     const thumbnails = new Map<number, VideoFrameThumbnail>();
     for (let start = 0; start < technical.groups.length; start += 2) {

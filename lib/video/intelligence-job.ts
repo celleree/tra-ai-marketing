@@ -152,12 +152,17 @@ const validatePreparation = (value: unknown) => {
   } as unknown as NonNullable<VideoIntelligenceJob['preparation']>;
 };
 const validateTranscript = (value: unknown, job: VideoIntelligenceJob, durationMs: number) => {
-  if (!isRecord(value) || value.version !== 1 || value.model !== 'whisper-1'
+  if (!isRecord(value) || value.version !== 1
     || value.sourceVideoMediaId !== job.sourceVideoMediaId
-    || value.sourceVideoContentHash !== job.sourceVideoContentHash
-    || typeof value.language !== 'string' || !Array.isArray(value.segments)) {
+    || value.sourceVideoContentHash !== job.sourceVideoContentHash || !Array.isArray(value.segments)) {
     return reject('transcript is invalid.');
   }
+  if (value.status === 'SKIPPED_NO_AUDIO_TRACK') {
+    if (value.model !== null || value.language !== null || value.segments.length !== 0
+      || !isRecord(value.evidence) || value.evidence.method !== 'FFMPEG_STREAM_METADATA') return reject('transcript is invalid.');
+    return;
+  }
+  if (value.status !== undefined || value.model !== 'whisper-1' || typeof value.language !== 'string') return reject('transcript is invalid.');
   let previousStart = -1;
   value.segments.forEach((segment, index) => {
     if (!isRecord(segment) || segment.segmentIndex !== index

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { validateStoredMedia } from '@/lib/media/storage';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
+import { probeTraVideoAudioTrack } from '@/lib/video/ffmpeg';
 
 export interface VideoTranscriptSegment {
   segmentIndex: number;
@@ -9,14 +10,26 @@ export interface VideoTranscriptSegment {
   text: string;
 }
 
-export interface VideoTranscript {
+export interface ProviderVideoTranscript {
   version: 1;
+  status?: undefined;
   model: 'whisper-1';
   sourceVideoMediaId: string;
   sourceVideoContentHash: string;
   language: string;
   segments: VideoTranscriptSegment[];
 }
+export interface NoAudioVideoTranscript {
+  version: 1;
+  status: 'SKIPPED_NO_AUDIO_TRACK';
+  model: null;
+  sourceVideoMediaId: string;
+  sourceVideoContentHash: string;
+  language: null;
+  segments: [];
+  evidence: { method: 'FFMPEG_STREAM_METADATA' };
+}
+export type VideoTranscript = ProviderVideoTranscript | NoAudioVideoTranscript;
 
 export const MAX_TRANSCRIPTION_UPLOAD_BYTES = 25_000_000;
 export const VIDEO_TRANSCRIPTION_TIMEOUT_MS = 120_000;
@@ -51,7 +64,11 @@ export const parseTranscriptSegments = (payload: unknown, durationMs: number) =>
 export const transcribeTraVideo = async (
   source: HydratedTraVideoSource,
   durationMs: number,
-  dependencies: { request?: typeof fetch } = {}
+  dependencies: {
+    request?: typeof fetch;
+    probe?: typeof probeTraVideoAudioTrack;
+    beforeProviderRequest?: () => void | Promise<void>;
+  } = {}
 ): Promise<VideoTranscript> => {
   if (source.role !== 'TRA_VIDEO' || source.media.mediaType !== 'VIDEO'
     || source.stored.mediaType !== 'VIDEO' || source.stored.mimeType !== 'video/mp4') {
@@ -59,12 +76,22 @@ export const transcribeTraVideo = async (
   }
   validateStoredMedia(source.stored);
   if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('A validated video duration is required.');
+  const sourceVideoContentHash = createHash('sha256').update(source.stored.buffer).digest('hex');
+  const audio = await (dependencies.probe ?? probeTraVideoAudioTrack)(source.stored.buffer);
+  if (!audio || typeof audio.hasAudioTrack !== 'boolean') {
+    throw new Error('The hydrated TRA video returned an ambiguous transcription audio probe.');
+  }
+  if (!audio.hasAudioTrack) return {
+    version: 1, status: 'SKIPPED_NO_AUDIO_TRACK', model: null,
+    sourceVideoMediaId: source.media.id, sourceVideoContentHash, language: null, segments: [],
+    evidence: { method: 'FFMPEG_STREAM_METADATA' },
+  };
   if (source.stored.buffer.length > MAX_TRANSCRIPTION_UPLOAD_BYTES) {
     throw new Error('Video transcription currently accepts MP4 files up to 25 MB.');
   }
+  await dependencies.beforeProviderRequest?.();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured for video transcription.');
-  const sourceVideoContentHash = createHash('sha256').update(source.stored.buffer).digest('hex');
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(source.stored.buffer)], { type: 'video/mp4' }), source.stored.fileName);
   form.append('model', 'whisper-1');

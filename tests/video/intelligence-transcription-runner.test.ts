@@ -22,6 +22,7 @@ const source = (): HydratedTraVideoSource => ({
   stored: { fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO', buffer: Buffer.from(REAL_MULTI_FRAME_MP4) },
 });
 const transcriptPayload = { language: 'en', segments: [{ start: 0, end: 1, text: 'Transcript.' }] };
+const audioProbe = async () => ({ hasAudioTrack: true });
 
 class MemoryStorage implements VideoIntelligenceStorage {
   value: { bytes: Buffer; etag: string } | null = null;
@@ -60,7 +61,7 @@ describe('video intelligence transcription runner', () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const deps = setup(); const work = await transcribingWork(deps);
     const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json(transcriptPayload));
-    await expect(runVideoIntelligenceTranscriptionJob(identity, work.leaseId, source(), { storage: deps.storage, now: deps.now, deadlineAtMs: deadline(deps), request }))
+    await expect(runVideoIntelligenceTranscriptionJob(identity, work.leaseId, source(), { storage: deps.storage, now: deps.now, deadlineAtMs: deadline(deps), request, probe: audioProbe }))
       .resolves.toMatchObject({ phase: 'OBSERVING', lease: null, transcript: { sourceVideoMediaId: mediaId, sourceVideoContentHash: identity.sourceVideoContentHash } });
     expect(request).toHaveBeenCalledTimes(1);
   });
@@ -94,7 +95,7 @@ describe('video intelligence transcription runner', () => {
   it('preserves preparation after provider failure and does not overwrite a replacement lease', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const deps = setup(); const work = await transcribingWork(deps);
-    const failed = await runVideoIntelligenceTranscriptionJob(identity, work.leaseId, source(), { storage: deps.storage, now: deps.now, deadlineAtMs: deadline(deps), request: vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 429 })) });
+    const failed = await runVideoIntelligenceTranscriptionJob(identity, work.leaseId, source(), { storage: deps.storage, now: deps.now, deadlineAtMs: deadline(deps), request: vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 429 })), probe: audioProbe });
     expect(failed).toMatchObject({ phase: 'RETRY_REQUIRED', preparation: { durationMs: 2_000 }, retry: { reason: 'PAID_WORK_FAILED', message: expect.stringContaining('HTTP 429') } });
 
     const next = setup(); const active = await transcribingWork(next);
@@ -103,7 +104,7 @@ describe('video intelligence transcription runner', () => {
       next.storage.value = { bytes: Buffer.from(JSON.stringify({ ...current.job, lease: { ...current.job.lease!, id: 'replacement' } })), etag: 'replacement' };
       return Response.json(transcriptPayload);
     });
-    await expect(runVideoIntelligenceTranscriptionJob(identity, active.leaseId, source(), { storage: next.storage, now: next.now, deadlineAtMs: deadline(next), request }))
+    await expect(runVideoIntelligenceTranscriptionJob(identity, active.leaseId, source(), { storage: next.storage, now: next.now, deadlineAtMs: deadline(next), request, probe: audioProbe }))
       .rejects.toBeInstanceOf(VideoIntelligenceJobLeaseLostError);
     expect((await readVideoIntelligenceJob(identity, next))?.job.lease?.id).toBe('replacement');
   });
@@ -112,8 +113,28 @@ describe('video intelligence transcription runner', () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const deps = setup(); const work = await transcribingWork(deps); const failure = new Error('storage unavailable');
     const request = vi.fn<typeof fetch>().mockImplementation(async () => { deps.storage.failure = failure; return Response.json(transcriptPayload); });
-    await expect(runVideoIntelligenceTranscriptionJob(identity, work.leaseId, source(), { storage: deps.storage, now: deps.now, deadlineAtMs: deadline(deps), request }))
+    await expect(runVideoIntelligenceTranscriptionJob(identity, work.leaseId, source(), { storage: deps.storage, now: deps.now, deadlineAtMs: deadline(deps), request, probe: audioProbe }))
       .rejects.toBe(failure);
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves directly to observing for a no-audio source without credentials or provider work', async () => {
+    const deps = setup(); const work = await transcribingWork(deps); const request = vi.fn<typeof fetch>();
+    await expect(runVideoIntelligenceTranscriptionJob(identity, work.leaseId, source(), {
+      storage: deps.storage, now: deps.now, deadlineAtMs: deadline(deps), request,
+      probe: async () => ({ hasAudioTrack: false }),
+    })).resolves.toMatchObject({ phase: 'OBSERVING', transcript: { status: 'SKIPPED_NO_AUDIO_TRACK', model: null } });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the deadline after probing before paid work', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const deps = setup(); const work = await transcribingWork(deps); const request = vi.fn<typeof fetch>();
+    let calls = 0;
+    await expect(runVideoIntelligenceTranscriptionJob(identity, work.leaseId, source(), {
+      storage: deps.storage, now: () => ++calls === 1 ? deps.clock.value : deps.clock.value + VIDEO_TRANSCRIPTION_TIMEOUT_MS + 65_000,
+      deadlineAtMs: deadline(deps), request, probe: audioProbe,
+    })).resolves.toMatchObject({ phase: 'RETRY_REQUIRED', retry: { reason: 'PAID_WORK_FAILED' } });
+    expect(request).not.toHaveBeenCalled();
   });
 });

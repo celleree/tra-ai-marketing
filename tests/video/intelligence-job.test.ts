@@ -36,6 +36,9 @@ const preparation = { manifestKey: `preparations/manifests/sha256/${hash('manife
   manifestSha256: hash('manifest'), durationMs: 2_000, representativeCandidateIndexes: [1] };
 const transcript = { version: 1 as const, model: 'whisper-1' as const, sourceVideoMediaId: mediaId,
   sourceVideoContentHash: contentHash, language: 'en', segments: [{ segmentIndex: 0, startMs: 0, endMs: 1_000, text: 'Speech.' }] };
+const skippedTranscript = { version: 1 as const, status: 'SKIPPED_NO_AUDIO_TRACK' as const, model: null,
+  sourceVideoMediaId: mediaId, sourceVideoContentHash: contentHash, language: null, segments: [] as [],
+  evidence: { method: 'FFMPEG_STREAM_METADATA' as const } };
 const parse = (job: VideoIntelligenceJob) => parseVideoIntelligenceJob(Buffer.from(JSON.stringify(job)), identity);
 const completeProgress = () => [{ candidateIndex: 1, frameSha256: frameHash, thumbnail, observation }];
 
@@ -52,6 +55,8 @@ describe('video intelligence job contract', () => {
     baseJob(),
     { ...baseJob(), phase: 'TRANSCRIBING' as const, preparation },
     { ...baseJob(), phase: 'OBSERVING' as const, preparation, transcript,
+      representatives: [{ candidateIndex: 1, frameSha256: frameHash, thumbnail }] },
+    { ...baseJob(), phase: 'OBSERVING' as const, preparation, transcript: skippedTranscript,
       representatives: [{ candidateIndex: 1, frameSha256: frameHash, thumbnail }] },
     { ...baseJob(), phase: 'FINALIZING' as const, preparation, transcript, representatives: completeProgress() },
     { ...baseJob(), phase: 'COMPLETE' as const, preparation, transcript, representatives: completeProgress(),
