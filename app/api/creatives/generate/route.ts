@@ -56,11 +56,8 @@ import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
-import {
-  loadVideoFrameLibrary,
-  videoSourceHash,
-} from '@/lib/video/library-service';
-import { getApprovedSelectedTraVideoFrames } from '@/lib/video/selected-frames';
+import { videoSourceHash } from '@/lib/video/library-service';
+import { extractVideoSelectionFrames, loadVideoSelectionContext } from '@/lib/video/selection-context';
 import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
 import type {
   ApprovedTraVideoFrame,
@@ -298,10 +295,8 @@ export async function POST(request: Request) {
           { status: 409 }
         );
       }
-      const library = await loadVideoFrameLibrary(
-        traVideoSource.media.id,
-        sourceContentHash
-      );
+      const selectionContext = await loadVideoSelectionContext(traVideoSource);
+      const library = selectionContext?.library;
       if (!library) {
         return NextResponse.json(
           { error: 'The selected TRA video frame library is missing or invalid. Reanalyze the video and select frames again.' },
@@ -315,9 +310,9 @@ export async function POST(request: Request) {
         );
       }
       try {
-        const selectedFrameSet = await getApprovedSelectedTraVideoFrames(
+        const selectedFrameSet = await extractVideoSelectionFrames(
           traVideoSource,
-          library,
+          selectionContext!,
           requestedSelection.frameIds
         );
         videoFrameSet = selectedFrameSet;

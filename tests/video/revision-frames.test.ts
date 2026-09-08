@@ -8,8 +8,7 @@ import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 
 const mocks = vi.hoisted(() => ({ automatic: vi.fn(), loadLibrary: vi.fn(), selected: vi.fn() }));
 vi.mock('@/lib/video/tra-video-frames', () => ({ getApprovedTraVideoFrames: mocks.automatic }));
-vi.mock('@/lib/video/library-service', () => ({ loadVideoFrameLibrary: mocks.loadLibrary }));
-vi.mock('@/lib/video/selected-frames', () => ({ getApprovedSelectedTraVideoFrames: mocks.selected }));
+vi.mock('@/lib/video/selection-context', () => ({ loadVideoSelectionContext: mocks.loadLibrary, extractVideoSelectionFrames: mocks.selected }));
 
 const MEDIA_ID = `media_${'a'.repeat(32)}`;
 const VIDEO = Buffer.from('stored TRA video bytes');
@@ -92,12 +91,12 @@ describe('revision TRA video frames', () => {
     const frames = [frame(1_000, png('first'), 0), frame(3_000, png('second'), 1)];
     const savedSelection = selection(frames);
     const library = { id: LIBRARY_ID };
-    mocks.loadLibrary.mockResolvedValue(library);
+    mocks.loadLibrary.mockResolvedValue({ library, manifest: null });
     mocks.selected.mockResolvedValue({ ...automaticSet(frames), reused: false, selectionProvenance: savedSelection.frames });
     await expect(resolveRevisionVideoFrames(source(), attached('USER_SELECTED', frames), savedSelection))
       .resolves.toEqual(frames);
-    expect(mocks.loadLibrary).toHaveBeenCalledWith(MEDIA_ID, SOURCE_HASH);
-    expect(mocks.selected).toHaveBeenCalledWith(expect.objectContaining({ role: 'TRA_VIDEO' }), library, FRAME_IDS);
+    expect(mocks.loadLibrary).toHaveBeenCalledWith(expect.objectContaining({ role: 'TRA_VIDEO', media: expect.objectContaining({ id: MEDIA_ID }) }));
+    expect(mocks.selected).toHaveBeenCalledWith(expect.objectContaining({ role: 'TRA_VIDEO' }), { library, manifest: null }, FRAME_IDS);
   });
 
   it.each([
@@ -105,10 +104,10 @@ describe('revision TRA video frames', () => {
       savedSelection.frames[0].timestampMs += 1;
     }, 'does not match this creative provenance'],
     ['library mismatch', async () => {
-      mocks.loadLibrary.mockResolvedValue({ id: `video-library:${'9'.repeat(64)}` });
+      mocks.loadLibrary.mockResolvedValue({ library: { id: `video-library:${'9'.repeat(64)}` }, manifest: null });
     }, 'library is missing or invalid'],
     ['fresh provenance drift', async (saved: ApprovedTraVideoFrame, savedSelection: GeneratedVideoFrameSelection) => {
-      mocks.loadLibrary.mockResolvedValue({ id: LIBRARY_ID });
+      mocks.loadLibrary.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: null });
       mocks.selected.mockResolvedValue({ ...automaticSet([saved]), reused: false,
         selectionProvenance: [{ ...savedSelection.frames[0], candidateFrameSha256: 'f'.repeat(64) }] });
     }, 'no longer match saved provenance'],

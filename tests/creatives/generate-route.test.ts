@@ -17,8 +17,8 @@ const mocks = vi.hoisted(() => ({
   analyzeApprovedTraVideoFrames: vi.fn(),
   generateApprovedTraVideoFrameCreativeImage: vi.fn(),
   getApprovedTraVideoFrames: vi.fn(),
-  getApprovedSelectedTraVideoFrames: vi.fn(),
-  loadVideoFrameLibrary: vi.fn(),
+  extractVideoSelectionFrames: vi.fn(),
+  loadVideoSelectionContext: vi.fn(),
   getMediaStorage: vi.fn(),
   getOrAnalyzeLayoutBlueprint: vi.fn(),
   listReferenceLibrary: vi.fn(),
@@ -53,13 +53,9 @@ vi.mock('@/lib/video/tra-video-frames', () => ({
   getApprovedTraVideoFrames: mocks.getApprovedTraVideoFrames,
 }));
 
-vi.mock('@/lib/video/selected-frames', () => ({
-  getApprovedSelectedTraVideoFrames: mocks.getApprovedSelectedTraVideoFrames,
-}));
-
-vi.mock('@/lib/video/library-service', async (original) => ({
-  ...(await original<typeof import('@/lib/video/library-service')>()),
-  loadVideoFrameLibrary: mocks.loadVideoFrameLibrary,
+vi.mock('@/lib/video/selection-context', () => ({
+  extractVideoSelectionFrames: mocks.extractVideoSelectionFrames,
+  loadVideoSelectionContext: mocks.loadVideoSelectionContext,
 }));
 
 vi.mock('@/lib/ai/reference-selector', () => ({
@@ -371,7 +367,7 @@ beforeEach(() => {
   mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(
     async ({ frames }) => ({ ...imageResult, providerFrames: [frames.at(-1)] })
   );
-  mocks.loadVideoFrameLibrary.mockResolvedValue(null);
+  mocks.loadVideoSelectionContext.mockResolvedValue(null);
   mocks.getApprovedTraVideoFrames.mockImplementation(async (source) => ({
     source,
     sourceVideoContentHash: contentHash(source.stored.buffer),
@@ -560,8 +556,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
       sourceVideoMediaId: videoId,
       sourceVideoContentHash,
     };
-    mocks.loadVideoFrameLibrary.mockResolvedValue(library);
-    mocks.getApprovedSelectedTraVideoFrames.mockImplementation(async (source) => ({
+    mocks.loadVideoSelectionContext.mockResolvedValue({ library, manifest: null });
+    mocks.extractVideoSelectionFrames.mockImplementation(async (source) => ({
       source,
       sourceVideoContentHash,
       durationMs: 1_000,
@@ -582,13 +578,12 @@ describe('layout blueprint and final image-provider boundaries', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
-    expect(mocks.loadVideoFrameLibrary).toHaveBeenCalledWith(
-      videoId,
-      sourceVideoContentHash
+    expect(mocks.loadVideoSelectionContext).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'TRA_VIDEO', media: expect.objectContaining({ id: videoId }) })
     );
-    expect(mocks.getApprovedSelectedTraVideoFrames).toHaveBeenCalledWith(
+    expect(mocks.extractVideoSelectionFrames).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'TRA_VIDEO' }),
-      library,
+      { library, manifest: null },
       [LIBRARY_FRAME_ID]
     );
     expect(mocks.analyzeApprovedTraVideoFrames).toHaveBeenCalledWith(
@@ -657,8 +652,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
       error: 'The selected TRA video frame library is missing or invalid. Reanalyze the video and select frames again.',
     });
 
-    mocks.loadVideoFrameLibrary.mockResolvedValue({
-      id: `video-library:${'e'.repeat(64)}`,
+    mocks.loadVideoSelectionContext.mockResolvedValue({
+      library: { id: `video-library:${'e'.repeat(64)}` }, manifest: null,
     });
     const mismatchedLibrary = await POST(
       generationRequest(
@@ -673,7 +668,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
       error: 'The selected TRA video frame library does not match this request. Select frames again.',
     });
     expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
-    expect(mocks.getApprovedSelectedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.extractVideoSelectionFrames).not.toHaveBeenCalled();
     expect(mocks.analyzeApprovedTraVideoFrames).not.toHaveBeenCalled();
     expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
@@ -693,8 +688,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
 
     expect(response.status).toBe(404);
     expect(mocks.getMediaStorage).not.toHaveBeenCalled();
-    expect(mocks.loadVideoFrameLibrary).not.toHaveBeenCalled();
-    expect(mocks.getApprovedSelectedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.loadVideoSelectionContext).not.toHaveBeenCalled();
+    expect(mocks.extractVideoSelectionFrames).not.toHaveBeenCalled();
     expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
