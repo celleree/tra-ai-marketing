@@ -13,6 +13,7 @@ export interface VideoConceptSelection {
 
 const MAX_CONCEPT_LENGTH = 2_000;
 const MAX_REASON_LENGTH = 500;
+export const VIDEO_SELECTION_TIMEOUT_MS = 120_000;
 const cap = (value: string, length: number) => value.slice(0, length);
 
 const rules = `Select one to three relevant frames for the requested creative concept from the supplied metadata only.
@@ -31,10 +32,29 @@ const selectionSchema = (frameIds: string[]) => ({
 
 const invalid = (): never => { throw new Error('Video concept selection returned an invalid selection.'); };
 
+export const parseVideoConceptSelection = (value: unknown, library: VideoFrameLibrary, concept: string): VideoConceptSelection => {
+  const item = value as Partial<VideoConceptSelection> | null;
+  if (!item || item.version !== 1 || item.libraryId !== library.id || item.sourceVideoMediaId !== library.sourceVideoMediaId
+    || item.sourceVideoContentHash !== library.sourceVideoContentHash || item.concept !== concept
+    || item.providerEligible !== false || item.evidenceStatus !== 'UNVERIFIED_MODEL_SELECTION'
+    || !Array.isArray(item.frames) || item.frames.length < 1 || item.frames.length > 3) return invalid();
+  const known = new Set(library.representativeFrames.map((frame) => frame.id));
+  const seen = new Set<string>();
+  const frames = item.frames.map((entry) => {
+    const frameId = entry?.frameId; const reason = entry?.reason;
+    if (typeof frameId !== 'string' || typeof reason !== 'string' || !reason.trim() || reason.length > MAX_REASON_LENGTH
+      || !known.has(frameId) || seen.has(frameId)) return invalid();
+    seen.add(frameId); return { frameId, reason };
+  });
+  return { version: 1, libraryId: library.id, sourceVideoMediaId: library.sourceVideoMediaId,
+    sourceVideoContentHash: library.sourceVideoContentHash, concept, providerEligible: false,
+    evidenceStatus: 'UNVERIFIED_MODEL_SELECTION', frames };
+};
+
 export const selectVideoFramesForConcept = async (
   library: VideoFrameLibrary,
   concept: string,
-  dependencies: { request?: typeof fetch } = {}
+  dependencies: { request?: typeof fetch; model?: string } = {}
 ): Promise<VideoConceptSelection> => {
   const brief = concept.trim();
   if (!brief || brief.length > MAX_CONCEPT_LENGTH) throw new Error('Video concept must be between 1 and 2000 characters.');
@@ -47,9 +67,10 @@ export const selectVideoFramesForConcept = async (
     summary: cap(frame.observation.summary, 400), visibleText: cap(frame.observation.visibleText.join('\n'), 1_000),
     temporalTranscriptContext: cap(frame.transcriptSegments.map((segment) => segment.text).join('\n'), 700),
   }));
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra')).trim();
+  if (!model) throw new Error('Video selection model must be non-empty.');
   const response = await (dependencies.request || fetch)('https://api.openai.com/v1/responses', {
-    method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(120_000),
+    method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS),
     body: JSON.stringify({ model, store: false, max_output_tokens: 2048, reasoning: { effort: 'low' }, input: [
       { role: 'developer', content: [{ type: 'input_text', text: rules }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ concept: brief, frames }) }] },
@@ -62,17 +83,7 @@ export const selectVideoFramesForConcept = async (
   let value: unknown;
   try { value = JSON.parse(text); } catch { invalid(); }
   const selected = value && typeof value === 'object' ? (value as { frames?: unknown }).frames : undefined;
-  if (!Array.isArray(selected) || selected.length < 1 || selected.length > 3) throw new Error('Video concept selection returned an invalid selection.');
-  const known = new Set(frames.map((frame) => frame.id));
-  const seen = new Set<string>();
-  const output = (selected as unknown[]).map((entry) => {
-    const item = entry as { frameId?: unknown; reason?: unknown }; const frameId = item?.frameId; const reason = item?.reason;
-    if (typeof frameId !== 'string' || typeof reason !== 'string' || !reason.trim() || reason.length > MAX_REASON_LENGTH
-      || !known.has(frameId) || seen.has(frameId)) throw new Error('Video concept selection returned an invalid selection.');
-    seen.add(frameId);
-    return { frameId, reason };
-  });
-  return { version: 1, libraryId: library.id, sourceVideoMediaId: library.sourceVideoMediaId,
+  return parseVideoConceptSelection({ version: 1, libraryId: library.id, sourceVideoMediaId: library.sourceVideoMediaId,
     sourceVideoContentHash: library.sourceVideoContentHash, concept: brief, providerEligible: false,
-    evidenceStatus: 'UNVERIFIED_MODEL_SELECTION', frames: output };
+    evidenceStatus: 'UNVERIFIED_MODEL_SELECTION', frames: selected }, library, brief);
 };
