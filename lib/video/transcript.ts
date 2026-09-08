@@ -19,6 +19,7 @@ export interface VideoTranscript {
 }
 
 export const MAX_TRANSCRIPTION_UPLOAD_BYTES = 25_000_000;
+export const VIDEO_TRANSCRIPTION_TIMEOUT_MS = 120_000;
 
 export const parseTranscriptSegments = (payload: unknown, durationMs: number) => {
   if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('A validated video duration is required.');
@@ -71,7 +72,7 @@ export const transcribeTraVideo = async (
   form.append('timestamp_granularities[]', 'segment');
   const response = await (dependencies.request || fetch)('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(VIDEO_TRANSCRIPTION_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`Video transcription failed (HTTP ${response.status}). Check audio, API access, and limits.`);
   return {
