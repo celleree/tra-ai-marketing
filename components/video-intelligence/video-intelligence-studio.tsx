@@ -4,6 +4,7 @@ import { type ChangeEvent, type FormEvent, useState } from 'react';
 import type { CreativeSourceVideoAsset } from '@/lib/media/types';
 import type { VideoConceptSelection } from '@/lib/video/concept-selection';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
+import { uploadTraVideo } from '@/lib/video/upload-client';
 import { SelectedFrameGeneration } from './selected-frame-generation';
 import styles from './video-intelligence-studio.module.css';
 
@@ -69,15 +70,7 @@ export function VideoIntelligenceStudio() {
     setSelections([]);
 
     try {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('sourceRole', 'TRA_VIDEO');
-      const response = await fetch('/api/media/upload', {
-        method: 'POST',
-        body: form,
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const uploaded = (await response.json()) as CreativeSourceVideoAsset;
+      const uploaded = await uploadTraVideo(file);
       setStoredMediaId(uploaded.id);
       setProgress('Video stored. Loading any matching local evidence library.');
       await refresh(uploaded.id);
