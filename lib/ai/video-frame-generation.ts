@@ -113,6 +113,7 @@ export async function analyzeApprovedTraVideoFrames(args: {
     body: JSON.stringify({
       model,
       store: false,
+      max_output_tokens: 8192,
       input: [
         { role: 'developer', content: [{ type: 'input_text', text: rules }] },
         { role: 'user', content },
@@ -128,7 +129,11 @@ export async function analyzeApprovedTraVideoFrames(args: {
     }),
   });
   if (!response.ok) throw new Error(await getErrorMessage(response));
-  const text = extractOutputText(await response.json());
+  const payload = await response.json() as { status?: string } | null;
+  if (payload?.status !== 'completed') {
+    throw new Error('TRA video-frame analysis did not complete.');
+  }
+  const text = extractOutputText(payload);
   if (!text) throw new Error('OpenAI returned no TRA video-frame analysis.');
   return JSON.parse(text) as CreativeReferenceAnalysis;
 }
