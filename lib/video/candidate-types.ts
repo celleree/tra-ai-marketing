@@ -34,6 +34,11 @@ export interface TemporaryVideoFrameCandidate {
   providerEligible: false;
 }
 
+export type VideoFrameAnalysisCandidate = Omit<
+  TemporaryVideoFrameCandidate,
+  'temporaryPath' | 'lifecycle'
+>;
+
 export interface TemporaryVideoFrameCandidateSet {
   sourceVideoMediaId: string;
   sourceVideoFileName: string;

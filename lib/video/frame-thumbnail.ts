@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
-import { inspectTemporaryCandidateFile } from '@/lib/video/candidate-file-integrity';
-import type { TemporaryVideoFrameCandidate } from '@/lib/video/candidate-types';
+import { getJpegDimensions, inspectTemporaryCandidateFile } from '@/lib/video/candidate-file-integrity';
+import type { TemporaryVideoFrameCandidate, VideoFrameAnalysisCandidate } from '@/lib/video/candidate-types';
 
 export interface VideoFrameThumbnail {
   sourceVideoMediaId: string;
@@ -12,6 +12,29 @@ export interface VideoFrameThumbnail {
   frameSha256: string;
   thumbnailDataUrl: string;
 }
+
+export const createVideoFrameThumbnailFromBytes = async (
+  candidate: VideoFrameAnalysisCandidate,
+  bytes: Buffer
+): Promise<VideoFrameThumbnail> => {
+  const dimensions = getJpegDimensions(bytes);
+  if (
+    candidate.providerEligible !== false || candidate.sourceRole !== 'TRA_VIDEO' || candidate.mimeType !== 'image/jpeg'
+    || !dimensions || dimensions.width !== candidate.width || dimensions.height !== candidate.height
+    || bytes.length !== candidate.byteLength || createHash('sha256').update(bytes).digest('hex') !== candidate.frameSha256
+  ) {
+    throw new Error('Frame thumbnails require an analysis-only TRA candidate.');
+  }
+  const thumbnail = await sharp(bytes, { limitInputPixels: 40_000_000 }).resize({ width: 280, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+  return {
+    sourceVideoMediaId: candidate.sourceVideoMediaId,
+    sourceVideoContentHash: candidate.sourceVideoContentHash,
+    candidateIndex: candidate.candidateIndex,
+    timestampMs: candidate.timestampMs,
+    frameSha256: candidate.frameSha256,
+    thumbnailDataUrl: `data:image/jpeg;base64,${thumbnail.toString('base64')}`,
+  };
+};
 
 export const createVideoFrameThumbnail = async (
   candidate: TemporaryVideoFrameCandidate
@@ -26,17 +49,5 @@ export const createVideoFrameThumbnail = async (
   ) {
     throw new Error('Frame thumbnail candidate integrity mismatch.');
   }
-  const bytes = await readFile(candidate.temporaryPath);
-  if (bytes.length !== candidate.byteLength || createHash('sha256').update(bytes).digest('hex') !== candidate.frameSha256) {
-    throw new Error('Frame thumbnail candidate integrity mismatch.');
-  }
-  const thumbnail = await sharp(bytes, { limitInputPixels: 40_000_000 }).resize({ width: 280, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
-  return {
-    sourceVideoMediaId: candidate.sourceVideoMediaId,
-    sourceVideoContentHash: candidate.sourceVideoContentHash,
-    candidateIndex: candidate.candidateIndex,
-    timestampMs: candidate.timestampMs,
-    frameSha256: candidate.frameSha256,
-    thumbnailDataUrl: `data:image/jpeg;base64,${thumbnail.toString('base64')}`,
-  };
+  return createVideoFrameThumbnailFromBytes(candidate, await readFile(candidate.temporaryPath));
 };
