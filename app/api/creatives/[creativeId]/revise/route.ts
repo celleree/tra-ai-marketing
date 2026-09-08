@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import { generateCreativeRevisionImage } from '@/lib/ai/creative-revision-image';
 import { buildCreativeCompanyContext, formatCreativeCompanyContext } from '@/lib/company/creative-context';
@@ -17,6 +18,9 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 export async function POST(request: Request, context: { params: Promise<{ creativeId: string }> }) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   const { creativeId: parentId } = await context.params;
   if (!isSafeCreativeId(parentId)) return NextResponse.json({ error: 'Invalid creative ID.' }, { status: 400 });
   let body: unknown;

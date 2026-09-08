@@ -1,5 +1,6 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-const mocks=vi.hoisted(()=>({save:vi.fn(),read:vi.fn()}));
+const mocks=vi.hoisted(()=>({save:vi.fn(),read:vi.fn(),requireOperatorAccess:vi.fn()}));
+vi.mock('@/lib/auth/require-operator',()=>({requireOperatorAccess:mocks.requireOperatorAccess}));
 vi.mock('@/lib/creatives/storage',()=>({isSafeCreativeId:(id:string)=>/^creative_[a-f0-9]{32}$/.test(id),saveCreativeBatch:mocks.save,listCreatives:vi.fn()}));
 vi.mock('@/lib/media/local-storage',()=>({getMediaStorage:()=>({readImageById:mocks.read})}));
 vi.mock('@/lib/creatives/attribution',()=>({getCreativeAttribution:vi.fn()}));
@@ -10,7 +11,7 @@ const selection={libraryId:`video-library:${'2'.repeat(64)}`,sourceVideoMediaId:
 const creative={id:`creative_${'8'.repeat(32)}`,image:{id,fileName:`${id}.png`,originalName:'generated.png',mimeType:'image/png',size:100,url:'/ignored'},
   category:'customer-problems',copy:{headline:'Options',primaryText:'Talk to TRA',description:''},videoFrameSelection:selection};
 const request=(item:unknown)=>new Request('http://localhost/api/creatives',{method:'POST',body:JSON.stringify({creatives:[item]})});
-beforeEach(()=>{vi.clearAllMocks();vi.stubEnv('NODE_ENV','test');mocks.read.mockResolvedValue({fileName:`${id}.png`,mimeType:'image/png'});mocks.save.mockImplementation(async items=>items);});
+beforeEach(()=>{vi.clearAllMocks();mocks.requireOperatorAccess.mockResolvedValue(null);vi.stubEnv('NODE_ENV','test');mocks.read.mockResolvedValue({fileName:`${id}.png`,mimeType:'image/png'});mocks.save.mockImplementation(async items=>items);});
 afterEach(()=>vi.unstubAllEnvs());
 it('retains complete selected-video provenance at the save API boundary',async()=>{
  const response=await POST(request(creative));expect(response.status).toBe(201);
