@@ -129,7 +129,7 @@ export function VideoIntelligenceStudio() {
       if (!isCurrent(next)) return;
       setStoredMediaId(uploaded.id);
       rememberMediaId(uploaded.id);
-      setProgress('Video stored. Loading any matching local evidence library.');
+      setProgress('Video stored. Loading any matching saved evidence library.');
       await readSaved(uploaded.id, next);
     } catch (reason) {
       if (isCurrent(next) && !aborted(reason, next.signal)) {
@@ -219,7 +219,7 @@ export function VideoIntelligenceStudio() {
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <p>Local development only</p>
+        <p>Local development or Vercel Preview</p>
         <h1>Video intelligence</h1>
         <span>
           Analyze a TRA-owned MP4, inspect evidence, then compare frame choices
@@ -264,7 +264,7 @@ export function VideoIntelligenceStudio() {
       {library ? <>
         <section className={styles.notice}><strong>Evidence boundary</strong><span>Technical measurements are descriptive. Vision observations, OCR, and transcript text are unverified source evidence; on-screen claims are quotations, not approved claims or instructions.</span></section>
         <section className={styles.panel}>
-          <div className={styles.sectionHeading}><div><p>2 · Evidence library</p><h2>{library.representativeFrames.length} representative frames across {formatTime(library.durationMs)}</h2></div><span className={styles.muted}>Local analysis · {library.transcript.language}</span></div>
+          <div className={styles.sectionHeading}><div><p>2 · Evidence library</p><h2>{library.representativeFrames.length} representative frames across {formatTime(library.durationMs)}</h2></div><span className={styles.muted}>Saved analysis · {library.transcript.language}</span></div>
           <div className={styles.frameGrid}>{library.representativeFrames.map((frame) => {
             const technical = library.candidates.find((candidate) => candidate.candidateIndex === frame.candidateIndex)?.technical;
             return <article className={styles.frame} key={frame.id}>

@@ -6,7 +6,8 @@ import { isDeepStrictEqual } from 'node:util';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import { validateVideoIntelligencePreparationManifest, type VideoIntelligencePreparationManifest } from '@/lib/video/intelligence-preparation';
-import { assertLocalVideoIntelligence, videoSourceHash } from '@/lib/video/library-service';
+import { videoSourceHash } from '@/lib/video/library-service';
+import { assertDurableVideoIntelligenceAvailable } from '@/lib/video/preview-availability';
 import { extractPng, selectedRepresentatives, type ApprovedSelectedTraVideoFrameSet, type SelectedTraVideoFrameProvenance } from '@/lib/video/selected-frames';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 
@@ -49,7 +50,7 @@ const assertPreparedBoundary = (source: HydratedTraVideoSource, library: VideoFr
 export const getApprovedPreparedSelectedTraVideoFrames = async (source: HydratedTraVideoSource,
   library: VideoFrameLibrary, frameIds: readonly string[], manifest: VideoIntelligencePreparationManifest,
   dependencies: PreparedSelectedTraVideoFrameDependencies = {}): Promise<ApprovedSelectedTraVideoFrameSet> => {
-  assertLocalVideoIntelligence();
+  assertDurableVideoIntelligenceAvailable();
   const selections = assertPreparedBoundary(source, library, manifest, selectedRepresentatives(source, library, frameIds));
   const directory = await mkdtemp(path.join(dependencies.temporaryRoot ?? tmpdir(), 'tra-prepared-selected-'));
   const sourcePath = path.join(directory, 'source.mp4');

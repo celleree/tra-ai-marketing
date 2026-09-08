@@ -35,6 +35,7 @@ import {
   type CreativePlacement,
 } from '@/lib/creatives/placements';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { isDurableVideoIntelligenceAvailable } from '@/lib/video/preview-availability';
 import {
   formatLayoutBlueprintForPlanning,
   LAYOUT_BLUEPRINT_SCHEMA_VERSION,
@@ -236,10 +237,10 @@ export async function POST(request: Request) {
 
     if (
       parsed.data.videoFrameSelection &&
-      process.env.NODE_ENV === 'production'
+      !isDurableVideoIntelligenceAvailable()
     ) {
       return NextResponse.json(
-        { error: 'Selected TRA video frame generation is available in local development only.' },
+        { error: 'Selected TRA video frame generation is available in local development or protected Vercel Preview only.' },
         { status: 404 }
       );
     }

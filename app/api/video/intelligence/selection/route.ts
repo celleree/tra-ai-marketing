@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { assertLocalVideoIntelligence } from '@/lib/video/library-service';
+import { assertDurableVideoIntelligenceAvailable, videoIntelligenceHttpStatus } from '@/lib/video/preview-availability';
 import { resolveExistingVideoIntelligenceJob, VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
 import { selectVideoFramesWithCache } from '@/lib/video/selection-cache';
@@ -11,7 +11,7 @@ const headers = { 'Cache-Control': 'no-store' };
 export async function POST(request: Request) {
   const deadlineAtMs = Date.now() + 295_000;
   try {
-    assertLocalVideoIntelligence();
+    assertDurableVideoIntelligenceAvailable();
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.concept !== 'string'
       || !body.concept.trim() || body.concept.trim().length > 2_000
@@ -27,8 +27,8 @@ export async function POST(request: Request) {
     return NextResponse.json(result, { headers });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Video selection failed.' }, {
-      headers, status: process.env.NODE_ENV === 'production' ? 404 : error instanceof VideoIntelligenceServiceError ? error.status
-        : error instanceof SyntaxError ? 400 : 500,
+      headers, status: videoIntelligenceHttpStatus(error instanceof VideoIntelligenceServiceError ? error.status
+        : error instanceof SyntaxError ? 400 : 500),
     });
   }
 }
