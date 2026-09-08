@@ -1,9 +1,10 @@
 import { getMediaStorage } from '@/lib/media/local-storage';
+import { createVideoResponse } from '@/lib/media/video-response';
 
 export const runtime = 'nodejs';
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ fileName: string }> }
 ) {
   const { fileName } = await context.params;
@@ -12,6 +13,8 @@ export async function GET(
   if (!stored) {
     return new Response('Not found', { status: 404 });
   }
+
+  if (stored.mimeType === 'video/mp4') return createVideoResponse(stored.buffer, request);
 
   return new Response(new Uint8Array(stored.buffer), {
     status: 200,
