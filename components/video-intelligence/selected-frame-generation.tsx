@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
@@ -41,8 +41,69 @@ export function SelectedFrameGeneration({
   const [error, setError] = useState('');
   const [savedCount, setSavedCount] = useState(0);
   const [failures, setFailures] = useState<Record<number, string>>({});
+  const [previews, setPreviews] = useState<Array<{ frameId: string; timestampMs: number; url: string }>>([]);
+  const [previewing, setPreviewing] = useState(false);
   const completedIndexes = useRef(new Set<number>());
   const failedIndexes = useRef(new Map<number, string>());
+  const previewAbort = useRef<AbortController | null>(null);
+  const previewUrls = useRef<string[]>([]);
+  const previewVersion = useRef(0);
+
+  const discardPreviews = () => {
+    previewVersion.current += 1;
+    previewAbort.current?.abort();
+    previewAbort.current = null;
+    setPreviewing(false);
+    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls.current = [];
+    setPreviews([]);
+  };
+
+  useEffect(() => () => {
+    previewAbort.current?.abort();
+    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+
+  const preview = async () => {
+    if (generating || previewAbort.current) return;
+    const selectedFrames = selection.frames.filter((frame) => selectedFrameIds.includes(frame.frameId));
+    if (!selectedFrames.length) return;
+    discardPreviews();
+    const controller = new AbortController();
+    previewAbort.current = controller;
+    setPreviewing(true);
+    const version = previewVersion.current;
+    setError('');
+    try {
+      const settled = await Promise.allSettled(selectedFrames.map(async ({ frameId }) => {
+        const response = await fetch('/api/video/intelligence/selected-frame-preview', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+          body: JSON.stringify({ mediaId: media.id, videoFrameSelection: { libraryId: library.id,
+            sourceVideoContentHash: library.sourceVideoContentHash, frameIds: [frameId] } }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Source-frame preview failed.');
+        return { frameId, timestampMs: Number(response.headers.get('X-TRA-Frame-Timestamp-Ms')),
+          url: URL.createObjectURL(await response.blob()) };
+      }));
+      const results = settled.filter((result): result is PromiseFulfilledResult<{ frameId: string; timestampMs: number; url: string }> => result.status === 'fulfilled').map((result) => result.value);
+      const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (failure) {
+        results.forEach(({ url }) => URL.revokeObjectURL(url));
+        throw failure.reason;
+      }
+      if (controller.signal.aborted || version !== previewVersion.current) {
+        results.forEach(({ url }) => URL.revokeObjectURL(url)); return;
+      }
+      previewUrls.current = results.map(({ url }) => url);
+      setPreviews(results);
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Source-frame preview failed.');
+    } finally {
+      if (previewAbort.current === controller) {
+        previewAbort.current = null;
+        setPreviewing(false);
+      }
+    }
+  };
 
   const generate = async () => {
     if (generating) return;
@@ -161,6 +222,7 @@ export function SelectedFrameGeneration({
   };
 
   const toggleFrame = (frameId: string) => {
+    discardPreviews();
     setSelectedFrameIds((current) =>
       current.includes(frameId)
         ? current.filter((id) => id !== frameId)
@@ -182,8 +244,14 @@ export function SelectedFrameGeneration({
         </label>;
       })}
     </fieldset>
-    <CreativePlacementSelect value={placement} onChange={setPlacement} disabled={generating} />
-    <button className={styles.primary} type="button" onClick={() => void generate()} disabled={generating || selectedFrameIds.length < 1}>
+    <button className={styles.primary} type="button" onClick={() => void preview()} disabled={generating || previewing || selectedFrameIds.length < 1}>{previewing ? 'Extracting source frames…' : 'Preview source frames'}</button>
+    <p className={styles.muted}>Extracted from the original video. No image generation.</p>
+    {previews.length ? <section className={styles.generatedResults}>{previews.map((frame) => <article className={styles.frameChoice} key={frame.frameId}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}<img src={frame.url} alt={`Verified source video frame at ${(frame.timestampMs / 1000).toFixed(3)} seconds`} />
+      <span><b>{(frame.timestampMs / 1000).toFixed(3)}s</b> Fresh source PNG</span>
+    </article>)}</section> : null}
+    <CreativePlacementSelect value={placement} onChange={setPlacement} disabled={generating || previewing} />
+    <button className={styles.primary} type="button" onClick={() => void generate()} disabled={generating || previewing || selectedFrameIds.length < 1}>
       {generating ? 'Generating 2 creatives…' : 'Generate 2 creatives from checked frames (uses API)'}
     </button>
     {savedCount ? <p className={styles.progress} role="status">Saved {savedCount} {savedCount === 1 ? 'creative' : 'creatives'} to the TRA creative library.</p> : null}
