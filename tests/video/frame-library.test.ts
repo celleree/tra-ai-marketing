@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { assembleVideoFrameLibrary } from '@/lib/video/frame-library';
-import { createVideoFrameThumbnail, type VideoFrameThumbnail } from '@/lib/video/frame-thumbnail';
-import type { TemporaryVideoFrameCandidate, TemporaryVideoFrameCandidateSet } from '@/lib/video/candidate-types';
+import { createVideoFrameThumbnail, createVideoFrameThumbnailFromBytes, type VideoFrameThumbnail } from '@/lib/video/frame-thumbnail';
+import type { TemporaryVideoFrameCandidate, TemporaryVideoFrameCandidateSet, VideoFrameAnalysisCandidate } from '@/lib/video/candidate-types';
 import type { FrameTechnicalAnalysis } from '@/lib/video/frame-technical-analysis';
 import type { VideoTranscript } from '@/lib/video/transcript';
 import sharp from 'sharp';
@@ -21,6 +21,10 @@ const candidate = (candidateIndex: number, timestampMs: number): TemporaryVideoF
   mimeType: 'image/jpeg', width: 640, height: 360, byteLength: 123, frameSha256: `${candidateIndex}`.padStart(64, '0'),
   extractionReasons: ['INTERVAL'], temporaryPath: `/tmp/frame-${candidateIndex}.jpg`, lifecycle: 'TEMPORARY', providerEligible: false,
 });
+const analysisCandidate = (entry: TemporaryVideoFrameCandidate): VideoFrameAnalysisCandidate => {
+  const { temporaryPath: _temporaryPath, lifecycle: _lifecycle, ...persisted } = entry;
+  return persisted;
+};
 const set = (): TemporaryVideoFrameCandidateSet => ({ sourceVideoMediaId, sourceVideoFileName: 'source.mp4', sourceVideoContentHash,
   durationMs: 4_000, policy: { targetIntervalFps: 1, maxIntervalCandidates: 4, maxTotalCandidates: 4, maxWidth: 640, imageFormat: 'jpeg', jpegQuality: 80 },
   effectiveIntervalFps: 1, candidates: [candidate(0, 500), candidate(1, 1_000), candidate(2, 1_500), candidate(3, 3_000)],
@@ -81,6 +85,18 @@ describe('video frame library assembly', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it('creates a thumbnail from verified persisted bytes', async () => {
+    const bytes = await sharp({ create: { width: 560, height: 360, channels: 3, background: '#336699' } }).jpeg().toBuffer();
+    const source = { ...candidate(0, 500), width: 560, height: 360, byteLength: bytes.length,
+      frameSha256: createHash('sha256').update(bytes).digest('hex') };
+    const result = await createVideoFrameThumbnailFromBytes(analysisCandidate(source), bytes);
+    expect(result).toMatchObject({ sourceVideoMediaId, sourceVideoContentHash, candidateIndex: 0,
+      timestampMs: 500, frameSha256: source.frameSha256 });
+    expect(await sharp(Buffer.from(result.thumbnailDataUrl.split(',')[1], 'base64')).metadata()).toMatchObject({ format: 'jpeg', width: 280, height: 180 });
+    await expect(createVideoFrameThumbnailFromBytes({ ...analysisCandidate(source), height: 359 }, bytes)).rejects.toThrow('analysis-only TRA candidate');
+    await expect(createVideoFrameThumbnailFromBytes(analysisCandidate(source), Buffer.from('truncated'))).rejects.toThrow('analysis-only TRA candidate');
   });
 
   it.each([

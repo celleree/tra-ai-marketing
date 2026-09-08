@@ -3,8 +3,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { TemporaryVideoFrameCandidate } from '@/lib/video/candidate-types';
-import { observeTemporaryVideoFrame, parseFrameVisualObservation } from '@/lib/video/visual-observation';
+import type { TemporaryVideoFrameCandidate, VideoFrameAnalysisCandidate } from '@/lib/video/candidate-types';
+import { observeTemporaryVideoFrame, observeVideoFrameBytes, parseFrameVisualObservation } from '@/lib/video/visual-observation';
 import sharp from 'sharp';
 
 const REAL_JPEG = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#888888' } }).jpeg().toBuffer();
@@ -22,7 +22,25 @@ const candidate = async (): Promise<TemporaryVideoFrameCandidate> => {
     byteLength: REAL_JPEG.length, frameSha256: createHash('sha256').update(REAL_JPEG).digest('hex'),
     extractionReasons: ['INTERVAL'], temporaryPath, lifecycle: 'TEMPORARY', providerEligible: false };
 };
+const analysisCandidate = (frame: TemporaryVideoFrameCandidate): VideoFrameAnalysisCandidate => {
+  const { temporaryPath: _temporaryPath, lifecycle: _lifecycle, ...persisted } = frame;
+  return persisted;
+};
 const response = (value = observation) => Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
+
+it('observes verified persisted bytes with an explicit model', async () => {
+  vi.stubEnv('OPENAI_API_KEY', 'test-key');
+  const frame = analysisCandidate(await candidate());
+  const request = vi.fn<typeof fetch>().mockResolvedValue(response());
+  const result = await observeVideoFrameBytes(frame, REAL_JPEG, { model: 'persisted-model', request });
+  expect(result).toMatchObject({ model: 'persisted-model', sourceVideoContentHash: frame.sourceVideoContentHash,
+    frameSha256: frame.frameSha256, candidateIndex: 4, timestampMs: 1333, providerEligible: false,
+    evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', observation });
+  const body = JSON.parse(request.mock.calls[0][1]!.body as string);
+  expect(body.model).toBe('persisted-model');
+  expect(body.store).toBe(false);
+  expect(body.input[1].content[0].image_url).toBe(`data:image/jpeg;base64,${REAL_JPEG.toString('base64')}`);
+});
 
 it('sends only candidate pixels to analysis, binds output on the server, and preserves ineligibility', async () => {
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
@@ -51,6 +69,16 @@ it('rejects changed pixels before sending and fails clearly for missing credenti
   await expect(observeTemporaryVideoFrame({ ...frame, frameSha256: '0'.repeat(64) }, { request })).rejects.toThrow('integrity');
   expect(request).not.toHaveBeenCalled();
   await expect(observeTemporaryVideoFrame(frame, { request })).rejects.toThrow('HTTP 429');
+});
+
+it('rejects invalid persisted bytes and models before sending', async () => {
+  vi.stubEnv('OPENAI_API_KEY', 'test-key');
+  const frame = analysisCandidate(await candidate());
+  const request = vi.fn<typeof fetch>();
+  await expect(observeVideoFrameBytes(frame, REAL_JPEG, { model: ' ', request })).rejects.toThrow('non-empty model');
+  await expect(observeVideoFrameBytes({ ...frame, width: 2 }, REAL_JPEG, { model: 'test', request })).rejects.toThrow('integrity');
+  await expect(observeVideoFrameBytes(frame, Buffer.from('truncated'), { model: 'test', request })).rejects.toThrow('integrity');
+  expect(request).not.toHaveBeenCalled();
 });
 
 it.each([null, {}, { ...observation, sceneType: 'JOSEPH' }, { ...observation, topics: [42] },
