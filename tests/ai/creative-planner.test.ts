@@ -20,7 +20,7 @@ const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human
   copy: { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' },
   strategy: strategy(subjectSource), selectionReason: `Distinct reason ${index}`,
 });
-const payload = (value: unknown) => ({ output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
+const payload = (value: unknown) => ({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
 const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value)), { status: 200 });
 
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
@@ -53,7 +53,7 @@ describe('creative batch planner', () => {
     const [url, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
     expect(url).toBe('https://api.openai.com/v1/responses');
-    expect(body).toMatchObject({ model: 'planner-override', reasoning: { effort: 'medium' }, store: false });
+    expect(body).toMatchObject({ model: 'planner-override', reasoning: { effort: 'medium' }, store: false, max_output_tokens: 8192 });
     expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true });
     expect(body.text.format.schema.properties.creatives).toMatchObject({ minItems: 2, maxItems: 2 });
     expect(body.text.format.schema.properties.creatives.items.properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
@@ -72,6 +72,22 @@ describe('creative batch planner', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('allows the largest supported batch with a finite scaled output allowance', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ creatives: Array.from({ length: 30 }, (_, i) => concept(i + 1)) }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await planCreativeBatch({ count: 30, context: '', analysis, hasApprovedHumanSource: false })).creatives).toHaveLength(30);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_output_tokens).toBe(65536);
+  });
+
+  it.each(['incomplete', 'failed'])('rejects %s responses even with parseable concepts and never retries', async (status) => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ...payload({ creatives: [concept(1), concept(2)] }), status }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow('did not complete');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ['wrong count', { creatives: [concept(1)] }, false],
     ['wrong index', { creatives: [concept(2), concept(1)] }, false],
@@ -85,7 +101,7 @@ describe('creative batch planner', () => {
 
   it('surfaces provider refusal and non-OK errors', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ content: [{ type: 'refusal', refusal: 'Cannot comply' }] }] }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'refusal', refusal: 'Cannot comply' }] }] }), { status: 200 })));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/refused.*Cannot comply/i);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { message: 'Provider unavailable' } }), { status: 503 })));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow('Provider unavailable');
@@ -93,9 +109,9 @@ describe('creative batch planner', () => {
 
   it('rejects missing and malformed output', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [] }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', output: [] }), { status: 200 })));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/no creative batch plan/i);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ content: [{ type: 'output_text', text: '{' }] }] }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text', text: '{' }] }] }), { status: 200 })));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/malformed/i);
   });
 });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  analyzeApprovedTraVideoFrames,
   generateApprovedTraVideoFrameCreativeImage,
   selectProviderVideoFrames,
 } from '@/lib/ai/video-frame-generation';
@@ -26,6 +27,18 @@ const makeFrames = (count = 6): ApprovedTraVideoFrame[] => Array.from({ length: 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('approved TRA video-frame provider boundary', () => {
+  it.each(['completed', 'incomplete', 'failed'])('bounds analysis and accepts only a completed response: %s', async (status) => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const result = { summary: 'Synthetic source', visibleText: [], visualStructure: 'Color bars', hookOrAngle: '', offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'educational' };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ status, output: [{ content: [{ type: 'output_text', text: JSON.stringify(result) }] }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = analyzeApprovedTraVideoFrames({ frames: makeFrames(1), context: 'Approved company context' });
+    if (status === 'completed') await expect(pending).resolves.toEqual(result);
+    else await expect(pending).rejects.toThrow('did not complete');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_output_tokens).toBe(8192);
+  });
+
   it('bounds provider pixels to representative first/middle/last frames', () => {
     expect(selectProviderVideoFrames(makeFrames()).map((frame) => frame.frameIndex)).toEqual([0, 2, 5]);
   });

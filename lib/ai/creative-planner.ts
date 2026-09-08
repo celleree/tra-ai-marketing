@@ -105,6 +105,8 @@ export async function planCreativeBatch(args: {
     body: JSON.stringify({
       model,
       reasoning: { effort: 'medium' },
+      // Bound paid reasoning/output while allowing larger supported batches more room.
+      max_output_tokens: 4096 + 2048 * args.count,
       store: false,
       input: [
         { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
@@ -138,7 +140,11 @@ export async function planCreativeBatch(args: {
   });
   if (!response.ok) throw new Error(await getProviderError(response));
 
-  const output = extractResult(await response.json());
+  const payload: unknown = await response.json();
+  if (!isRecord(payload) || payload.status !== 'completed') {
+    throw new Error('Creative planning did not complete. No images were generated.');
+  }
+  const output = extractResult(payload);
   if (output.refusal) throw new Error(`OpenAI refused the creative batch plan: ${output.refusal}`);
   if (!output.text) throw new Error('OpenAI returned no creative batch plan.');
   let parsed: unknown;

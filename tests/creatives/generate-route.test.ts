@@ -1019,6 +1019,18 @@ describe('progressive creative delivery', () => {
     });
   });
 
+  it('stops before image generation or saving when planning fails to complete', async () => {
+    mocks.planCreativeBatch.mockRejectedValue(new Error('Creative planning did not complete within its response limit.'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const response = await POST(generationRequest([]));
+    expect(response.status).toBe(500);
+    expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(saveImage).not.toHaveBeenCalled();
+    expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();
+  });
+
   it('rejects a genuinely duplicate planner batch before image generation or saving', async () => {
     const duplicate = plannedCreative(2);
     mocks.planCreativeBatch.mockResolvedValue({
