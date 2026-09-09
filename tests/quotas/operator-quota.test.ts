@@ -12,7 +12,19 @@ const reserve = (units: number, now = 0, storage?: VideoIntelligenceStorage) =>
 describe('operator quota', () => {
   it('uses the approved hourly technical limits', () => {
     expect(OPERATOR_QUOTA_POLICY).toEqual({ WEBSITE_ANALYSIS: 12, FONT_ANALYSIS: 12, CREATIVE_GENERATION: 60,
-      CREATIVE_REVISION: 24, VIDEO_SELECTION: 24, VIDEO_PROVIDER_WORK: 120, VIDEO_FRAME_PREVIEW: 30, VIDEO_PREPARATION: 12 });
+      CREATIVE_REVISION: 24, REFERENCE_CLASSIFICATION: 100, VIDEO_SELECTION: 24, VIDEO_PROVIDER_WORK: 120, VIDEO_FRAME_PREVIEW: 30, VIDEO_PREPARATION: 12 });
+  });
+
+  it('admits a full reference batch, rejects the next image, and resets next hour', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'tra-reference-quota-'));
+    const storage = new LocalVideoIntelligenceStorage(root);
+    const input = { operatorId: 'user_123', group: 'REFERENCE_CLASSIFICATION' as const, units: 100 };
+    try {
+      expect(await reserveOperatorQuota(input, { storage, now: () => 0 })).toEqual({ allowed: true });
+      expect(await reserveOperatorQuota({ ...input, units: 1 }, { storage, now: () => 0 }))
+        .toEqual({ allowed: false, retryAfterSeconds: 3_600 });
+      expect(await reserveOperatorQuota(input, { storage, now: () => HOUR })).toEqual({ allowed: true });
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it('fails closed before reading storage when a runtime group has no approved limit', async () => {
