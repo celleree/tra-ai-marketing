@@ -147,13 +147,14 @@ export const generatePromptOnlyCreativeImage = async (args: {
   context: string;
   copy: CreativeCopy;
   reserveLogoArea: boolean;
+  imageModel?: string;
 }): Promise<ImageGenerationResult> => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is not configured.');
   }
 
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+  const model = args.imageModel || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
   const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
   const prompt = `
@@ -532,6 +533,7 @@ export async function POST(request: Request) {
               context: itemContext,
               copy,
               reserveLogoArea,
+              imageModel: parsed.data.imageModel,
             });
           } else if (videoFrameSet) {
             const videoImageResult = await generateApprovedTraVideoFrameCreativeImage({
@@ -541,6 +543,7 @@ export async function POST(request: Request) {
               context: itemContext,
               copy,
               reserveLogoArea,
+              imageModel: parsed.data.imageModel,
             });
             imageResult = videoImageResult;
             providerFrames = videoImageResult.providerFrames;
@@ -551,6 +554,7 @@ export async function POST(request: Request) {
               context: itemContext,
               copy,
               reserveLogoArea,
+              imageModel: parsed.data.imageModel,
             });
           }
 

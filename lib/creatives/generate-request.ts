@@ -4,6 +4,11 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import {
+  DEFAULT_CREATIVE_IMAGE_MODEL,
+  isCreativeImageModel,
+  type CreativeImageModel,
+} from '@/lib/creatives/image-models';
+import {
   isCreativePlacement,
   type CreativePlacement,
 } from '@/lib/creatives/placements';
@@ -29,16 +34,18 @@ export type GenerateCreativeRequest = {
   companyProfile?: RuntimeCompanyProfileSnapshot;
   videoFrameSelection?: GenerateVideoFrameSelection;
   placement?: CreativePlacement;
+  imageModel?: CreativeImageModel;
   context: string;
   variationCount: number;
 };
 
 export type ValidGenerateCreativeRequest = Omit<
   GenerateCreativeRequest,
-  'sourceAssets' | 'placement'
+  'sourceAssets' | 'placement' | 'imageModel'
 > & {
   sourceAssets: CreativeSourceSelection[];
   placement: CreativePlacement;
+  imageModel: CreativeImageModel;
 };
 
 export type PlannedCreative = {
@@ -112,6 +119,10 @@ export function validateGenerateCreativeRequest(input: unknown):
       : parseGenerateVideoFrameSelection(body.videoFrameSelection);
   const placement =
     body.placement === undefined ? 'SQUARE_1_1' : body.placement;
+  const imageModel =
+    body.imageModel === undefined
+      ? DEFAULT_CREATIVE_IMAGE_MODEL
+      : body.imageModel;
   const brandLogoMediaId =
     typeof body.brandLogoMediaId === 'string'
       ? body.brandLogoMediaId.trim()
@@ -137,6 +148,10 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   if (!isCreativePlacement(placement)) {
     return { success: false, error: 'placement is unsupported' };
+  }
+
+  if (!isCreativeImageModel(imageModel)) {
+    return { success: false, error: 'imageModel is unsupported' };
   }
 
   if (
@@ -212,6 +227,7 @@ export function validateGenerateCreativeRequest(input: unknown):
     data: {
       sourceAssets,
       placement,
+      imageModel,
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),

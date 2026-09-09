@@ -5,6 +5,7 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
+import type { CreativeImageModel } from '@/lib/creatives/image-models';
 import {
   CREATIVE_PLACEMENT_SPECS,
   type CreativePlacement,
@@ -427,9 +428,10 @@ const appendImage = (
 const generateImageEdit = async (
   prompt: string,
   images: Array<{ source: StoredMediaFile; fileName: string }>,
-  providerSize: string
+  providerSize: string,
+  imageModel?: CreativeImageModel
 ): Promise<ImageGenerationResult> => {
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+  const model = imageModel || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const formData = new FormData();
   formData.set('model', model);
   formData.set('prompt', prompt);
@@ -470,6 +472,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
   context: string;
   copy: CreativeCopy;
   reserveLogoArea?: boolean;
+  imageModel?: CreativeImageModel;
 }): Promise<ImageGenerationResult> {
   const prompt = buildApprovedTraSourceImagePrompt(
       args.primaryFormat,
@@ -487,6 +490,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
         fileName: `approved-tra-source-${args.source.fileName}`,
       },
     ],
-    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize
+    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize,
+    args.imageModel
   );
 }

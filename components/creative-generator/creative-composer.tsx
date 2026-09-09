@@ -7,7 +7,9 @@ import type {
   DragEvent,
   KeyboardEvent,
 } from 'react';
+import { CreativeImageModelSelect } from '@/components/creative-generator/creative-image-model-select';
 import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
+import type { CreativeImageModel } from '@/lib/creatives/image-models';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import type {
   CreativeSourceAsset,
@@ -39,6 +41,8 @@ interface CreativeComposerProps {
   onVariationCountChange: (value: number) => void;
   placement?: CreativePlacement;
   onPlacementChange?: (value: CreativePlacement) => void;
+  imageModel?: CreativeImageModel;
+  onImageModelChange?: (value: CreativeImageModel) => void;
   onSubmit: () => void;
   ready: boolean;
   generating: boolean;
@@ -82,6 +86,8 @@ export function CreativeComposer({
   onVariationCountChange,
   placement,
   onPlacementChange,
+  imageModel,
+  onImageModelChange,
   onSubmit,
   ready,
   generating,
@@ -465,6 +471,13 @@ export function CreativeComposer({
             <CreativePlacementSelect
               value={placement}
               onChange={onPlacementChange}
+              disabled={generating}
+            />
+          ) : null}
+          {imageModel && onImageModelChange ? (
+            <CreativeImageModelSelect
+              value={imageModel}
+              onChange={onImageModelChange}
               disabled={generating}
             />
           ) : null}

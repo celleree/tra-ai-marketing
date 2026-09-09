@@ -5,6 +5,7 @@ import {
 import { CREATIVE_FORMAT_LABELS, type CreativeFormatId } from '@/lib/creative-formats';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import type { CreativeImageModel } from '@/lib/creatives/image-models';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import type { CreativeCopy } from '@/lib/creatives/generated';
 import {
@@ -149,10 +150,11 @@ export async function generateApprovedTraVideoFrameCreativeImage(args: {
   context: string;
   copy: CreativeCopy;
   reserveLogoArea?: boolean;
+  imageModel?: CreativeImageModel;
 }): Promise<VideoImageGenerationResult> {
   const frames = selectProviderVideoFrames(args.frames);
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'];
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+  const model = args.imageModel || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attached images are server-extracted still frames from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels, external reference-library pixels, third-party people, or unrelated images are attached. Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. User direction: ${args.context}. Headline: ${args.copy.headline}. Primary text: ${args.copy.primaryText}. Description: ${args.copy.description}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.reserveLogoArea ? formatCreativeLogoReservation(args.placement ?? 'SQUARE_1_1') : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(args.placement ?? 'SQUARE_1_1')}`;
   const formData = new FormData();
   formData.set('model', model);
