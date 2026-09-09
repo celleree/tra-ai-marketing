@@ -292,10 +292,6 @@ export function CreativeGenerator() {
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
           <div className="workspace-brand-mark">TRA</div>
-          <div>
-            <strong>AI Marketing</strong>
-            <span>Creative Studio</span>
-          </div>
         </div>
 
         <nav className="workspace-nav" aria-label="Creative workspace">
