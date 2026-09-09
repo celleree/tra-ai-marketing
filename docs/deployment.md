@@ -13,6 +13,14 @@ The connected Vercel account should be treated as the authority for actual proje
 
 Video intelligence requires the pinned FFmpeg binary installed by `postinstall` in the job, generation, and revision function bundles. The resumable job and selection routes need a 300-second function duration; each request performs a bounded unit and stores progress before the next browser request. Verify uploads, MP4 range playback, artifact persistence, and reload/resume on the intended deployment before treating the video workflow as production-ready.
 
+### Production video configuration
+
+Vercel Production and Preview require `NODE_ENV=production`. Conflicting or missing `NODE_ENV` is invalid deployment configuration, even when all credentials are present: protected application access fails with 503 before Clerk or request parsing; the video gate rejects it; media and durable video/quota factories refuse local fallback (including a cached media adapter); and legacy local-video helpers reject it. Fix the deployment configuration instead of enabling development fallbacks. This does not introduce a manual video feature flag.
+
+There is no separate runtime feature flag for Production video. In Vercel **Production**, durable video availability is determined by the deployment environment and required configuration: `VERCEL_ENV=production` must be supplied by the platform, both Clerk keys must have Production markers (`pk_live_` / `sk_live_`), and the Clerk, OpenAI and four R2 variables must be nonblank. Missing or invalid required Production configuration keeps the video workflow unavailable. Local development and protected Preview retain their existing behavior. Legacy prototype video endpoints stay development-only.
+
+This gate checks configuration presence and Clerk environment markers, not credential validity, key pairing, DNS/CORS, bucket privacy/scope or provider access. Verify those separately. Existing server operator authorization, durable quotas, source/provenance validation and persistence checks remain mandatory. Satisfying the configuration gate makes the Production video workflow available in that deployment; it does not authorize provider spend, promote a deployment, or certify final end-to-end release acceptance. Configure changes through a new approved deployment; do not promote an old Preview build with Preview credentials.
+
 ## Cloudflare R2
 
 Production media storage requires the R2 variables listed in `.env.example`.

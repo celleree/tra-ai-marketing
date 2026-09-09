@@ -60,7 +60,17 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-describe('durable video quota admission', () => {
+describe.each(['local', 'configured Production'])('durable video quota admission in %s', (environment) => {
+  beforeEach(() => {
+    if (environment !== 'configured Production') return;
+    vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('VERCEL_ENV', 'production');
+    for (const [name, value] of Object.entries({
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_fixture', CLERK_SECRET_KEY: 'sk_live_fixture',
+      OPENAI_API_KEY: 'fixture-provider', R2_ACCOUNT_ID: 'fixture-account', R2_ACCESS_KEY_ID: 'fixture-access',
+      R2_SECRET_ACCESS_KEY: 'fixture-secret', R2_BUCKET_NAME: 'fixture-production',
+    })) vi.stubEnv(name, value);
+  });
+
   it.each(cases.flatMap(entry => [429, 503].map(status => ({ ...entry, status }))))
   ('denies $name with $status before job claims, source reads or providers', async ({ route, body, group, status }) => {
     const denial = new Response(null, { status, headers: { 'Cache-Control': 'private, no-store', 'Retry-After': '60' } });
@@ -119,8 +129,9 @@ describe('durable video quota admission', () => {
     expect(mocks.execute.mock.calls[0][1]).toEqual({ deadlineAtMs: 296_000 });
   });
 
-  it('keeps disabled Production ahead of parsing and quota', async () => {
+  it('keeps misconfigured Production ahead of parsing and quota', async () => {
     vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('VERCEL_ENV', 'production');
+    vi.stubEnv('OPENAI_API_KEY', '');
     for (const route of [job, selection, preview]) {
       const input = { json: vi.fn() } as unknown as Request;
       expect((await route(input)).status).toBe(404); expect(input.json).not.toHaveBeenCalled();

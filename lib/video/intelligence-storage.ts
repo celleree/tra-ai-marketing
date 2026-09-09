@@ -1,3 +1,4 @@
+import { assertDeploymentRuntimeConsistent } from '@/lib/runtime/deployment';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -219,7 +220,9 @@ export class R2VideoIntelligenceStorage implements VideoIntelligenceStorage {
   }
 }
 
-export const getVideoIntelligenceStorage = (): VideoIntelligenceStorage =>
-  process.env.NODE_ENV === 'production'
+export const getVideoIntelligenceStorage = (): VideoIntelligenceStorage => {
+  assertDeploymentRuntimeConsistent();
+  return process.env.NODE_ENV === 'production'
     ? new R2VideoIntelligenceStorage(getR2Config())
     : new LocalVideoIntelligenceStorage();
+};

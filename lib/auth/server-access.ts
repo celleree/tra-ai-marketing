@@ -1,3 +1,4 @@
+import { isDeploymentRuntimeConsistent } from '@/lib/runtime/deployment';
 import { auth, clerkClient } from '@clerk/nextjs/server';
 import { isAllowedTraOperator } from '@/lib/auth/operators';
 
@@ -14,7 +15,7 @@ export const isClerkConfigured = (): boolean => Boolean(
 /** Server resource boundary: identity comes from Clerk, never request data. */
 export async function getOperatorAccess(): Promise<OperatorAccess> {
   const unavailable = { allowed: false, status: 503, error: 'Authentication is unavailable.' } as const;
-  if (!isClerkConfigured()) return unavailable;
+  if (!isDeploymentRuntimeConsistent() || !isClerkConfigured()) return unavailable;
 
   try {
     const { userId } = await auth({ acceptsToken: 'session_token' });

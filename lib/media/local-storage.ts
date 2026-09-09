@@ -1,3 +1,4 @@
+import { assertDeploymentRuntimeConsistent } from '@/lib/runtime/deployment';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { resolve } from 'path';
 import {
@@ -127,6 +128,7 @@ const REQUIRED_R2_VARIABLES = [
 ] as const;
 
 export const getMediaStorage = (): MediaStorage => {
+  assertDeploymentRuntimeConsistent(); // Check before returning a cached adapter.
   if (storage) return storage;
 
   if (process.env.NODE_ENV !== 'production') {
