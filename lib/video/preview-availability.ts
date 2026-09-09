@@ -1,11 +1,30 @@
-/** Durable video workflows may be tested in protected Preview deployments.
- * Production remains gated until application authorization is in place. */
-export const isDurableVideoIntelligenceAvailable = () =>
-  process.env.NODE_ENV !== 'production' || process.env.VERCEL_ENV === 'preview';
+/** Durable video workflows are available in local development and protected Preview.
+ * Production requires an explicit opt-in plus the configuration needed by the
+ * authenticated, storage-backed provider path. */
+const REQUIRED_PRODUCTION_VIDEO_VARIABLES = [
+  'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+  'CLERK_SECRET_KEY',
+  'OPENAI_API_KEY',
+  'R2_ACCOUNT_ID',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'R2_BUCKET_NAME',
+] as const;
+
+const hasRequiredProductionVideoConfiguration = () =>
+  REQUIRED_PRODUCTION_VIDEO_VARIABLES.every((name) => Boolean(process.env[name]?.trim()));
+
+export const isDurableVideoIntelligenceAvailable = () => {
+  if (process.env.NODE_ENV !== 'production') return true;
+  if (process.env.VERCEL_ENV === 'preview') return true;
+  return process.env.VERCEL_ENV === 'production'
+    && process.env.TRA_PRODUCTION_VIDEO_ENABLED === '1'
+    && hasRequiredProductionVideoConfiguration();
+};
 
 export const assertDurableVideoIntelligenceAvailable = () => {
   if (!isDurableVideoIntelligenceAvailable()) {
-    throw new Error('Video intelligence is available in local development or protected Vercel Preview only.');
+    throw new Error('Video intelligence is unavailable in this deployment. Production requires explicit enablement and complete configuration.');
   }
 };
 
