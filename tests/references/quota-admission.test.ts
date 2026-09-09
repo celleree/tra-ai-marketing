@@ -80,8 +80,8 @@ describe('reference classification quota admission', () => {
     expectNoWork();
   });
 
-  it.each([[], items(101), [{ id: 'invalid' }]])('rejects invalid or oversized inputs without reserving quota: %#', async value => {
-    expect((await POST(request({ items: value }))).status).toBe(400);
+  it.each([{ items: [] }, { items: items(101) }, { items: [{ id: 'invalid' }] }])('rejects invalid or oversized inputs without reserving quota: %#', async body => {
+    expect((await POST(request(body))).status).toBe(400);
     expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
     expectNoWork();
   });
