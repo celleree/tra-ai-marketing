@@ -43,6 +43,46 @@ const NAV_ITEMS: Array<{
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
 ];
 
+const SECTION_HEADERS: Record<
+  WorkspaceSection,
+  { eyebrow: string; title: string; description: string }
+> = {
+  upload: {
+    eyebrow: 'Creative studio',
+    title: 'Create',
+    description: 'Generate new TRA creatives with AI or upload finished ads.',
+  },
+  'tra-creatives': {
+    eyebrow: 'TRA creative library',
+    title: 'Creatives',
+    description: 'Review, revise, and manage saved generated and uploaded TRA creatives.',
+  },
+  company: {
+    eyebrow: 'Company intelligence',
+    title: 'Company',
+    description:
+      'Manage the verified company profile, brand guidance, and guardrails used by the creative system.',
+  },
+  'reference-images': {
+    eyebrow: 'Reference library',
+    title: 'References',
+    description:
+      'Manage layout inspiration and TRA-owned source imagery used for new creatives.',
+  },
+};
+
+function WorkspaceSectionHeader({ section }: { section: WorkspaceSection }) {
+  const header = SECTION_HEADERS[section];
+
+  return (
+    <header className="workspace-section-header">
+      <p className="workspace-section-eyebrow">{header.eyebrow}</p>
+      <h1>{header.title}</h1>
+      <p>{header.description}</p>
+    </header>
+  );
+}
+
 export function CreativeGenerator() {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
   const [creationMode, setCreationMode] = useState<CreationMode>('generate');
@@ -322,6 +362,8 @@ export function CreativeGenerator() {
       <section className="workspace-content">
         {activeSection === 'upload' ? (
           <div className="workspace-view workspace-view-upload">
+            <WorkspaceSectionHeader section="upload" />
+
             <div className="generator-grid">
               <div className="generator-main">
                 <div className={createStyles.modeSwitch} aria-label="Creative source">
@@ -386,15 +428,18 @@ export function CreativeGenerator() {
             />
           </div>
         ) : activeSection === 'tra-creatives' ? (
-          <div className="workspace-view">
+          <div className="workspace-view workspace-view-standard">
+            <WorkspaceSectionHeader section="tra-creatives" />
             <CreativeLibrary />
           </div>
         ) : activeSection === 'company' ? (
-          <div className="workspace-view">
+          <div className="workspace-view workspace-view-standard">
+            <WorkspaceSectionHeader section="company" />
             <CompanyView />
           </div>
         ) : (
-          <div className="workspace-view">
+          <div className="workspace-view workspace-view-standard">
+            <WorkspaceSectionHeader section="reference-images" />
             <ReferenceLibrary />
           </div>
         )}
