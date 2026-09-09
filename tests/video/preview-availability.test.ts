@@ -36,6 +36,13 @@ describe('durable video deployment availability', () => {
     for (const status of [400, 409, 500]) expect(videoIntelligenceHttpStatus(status)).toBe(status);
   });
 
+  it.each(['development', 'test'])('treats Vercel Production as Production even when NODE_ENV=%s', (node) => {
+    setEnvironment(node, 'production');
+    expect(isDurableVideoIntelligenceAvailable()).toBe(false);
+    expect(() => assertDurableVideoIntelligenceAvailable()).toThrow('explicitly enabled and configured Production');
+    expect(videoIntelligenceHttpStatus(500)).toBe(404);
+  });
+
   it.each(['production', '', 'development'])('denies production runtime with VERCEL_ENV=%s before parsing or extraction', async (vercel) => {
     setEnvironment('production', vercel);
     expect(isDurableVideoIntelligenceAvailable()).toBe(false);
