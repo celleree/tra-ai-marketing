@@ -19,6 +19,13 @@ export interface StoredBrandLogo {
   mediaId: string;
 }
 
+interface DrawableImage {
+  image: HTMLImageElement;
+  width: number;
+  height: number;
+  release: () => void;
+}
+
 export function readStoredBrandLogo(): StoredBrandLogo | null {
   try {
     const raw = window.localStorage.getItem(COMPANY_PROFILE_STORAGE_KEY);
@@ -83,11 +90,16 @@ const uploadMediaFile = async (file: File): Promise<MediaAsset> => {
     throw new Error('Branded creative upload could not be prepared.');
   }
 
-  const putResponse = await fetch(plan.uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type },
-    body: file,
-  });
+  let putResponse: Response;
+  try {
+    putResponse = await fetch(plan.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+  } catch {
+    return uploadThroughServer(file);
+  }
   if (!putResponse.ok) {
     throw new Error('Direct branded creative upload failed.');
   }
@@ -107,13 +119,63 @@ const uploadMediaFile = async (file: File): Promise<MediaAsset> => {
   return plan.media;
 };
 
-const fetchBitmap = async (url: string, label: string) => {
-  const response = await fetch(url, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`${label} could not be loaded.`);
+const toSameOriginMediaUrl = (url: string) => {
+  try {
+    const resolved = new URL(url, window.location.origin);
+    const mediaPath = `${resolved.pathname}${resolved.search}`;
+    if (STORED_MEDIA_URL.exec(mediaPath)?.[0] === mediaPath) {
+      return mediaPath;
+    }
+  } catch {
+    // Keep non-media relative URLs unchanged.
   }
 
-  return createImageBitmap(await response.blob());
+  return url;
+};
+
+const fetchDrawableImage = async (
+  url: string,
+  label: string
+): Promise<DrawableImage> => {
+  let response: Response;
+  try {
+    response = await fetch(url, { cache: 'no-store' });
+  } catch {
+    throw new Error(`${label} could not be fetched from this deployment.`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`${label} could not be loaded (HTTP ${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  if (!blob.size) {
+    throw new Error(`${label} returned an empty image.`);
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = objectUrl;
+
+  try {
+    await image.decode();
+  } catch {
+    URL.revokeObjectURL(objectUrl);
+    throw new Error(`${label} could not be decoded.`);
+  }
+
+  if (!image.naturalWidth || !image.naturalHeight) {
+    URL.revokeObjectURL(objectUrl);
+    throw new Error(`${label} has invalid dimensions.`);
+  }
+
+  return {
+    image,
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+    release: () => URL.revokeObjectURL(objectUrl),
+  };
 };
 
 const canvasToPngFile = (canvas: HTMLCanvasElement, fileName: string) =>
@@ -135,69 +197,78 @@ const brandOneCreative = async (
   creative: GeneratedCreative,
   logoUrl: string
 ): Promise<GeneratedCreative> => {
-  const [creativeBitmap, logoBitmap] = await Promise.all([
-    fetchBitmap(creative.image.url, 'Generated creative'),
-    fetchBitmap(logoUrl, 'TRA logo'),
-  ]);
+  const creativeUrl = `/api/media/files/${creative.image.fileName}`;
+  const safeLogoUrl = toSameOriginMediaUrl(logoUrl);
+  const creativeSource = await fetchDrawableImage(
+    creativeUrl,
+    'Generated creative'
+  );
 
   try {
-    const canvas = document.createElement('canvas');
-    canvas.width = creativeBitmap.width;
-    canvas.height = creativeBitmap.height;
-    const context = canvas.getContext('2d');
-    if (!context) {
-      throw new Error('The browser could not prepare the branded creative.');
+    const logoSource = await fetchDrawableImage(safeLogoUrl, 'TRA logo');
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = creativeSource.width;
+      canvas.height = creativeSource.height;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('The browser could not prepare the branded creative.');
+      }
+
+      context.drawImage(creativeSource.image, 0, 0);
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const maxLogoWidth = width * 0.23;
+      const maxLogoHeight = height * 0.085;
+      const scale = Math.min(
+        maxLogoWidth / logoSource.width,
+        maxLogoHeight / logoSource.height
+      );
+      const logoWidth = Math.max(1, Math.round(logoSource.width * scale));
+      const logoHeight = Math.max(1, Math.round(logoSource.height * scale));
+      const margin = Math.round(width * 0.03);
+      const paddingX = Math.round(width * 0.014);
+      const paddingY = Math.round(height * 0.012);
+      const panelWidth = logoWidth + paddingX * 2;
+      const panelHeight = logoHeight + paddingY * 2;
+
+      context.save();
+      context.fillStyle = 'rgba(255, 255, 255, 0.94)';
+      context.beginPath();
+      context.roundRect(
+        margin,
+        margin,
+        panelWidth,
+        panelHeight,
+        Math.round(width * 0.012)
+      );
+      context.fill();
+      context.restore();
+
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
+      context.drawImage(
+        logoSource.image,
+        margin + paddingX,
+        margin + paddingY,
+        logoWidth,
+        logoHeight
+      );
+
+      const file = await canvasToPngFile(
+        canvas,
+        `tra-creative-${creative.index}-branded.png`
+      );
+      const image = await uploadMediaFile(file);
+
+      return { ...creative, image };
+    } finally {
+      logoSource.release();
     }
-
-    context.drawImage(creativeBitmap, 0, 0);
-
-    const width = canvas.width;
-    const height = canvas.height;
-    const maxLogoWidth = width * 0.23;
-    const maxLogoHeight = height * 0.085;
-    const scale = Math.min(
-      maxLogoWidth / logoBitmap.width,
-      maxLogoHeight / logoBitmap.height
-    );
-    const logoWidth = Math.max(1, Math.round(logoBitmap.width * scale));
-    const logoHeight = Math.max(1, Math.round(logoBitmap.height * scale));
-    const margin = Math.round(width * 0.03);
-    const paddingX = Math.round(width * 0.014);
-    const paddingY = Math.round(height * 0.012);
-    const panelWidth = logoWidth + paddingX * 2;
-    const panelHeight = logoHeight + paddingY * 2;
-
-    context.save();
-    context.fillStyle = 'rgba(255, 255, 255, 0.94)';
-    context.beginPath();
-    context.roundRect(
-      margin,
-      margin,
-      panelWidth,
-      panelHeight,
-      Math.round(width * 0.012)
-    );
-    context.fill();
-    context.restore();
-
-    context.drawImage(
-      logoBitmap,
-      margin + paddingX,
-      margin + paddingY,
-      logoWidth,
-      logoHeight
-    );
-
-    const file = await canvasToPngFile(
-      canvas,
-      `tra-creative-${creative.index}-branded.png`
-    );
-    const image = await uploadMediaFile(file);
-
-    return { ...creative, image };
   } finally {
-    creativeBitmap.close();
-    logoBitmap.close();
+    creativeSource.release();
   }
 };
 

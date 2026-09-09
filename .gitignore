@@ -26,6 +26,7 @@ __pycache__/
 *.pyc
 .next/
 *.tsbuildinfo
+.runtime/
 
 # Build and generated output
 dist/
@@ -39,8 +40,9 @@ temp/
 .claude/settings.local.json
 .mcp.local.json
 
-# Editor / OS files
+# Editor / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+.vercel

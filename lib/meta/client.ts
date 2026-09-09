@@ -2,6 +2,8 @@ import type { StoredMediaFile } from '@/lib/media/types';
 import type { MetaAdAccount, MetaCtaType, MetaListItem } from '@/lib/meta/types';
 
 const DEFAULT_META_GRAPH_API_VERSION = 'v25.0';
+export const DEFAULT_TRA_META_URL_TAGS =
+  '_ef_transaction_id=&source_id=&affid=6&sub1={{campaign.id}}&sub2={{adset.id}}&sub3={{ad.id}}&sub4={{placement}}&sub5=ci&oid=73';
 
 interface MetaCollection<T> {
   data?: T[];
@@ -281,13 +283,33 @@ export const createMetaAdCreative = async (args: {
   headline: string;
   description?: string;
   ctaType?: MetaCtaType;
+  urlTags?: string;
 }) => {
   const accountId = normalizeAdAccountId(args.adAccountId);
   const pageId = assertGraphId(args.pageId, 'Facebook Page ID');
   const description = (args.description || '').trim();
+  const urlTags = (
+    args.urlTags ?? process.env.META_URL_TAGS ?? DEFAULT_TRA_META_URL_TAGS
+  )
+    .trim()
+    .replace(/^\?/, '');
+  const destination = new URL(args.destinationUrl);
+  const trackingKeys = [
+    '_ef_transaction_id',
+    'source_id',
+    'affid',
+    'sub1',
+    'sub2',
+    'sub3',
+    'sub4',
+    'sub5',
+    'oid',
+  ];
+  trackingKeys.forEach((key) => destination.searchParams.delete(key));
+
   const linkData: Record<string, unknown> = {
     image_hash: args.imageHash,
-    link: args.destinationUrl,
+    link: destination.toString(),
     message: args.primaryText,
     name: args.headline,
   };
@@ -299,10 +321,15 @@ export const createMetaAdCreative = async (args: {
     linkData.call_to_action = { type: args.ctaType };
   }
 
-  const body = new URLSearchParams({
+  const creativeFields: Record<string, string> = {
     name: args.name,
     object_story_spec: JSON.stringify({ page_id: pageId, link_data: linkData }),
-  });
+  };
+  if (urlTags) {
+    creativeFields.url_tags = urlTags;
+  }
+
+  const body = new URLSearchParams(creativeFields);
   const payload = await request<{ id?: string }>(`${accountId}/adcreatives`, {
     method: 'POST',
     body,

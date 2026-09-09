@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import {
   listMetaPages,
   listMetaPromotablePages,
@@ -8,6 +9,9 @@ import {
 export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   try {
     const url = new URL(request.url);
     const adAccountId = url.searchParams.get('adAccountId')?.trim() || '';

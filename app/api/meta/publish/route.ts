@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
+import { recordCreativeMetaAttribution } from '@/lib/creatives/attribution';
+import { isSafeCreativeId, listCreatives } from '@/lib/creatives/storage';
 import { getMediaStorage } from '@/lib/media/local-storage';
+import { getPublicMediaUrl } from '@/lib/media/storage';
 import {
   createMetaAdCreative,
   createPausedMetaAd,
@@ -26,7 +30,7 @@ interface PublishBody {
   pageId?: string;
   destinationUrl?: string;
   dailyBudgetCents?: number;
-  creatives?: MetaPublishCreativeInput[];
+  creativeIds?: unknown;
 }
 
 const isValidUrl = (value: string) => {
@@ -51,6 +55,9 @@ const chooseCta = (creative: MetaPublishCreativeInput): MetaCtaType => {
 };
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   let campaignId = '';
 
   try {
@@ -58,7 +65,7 @@ export async function POST(request: Request) {
     const adAccountId = body.adAccountId?.trim() || '';
     const requestedPageId = body.pageId?.trim() || '';
     const destinationUrl = body.destinationUrl?.trim() || '';
-    const creatives = Array.isArray(body.creatives) ? body.creatives : [];
+    const creativeIds = body.creativeIds;
     const dailyBudgetCents = Number(body.dailyBudgetCents || 2000);
 
     if (!adAccountId || !requestedPageId) {
@@ -83,12 +90,33 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (!creatives.length || creatives.length > 30) {
+    if (!Array.isArray(creativeIds) || !creativeIds.length || creativeIds.length > 30 ||
+      !creativeIds.every((id): id is string => typeof id === 'string' && isSafeCreativeId(id)) ||
+      new Set(creativeIds).size !== creativeIds.length) {
       return NextResponse.json(
-        { error: 'Select between 1 and 30 creatives.' },
+        { error: 'Select between 1 and 30 distinct saved creatives.' },
         { status: 400 }
       );
     }
+
+    // Release the saved image and copy that were reviewed, never client-supplied content.
+    const saved = new Map((await listCreatives()).map(creative => [creative.id, creative]));
+    const blocked = creativeIds.flatMap(id => {
+      const creative = saved.get(id);
+      const reason = !creative ? 'not found' : creative.humanReview?.status !== 'APPROVED'
+        ? 'human review required' : creative.lifecycle?.status === 'PAUSED'
+          ? 'paused in library' : !creative.format ? 'missing saved format' : null;
+      return reason ? [{ id, reason }] : [];
+    });
+    if (blocked.length) return NextResponse.json({
+      error: `Review and activate all selected creatives in TRA Creatives before sending to Meta. Blocked: ${blocked.map(item => `${item.id} (${item.reason})`).join(', ')}.`,
+      blocked,
+    }, { status: 409 });
+    const creatives: MetaPublishCreativeInput[] = creativeIds.map(id => {
+      const creative = saved.get(id)!;
+      return { id, imageId: creative.image.id, category: creative.category,
+        format: creative.format!, source: creative.source ?? 'generated', copy: creative.copy };
+    });
 
     const promotablePages = await listMetaPromotablePages(adAccountId);
     const requestedPage = promotablePages.find((page) => page.id === requestedPageId);
@@ -134,21 +162,24 @@ export async function POST(request: Request) {
           throw new Error('Creative data is incomplete.');
         }
 
-        stage = 'loading generated image';
+        stage = 'loading image';
         const image = await storage.readImageById(creative.imageId);
         if (!image) {
-          throw new Error('The generated image could not be found in media storage.');
+          throw new Error('The creative image could not be found in media storage.');
         }
 
         stage = 'uploading image to Meta';
         imageHash = await uploadMetaAdImage(adAccountId, image);
-        const categoryLabel =
-          CREATIVE_CATEGORY_LABELS[creative.category as keyof typeof CREATIVE_CATEGORY_LABELS] || creative.category;
-        const formatLabel =
-          CREATIVE_FORMAT_LABELS[creative.format as keyof typeof CREATIVE_FORMAT_LABELS] || creative.format;
+        const uploaded = creative.source === 'uploaded';
+        const categoryLabel = uploaded
+          ? 'Uploaded'
+          : CREATIVE_CATEGORY_LABELS[creative.category as keyof typeof CREATIVE_CATEGORY_LABELS] || creative.category;
+        const formatLabel = uploaded
+          ? 'Static Image'
+          : CREATIVE_FORMAT_LABELS[creative.format as keyof typeof CREATIVE_FORMAT_LABELS] || creative.format;
         const adName = [
           'TRA',
-          'AI',
+          uploaded ? 'Upload' : 'AI',
           cleanNamePart(categoryLabel),
           cleanNamePart(formatLabel),
           cleanNamePart(creativeId),
@@ -179,12 +210,49 @@ export async function POST(request: Request) {
           name: adName,
         });
 
+        const creativeUrl = getPublicMediaUrl(image.fileName);
+        let attributionSaved = true;
+        let attributionWarning = '';
+
+        try {
+          await recordCreativeMetaAttribution({
+            creativeId,
+            mediaId: creative.imageId,
+            fileName: image.fileName,
+            creativeUrl,
+            source: uploaded ? 'uploaded' : 'generated',
+            category: creative.category,
+            format: creative.format,
+            adAccountId,
+            campaignId,
+            adSetId,
+            metaAdId,
+            metaCreativeId,
+            metaImageHash: imageHash,
+          });
+        } catch (error) {
+          attributionSaved = false;
+          attributionWarning =
+            error instanceof Error
+              ? error.message
+              : 'Creative attribution could not be persisted.';
+          console.error('Creative attribution save failed', {
+            creativeId,
+            metaAdId,
+            metaCreativeId,
+            error: attributionWarning,
+          });
+        }
+
         results.push({
           creativeId,
           status: 'success',
           metaAdId,
           metaCreativeId,
           metaImageHash: imageHash,
+          creativeUrl,
+          attributionSaved,
+          ...(attributionWarning ? { attributionWarning } : {}),
           adStatus: 'PAUSED',
           ctaType,
         });

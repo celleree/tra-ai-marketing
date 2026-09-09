@@ -1,5 +1,5 @@
-import { CreativeGenerator } from '@/components/creative-generator/creative-generator';
+import { MomentumLanding } from '@/components/landing/momentum-landing';
 
 export default function HomePage() {
-  return <CreativeGenerator />;
+  return <MomentumLanding />;
 }

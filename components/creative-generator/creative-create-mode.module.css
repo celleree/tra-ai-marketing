@@ -1,0 +1,193 @@
+.modeSwitch {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border: 1px solid #d7dde5;
+  border-radius: 14px;
+  background: #f5f7fa;
+  padding: 4px;
+}
+
+.modeButton {
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 8px 12px;
+  color: #607080;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modeButtonActive {
+  background: #ffffff;
+  color: #14213d;
+  box-shadow: 0 1px 4px rgba(20, 33, 61, 0.12);
+}
+
+.uploadPanel {
+  border: 1px solid #dfe4ea;
+  border-radius: 18px;
+  background: #ffffff;
+  padding: 22px;
+  box-shadow: 0 8px 30px rgba(23, 33, 43, 0.05);
+}
+
+.uploadHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.uploadHeader h2 {
+  margin: 4px 0 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.creditBadge {
+  border-radius: 999px;
+  background: #edf8f1;
+  padding: 7px 10px;
+  color: #207044;
+  font-size: 0.76rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.uploadDescription {
+  max-width: 760px;
+  margin: 12px 0 16px;
+  color: #607080;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.dropzone {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 84px;
+  border: 1px dashed #b9c3cf;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 16px;
+  color: #657484;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.dropzoneActive {
+  border-color: #244fd3;
+  background: #f2f5ff;
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.chooseButton,
+.uploadButton {
+  border: 0;
+  border-radius: 10px;
+  background: #14213d;
+  padding: 10px 14px;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chooseButton:disabled,
+.uploadButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.fileNames {
+  margin: 9px 0 0;
+  color: #71808f;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.copyGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.copyGrid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.copyGrid label > span {
+  color: #394858;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.copyGrid input,
+.copyGrid textarea {
+  width: 100%;
+  border: 1px solid #d7dde5;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 11px;
+  color: #1d2935;
+  font: inherit;
+  resize: vertical;
+}
+
+.fullWidth {
+  grid-column: 1 / -1;
+}
+
+.uploadFooter {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.uploadFooter > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress {
+  color: #52606d;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.uploadError {
+  color: #a43a3a;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .uploadHeader,
+  .uploadFooter,
+  .dropzone {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .copyGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .fullWidth {
+    grid-column: auto;
+  }
+}

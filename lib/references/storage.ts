@@ -14,21 +14,23 @@ import type { MediaAsset } from '@/lib/media/types';
 import type {
   ReferenceAngleSource,
   ReferenceLibraryItem,
+  ReferenceLibraryType,
 } from '@/lib/references/types';
 
 const INDEX_KEY = '_metadata/reference-library.json';
-const LOCAL_INDEX_PATH = resolve(
-  process.cwd(),
-  process.env.REFERENCE_LIBRARY_INDEX || 'data/reference-library.json'
-);
+const configuredIndexPath = process.env.REFERENCE_LIBRARY_INDEX;
+const LOCAL_INDEX_PATH = configuredIndexPath
+  ? resolve(/* turbopackIgnore: true */ process.cwd(), configuredIndexPath)
+  : resolve(process.cwd(), 'data', 'reference-library.json');
 
 interface ReferenceLibraryIndex {
-  version: 2;
+  version: 3;
   items: ReferenceLibraryItem[];
 }
 
 export interface ReferenceLibraryAddition {
   media: MediaAsset;
+  referenceType: ReferenceLibraryType;
   angle: CreativeCategoryId;
   angleSource: ReferenceAngleSource;
 }
@@ -38,13 +40,14 @@ export interface ReferenceLibraryRemoval {
   removed: ReferenceLibraryItem[];
 }
 
-const emptyIndex = (): ReferenceLibraryIndex => ({ version: 2, items: [] });
+const emptyIndex = (): ReferenceLibraryIndex => ({ version: 3, items: [] });
 const ANGLE_SOURCES: ReferenceAngleSource[] = [
   'ai',
   'manual',
   'legacy',
   'fallback',
 ];
+const REFERENCE_TYPES: ReferenceLibraryType[] = ['layout', 'tra'];
 
 const isMissingObjectError = (error: unknown) =>
   error instanceof NoSuchKey ||
@@ -67,6 +70,11 @@ const normalizeItem = (value: unknown): ReferenceLibraryItem | null => {
   const url = typeof item.url === 'string' ? item.url : '';
   const addedAt =
     typeof item.addedAt === 'string' ? item.addedAt : new Date(0).toISOString();
+  const referenceType =
+    typeof item.referenceType === 'string' &&
+    REFERENCE_TYPES.includes(item.referenceType as ReferenceLibraryType)
+      ? (item.referenceType as ReferenceLibraryType)
+      : 'layout';
   const angle =
     typeof item.angle === 'string' && isCreativeCategory(item.angle)
       ? item.angle
@@ -89,6 +97,7 @@ const normalizeItem = (value: unknown): ReferenceLibraryItem | null => {
     size,
     url,
     addedAt,
+    referenceType,
     angle,
     angleSource,
   };
@@ -99,7 +108,7 @@ const parseIndex = (raw: string): ReferenceLibraryIndex => {
     const parsed = JSON.parse(raw) as { items?: unknown };
     const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
     return {
-      version: 2,
+      version: 3,
       items: rawItems
         .map(normalizeItem)
         .filter((item): item is ReferenceLibraryItem => Boolean(item)),
@@ -195,11 +204,17 @@ const writeIndex = (index: ReferenceLibraryIndex) =>
     ? writeR2Index(index)
     : writeLocalIndex(index);
 
-export const listReferenceLibrary = async (): Promise<ReferenceLibraryItem[]> => {
+const newestFirst = (a: ReferenceLibraryItem, b: ReferenceLibraryItem) =>
+  new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
+
+export const listAllReferenceLibrary = async (): Promise<ReferenceLibraryItem[]> => {
   const index = await readIndex();
-  return [...index.items].sort(
-    (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()
-  );
+  return [...index.items].sort(newestFirst);
+};
+
+export const listReferenceLibrary = async (): Promise<ReferenceLibraryItem[]> => {
+  const items = await listAllReferenceLibrary();
+  return items.filter((item) => item.referenceType === 'layout');
 };
 
 export const addToReferenceLibrary = async (
@@ -210,15 +225,16 @@ export const addToReferenceLibrary = async (
   const addedAt = new Date().toISOString();
   const nextItems = additions
     .filter(({ media }) => !existingIds.has(media.id))
-    .map(({ media, angle, angleSource }) => ({
+    .map(({ media, referenceType, angle, angleSource }) => ({
       ...media,
       addedAt,
+      referenceType,
       angle,
       angleSource,
     }));
 
   const nextIndex: ReferenceLibraryIndex = {
-    version: 2,
+    version: 3,
     items: [...nextItems, ...index.items],
   };
 
@@ -236,6 +252,9 @@ export const updateReferenceAngle = async (
   const items = index.items.map((item) => {
     if (item.id !== id) return item;
     found = true;
+    if (item.referenceType !== 'layout') {
+      throw new Error('TRA reference images do not use creative-angle folders.');
+    }
     return { ...item, angle, angleSource: 'manual' as const };
   });
 
@@ -243,7 +262,7 @@ export const updateReferenceAngle = async (
     throw new Error('Reference image was not found.');
   }
 
-  await writeIndex({ version: 2, items });
+  await writeIndex({ version: 3, items });
   return items;
 };
 
@@ -259,6 +278,6 @@ export const removeFromReferenceLibrary = async (
     return { items: index.items, removed: [] };
   }
 
-  await writeIndex({ version: 2, items });
+  await writeIndex({ version: 3, items });
   return { items, removed };
 };

@@ -1,0 +1,148 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
+import type { CreativeRecord } from '@/lib/creatives/generated';
+import { RevisionControls } from '@/components/creative-library/revision-controls';
+import { HumanReviewControls } from '@/components/creative-library/human-review-controls';
+import styles from '@/components/creative-generator/creative-results.module.css';
+
+interface CreativeLibraryItem extends CreativeRecord {
+  metaAdId?: string;
+  metaCreativeId?: string;
+}
+
+const operationLabels = {
+  GENERATE: 'Original concept', PLACEMENT: 'Placement variant', EDIT: 'Edited version',
+  REGENERATE: 'Regenerated concept', VARIATION: 'New variation',
+};
+
+export function CreativeLibrary() {
+  const [items, setItems] = useState<CreativeLibraryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+
+    const load = async () => {
+      try {
+        const response = await fetch('/api/creatives', { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || 'TRA creatives could not be loaded.');
+        }
+        if (active) setItems((payload.items || []) as CreativeLibraryItem[]);
+      } catch (loadError) {
+        if (active) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : 'TRA creatives could not be loaded.'
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <section className={styles.section} aria-busy={loading}>
+      <div className={styles.heading}>
+        <div>
+          <p className="eyebrow">TRA creative library</p>
+          <h2>TRA Creatives</h2>
+        </div>
+        <span className="muted">
+          {loading ? 'Loading…' : `${items.length} creative${items.length === 1 ? '' : 's'}`}
+        </span>
+      </div>
+
+      {error ? <p className={styles.inlineError}>{error}</p> : null}
+      {!loading && !error && !items.length ? (
+        <p className="muted">Saved generated and uploaded creatives will appear here.</p>
+      ) : null}
+
+      {items.length ? (
+        <div className={styles.grid}>
+          {items.map((creative) => (
+            <article className={styles.card} key={creative.id} id={creative.id}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                className={styles.image}
+                src={creative.image.url}
+                alt={`TRA creative ${creative.id}`}
+              />
+              <div className={styles.body}>
+                <h3>{creative.copy.headline}</h3>
+                <p>{creative.copy.primaryText}</p>
+                {creative.copy.description ? <p className={styles.description}>{creative.copy.description}</p> : null}
+                <div className={styles.pills}>
+                  <span className={styles.pill}>
+                    {CREATIVE_CATEGORY_LABELS[creative.category]}
+                  </span>
+                  <span className={styles.pill}>
+                    {creative.source === 'uploaded' ? 'Uploaded' : 'Generated'}
+                  </span>
+                </div>
+                <p className={styles.creativeId}>Creative ID: {creative.id}</p>
+                <p className={styles.description}>
+                  Created {new Date(creative.createdAt).toLocaleString()}
+                </p>
+                {creative.identity ? (
+                  <details style={{ overflowWrap: 'anywhere' }}>
+                    <summary>Version history</summary>
+                    <p>{operationLabels[creative.identity.operation]}</p>
+                    {creative.identity.parentCreativeId ? (
+                      <p><a href={`#${creative.identity.parentCreativeId}`}>View the parent creative</a></p>
+                    ) : null}
+                    <p className={styles.creativeId}>Concept ID: {creative.identity.conceptId}</p>
+                    <ul>{items.filter((item) => item.identity?.conceptId === creative.identity?.conceptId).map((version) => (
+                      <li key={version.id}>
+                        <a href={`#${version.id}`}>{version.copy.headline}</a>
+                        {' · '}{operationLabels[version.identity!.operation]}
+                        {' · '}{new Date(version.createdAt).toLocaleString()}
+                      </li>
+                    ))}</ul>
+                  </details>
+                ) : null}
+                <RevisionControls creative={creative} onSaved={saved => setItems(current => [saved, ...current.filter(item => item.id !== saved.id)])} />
+                <HumanReviewControls creative={creative} onUpdated={saved => setItems(current => current.map(item => item.id === saved.id ? { ...item, ...saved } : item))} />
+                {creative.referenceImageId ? (
+                  <p className={styles.creativeId}>
+                    Reference ID: {creative.referenceImageId}
+                  </p>
+                ) : null}
+                {creative.videoFrameSelection ? (
+                  <details style={{ overflowWrap: 'anywhere' }}>
+                    <summary>Selected video frames</summary>
+                    <p className={styles.creativeId}>Source: {creative.videoFrameSelection.sourceVideoMediaId}</p>
+                    <ul>{creative.videoFrameSelection.frames.map((frame) => (
+                      <li key={frame.libraryFrameId}>
+                        {(frame.timestampMs / 1000).toFixed(3)}s · {frame.libraryFrameId}
+                      </li>
+                    ))}</ul>
+                  </details>
+                ) : null}
+                {creative.metaAdId ? (
+                  <p className={styles.creativeId}>Meta Ad ID: {creative.metaAdId}</p>
+                ) : null}
+                {creative.metaCreativeId ? (
+                  <p className={styles.creativeId}>
+                    Meta Creative ID: {creative.metaCreativeId}
+                  </p>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}

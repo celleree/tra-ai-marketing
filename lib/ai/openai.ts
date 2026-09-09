@@ -5,8 +5,14 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
+import {
+  CREATIVE_PLACEMENT_SPECS,
+  type CreativePlacement,
+} from '@/lib/creatives/placements';
 import type { PlannedCreativeFormat } from '@/lib/creatives/generate-request';
 import type { CreativeCopy } from '@/lib/creatives/generated';
+import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import type { StoredMediaFile } from '@/lib/media/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -242,7 +248,7 @@ export async function generateCreativeCopy(
   context: string,
   analysis: CreativeReferenceAnalysis
 ): Promise<Map<number, CreativeCopy>> {
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
   const requested = plan.map((item) => ({
     index: item.index,
     category: CREATIVE_CATEGORY_LABELS[item.category],
@@ -260,6 +266,7 @@ export async function generateCreativeCopy(
     },
     body: JSON.stringify({
       model,
+      reasoning: { effort: 'medium' },
       store: false,
       input: [
         {
@@ -359,27 +366,21 @@ export async function generateCreativeCopy(
   return copyByIndex;
 }
 
-const logoSafeAreaRules = (reserveLogoArea: boolean) =>
-  reserveLogoArea
-    ? `
-Approved-logo placement:
-- Do NOT draw, imitate, typeset, or invent a TRA logo in the generated image.
-- Leave the upper-left area clear of important text, faces, CTA buttons, and essential imagery: approximately the left 27% of the canvas and top 13% of the canvas.
-- The exact approved TRA logo asset will be composited into that reserved space after image generation. Treat that space as a deliberate brand lockup area.
-`
-    : '';
-
-const buildReferenceImagePrompt = (
+const buildApprovedTraSourceImagePrompt = (
   primaryFormat: CreativeFormatId,
   secondaryFormat: CreativeFormatId | undefined,
+  placement: CreativePlacement,
   context: string,
   copy: CreativeCopy,
-  analysis: CreativeReferenceAnalysis,
   reserveLogoArea: boolean
-) => `
-Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA), using the attached image as CREATIVE INSPIRATION.
+) => {
+  const placementSpec = CREATIVE_PLACEMENT_SPECS[placement];
+  return `
+Create an ORIGINAL ${placementSpec.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
-The attached image is a reference ad, not the advertiser identity for the output. The final ad must clearly be a TRA ad.
+Compose natively for the ${placementSpec.aspectRatio} canvas (${placementSpec.width}x${placementSpec.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
+
+The ONE attached image is a validated, TRA-owned reference and is the only raw source image supplied to this generation call. Layout references, external reference-library images, and video frames are not attached.
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}
 ${
@@ -389,27 +390,18 @@ ${
 }
 User direction: ${context}
 
-Reference analysis:
-Summary: ${analysis.summary}
-Visual structure: ${analysis.visualStructure}
-Hook/angle: ${analysis.hookOrAngle}
-Style notes: ${analysis.styleNotes}
-High-level ideas worth preserving: ${analysis.preserve.join('; ') || 'none'}
-Elements to avoid copying: ${analysis.avoid.join('; ') || 'none'}
-
 Use this approved ad copy as the messaging source:
 Headline: ${copy.headline}
 Primary text idea: ${copy.primaryText}
 Description: ${copy.description}
 
-Reference-ad rules:
-- Make the attached reference materially visible in the new execution through its high-level layout logic, hierarchy, spacing, visual mechanism, or presentation style.
-- Do not fall back to a generic direct-response template when the attached reference uses a distinct creative structure.
-- Do not recreate the reference verbatim.
-- Do not copy its company name, logo, trademarks, people, exact wording, testimonial, statistics, claims, or other brand identity.
-- Replace the reference advertiser identity with Tax Relief Advocates / TRA.
+Approved-source rules:
+- The attached TRA image is the only allowed raw visual and the only approved human-identity source for this generation call.
+- If the output depicts a person, preserve the visible identity from the attached TRA image. Do not invent, replace, blend, or add another person.
+- Do not recreate the attached image verbatim or depend on its old layout unless the text direction explicitly asks for a high-level structural cue.
 - Make the result clearly original and specific to TRA.
-${logoSafeAreaRules(reserveLogoArea)}
+${formatCreativeSafeZoneRules(placement)}
+${reserveLogoArea ? formatCreativeLogoReservation(placement) : ''}
 TRA guardrails:
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
@@ -418,54 +410,7 @@ TRA guardrails:
 - Strong visual hierarchy. Avoid tiny text and clutter.
 - The only company/brand name that may appear is Tax Relief Advocates or TRA.
 `;
-
-const buildTraLibraryImagePrompt = (
-  primaryFormat: CreativeFormatId,
-  secondaryFormat: CreativeFormatId | undefined,
-  context: string,
-  copy: CreativeCopy,
-  traAnalysis: CreativeReferenceAnalysis,
-  reserveLogoArea: boolean
-) => `
-Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
-
-The ONE attached image is the selected REFERENCE-LIBRARY CREATIVE and is the PRIMARY VISUAL-EXECUTION ANCHOR.
-The uploaded TRA source ad is intentionally NOT attached to this image-generation call because its old layout must not compete with the reference. TRA source information is provided below as text analysis only.
-
-Primary creative format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}
-${
-  secondaryFormat
-    ? `Secondary creative format: ${CREATIVE_FORMAT_LABELS[secondaryFormat]}`
-    : ''
-}
-User direction: ${context}
-
-TRA source analysis for brand/content context only:
-Summary: ${traAnalysis.summary}
-TRA identity/message cues worth preserving: ${traAnalysis.preserve.join('; ') || 'Tax Relief Advocates identity'}
-Source elements to avoid repeating or relying on: ${traAnalysis.avoid.join('; ') || 'none'}
-
-Use this approved ad copy as the messaging source:
-Headline: ${copy.headline}
-Primary text idea: ${copy.primaryText}
-Description: ${copy.description}
-
-Reference-driven rules:
-- The attached library reference should materially drive the output's composition family, major visual blocks, hierarchy, spacing, visual mechanism, and presentation treatment.
-- Keep the recognizable high-level creative idea of the reference while rebuilding it as an original TRA ad.
-- Do NOT default back to the uploaded TRA ad's old composition or a generic TRA direct-response layout.
-- Do not merely recolor the reference or swap a headline. Rebuild the execution with TRA copy and identity while retaining the reference's useful structural logic.
-- Do not copy third-party company names, logos, people, exact wording, testimonials, statistics, results, or protected brand elements from the reference.
-- The reference does NOT define factual claims. Use only the approved TRA copy and TRA source analysis supplied here.
-${logoSafeAreaRules(reserveLogoArea)}
-TRA guardrails:
-- Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
-- If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
-- Do not imply universal tax-debt results.
-- Keep the design credible, consumer-friendly, and readable on a phone.
-- Strong visual hierarchy. Avoid tiny text and clutter.
-- The only company/brand name that may appear is Tax Relief Advocates or TRA.
-`;
+};
 
 const appendImage = (
   formData: FormData,
@@ -481,14 +426,15 @@ const appendImage = (
 
 const generateImageEdit = async (
   prompt: string,
-  images: Array<{ source: StoredMediaFile; fileName: string }>
-): Promise<Buffer> => {
+  images: Array<{ source: StoredMediaFile; fileName: string }>,
+  providerSize: string
+): Promise<ImageGenerationResult> => {
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const formData = new FormData();
   formData.set('model', model);
   formData.set('prompt', prompt);
-  formData.set('size', '1024x1024');
-  formData.set('quality', 'medium');
+  formData.set('size', providerSize);
+  formData.set('quality', 'high');
   formData.set('output_format', 'png');
 
   for (const image of images) {
@@ -513,54 +459,34 @@ const generateImageEdit = async (
     throw new Error('OpenAI returned no generated image.');
   }
 
-  return Buffer.from(base64, 'base64');
+  return { buffer: Buffer.from(base64, 'base64'), prompt, model };
 };
 
-export async function generateReferenceCreativeImage(args: {
+export async function generateApprovedTraReferenceCreativeImage(args: {
   source: StoredMediaFile;
   primaryFormat: CreativeFormatId;
   secondaryFormat?: CreativeFormatId;
+  placement?: CreativePlacement;
   context: string;
   copy: CreativeCopy;
-  analysis: CreativeReferenceAnalysis;
   reserveLogoArea?: boolean;
-}): Promise<Buffer> {
-  return generateImageEdit(
-    buildReferenceImagePrompt(
+}): Promise<ImageGenerationResult> {
+  const prompt = buildApprovedTraSourceImagePrompt(
       args.primaryFormat,
       args.secondaryFormat,
+      args.placement ?? 'SQUARE_1_1',
       args.context,
       args.copy,
-      args.analysis,
       Boolean(args.reserveLogoArea)
-    ),
-    [{ source: args.source, fileName: `reference-${args.source.fileName}` }]
-  );
-}
-
-export async function generateTraCreativeFromLibraryReference(args: {
-  creativeReference: StoredMediaFile;
-  primaryFormat: CreativeFormatId;
-  secondaryFormat?: CreativeFormatId;
-  context: string;
-  copy: CreativeCopy;
-  traAnalysis: CreativeReferenceAnalysis;
-  reserveLogoArea?: boolean;
-}): Promise<Buffer> {
+    );
   return generateImageEdit(
-    buildTraLibraryImagePrompt(
-      args.primaryFormat,
-      args.secondaryFormat,
-      args.context,
-      args.copy,
-      args.traAnalysis,
-      Boolean(args.reserveLogoArea)
-    ),
+    prompt,
     [
       {
-        source: args.creativeReference,
-        fileName: `library-reference-${args.creativeReference.fileName}`,
+        source: args.source,
+        fileName: `approved-tra-source-${args.source.fileName}`,
       },
-    ]
+    ],
+    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize
   );
 }

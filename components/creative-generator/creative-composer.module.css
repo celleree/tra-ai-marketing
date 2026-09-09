@@ -5,7 +5,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid #dde2e8;
-  border-radius: 22px;
+  border-radius: 18px;
   background: #ffffff;
   padding: 16px 18px;
   box-shadow: 0 10px 34px rgba(23, 33, 43, 0.055);
@@ -25,6 +25,11 @@
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
+}
+
+.attachmentList {
+  display: grid;
+  gap: 8px;
 }
 
 .attachmentRow {
@@ -55,6 +60,20 @@
   border-radius: 10px;
   background: #edf1f4;
   object-fit: cover;
+}
+
+.videoBadge {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  background: #e7edf8;
+  color: #3159bd;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .attachmentCopy {
@@ -90,40 +109,36 @@
   box-shadow: 0 0 0 4px rgba(22, 162, 97, 0.1);
 }
 
-.modeToggle {
+.attachmentActions {
   display: inline-flex;
   flex: 0 0 auto;
-  gap: 2px;
+  align-items: center;
+  gap: 7px;
+}
+
+.attachmentActions select,
+.attachmentActions button {
   border: 1px solid #dfe4ea;
-  border-radius: 999px;
-  background: #f4f6f8;
-  padding: 3px;
-}
-
-.modeButton {
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  padding: 7px 11px;
-  color: #6d7884;
-  font-size: 0.74rem;
-  font-weight: 750;
-  line-height: 1;
-  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
-}
-
-.modeButtonActive {
+  border-radius: 9px;
   background: #ffffff;
-  color: #17212b;
-  box-shadow: 0 1px 4px rgba(23, 33, 43, 0.12);
+  padding: 7px 9px;
+  color: #43505d;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
-.modeButton:focus-visible {
+.attachmentActions button {
+  color: #8a3d3d;
+}
+
+.attachmentActions select:focus-visible,
+.attachmentActions button:focus-visible {
   outline: 3px solid rgba(53, 97, 232, 0.18);
   outline-offset: 2px;
 }
 
-.modeButton:disabled {
+.attachmentActions select:disabled,
+.attachmentActions button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -272,6 +287,10 @@
   gap: 10px;
 }
 
+.tools {
+  flex-wrap: wrap;
+}
+
 .plusButton,
 .sendButton {
   display: grid;
@@ -355,7 +374,7 @@
   place-content: center;
   gap: 5px;
   border: 2px dashed #3561e8;
-  border-radius: 17px;
+  border-radius: 14px;
   background: rgba(248, 250, 255, 0.96);
   color: #244fd3;
   pointer-events: none;
@@ -386,12 +405,17 @@
     align-items: flex-start;
   }
 
-  .modeToggle {
+  .attachmentActions {
     width: 100%;
+    justify-content: flex-end;
   }
 
-  .modeButton {
+  .attachmentActions label {
     flex: 1;
+  }
+
+  .attachmentActions select {
+    width: 100%;
   }
 
   .textarea {

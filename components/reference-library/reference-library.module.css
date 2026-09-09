@@ -6,13 +6,15 @@
 
 .intro {
   max-width: 680px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .intro h2 {
   margin: 0 0 8px;
-  font-size: 1.55rem;
-  letter-spacing: -0.03em;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
 }
 
 .intro p {
@@ -21,17 +23,68 @@
   line-height: 1.6;
 }
 
+.libraryTabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  border: 1px solid #e0e4e9;
+  border-radius: 12px;
+  background: #f7f8fa;
+  padding: 4px;
+}
+
+.libraryTab {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  padding: 0 13px;
+  color: #66717e;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.libraryTab:hover {
+  color: #17212b;
+}
+
+.libraryTab span {
+  min-width: 22px;
+  border-radius: 999px;
+  background: #e8ebef;
+  padding: 2px 6px;
+  color: #7b8692;
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+.libraryTabActive {
+  background: #ffffff;
+  color: #244fd3;
+  box-shadow: 0 1px 4px rgba(23, 33, 43, 0.08);
+}
+
+.libraryTabActive span {
+  background: #e7ecff;
+  color: #244fd3;
+}
+
 .uploader {
   position: relative;
-  display: flex;
-  min-height: 190px;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
+  display: grid;
+  min-height: 172px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
   border: 1.5px dashed #c6cdd6;
   border-radius: 18px;
   background: #ffffff;
-  padding: 28px;
+  padding: 30px 28px 46px;
+  cursor: pointer;
   transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
 }
 
@@ -43,68 +96,73 @@
 
 .fileInput {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  z-index: 3;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   opacity: 0;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .uploadIcon {
+  position: relative;
   display: grid;
-  width: 48px;
-  height: 48px;
-  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
   place-items: center;
-  border: 1px solid #d9dfe6;
-  border-radius: 14px;
-  background: #f7f8fa;
-  color: #2f3a46;
-  font-size: 1.7rem;
-  font-weight: 400;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #293440;
+  font-size: 0;
+}
+
+.uploadIcon::before {
+  content: '↑';
+  font-size: 1.65rem;
+  font-weight: 500;
+  line-height: 1;
+  transform: translateY(-2px);
+}
+
+.uploadIcon::after {
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  width: 21px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+  transform: translateX(-50%);
 }
 
 .uploadCopy {
-  display: grid;
+  display: block;
   min-width: 0;
-  gap: 4px;
+  text-align: center;
 }
 
 .uploadCopy strong {
+  display: block;
   color: #17212b;
   font-size: 1rem;
+  font-weight: 700;
 }
 
-.uploadCopy span {
-  color: #6e7986;
-  font-size: 0.9rem;
-}
-
+.uploadCopy span,
 .chooseButton {
-  min-height: 42px;
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: 10px;
-  background: #17212b;
-  padding: 0 16px;
-  color: #ffffff;
-  font-weight: 750;
-}
-
-.chooseButton:hover:not(:disabled) {
-  background: #0f161e;
-}
-
-.chooseButton:disabled {
-  opacity: 0.55;
+  display: none;
 }
 
 .uploadMeta {
   position: absolute;
-  bottom: 18px;
+  bottom: 17px;
   left: 50%;
   transform: translateX(-50%);
-  color: #929ba6;
+  color: #9aa3ad;
   font-size: 0.76rem;
   white-space: nowrap;
 }
@@ -164,12 +222,12 @@
   align-items: center;
   gap: 7px;
   border: 1px solid #e0e4e9;
-  border-radius: 9px;
+  border-radius: 10px;
   background: #ffffff;
   padding: 0 10px;
   color: #9a2e2e;
   font-size: 0.76rem;
-  font-weight: 750;
+  font-weight: 700;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
 }
 
@@ -194,7 +252,11 @@
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 20px;
   align-items: start;
-  margin-top: 18px;
+  margin-top: 20px;
+}
+
+.traLibraryLayout {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .folderPanel {
@@ -202,7 +264,7 @@
   top: 104px;
   overflow: hidden;
   border: 1px solid #e0e4e9;
-  border-radius: 16px;
+  border-radius: 14px;
   background: #ffffff;
   box-shadow: 0 5px 20px rgba(23, 33, 43, 0.03);
 }
@@ -218,6 +280,7 @@
 
 .folderHeader strong {
   font-size: 0.85rem;
+  font-weight: 700;
 }
 
 .folderHeader span {
@@ -239,7 +302,7 @@
   align-items: center;
   gap: 7px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   background: transparent;
   padding: 6px 8px;
   color: #586573;
@@ -255,7 +318,7 @@
 .folderButtonActive {
   background: #eef2ff;
   color: #244fd3;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .folderButtonActive:hover {
@@ -313,6 +376,7 @@
 .libraryHeader h3 {
   margin: 2px 0 0;
   font-size: 1.08rem;
+  font-weight: 700;
 }
 
 .libraryHeader > span {
@@ -324,7 +388,7 @@
   color: #8b95a0;
   font-size: 0.65rem;
   font-weight: 800;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -366,7 +430,7 @@
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 2px 8px rgba(23, 33, 43, 0.12);
   cursor: pointer;
@@ -425,6 +489,18 @@
   white-space: nowrap;
 }
 
+.assetLabel {
+  width: fit-content;
+  border-radius: 999px;
+  background: #eef4f8;
+  padding: 5px 8px;
+  color: #607382;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 .angleControl {
   display: grid;
   gap: 5px;
@@ -433,7 +509,7 @@
 .angleControl span {
   color: #929ba6;
   font-size: 0.65rem;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -443,7 +519,7 @@
   min-width: 0;
   height: 34px;
   border: 1px solid #d9dfe5;
-  border-radius: 8px;
+  border-radius: 10px;
   outline: none;
   background: #fafbfc;
   padding: 0 8px;
@@ -464,7 +540,7 @@
   align-content: center;
   gap: 6px;
   border: 1px solid #e2e6eb;
-  border-radius: 16px;
+  border-radius: 14px;
   background: #ffffff;
   color: #8a95a1;
   text-align: center;
@@ -473,6 +549,7 @@
 .empty strong {
   color: #3a4652;
   font-size: 0.92rem;
+  font-weight: 700;
 }
 
 .empty span {
@@ -521,19 +598,29 @@
 @media (max-width: 720px) {
   .page {
     width: min(100% - 32px, 760px);
-    padding: 30px 0 56px;
+    padding: 32px 0 56px;
+  }
+
+  .libraryTabs {
+    width: 100%;
+  }
+
+  .libraryTab {
+    flex: 1;
+    justify-content: center;
   }
 
   .uploader {
-    min-height: 250px;
-    flex-direction: column;
-    gap: 12px;
-    text-align: center;
+    min-height: 156px;
+    padding: 30px 18px 46px;
   }
 
   .uploadMeta {
     position: static;
+    max-width: calc(100% - 24px);
+    overflow: hidden;
     transform: none;
+    text-overflow: ellipsis;
     white-space: normal;
   }
 

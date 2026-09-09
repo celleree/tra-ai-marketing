@@ -23,6 +23,7 @@ export interface MetaPublishCreativeInput {
   imageId: string;
   category: string;
   format: string;
+  source?: 'generated' | 'uploaded';
   copy: {
     primaryText: string;
     headline: string;
@@ -36,6 +37,9 @@ export interface MetaPublishCreativeResult {
   metaAdId?: string;
   metaCreativeId?: string;
   metaImageHash?: string;
+  creativeUrl?: string;
+  attributionSaved?: boolean;
+  attributionWarning?: string;
   adStatus?: 'PAUSED';
   ctaType?: MetaCtaType;
   error?: string;

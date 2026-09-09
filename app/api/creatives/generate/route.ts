@@ -1,39 +1,87 @@
+import { createHash, randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
+import { getOperatorAccess } from '@/lib/auth/server-access';
+import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
+import { requireOperatorQuota } from '@/lib/quotas/require-quota';
+import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
+import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
+import { saveCreativeBatch } from '@/lib/creatives/storage';
 import {
-  analyzeReferenceCreative,
   analyzeTraSourceCreative,
-  generateCreativeCopy,
-  generateReferenceCreativeImage,
-  generateTraCreativeFromLibraryReference,
+  generateApprovedTraReferenceCreativeImage,
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
+import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import { planCreativeBatch } from '@/lib/ai/creative-planner';
 import {
-  CREATIVE_CATEGORIES,
-  CREATIVE_CATEGORY_LABELS,
-} from '@/lib/creative-categories';
+  analyzeApprovedTraVideoFrames,
+  generateApprovedTraVideoFrameCreativeImage,
+} from '@/lib/ai/video-frame-generation';
+import {
+  selectBestReferenceCreatives,
+  type ReferenceSelectionCandidate,
+  type SelectedReferenceCreative,
+} from '@/lib/ai/reference-selector';
+import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import {
-  buildCreativePlan,
   validateGenerateCreativeRequest,
-  type PlannedCreative,
-  type ValidGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
+import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
+import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
+import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
+import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
+import {
+  CREATIVE_PLACEMENT_SPECS,
+  type CreativePlacement,
+} from '@/lib/creatives/placements';
+import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { isDurableVideoIntelligenceAvailable } from '@/lib/video/preview-availability';
+import {
+  formatLayoutBlueprintForPlanning,
+  LAYOUT_BLUEPRINT_SCHEMA_VERSION,
+  type LayoutBlueprint,
+} from '@/lib/layouts/blueprint';
+import {
+  getOrAnalyzeLayoutBlueprint,
+  type ResolvedLayoutBlueprint,
+} from '@/lib/layouts/service';
 import { getMediaStorage } from '@/lib/media/local-storage';
-import type { MediaStorage } from '@/lib/media/storage';
-import type { StoredMediaFile } from '@/lib/media/types';
+import {
+  CreativeSourceHydrationError,
+  findEligibleProviderImageSource,
+  hydrateCreativeSourceSelections,
+  type HydratedCreativeSourceAsset,
+} from '@/lib/media/source-hydration';
+import { isUsableApprovedHumanSource } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
+import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
+import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
+import { videoSourceHash } from '@/lib/video/library-service';
+import { extractVideoSelectionFrames, loadVideoSelectionContext } from '@/lib/video/selection-context';
+import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
+import type {
+  ApprovedTraVideoFrame,
+  ApprovedTraVideoFrameSet,
+} from '@/lib/video/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const RENDER_CONCURRENCY = 2;
 
-interface SelectedLibraryReference {
-  item: ReferenceLibraryItem;
-  source: StoredMediaFile;
-}
+const sha256 = (buffer: Buffer) =>
+  createHash('sha256').update(buffer).digest('hex');
+
+const encodeSseEvent = (
+  encoder: TextEncoder,
+  event: 'creative' | 'error' | 'complete',
+  payload: object
+) => encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 
 const getOpenAIError = async (response: Response) => {
   try {
@@ -47,8 +95,7 @@ const getOpenAIError = async (response: Response) => {
 };
 
 const buildPromptOnlyAnalysis = (
-  context: string,
-  plan: PlannedCreative[]
+  context: string
 ): CreativeReferenceAnalysis => ({
   summary: 'No source image was supplied. Create original TRA concepts from the user direction.',
   visibleText: [],
@@ -63,33 +110,56 @@ const buildPromptOnlyAnalysis = (
     'guaranteed outcomes',
     'government affiliation',
     'third-party brands or trademarks',
+    'people, faces, spokespersons, or human figures without an attached approved TRA human source',
   ],
   unknowns: [],
-  dominantCategory: plan[0]?.category || 'customer-problems',
+  dominantCategory: 'customer-problems',
 });
 
-const generatePromptOnlyCreativeImage = async (args: {
+const buildLayoutReferenceAnalysis = (
+  blueprint: LayoutBlueprint
+): CreativeReferenceAnalysis => ({
+  summary:
+    'External layout reference reduced to a validated design-only LayoutBlueprint. It supplies no creative strategy, copy, claims, brand identity, trademark identity, or person identity.',
+  visibleText: [],
+  visualStructure: formatLayoutBlueprintForPlanning(blueprint),
+  hookOrAngle:
+    'Not supplied by the layout reference. Choose strategy only from approved TRA company context and user direction.',
+  offerOrCta:
+    'Not supplied by the layout reference. Use only approved TRA offers, claims, and CTA direction.',
+  styleNotes:
+    'Use only the validated blueprint geometry and controlled design mechanisms. Do not reconstruct restricted reference content.',
+  preserve: ['validated layout geometry and design mechanisms only'],
+  avoid: [
+    'third-party person identity',
+    'third-party logos or branding',
+    'third-party trademarks',
+    'reference ad copy',
+    'reference testimonials, statistics, claims, or proof content',
+  ],
+  unknowns: [],
+  dominantCategory: 'customer-problems',
+});
+
+export const generatePromptOnlyCreativeImage = async (args: {
   primaryFormat: keyof typeof CREATIVE_FORMAT_LABELS;
+  placement: CreativePlacement;
   context: string;
   copy: CreativeCopy;
   reserveLogoArea: boolean;
-}) => {
+}): Promise<ImageGenerationResult> => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is not configured.');
   }
 
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
-  const logoDirection = args.reserveLogoArea
-    ? `
-Approved-logo placement:
-- Do NOT draw, imitate, typeset, or invent a TRA logo in the generated image.
-- Leave the upper-left area clear of important text, faces, CTA buttons, and essential imagery: approximately the left 27% of the canvas and top 13% of the canvas.
-- The exact approved TRA logo asset will be composited into that reserved space after image generation.
-`
-    : '';
+  const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
+  const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
   const prompt = `
-Create an ORIGINAL square static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+
+Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
 User direction: ${args.context}
@@ -100,8 +170,10 @@ Primary text idea: ${args.copy.primaryText}
 Description: ${args.copy.description}
 
 ${logoDirection}
+${formatCreativeSafeZoneRules(args.placement)}
 TRA guardrails:
 - This request has no reference image. Invent the visual composition from scratch.
+- Do not depict a person, face, spokesperson, or human figure. No approved TRA human identity is attached to this image-generation call, so use a non-human concept.
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
 - Do not imply universal tax-debt results.
@@ -119,8 +191,8 @@ TRA guardrails:
     body: JSON.stringify({
       model,
       prompt,
-      size: '1024x1024',
-      quality: 'medium',
+      size: placement.providerSize,
+      quality: 'high',
       output_format: 'png',
     }),
   });
@@ -137,89 +209,46 @@ TRA guardrails:
     throw new Error('OpenAI returned no generated image.');
   }
 
-  return Buffer.from(base64, 'base64');
+  return { buffer: Buffer.from(base64, 'base64'), prompt, model };
 };
 
-const rotate = <T,>(items: T[]): T[] => {
-  if (items.length < 2) return [...items];
-  const offset = Math.floor(Math.random() * items.length);
-  return [...items.slice(offset), ...items.slice(0, offset)];
-};
+const buildReferenceCandidates = (
+  library: ReferenceLibraryItem[],
+  requestUrl: string
+): ReferenceSelectionCandidate[] =>
+  library.map((item) => ({
+    item,
+    imageUrl: new URL(item.url, requestUrl).toString(),
+  }));
 
-const buildReferenceDrivenPlan = (
-  request: ValidGenerateCreativeRequest,
-  library: ReferenceLibraryItem[]
-): PlannedCreative[] => {
-  const availableCategories = CREATIVE_CATEGORIES.filter((category) =>
-    library.some((item) => item.angle === category)
-  );
-  if (!availableCategories.length) return [];
-
-  const orderedCategories = rotate([...availableCategories]);
-  return Array.from({ length: request.variationCount }, (_, offset) => {
-    const category = orderedCategories[offset % orderedCategories.length];
-    const [template] = buildCreativePlan(
-      { ...request, variationCount: 1 },
-      category
-    );
-
-    return { ...template, index: offset + 1 };
-  });
-};
-
-const selectLibraryReferences = async (
-  plan: PlannedCreative[],
-  storage: MediaStorage,
-  library: ReferenceLibraryItem[]
-): Promise<Map<number, SelectedLibraryReference>> => {
-  const selections = new Map<number, SelectedLibraryReference>();
-  if (!library.length) return selections;
-
-  const orderedLibrary = rotate([...library]);
-  const usedIds = new Set<string>();
-  const sourceCache = new Map<string, Promise<StoredMediaFile | null>>();
-
-  const readSource = (id: string) => {
-    const existing = sourceCache.get(id);
-    if (existing) return existing;
-    const pending = storage.readImageById(id);
-    sourceCache.set(id, pending);
-    return pending;
-  };
-
-  for (const creative of plan) {
-    const categoryPool = orderedLibrary.filter(
-      (item) => item.angle === creative.category
-    );
-    const candidates = [
-      ...categoryPool.filter((item) => !usedIds.has(item.id)),
-      ...categoryPool,
-    ];
-    const seen = new Set<string>();
-
-    for (const candidate of candidates) {
-      if (seen.has(candidate.id)) continue;
-      seen.add(candidate.id);
-
-      const source = await readSource(candidate.id);
-      if (!source) continue;
-
-      selections.set(creative.index, { item: candidate, source });
-      usedIds.add(candidate.id);
-      break;
-    }
-  }
-
-  return selections;
-};
+const findGenerationSource = (
+  sources: HydratedCreativeSourceAsset[]
+): HydratedCreativeSourceAsset | undefined =>
+  sources.find(
+    (source) =>
+      source.role === 'LAYOUT_REFERENCE' && source.media.mediaType === 'IMAGE'
+  ) || sources.find((source) => source.media.mediaType === 'IMAGE');
 
 export async function POST(request: Request) {
+  const access = await getOperatorAccess();
+  if (!access.allowed) return operatorAccessDeniedResponse(access);
+
   try {
     const body = await request.json();
     const parsed = validateGenerateCreativeRequest(body);
 
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+
+    if (
+      parsed.data.videoFrameSelection &&
+      !isDurableVideoIntelligenceAvailable()
+    ) {
+      return NextResponse.json(
+        { error: 'Selected TRA video frame generation is available in local development or protected Vercel Preview only.' },
+        { status: 404 }
+      );
     }
 
     if (!process.env.OPENAI_API_KEY) {
@@ -229,16 +258,107 @@ export async function POST(request: Request) {
       );
     }
 
-    const storage = getMediaStorage();
-    const source = parsed.data.mediaId
-      ? await storage.readImageById(parsed.data.mediaId)
-      : null;
+    const quotaDenied = await requireOperatorQuota(
+      access.userId,
+      'CREATIVE_GENERATION',
+      parsed.data.variationCount,
+    );
+    if (quotaDenied) return quotaDenied;
 
-    if (parsed.data.mediaId && !source) {
-      return NextResponse.json(
-        { error: 'The source image could not be found.' },
-        { status: 404 }
+    const storage = getMediaStorage();
+    let sourceAssets: HydratedCreativeSourceAsset[];
+    try {
+      sourceAssets = await hydrateCreativeSourceSelections(
+        storage,
+        parsed.data.sourceAssets
       );
+    } catch (error) {
+      if (error instanceof CreativeSourceHydrationError) {
+        return NextResponse.json(
+          { error: error.message },
+          { status: error.status }
+        );
+      }
+      throw error;
+    }
+
+    const generationSourceAsset = findGenerationSource(sourceAssets);
+    const requestedSources: CreativeGenerationProvenance['requestedSources'] =
+      sourceAssets.map((sourceAsset) => ({
+        role: sourceAsset.role,
+        mediaId: sourceAsset.media.id,
+        sha256: sha256(sourceAsset.stored.buffer),
+      }));
+    const source =
+      generationSourceAsset?.stored.mediaType === 'IMAGE'
+        ? generationSourceAsset.stored
+        : null;
+    const providerImageSource = findEligibleProviderImageSource(sourceAssets);
+    const traVideoSource = sourceAssets.find(
+      (sourceAsset) => sourceAsset.role === 'TRA_VIDEO'
+    ) as HydratedTraVideoSource | undefined;
+    let videoFrameSet: ApprovedTraVideoFrameSet | null = null;
+    let generatedVideoFrameSelection: GeneratedVideoFrameSelection | undefined;
+
+    if (parsed.data.videoFrameSelection && traVideoSource) {
+      const requestedSelection = parsed.data.videoFrameSelection;
+      const sourceContentHash = videoSourceHash(traVideoSource);
+      if (sourceContentHash !== requestedSelection.sourceVideoContentHash) {
+        return NextResponse.json(
+          { error: 'The selected TRA video frames are stale. Reanalyze the video and select frames again.' },
+          { status: 409 }
+        );
+      }
+      const selectionContext = await loadVideoSelectionContext(traVideoSource);
+      const library = selectionContext?.library;
+      if (!library) {
+        return NextResponse.json(
+          { error: 'The selected TRA video frame library is missing or invalid. Reanalyze the video and select frames again.' },
+          { status: 409 }
+        );
+      }
+      if (library.id !== requestedSelection.libraryId) {
+        return NextResponse.json(
+          { error: 'The selected TRA video frame library does not match this request. Select frames again.' },
+          { status: 409 }
+        );
+      }
+      try {
+        const selectedFrameSet = await extractVideoSelectionFrames(
+          traVideoSource,
+          selectionContext!,
+          requestedSelection.frameIds
+        );
+        videoFrameSet = selectedFrameSet;
+        generatedVideoFrameSelection = {
+          libraryId: library.id,
+          sourceVideoMediaId: traVideoSource.media.id,
+          sourceVideoContentHash: selectedFrameSet.sourceVideoContentHash,
+          frames: selectedFrameSet.selectionProvenance,
+        };
+      } catch (error) {
+        return NextResponse.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : 'The selected TRA video frames could not be verified. Select frames again.',
+          },
+          { status: 409 }
+        );
+      }
+    } else if (traVideoSource && !providerImageSource) {
+      try {
+        videoFrameSet = await getApprovedTraVideoFrames(traVideoSource);
+      } catch (error) {
+        if (error instanceof TraVideoProcessingError) {
+          return NextResponse.json(
+            { error: error.message },
+            { status: error.status }
+          );
+        }
+        throw error;
+      }
     }
 
     const brandLogo = parsed.data.brandLogoMediaId
@@ -254,61 +374,77 @@ export async function POST(request: Request) {
       );
     }
     const reserveLogoArea = Boolean(brandLogo);
+    const logoOverlaySource = brandLogo && parsed.data.brandLogoMediaId
+      ? {
+          mediaId: parsed.data.brandLogoMediaId,
+          sha256: sha256(brandLogo.buffer),
+        }
+      : undefined;
 
     let analysis: CreativeReferenceAnalysis;
-    let creativePlan: PlannedCreative[];
-    let librarySelections = new Map<number, SelectedLibraryReference>();
+    let layoutBlueprint: ResolvedLayoutBlueprint | null = null;
+    let selectedReferences: SelectedReferenceCreative[] = [];
 
-    if (source && parsed.data.uploadMode === 'reference') {
-      analysis = await analyzeReferenceCreative(source, parsed.data.context);
-      creativePlan = buildCreativePlan(parsed.data, analysis.dominantCategory);
-    } else if (source && parsed.data.uploadMode === 'tra') {
-      const library = await listReferenceLibrary();
-      creativePlan = buildReferenceDrivenPlan(parsed.data, library);
-
-      if (!creativePlan.length) {
-        return NextResponse.json(
-          {
-            error:
-              'TRA ad mode needs categorized images in the Reference Images library before it can build reference-driven concepts.',
-          },
-          { status: 409 }
-        );
-      }
-
-      librarySelections = await selectLibraryReferences(
-        creativePlan,
-        storage,
-        library
-      );
-
-      if (librarySelections.size !== creativePlan.length) {
-        return NextResponse.json(
-          {
-            error:
-              'One or more planned creative categories do not have a usable matching reference image. Re-upload the missing category reference and try again.',
-          },
-          { status: 409 }
-        );
-      }
-
+    if (source && generationSourceAsset?.role === 'LAYOUT_REFERENCE') {
+      layoutBlueprint = await getOrAnalyzeLayoutBlueprint(source);
+      analysis = buildLayoutReferenceAnalysis(layoutBlueprint.blueprint);
+    } else if (source && generationSourceAsset?.role === 'TRA_REFERENCE') {
       analysis = await analyzeTraSourceCreative(source, parsed.data.context);
+
+      const library = await listReferenceLibrary();
+      const requestedReferenceCount = Math.min(
+        parsed.data.variationCount,
+        library.length
+      );
+      if (requestedReferenceCount > 0) {
+        selectedReferences = await selectBestReferenceCreatives({
+          candidates: buildReferenceCandidates(library, request.url),
+          requestedCount: requestedReferenceCount,
+          userContext: parsed.data.context,
+          traSummary: analysis.summary,
+          traPreserve: analysis.preserve,
+        });
+      }
+    } else if (videoFrameSet) {
+      analysis = await analyzeApprovedTraVideoFrames({
+        frames: videoFrameSet.frames,
+        context: parsed.data.context,
+      });
     } else {
-      creativePlan = buildCreativePlan(parsed.data);
-      analysis = buildPromptOnlyAnalysis(parsed.data.context, creativePlan);
+      analysis = buildPromptOnlyAnalysis(parsed.data.context);
     }
 
-    const categoryDirections = creativePlan
-      .map(
-        (item) =>
-          `Creative ${item.index}: ${CREATIVE_CATEGORY_LABELS[item.category]}`
-      )
-      .join('\n');
+    const referenceDirections = selectedReferences.length
+      ? selectedReferences
+          .map((selection) =>
+            `- Reference ${selection.item.id} (${CREATIVE_CATEGORY_LABELS[selection.item.angle]}): ${selection.selectionReason}`
+          )
+          .join('\n')
+      : '';
     const modeDirection = source
-      ? parsed.data.uploadMode === 'tra'
-        ? 'TRA ad mode: the uploaded TRA image supplies brand/content context through analysis only. Every generated image uses a category-matched library reference as its visual execution anchor. The uploaded TRA ad itself is not passed into final image generation, so its old layout cannot overpower the reference.'
-        : `Reference ad mode: the uploaded image is creative inspiration. Keep the variations within its dominant category (${CREATIVE_CATEGORY_LABELS[analysis.dominantCategory]}) while turning the concept into original TRA ads.`
-      : 'No-image mode: create original TRA ads from the user direction.';
+      ? generationSourceAsset?.role === 'TRA_REFERENCE'
+        ? 'TRA ad mode: the validated uploaded TRA reference may be attached to final generation. Any selected library references are optional analysis-only design guidance for planning. They do not dictate a creative category, do not need to be used by every output, and their raw pixels are never attached to final generation.'
+        : 'Layout-reference mode: the uploaded external image has already been reduced to a validated structured LayoutBlueprint. Use only that design mechanism plus approved TRA context. Its raw pixels and any person identity in it must never reach final image generation.'
+      : videoFrameSet
+        ? `Video-source mode: the raw TRA video ${videoFrameSet.source.media.id} remains server-side and is never attached to the image provider. A bounded set of server-extracted approved still frames is available as TRA human/content source pixels. Do not treat old video framing, captions, or graphics as a required static-ad layout.`
+        : 'No-image mode: create original TRA ads from the user direction.';
+
+    const approvedHumanSource =
+      providerImageSource || videoFrameSet?.source || null;
+    const sourceSuppliedToImageGeneration = Boolean(
+      providerImageSource || videoFrameSet?.frames.length
+    );
+    const hasUsableApprovedHumanSource = approvedHumanSource
+      ? isUsableApprovedHumanSource(
+          approvedHumanSource,
+          sourceSuppliedToImageGeneration
+        )
+      : false;
+    const humanSourceDirection = videoFrameSet
+      ? `Use only a person visibly grounded in the attached approved TRA video frames from source ${videoFrameSet.source.media.id}. Preserve that visible identity; do not invent, replace, blend, or add another person. Layout-reference and library-reference people remain forbidden human sources.`
+      : hasUsableApprovedHumanSource
+        ? 'Use only the attached approved TRA human identity when depicting a person.'
+        : 'Current generation boundary: no approved TRA human source is attached to final image generation. Do not depict any person, face, spokesperson, body, or human figure; use a non-human visual concept. Layout-reference and library-reference people are never approved human sources.';
 
     const colorDirection = parsed.data.brandColors?.length
       ? `Approved TRA brand palette from the uploaded logo: ${parsed.data.brandColors.join(', ')}. Use these as the primary design colors. Neutral black, white, and gray may be used for legibility, but do not substitute an unrelated dominant palette.`
@@ -320,99 +456,254 @@ export async function POST(request: Request) {
       .filter(Boolean)
       .join('\n\n');
 
-    const generationContext = `${parsed.data.context}\n\n${modeDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\n\nPrimary creative categories:\n${categoryDirections}\n\nTreat each category as the main messaging direction. The format is only the presentation structure.`;
+    const analysisDirection = source
+      ? `Analysis-only source guidance (raw layout/library pixels are not attached unless the source is the validated TRA reference explicitly allowed at the final provider boundary):\nSummary: ${analysis.summary}\nVisual structure: ${analysis.visualStructure}\nStyle notes: ${analysis.styleNotes}\nPreserve at a high level: ${analysis.preserve.join('; ') || 'none'}\nAvoid: ${analysis.avoid.join('; ') || 'none'}`
+      : videoFrameSet
+        ? `Approved TRA video-frame source analysis:\nSummary: ${analysis.summary}\nVisible source structure/context: ${analysis.visualStructure}\nStyle notes: ${analysis.styleNotes}\nPreserve approved TRA cues: ${analysis.preserve.join('; ') || 'none'}\nAvoid: ${analysis.avoid.join('; ') || 'none'}`
+        : '';
 
-    const copyByIndex = await generateCreativeCopy(
-      creativePlan,
-      generationContext,
-      analysis
-    );
-    const creatives: GeneratedCreative[] = [];
+    const generationContext = `${parsed.data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
+    const batchPlan = await planCreativeBatch({
+      count: parsed.data.variationCount,
+      context: generationContext,
+      analysis,
+      hasApprovedHumanSource: hasUsableApprovedHumanSource,
+    });
+    const creativePlan = batchPlan.creatives;
+    const diversityIssue = getCreativeDiversityIssue(creativePlan);
+    if (diversityIssue) {
+      return NextResponse.json(
+        {
+          error: `Creative planner returned an insufficiently diverse batch: ${diversityIssue}`,
+        },
+        { status: 502 }
+      );
+    }
 
-    for (let offset = 0; offset < creativePlan.length; offset += 2) {
-      const batch = creativePlan.slice(offset, offset + 2);
-      const generated = await Promise.all(
-        batch.map(async (item): Promise<GeneratedCreative> => {
-          const copy = copyByIndex.get(item.index);
-          if (!copy) {
-            throw new Error(`Missing copy for creative ${item.index}.`);
-          }
+    const analysisSources: CreativeGenerationProvenance['analysisSources'] = [
+      ...(layoutBlueprint && generationSourceAsset
+        ? [
+            {
+              type: 'LAYOUT_REFERENCE' as const,
+              mediaId: generationSourceAsset.media.id,
+              sha256: layoutBlueprint.contentHash,
+              layoutCache: {
+                sourceSha256: layoutBlueprint.contentHash,
+                analyzerModel: layoutBlueprint.analyzerModel,
+                schemaVersion: LAYOUT_BLUEPRINT_SCHEMA_VERSION,
+              },
+            },
+          ]
+        : []),
+      ...selectedReferences.map((selection) => ({
+        type: 'REFERENCE_LIBRARY' as const,
+        mediaId: selection.item.id,
+      })),
+    ];
 
-          const itemContext = `${parsed.data.context}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.category]}. Treat this category as the main ad idea; use the format only as its presentation structure.`;
-          let imageBuffer: Buffer;
+    const renderCreative = async (
+      item: PlannedCreativeConcept
+    ): Promise<GeneratedCreative> => {
+          const creativeId = `creative_${randomUUID().replaceAll('-', '')}`;
+          const identity = buildCreativeIdentity({
+            creativeId,
+            operation: 'GENERATE',
+            strategy: item.strategy,
+          });
+          const copy = item.copy;
+          const selectedReference = selectedReferences[item.index - 1];
+          const singleReferenceContract = selectedReference
+            ? `\n\nOPTIONAL ANALYSIS-ONLY REFERENCE GUIDANCE:\n- External reference: ${selectedReference.item.id}.\n- Its raw pixels are NOT attached to final generation.\n- Use it only when compatible with the planned strategy and visual direction; its library category is not a requirement.\n- Do not recreate unseen details, copy third-party identity or unsupported claims, or combine competing visual systems.\n- Selection reason: ${selectedReference.selectionReason}`
+            : '';
+          const itemHumanDirection =
+            item.strategy.execution.subjectSource === 'non-human'
+              ? 'This planned concept is explicitly non-human. Do not depict any person, face, spokesperson, body, or human figure even though approved TRA source pixels may be attached.'
+              : humanSourceDirection;
+          const execution = item.strategy.execution;
+          const itemContext = `${parsed.data.context}${videoFrameSet ? `\n\n${modeDirection}` : ''}\n\n${itemHumanDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\n\nPLANNED CREATIVE BRIEF:\nSelection reason: ${item.selectionReason}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.strategy.category]}\nSO WHAT outcome chain:\n- Surface message: ${item.strategy.soWhat.surfaceMessage}\n- Functional consequence: ${item.strategy.soWhat.functionalConsequence}\n- Meaningful customer outcome: ${item.strategy.soWhat.meaningfulOutcome}\nExecution:\n- Subject source: ${execution.subjectSource}\n- Composition: ${execution.composition}\n- Image treatment: ${execution.imageTreatment}\n- Text density: ${execution.textDensity}\n- CTA treatment: ${execution.ctaTreatment}\n- Typography hierarchy: ${execution.typographyHierarchy}\nVisual direction: ${item.strategy.visualDirection}${singleReferenceContract}`;
+          let imageResult: ImageGenerationResult;
+          let providerFrames: ApprovedTraVideoFrame[] | undefined;
 
-          if (!source) {
-            imageBuffer = await generatePromptOnlyCreativeImage({
+          if (providerImageSource) {
+            imageResult = await generateApprovedTraReferenceCreativeImage({
+              source: providerImageSource.stored,
               primaryFormat: item.format,
+              placement: parsed.data.placement,
               context: itemContext,
               copy,
               reserveLogoArea,
             });
-          } else if (parsed.data.uploadMode === 'reference') {
-            imageBuffer = await generateReferenceCreativeImage({
-              source,
+          } else if (videoFrameSet) {
+            const videoImageResult = await generateApprovedTraVideoFrameCreativeImage({
+              frames: videoFrameSet.frames,
               primaryFormat: item.format,
+              placement: parsed.data.placement,
               context: itemContext,
               copy,
-              analysis,
               reserveLogoArea,
             });
+            imageResult = videoImageResult;
+            providerFrames = videoImageResult.providerFrames;
           } else {
-            const selectedReference = librarySelections.get(item.index);
-            if (!selectedReference) {
-              throw new Error(
-                `Missing category-matched library reference for creative ${item.index}.`
-              );
-            }
-
-            imageBuffer = await generateTraCreativeFromLibraryReference({
-              creativeReference: selectedReference.source,
+            imageResult = await generatePromptOnlyCreativeImage({
               primaryFormat: item.format,
-              context: `${itemContext}\nThis exact attached image was selected from the ${CREATIVE_CATEGORY_LABELS[item.category]} reference-library category. Its visual execution should materially shape this output.`,
+              placement: parsed.data.placement,
+              context: itemContext,
               copy,
-              traAnalysis: analysis,
               reserveLogoArea,
             });
           }
 
+          await validateGeneratedCreativeImage(imageResult.buffer, parsed.data.placement);
+          const finalImage = brandLogo
+            ? await compositeCreativeBrandLogo(imageResult.buffer, brandLogo.buffer, parsed.data.placement)
+            : imageResult.buffer;
           const generatedFile = new File(
-            [new Uint8Array(imageBuffer)],
+            [new Uint8Array(finalImage)],
             `tra-creative-${item.index}.png`,
             { type: 'image/png' }
           );
           const image = await storage.saveImage(generatedFile);
+          const uploadedReferenceImageId =
+            generationSourceAsset?.role === 'LAYOUT_REFERENCE'
+              ? generationSourceAsset.media.id
+              : undefined;
+          const attachedSource: CreativeGenerationProvenance['attachedSource'] =
+            providerImageSource
+              ? {
+                  type: 'TRA_REFERENCE_IMAGE',
+                  mediaId: providerImageSource.media.id,
+                  sha256: sha256(providerImageSource.stored.buffer),
+                }
+              : providerFrames
+                ? {
+                    type: 'TRA_VIDEO_FRAMES',
+                    mediaId: providerFrames[0].sourceVideoMediaId,
+                    sourceSha256: providerFrames[0].sourceVideoContentHash,
+                    selectionMode: generatedVideoFrameSelection
+                      ? 'USER_SELECTED'
+                      : 'AUTOMATIC',
+                    frames: providerFrames.map((frame) => ({
+                      timestampMs: frame.timestampMs,
+                      approvedPngSha256: frame.frameSha256,
+                    })),
+                  }
+                : null;
+          const generationProvenance: CreativeGenerationProvenance = {
+            version: 1,
+            imageGeneration: {
+              prompt: imageResult.prompt,
+              model: imageResult.model,
+            },
+            requestedSources,
+            attachedSource,
+            analysisSources,
+            ...(logoOverlaySource ? { logoOverlaySource } : {}),
+          };
 
-          return {
-            id: `creative_${image.id.slice('media_'.length)}`,
+          const creative: GeneratedCreative = {
+            id: creativeId,
             index: item.index,
-            category: item.category,
+            category: item.strategy.category,
             format: item.format,
+            placement: parsed.data.placement,
             image,
             copy,
+            generationProvenance,
+            identity,
+            planning: {
+              strategy: item.strategy,
+              selectionReason: item.selectionReason,
+              model: batchPlan.plannerModel,
+              reasoningEffort: batchPlan.reasoningEffort,
+            },
+            ...(generatedVideoFrameSelection
+              ? { videoFrameSelection: generatedVideoFrameSelection }
+              : {}),
+            ...(selectedReference
+              ? {
+                  referenceImageId: selectedReference.item.id,
+                  referenceImageUrl: selectedReference.item.url,
+                  referenceCategory: selectedReference.item.angle,
+                  referenceSelectionReason: selectedReference.selectionReason,
+                }
+              : uploadedReferenceImageId
+                ? { referenceImageId: uploadedReferenceImageId }
+                : {}),
           };
-        })
-      );
+          const [saved] = await saveCreativeBatch([{ ...creative, createdAt: new Date().toISOString() }]);
+          return { ...creative, finalization: { status: 'SAVED', createdAt: saved.createdAt } };
+    };
 
-      creatives.push(...generated);
-    }
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const successfulIndexes: number[] = [];
+        const failedIndexes: number[] = [];
+        let cursor = 0;
 
-    creatives.sort((a, b) => a.index - b.index);
-    return NextResponse.json({
-      creatives,
-      creativePlan,
-      analysis,
-      uploadMode: source ? parsed.data.uploadMode : null,
-      usedReferenceImage: Boolean(source),
-      usedBrandLogo: reserveLogoArea,
-      usedBrandColors: parsed.data.brandColors?.length || 0,
-      usedBrandFonts: parsed.data.brandFontNames?.length || 0,
-      referenceLibrarySelections: Array.from(librarySelections.entries()).map(
-        ([index, selection]) => ({
-          index,
-          referenceId: selection.item.id,
-          referenceCategory: selection.item.angle,
-        })
-      ),
+        const emit = (
+          event: 'creative' | 'error' | 'complete',
+          payload: object
+        ) => controller.enqueue(encodeSseEvent(encoder, event, payload));
+
+        const worker = async () => {
+          while (true) {
+            const position = cursor;
+            cursor += 1;
+            if (position >= creativePlan.length) return;
+
+            const item = creativePlan[position];
+            try {
+              const creative = await renderCreative(item);
+              successfulIndexes.push(item.index);
+              emit('creative', { creative });
+            } catch (error) {
+              console.error(`Creative ${item.index} failed to render`, error);
+              failedIndexes.push(item.index);
+              emit('error', {
+                index: item.index,
+                error: error instanceof GeneratedImageValidationError
+                  ? error.message
+                  : `Creative ${item.index} could not be completed.`,
+              });
+            }
+          }
+        };
+
+        try {
+          await Promise.all(
+            Array.from(
+              { length: Math.min(RENDER_CONCURRENCY, creativePlan.length) },
+              () => worker()
+            )
+          );
+          successfulIndexes.sort((a, b) => a - b);
+          failedIndexes.sort((a, b) => a - b);
+          emit('complete', {
+            requestedCount: creativePlan.length,
+            successfulCount: successfulIndexes.length,
+            failedCount: failedIndexes.length,
+            successfulIndexes,
+            failedIndexes,
+          });
+        } catch (error) {
+          console.error('Creative generation stream failed', error);
+          emit('error', {
+            error: 'Creative generation was interrupted before completion.',
+          });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+      },
     });
   } catch (error) {
     console.error('Creative generation failed', error);

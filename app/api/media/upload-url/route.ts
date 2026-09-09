@@ -3,12 +3,13 @@ import { basename } from 'path';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NextResponse } from 'next/server';
-import type { MediaAsset } from '@/lib/media/types';
+import type { CreativeSourceMediaAsset } from '@/lib/media/types';
+import { validateSourceRoleForMime } from '@/lib/media/source-contract';
 import {
   EXTENSION_BY_MIME,
   getMaxUploadBytes,
-  isAllowedImageMimeType,
 } from '@/lib/media/storage';
+import { requireOperatorAccess } from '@/lib/auth/require-operator';
 
 export const runtime = 'nodejs';
 
@@ -20,6 +21,9 @@ const REQUIRED_R2_VARIABLES = [
 ] as const;
 
 export async function POST(request: Request) {
+  const denied = await requireOperatorAccess();
+  if (denied) return denied;
+
   if (process.env.NODE_ENV !== 'production') {
     return NextResponse.json({ direct: false });
   }
@@ -28,19 +32,22 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const originalName =
       typeof body.fileName === 'string' ? basename(body.fileName).slice(0, 200) : 'upload';
-    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : '';
     const size = typeof body.size === 'number' ? body.size : Number(body.size);
-
-    if (!isAllowedImageMimeType(mimeType)) {
+    const sourceContract = validateSourceRoleForMime(
+      body.sourceRole,
+      body.mimeType
+    );
+    if (!sourceContract.success) {
       return NextResponse.json(
-        { error: 'Upload a PNG, JPEG, or WebP image.' },
+        { error: sourceContract.error },
         { status: 400 }
       );
     }
+    const { mimeType, mediaType, role: sourceRole } = sourceContract.data;
 
-    if (!Number.isFinite(size) || size <= 0 || size > getMaxUploadBytes()) {
+    if (!Number.isFinite(size) || size <= 0 || size > getMaxUploadBytes(mimeType)) {
       return NextResponse.json(
-        { error: 'The image is empty or larger than the upload limit.' },
+        { error: 'The file is empty or larger than the upload limit.' },
         { status: 400 }
       );
     }
@@ -74,16 +81,22 @@ export async function POST(request: Request) {
       }
     );
 
-    const media: MediaAsset = {
+    const media: CreativeSourceMediaAsset = {
       id,
       fileName,
       originalName,
       mimeType,
+      mediaType,
       size,
       url: `/api/media/files/${fileName}`,
-    };
+    } as CreativeSourceMediaAsset;
 
-    return NextResponse.json({ direct: true, uploadUrl, media });
+    return NextResponse.json({
+      direct: true,
+      uploadUrl,
+      media,
+      ...(sourceRole ? { sourceRole } : {}),
+    });
   } catch (error) {
     console.error('Could not create direct upload URL', error);
     return NextResponse.json(
