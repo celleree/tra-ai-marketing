@@ -1,21 +1,23 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), load: vi.fn(), select: vi.fn() }));
-const requireOperatorAccess = vi.hoisted(() => vi.fn(async () => null));
-vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess }));
+const getOperatorAccess = vi.hoisted(() => vi.fn());
+const requireOperatorQuota = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess }));
+vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota }));
 vi.mock('@/lib/video/intelligence-service', async (load) => ({
   ...await load<typeof import('@/lib/video/intelligence-service')>(), resolveExistingVideoIntelligenceJob: mocks.resolve,
 }));
 vi.mock('@/lib/video/intelligence-finalization-runner', () => ({ loadVideoIntelligenceLibrary: mocks.load }));
 vi.mock('@/lib/video/selection-cache', () => ({ selectVideoFramesWithCache: mocks.select }));
 import { POST } from '@/app/api/video/intelligence/selection/route';
-import { VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
+import { createCurrentVideoIntelligenceIdentity, VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
 
-const locator = { version: 1, sourceVideoMediaId: `media_${'a'.repeat(32)}`, sourceVideoContentHash: 'b'.repeat(64), analyzerFingerprintSha256: 'c'.repeat(64) };
+const locator = { version: 1, sourceVideoMediaId: `media_${'a'.repeat(32)}`, sourceVideoContentHash: 'b'.repeat(64), analyzerFingerprintSha256: createCurrentVideoIntelligenceIdentity(`media_${'a'.repeat(32)}`, 'b'.repeat(64)).analyzerFingerprint.sha256 };
 const identity = { analyzerFingerprint: { visionModel: 'frozen-selector' } };
 const artifact = { key: 'private-library', sha256: 'd'.repeat(64), byteLength: 20 };
 const library = { id: 'library' };
 const post = (body: unknown) => new Request('http://localhost/api/video/intelligence/selection', { method: 'POST', body: JSON.stringify(body) });
-beforeEach(() => { vi.resetAllMocks(); requireOperatorAccess.mockResolvedValue(null); vi.stubEnv('NODE_ENV', 'test'); });
+beforeEach(() => { vi.resetAllMocks(); getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' }); requireOperatorQuota.mockResolvedValue(null); vi.stubEnv('NODE_ENV', 'test'); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 it('uses only server-resolved library digest/model and the request-entry deadline', async () => {
