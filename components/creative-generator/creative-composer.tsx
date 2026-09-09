@@ -460,7 +460,7 @@ export function CreativeComposer({
               ? 'Uploading source assets…'
               : sourceLimitReached
                 ? `Maximum of ${MAX_CREATIVE_SOURCE_ASSETS} sources attached. Remove one to add another.`
-                : 'Images default to TRA_REFERENCE · MP4 uses TRA_VIDEO'}
+                : ''}
           </span>
         </div>
 
