@@ -1,3 +1,4 @@
+import { isDeploymentRuntimeConsistent } from '@/lib/runtime/deployment';
 /** Durable video workflows are available in local development and protected Preview.
  * Production requires the configuration needed by the authenticated,
  * storage-backed provider path. This is not a credential-health check. */
@@ -17,6 +18,7 @@ const hasRequiredProductionVideoConfiguration = () =>
   && /^sk_live_\S+$/.test(process.env.CLERK_SECRET_KEY ?? '');
 
 export const isDurableVideoIntelligenceAvailable = () => {
+  if (!isDeploymentRuntimeConsistent()) return false;
   const vercelEnvironment = process.env.VERCEL_ENV;
 
   if (vercelEnvironment === 'production') {

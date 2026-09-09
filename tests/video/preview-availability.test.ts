@@ -42,6 +42,19 @@ describe('durable video deployment availability', () => {
     expect(videoIntelligenceHttpStatus(500)).toBe(404);
   });
 
+  it.each(['production', 'preview'].flatMap(vercel => ['development', 'test'].map(node => ({ vercel, node }))))
+  ('rejects configured $vercel with NODE_ENV=$node before durable route inputs', async ({ vercel, node }) => {
+    configureProduction(); setEnvironment(node, vercel);
+    expect(isDurableVideoIntelligenceAvailable()).toBe(false);
+    expect(videoIntelligenceHttpStatus(500)).toBe(404);
+    for (const route of [job, library, selection, preview]) {
+      const input = { json: vi.fn() } as unknown as Request;
+      expect((await route(input)).status).toBe(404); expect(input.json).not.toHaveBeenCalled();
+    }
+    expect((await readJob(new Request('http://localhost/jobs'))).status).toBe(404);
+    await expect(getApprovedPreparedSelectedTraVideoFrames(null as never, null as never, [], null as never)).rejects.toThrow('configured Production');
+  });
+
   it.each(['production', '', 'development'])('denies production runtime with VERCEL_ENV=%s before parsing or extraction', async (vercel) => {
     setEnvironment('production', vercel);
     expect(isDurableVideoIntelligenceAvailable()).toBe(false);

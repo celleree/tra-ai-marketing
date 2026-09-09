@@ -1,3 +1,4 @@
+import { assertDeploymentRuntimeConsistent } from '@/lib/runtime/deployment';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import { MAX_TRANSCRIPTION_UPLOAD_BYTES, transcriptAtTimestamp, transcribeTraVid
 import { observeTemporaryVideoFrame, parseFrameVisualObservation, VIDEO_CONTENT_TOPICS, VIDEO_SCENE_TYPES } from '@/lib/video/visual-observation';
 
 export const assertLocalVideoIntelligence = () => {
+  assertDeploymentRuntimeConsistent();
   if (process.env.NODE_ENV === 'production') throw new Error('Video intelligence is currently available in local development only.');
 };
 export const videoSourceHash = (source: HydratedTraVideoSource) => createHash('sha256').update(source.stored.buffer).digest('hex');
