@@ -49,6 +49,7 @@ const expectNoWork = () => {
 
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv('NODE_ENV', 'test'); vi.stubEnv('VERCEL_ENV', '');
+  vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', '0');
   vi.stubGlobal('fetch', vi.fn());
   mocks.access.mockResolvedValue({ allowed: true, userId: 'operator' }); mocks.quota.mockResolvedValue(null);
   mocks.execute.mockResolvedValue({ phase: 'COMPLETE' }); mocks.read.mockResolvedValue({ status: null });
@@ -60,7 +61,18 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-describe('durable video quota admission', () => {
+describe.each(['local', 'enabled Production'])('durable video quota admission in %s', (environment) => {
+  beforeEach(() => {
+    if (environment !== 'enabled Production') return;
+    vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('VERCEL_ENV', 'production');
+    vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', '1');
+    for (const [name, value] of Object.entries({
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_fixture', CLERK_SECRET_KEY: 'sk_live_fixture',
+      OPENAI_API_KEY: 'fixture-provider', R2_ACCOUNT_ID: 'fixture-account', R2_ACCESS_KEY_ID: 'fixture-access',
+      R2_SECRET_ACCESS_KEY: 'fixture-secret', R2_BUCKET_NAME: 'fixture-production',
+    })) vi.stubEnv(name, value);
+  });
+
   it.each(cases.flatMap(entry => [429, 503].map(status => ({ ...entry, status }))))
   ('denies $name with $status before job claims, source reads or providers', async ({ route, body, group, status }) => {
     const denial = new Response(null, { status, headers: { 'Cache-Control': 'private, no-store', 'Retry-After': '60' } });
@@ -121,6 +133,7 @@ describe('durable video quota admission', () => {
 
   it('keeps disabled Production ahead of parsing and quota', async () => {
     vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('VERCEL_ENV', 'production');
+    vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', '0');
     for (const route of [job, selection, preview]) {
       const input = { json: vi.fn() } as unknown as Request;
       expect((await route(input)).status).toBe(404); expect(input.json).not.toHaveBeenCalled();
