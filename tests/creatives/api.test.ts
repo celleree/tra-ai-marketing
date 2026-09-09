@@ -8,7 +8,7 @@ const {
   listAllReferenceLibraryMock,
   listCreativesMock,
   removeFromReferenceLibraryMock,
-  requireOperatorAccessMock,
+  getOperatorAccessMock,
   saveCreativeBatchMock,
   updateCreativeReviewStateMock,
   updateReferenceAngleMock,
@@ -18,14 +18,14 @@ const {
   listAllReferenceLibraryMock: vi.fn(),
   listCreativesMock: vi.fn(),
   removeFromReferenceLibraryMock: vi.fn(),
-  requireOperatorAccessMock: vi.fn(),
+  getOperatorAccessMock: vi.fn(),
   saveCreativeBatchMock: vi.fn(),
   updateCreativeReviewStateMock: vi.fn(),
   updateReferenceAngleMock: vi.fn(),
 }));
 
-vi.mock('@/lib/auth/require-operator', () => ({
-  requireOperatorAccess: requireOperatorAccessMock,
+vi.mock('@/lib/auth/server-access', () => ({
+  getOperatorAccess: getOperatorAccessMock,
 }));
 
 vi.mock('@/lib/creatives/storage', () => ({
@@ -103,7 +103,7 @@ beforeEach(() => {
   addToReferenceLibraryMock.mockReset();
   updateReferenceAngleMock.mockReset();
   removeFromReferenceLibraryMock.mockReset();
-  requireOperatorAccessMock.mockReset().mockResolvedValue(null);
+  getOperatorAccessMock.mockReset().mockResolvedValue({ allowed: true, userId: 'operator' });
 });
 
 afterEach(() => {
@@ -128,7 +128,7 @@ describe('TRA creatives API validation', () => {
     ];
     return guardedRoutes.map(([route, invoke]) => [status, route, invoke, json, params] as const);
   }))('returns %i from %s before accessing route inputs or storage', async (status, _route, invoke, json, params) => {
-    requireOperatorAccessMock.mockResolvedValue(new Response('denied', { status }));
+    getOperatorAccessMock.mockResolvedValue({ allowed: false, status, error: 'denied' });
     expect((await invoke()).status).toBe(status);
     expect(json).not.toHaveBeenCalled();
     expect(params).not.toHaveBeenCalled();

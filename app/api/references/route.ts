@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { requireOperatorAccess } from '@/lib/auth/require-operator';
+import { getOperatorAccess } from '@/lib/auth/server-access';
+import { operatorAccessDeniedResponse, requireOperatorAccess } from '@/lib/auth/require-operator';
+import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { classifyReferenceCreativeAngle } from '@/lib/ai/reference-angle';
 import {
   isCreativeCategory,
@@ -129,8 +131,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const denied = await requireOperatorAccess();
-  if (denied) return denied;
+  const access = await getOperatorAccess();
+  if (!access.allowed) return operatorAccessDeniedResponse(access);
 
   try {
     const body = (await request.json()) as Record<string, unknown>;
@@ -160,6 +162,11 @@ export async function POST(request: Request) {
         { error: 'One or more reference images were invalid.' },
         { status: 400 }
       );
+    }
+
+    if (referenceType === 'layout' && process.env.OPENAI_API_KEY) {
+      const quotaDenied = await requireOperatorQuota(access.userId, 'REFERENCE_CLASSIFICATION', items.length);
+      if (quotaDenied) return quotaDenied;
     }
 
     const additions =
