@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
-import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
@@ -288,9 +287,6 @@ export function CreativeGenerator() {
     void generate();
   }, [handoffGenerate, context, sourceAssets, variationCount]);
 
-  const activeLabel =
-    NAV_ITEMS.find((item) => item.id === activeSection)?.label || 'Create';
-
   return (
     <main className="workspace-shell">
       <aside className="workspace-sidebar">
@@ -328,14 +324,6 @@ export function CreativeGenerator() {
       </aside>
 
       <section className="workspace-content">
-        <header className="workspace-topbar">
-          <div>
-            <p className="workspace-kicker">TRA AI Marketing</p>
-            <h1>{activeLabel}</h1>
-          </div>
-          <div className="workspace-badge">Internal</div>
-        </header>
-
         {activeSection === 'upload' ? (
           <div className="workspace-view workspace-view-upload">
             <div className="generator-grid">
@@ -362,8 +350,6 @@ export function CreativeGenerator() {
                 </div>
 
                 {creationMode === 'generate' ? (
-                  <>
-                  <CreativePlacementSelect value={placement} onChange={setPlacement} disabled={generating} />
                   <CreativeComposer
                     value={context}
                     onChange={setContext}
@@ -374,11 +360,12 @@ export function CreativeGenerator() {
                     onSourceRemoved={handleSourceRemoved}
                     variationCount={variationCount}
                     onVariationCountChange={setVariationCount}
+                    placement={placement}
+                    onPlacementChange={setPlacement}
                     onSubmit={generate}
                     ready={ready}
                     generating={generating}
                   />
-                  </>
                 ) : (
                   <DirectCreativeUploader
                     onUploadStart={handleUploadStart}
