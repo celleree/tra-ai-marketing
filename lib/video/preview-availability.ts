@@ -17,11 +17,16 @@ const hasRequiredProductionVideoConfiguration = () =>
   && /^sk_live_\S+$/.test(process.env.CLERK_SECRET_KEY ?? '');
 
 export const isDurableVideoIntelligenceAvailable = () => {
-  if (process.env.NODE_ENV !== 'production') return true;
-  if (process.env.VERCEL_ENV === 'preview') return true;
-  return process.env.VERCEL_ENV === 'production'
-    && process.env.TRA_PRODUCTION_VIDEO_ENABLED === '1'
-    && hasRequiredProductionVideoConfiguration();
+  const vercelEnvironment = process.env.VERCEL_ENV;
+
+  if (vercelEnvironment === 'production') {
+    return process.env.TRA_PRODUCTION_VIDEO_ENABLED === '1'
+      && hasRequiredProductionVideoConfiguration();
+  }
+
+  if (vercelEnvironment === 'preview') return true;
+  if (vercelEnvironment && vercelEnvironment !== 'development') return false;
+  return process.env.NODE_ENV !== 'production';
 };
 
 export const assertDurableVideoIntelligenceAvailable = () => {
