@@ -7,11 +7,11 @@ const baseRequest = {
 };
 
 describe('creative image model request', () => {
-  it('defaults to GPT Image 2.5 Flare', () => {
+  it('keeps omitted model backward compatible', () => {
     const result = validateGenerateCreativeRequest(baseRequest);
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.data.imageModel).toBe('gpt-image-2.5-flare');
+    expect(result.data.imageModel).toBeUndefined();
   });
 
   it.each(['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'] as const)(
