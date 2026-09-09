@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   ChangeEvent,
   CSSProperties,
@@ -16,6 +16,12 @@ import {
   getCreativeSourceCountError,
   MAX_CREATIVE_SOURCE_ASSETS,
 } from '@/lib/media/source-limits';
+import {
+  getCreativeSourceUploadInFlight,
+  releaseCreativeSourceUpload,
+  subscribeCreativeSourceUploadInFlight,
+  tryAcquireCreativeSourceUpload,
+} from '@/lib/media/source-upload-lock';
 import styles from './creative-composer.module.css';
 
 interface CreativeComposerProps {
@@ -77,11 +83,17 @@ export function CreativeComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const uploadInFlightRef = useRef(false);
+  const sharedUploadInFlight = useSyncExternalStore(
+    subscribeCreativeSourceUploadInFlight,
+    getCreativeSourceUploadInFlight,
+    () => false
+  );
   const [localPreview, setLocalPreview] = useState('');
   const [pendingName, setPendingName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState('');
+  const uploadBusy = uploading || sharedUploadInFlight;
   const sourceLimitReached =
     allowMultipleSources && sourceAssets.length >= MAX_CREATIVE_SOURCE_ASSETS;
 
@@ -194,7 +206,14 @@ export function CreativeComposer({
   };
 
   const acceptFiles = async (files: File[]) => {
-    if (!files.length || uploadInFlightRef.current || generating) return;
+    if (
+      !files.length ||
+      uploadInFlightRef.current ||
+      sharedUploadInFlight ||
+      generating
+    ) {
+      return;
+    }
 
     const selectedFiles = allowMultipleSources ? files : files.slice(0, 1);
     const sourceCountError = getCreativeSourceCountError(
@@ -204,6 +223,8 @@ export function CreativeComposer({
       setError(sourceCountError);
       return;
     }
+    if (!tryAcquireCreativeSourceUpload()) return;
+
     const previewFile = selectedFiles.find((file) =>
       ALLOWED_IMAGE_TYPES.includes(file.type)
     );
@@ -238,6 +259,7 @@ export function CreativeComposer({
       }
     } finally {
       uploadInFlightRef.current = false;
+      releaseCreativeSourceUpload();
       setUploading(false);
       setLocalPreview('');
       setPendingName('');
@@ -254,7 +276,7 @@ export function CreativeComposer({
   const handleDragEnter = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     dragDepthRef.current += 1;
-    if (!uploading) setDragActive(true);
+    if (!uploadBusy) setDragActive(true);
   };
 
   const handleDragOver = (event: DragEvent<HTMLElement>) => {
@@ -285,7 +307,14 @@ export function CreativeComposer({
     }
 
     event.preventDefault();
-    if (ready && !generating && !uploadInFlightRef.current) onSubmit();
+    if (
+      ready &&
+      !generating &&
+      !sharedUploadInFlight &&
+      !uploadInFlightRef.current
+    ) {
+      onSubmit();
+    }
   };
 
   const sliderProgress =
@@ -310,11 +339,11 @@ export function CreativeComposer({
         type="file"
         accept="image/png,image/jpeg,image/webp,video/mp4"
         multiple={allowMultipleSources}
-        disabled={uploading || generating || sourceLimitReached}
+        disabled={uploadBusy || generating || sourceLimitReached}
         onChange={handleFileChange}
       />
 
-      {localPreview && uploading ? (
+      {localPreview && uploadBusy ? (
         <div className={styles.attachment}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={localPreview} alt="Selected source preview" />
@@ -422,12 +451,12 @@ export function CreativeComposer({
             aria-label="Add creative source assets"
             title="Add creative source assets"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || generating || sourceLimitReached}
+            disabled={uploadBusy || generating || sourceLimitReached}
           >
             +
           </button>
           <span className={styles.hint}>
-            {uploading
+            {uploadBusy
               ? 'Uploading source assets…'
               : sourceLimitReached
                 ? `Maximum of ${MAX_CREATIVE_SOURCE_ASSETS} sources attached. Remove one to add another.`
@@ -442,7 +471,7 @@ export function CreativeComposer({
             type="button"
             aria-label={generating ? 'Generating creatives' : 'Generate creatives'}
             title="Generate creatives"
-            disabled={!ready || generating || uploading}
+            disabled={!ready || generating || uploadBusy}
             onClick={onSubmit}
           >
             <svg viewBox="0 0 20 20" aria-hidden="true">
