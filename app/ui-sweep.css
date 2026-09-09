@@ -22,7 +22,7 @@ body {
   background-image: url('/tra-logo-sidebar.png');
   background-repeat: no-repeat;
   background-position: center;
-  background-size: contain;
+  background-size: 88% auto;
   color: transparent;
   text-indent: -9999px;
   overflow: hidden;
