@@ -49,7 +49,6 @@ const expectNoWork = () => {
 
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv('NODE_ENV', 'test'); vi.stubEnv('VERCEL_ENV', '');
-  vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', '0');
   vi.stubGlobal('fetch', vi.fn());
   mocks.access.mockResolvedValue({ allowed: true, userId: 'operator' }); mocks.quota.mockResolvedValue(null);
   mocks.execute.mockResolvedValue({ phase: 'COMPLETE' }); mocks.read.mockResolvedValue({ status: null });
@@ -61,11 +60,10 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-describe.each(['local', 'enabled Production'])('durable video quota admission in %s', (environment) => {
+describe.each(['local', 'configured Production'])('durable video quota admission in %s', (environment) => {
   beforeEach(() => {
-    if (environment !== 'enabled Production') return;
+    if (environment !== 'configured Production') return;
     vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('VERCEL_ENV', 'production');
-    vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', '1');
     for (const [name, value] of Object.entries({
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_fixture', CLERK_SECRET_KEY: 'sk_live_fixture',
       OPENAI_API_KEY: 'fixture-provider', R2_ACCOUNT_ID: 'fixture-account', R2_ACCESS_KEY_ID: 'fixture-access',
@@ -131,9 +129,9 @@ describe.each(['local', 'enabled Production'])('durable video quota admission in
     expect(mocks.execute.mock.calls[0][1]).toEqual({ deadlineAtMs: 296_000 });
   });
 
-  it('keeps disabled Production ahead of parsing and quota', async () => {
+  it('keeps misconfigured Production ahead of parsing and quota', async () => {
     vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('VERCEL_ENV', 'production');
-    vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', '0');
+    vi.stubEnv('OPENAI_API_KEY', '');
     for (const route of [job, selection, preview]) {
       const input = { json: vi.fn() } as unknown as Request;
       expect((await route(input)).status).toBe(404); expect(input.json).not.toHaveBeenCalled();

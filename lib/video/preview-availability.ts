@@ -1,6 +1,6 @@
 /** Durable video workflows are available in local development and protected Preview.
- * Production requires an explicit opt-in plus the configuration needed by the
- * authenticated, storage-backed provider path. This is not a credential-health check. */
+ * Production requires the configuration needed by the authenticated,
+ * storage-backed provider path. This is not a credential-health check. */
 const REQUIRED_PRODUCTION_VIDEO_VARIABLES = [
   'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
   'CLERK_SECRET_KEY',
@@ -20,8 +20,7 @@ export const isDurableVideoIntelligenceAvailable = () => {
   const vercelEnvironment = process.env.VERCEL_ENV;
 
   if (vercelEnvironment === 'production') {
-    return process.env.TRA_PRODUCTION_VIDEO_ENABLED === '1'
-      && hasRequiredProductionVideoConfiguration();
+    return hasRequiredProductionVideoConfiguration();
   }
 
   if (vercelEnvironment === 'preview') return true;
@@ -31,7 +30,7 @@ export const isDurableVideoIntelligenceAvailable = () => {
 
 export const assertDurableVideoIntelligenceAvailable = () => {
   if (!isDurableVideoIntelligenceAvailable()) {
-    throw new Error('Video intelligence is available in local development, protected Vercel Preview, or explicitly enabled and configured Production only.');
+    throw new Error('Video intelligence is available in local development, protected Vercel Preview, or configured Production only.');
   }
 };
 

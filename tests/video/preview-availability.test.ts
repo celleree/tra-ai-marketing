@@ -17,14 +17,13 @@ const productionConfig = {
 };
 beforeEach(() => {
   getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
-  vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', '0');
   for (const name of Object.keys(productionConfig)) vi.stubEnv(name, '');
 });
 afterEach(() => vi.unstubAllEnvs());
 const setEnvironment = (node: string, vercel: string) => { vi.stubEnv('NODE_ENV', node); vi.stubEnv('VERCEL_ENV', vercel); };
 const malformed = () => new Request('http://localhost/test', { method: 'POST', body: '{' });
-const enableProduction = () => {
-  setEnvironment('production', 'production'); vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', '1');
+const configureProduction = () => {
+  setEnvironment('production', 'production');
   for (const [name, value] of Object.entries(productionConfig)) vi.stubEnv(name, value);
 };
 
@@ -39,7 +38,7 @@ describe('durable video deployment availability', () => {
   it.each(['development', 'test'])('treats Vercel Production as Production even when NODE_ENV=%s', (node) => {
     setEnvironment(node, 'production');
     expect(isDurableVideoIntelligenceAvailable()).toBe(false);
-    expect(() => assertDurableVideoIntelligenceAvailable()).toThrow('explicitly enabled and configured Production');
+    expect(() => assertDurableVideoIntelligenceAvailable()).toThrow('configured Production');
     expect(videoIntelligenceHttpStatus(500)).toBe(404);
   });
 
@@ -60,17 +59,11 @@ describe('durable video deployment availability', () => {
     for (const route of [legacyAnalysis, legacySelection]) expect((await route(malformed())).status).toBe(404);
   });
 
-  it.each([undefined, '', '0', 'true', 'false', 'yes', ' 1', '1 '])('rejects an absent or non-exact Production opt-in: %s', (flag) => {
-    enableProduction(); vi.stubEnv('TRA_PRODUCTION_VIDEO_ENABLED', flag);
-    expect(isDurableVideoIntelligenceAvailable()).toBe(false);
-    expect(videoIntelligenceHttpStatus(500)).toBe(404);
-  });
-
   it.each(Object.keys(productionConfig).flatMap(name => [undefined, '', ' \t '].map(value => ({ name, value }))))
   ('rejects missing/blank $name configuration: $value', async ({ name, value }) => {
-    enableProduction(); vi.stubEnv(name, value);
+    configureProduction(); vi.stubEnv(name, value);
     expect(isDurableVideoIntelligenceAvailable()).toBe(false);
-    expect(() => assertDurableVideoIntelligenceAvailable()).toThrow('explicitly enabled and configured Production');
+    expect(() => assertDurableVideoIntelligenceAvailable()).toThrow('configured Production');
     for (const route of [job, library, selection, preview]) {
       const input = { json: vi.fn() } as unknown as Request;
       expect((await route(input)).status).toBe(404); expect(input.json).not.toHaveBeenCalled();
@@ -81,17 +74,17 @@ describe('durable video deployment availability', () => {
     ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_fixture'], ['CLERK_SECRET_KEY', 'sk_test_fixture'],
     ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_'], ['CLERK_SECRET_KEY', 'sk_live_'],
   ])('rejects non-Production or incomplete Clerk markers: %s', (name, value) => {
-    enableProduction(); vi.stubEnv(name, value);
+    configureProduction(); vi.stubEnv(name, value);
     expect(isDurableVideoIntelligenceAvailable()).toBe(false);
   });
 
   it.each([undefined, '', 'development', 'staging', 'PRODUCTION'])('does not enable an unidentified production runtime: %s', (vercel) => {
-    enableProduction(); vi.stubEnv('VERCEL_ENV', vercel);
+    configureProduction(); vi.stubEnv('VERCEL_ENV', vercel);
     expect(isDurableVideoIntelligenceAvailable()).toBe(false);
   });
 
-  it('enables only configured opt-in Production while preserving validation and legacy denial', async () => {
-    enableProduction();
+  it('enables configured Production while preserving validation and legacy denial', async () => {
+    configureProduction();
     expect(isDurableVideoIntelligenceAvailable()).toBe(true);
     expect(() => assertDurableVideoIntelligenceAvailable()).not.toThrow();
     for (const status of [400, 409, 429, 500, 503]) expect(videoIntelligenceHttpStatus(status)).toBe(status);
