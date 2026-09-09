@@ -9,8 +9,8 @@ export const DEFAULT_CREATIVE_IMAGE_MODEL: CreativeImageModel =
   'gpt-image-2.5-flare';
 
 export const CREATIVE_IMAGE_MODEL_LABELS: Record<CreativeImageModel, string> = {
-  'gpt-image-2.5-flare': 'Flare',
-  'gpt-image-2.5-sunburst': 'Sunburst',
+  'gpt-image-2.5-flare': 'GPT Image 2.5 Flare',
+  'gpt-image-2.5-sunburst': 'GPT Image 2.5 Sunburst',
 };
 
 export const isCreativeImageModel = (
