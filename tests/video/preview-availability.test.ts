@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const requireOperatorAccess = vi.hoisted(() => vi.fn(async () => null));
-vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess }));
+const getOperatorAccess = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess }));
 import { assertDurableVideoIntelligenceAvailable, isDurableVideoIntelligenceAvailable, videoIntelligenceHttpStatus } from '@/lib/video/preview-availability';
 import { GET as readJob, POST as job } from '@/app/api/video/intelligence/jobs/route';
 import { POST as library } from '@/app/api/video/intelligence/library/route';
@@ -9,7 +9,7 @@ import { POST as legacyAnalysis } from '@/app/api/video/intelligence/route';
 import { POST as legacySelection } from '@/app/api/video/selection/route';
 import { getApprovedPreparedSelectedTraVideoFrames } from '@/lib/video/prepared-selected-frames';
 
-beforeEach(() => requireOperatorAccess.mockResolvedValue(null));
+beforeEach(() => getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' }));
 afterEach(() => vi.unstubAllEnvs());
 const setEnvironment = (node: string, vercel: string) => { vi.stubEnv('NODE_ENV', node); vi.stubEnv('VERCEL_ENV', vercel); };
 const malformed = () => new Request('http://localhost/test', { method: 'POST', body: '{' });

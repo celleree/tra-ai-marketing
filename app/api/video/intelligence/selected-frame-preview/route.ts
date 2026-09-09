@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { requireOperatorAccess } from '@/lib/auth/require-operator';
+import { getOperatorAccess } from '@/lib/auth/server-access';
+import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
+import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { isSafeMediaId } from '@/lib/media/storage';
 import { getMediaStorage } from '@/lib/media/local-storage';
@@ -23,12 +25,14 @@ const parseRequest = (value: unknown) => {
 };
 
 export async function POST(request: Request) {
-  const denied = await requireOperatorAccess();
-  if (denied) return denied;
+  const access = await getOperatorAccess();
+  if (!access.allowed) return operatorAccessDeniedResponse(access);
   try {
     assertDurableVideoIntelligenceAvailable();
     const parsed = parseRequest(await request.json());
     if (!parsed) return NextResponse.json({ error: 'Choose one valid stored TRA video frame to preview.' }, { status: 400, headers: noStore });
+    const quotaDenied = await requireOperatorQuota(access.userId, 'VIDEO_FRAME_PREVIEW', 1);
+    if (quotaDenied) return quotaDenied;
     const [source] = await hydrateCreativeSourceSelections(getMediaStorage(), [{ mediaId: parsed.mediaId, role: 'TRA_VIDEO' }]);
     const video = source as HydratedTraVideoSource;
     if (videoSourceHash(video) !== parsed.selection.sourceVideoContentHash) {

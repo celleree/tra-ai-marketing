@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ access: vi.fn(), available: vi.fn(), previewAvailable: true, hydrate: vi.fn(), hash: vi.fn(), context: vi.fn(), extract: vi.fn() }));
-vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess: mocks.access }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), quota: vi.fn(), available: vi.fn(), previewAvailable: true, hydrate: vi.fn(), hash: vi.fn(), context: vi.fn(), extract: vi.fn() }));
+vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.access }));
+vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.quota }));
 vi.mock('@/lib/video/preview-availability', () => ({ assertDurableVideoIntelligenceAvailable: mocks.available, videoIntelligenceHttpStatus: (status: number) => mocks.previewAvailable ? status : 404 }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: vi.fn(() => ({})) }));
 vi.mock('@/lib/media/storage', () => ({ isSafeMediaId: (id: string) => /^media_[a-f0-9]{32}$/.test(id) }));
@@ -21,7 +22,7 @@ const request = (value: unknown = body) => ({ json: vi.fn().mockResolvedValue(va
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.access.mockResolvedValue(null); mocks.available.mockImplementation(() => {}); mocks.previewAvailable = true; mocks.hash.mockReturnValue(hash);
+  mocks.access.mockResolvedValue({ allowed: true, userId: 'operator' }); mocks.quota.mockResolvedValue(null); mocks.available.mockImplementation(() => {}); mocks.previewAvailable = true; mocks.hash.mockReturnValue(hash);
   mocks.hydrate.mockResolvedValue([{ media: { id: mediaId }, stored: { buffer: Buffer.from('source') }, role: 'TRA_VIDEO' }]);
   mocks.context.mockResolvedValue({ library: { id: libraryId } });
   mocks.extract.mockResolvedValue({ frames: [{ buffer: Buffer.from('png'), timestampMs: 500, frameSha256: 'e'.repeat(64) }] });
@@ -30,10 +31,10 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('selected source-frame PNG preview', () => {
   it('stops at authentication or Preview availability before parsing or downstream work', async () => {
-    const denied = Response.json({ error: 'Access denied.' }, { status: 403 });
+    const denied = { allowed: false, status: 403, error: 'Access denied.' };
     mocks.access.mockResolvedValue(denied); const deniedRequest = request();
     expect((await POST(deniedRequest)).status).toBe(403); expect(deniedRequest.json).not.toHaveBeenCalled();
-    mocks.access.mockResolvedValue(null); mocks.previewAvailable = false; mocks.available.mockImplementation(() => { throw new Error('Unavailable'); }); const unavailable = request();
+    mocks.access.mockResolvedValue({ allowed: true, userId: 'operator' }); mocks.previewAvailable = false; mocks.available.mockImplementation(() => { throw new Error('Unavailable'); }); const unavailable = request();
     expect((await POST(unavailable)).status).toBe(404); expect(unavailable.json).not.toHaveBeenCalled(); expect(mocks.hydrate).not.toHaveBeenCalled();
   });
 

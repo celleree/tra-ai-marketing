@@ -1,23 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const service = vi.hoisted(() => ({ execute: vi.fn(), read: vi.fn() }));
-const requireOperatorAccess = vi.hoisted(() => vi.fn(async () => null));
-vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess }));
+const getOperatorAccess = vi.hoisted(() => vi.fn());
+const requireOperatorQuota = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess }));
+vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota }));
 vi.mock('@/lib/video/intelligence-service', async (load) => ({
   ...await load<typeof import('@/lib/video/intelligence-service')>(),
   executeVideoIntelligenceStep: service.execute, readVideoIntelligenceSource: service.read,
 }));
 import { GET, POST } from '@/app/api/video/intelligence/jobs/route';
-import { VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
+import { createCurrentVideoIntelligenceIdentity, VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
 import { CreativeSourceHydrationError } from '@/lib/media/source-hydration';
 
 const mediaId = `media_${'a'.repeat(32)}`;
-const locator = { version: 1, sourceVideoMediaId: mediaId, sourceVideoContentHash: 'b'.repeat(64), analyzerFingerprintSha256: 'c'.repeat(64) };
+const locator = { version: 1, sourceVideoMediaId: mediaId, sourceVideoContentHash: 'b'.repeat(64), analyzerFingerprintSha256: createCurrentVideoIntelligenceIdentity(mediaId, 'b'.repeat(64)).analyzerFingerprint.sha256 };
 const status = { locator, jobId: 'video-intelligence-job:test', phase: 'RETRY_REQUIRED', busy: false,
   completedRepresentatives: 1, totalRepresentatives: 2, updatedAtMs: 1_000 };
 const post = (body: unknown) => new Request('http://localhost/api/video/intelligence/jobs', { method: 'POST', body: JSON.stringify(body) });
 
-beforeEach(() => { vi.clearAllMocks(); requireOperatorAccess.mockResolvedValue(null); vi.stubEnv('NODE_ENV', 'test'); });
+beforeEach(() => { vi.clearAllMocks(); getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' }); requireOperatorQuota.mockResolvedValue(null); vi.stubEnv('NODE_ENV', 'test'); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe('video job control API', () => {
