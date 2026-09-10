@@ -36,7 +36,7 @@ Sunburst should receive a distilled render brief for one creative, not the entir
 
 The render brief should contain only what is needed to execute that image:
 
-- exact approved copy;
+- exact planned copy grounded only in approved TRA claims/source material; rendering does not itself approve the copy or creative for advertising use;
 - subject and environment;
 - chosen composition/layout;
 - visual mechanism;
@@ -160,9 +160,9 @@ Astra produced a six-concept batch that demonstrated:
 
 This was strong enough to move from planner testing to render testing. It does not yet prove production behavior or 30-ad diversity.
 
-## Approved six-concept render mapping
+## Selected six-concept render mapping
 
-Use the approved Astra concept batch with these layout assignments for the current manual render test:
+Use the selected Astra concept batch with these layout assignments for the current manual render test:
 
 - Concept 1 -> `TEST_REF_05`
 - Concept 2 -> `TEST_REF_04`
@@ -175,7 +175,9 @@ Important labeling correction from the Codex fixture discussion: `TEST_REF_08` i
 
 ## Current manual render experiment
 
-Render one approved concept at a time with GPT-Image-2.5 Sunburst.
+This six-image behavior-discovery test is explicitly authorized by the narrow manual-test exception in `docs/image-workflow.md`. It does not change current app/runtime source-role or human-source rules.
+
+Render one selected concept at a time with GPT-Image-2.5 Sunburst.
 
 For concepts 1-5, pair the distilled render brief with the assigned layout reference image. Tell the renderer explicitly that the image is for composition/structure inspiration only and must not transfer third-party identity, people, branding, logos, exact copy, claims, prices, statistics, testimonials, or proof.
 
