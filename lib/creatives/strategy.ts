@@ -4,6 +4,8 @@ import {
   type CreativeCategoryId,
 } from '@/lib/creative-categories';
 
+import { TAX_DOCUMENT_SELECTIONS, type TaxDocumentSelection } from '@/lib/references/tax-documents';
+
 const awarenessStages = ['problem-aware', 'solution-aware', 'service-aware', 'action-ready'] as const;
 const subjectSources = ['approved-tra-human', 'non-human'] as const;
 const compositions = ['single-focus', 'split', 'stacked', 'grid', 'comparison'] as const;
@@ -27,6 +29,7 @@ export type CreativeStrategy = {
   offer: string | null;
   soWhat: { surfaceMessage: string; functionalConsequence: string; meaningfulOutcome: string };
   execution: {
+    taxDocumentReference?: TaxDocumentSelection; // Absent only on legacy saved plans.
     subjectSource: SubjectSource;
     composition: (typeof compositions)[number];
     imageTreatment: (typeof imageTreatments)[number];
@@ -51,8 +54,9 @@ export const CREATIVE_STRATEGY_JSON_SCHEMA = {
     soWhat: { type: 'object', additionalProperties: false, required: soWhatFields,
       properties: Object.fromEntries(soWhatFields.map((field) => [field, stringSchema])) },
     execution: { type: 'object', additionalProperties: false,
-      required: ['subjectSource', 'composition', 'imageTreatment', 'textDensity', 'ctaTreatment', 'typographyHierarchy'],
-      properties: { subjectSource: { type: 'string', enum: subjectSources }, composition: { type: 'string', enum: compositions },
+      required: ['taxDocumentReference', 'subjectSource', 'composition', 'imageTreatment', 'textDensity', 'ctaTreatment', 'typographyHierarchy'],
+      properties: { taxDocumentReference: { type: 'string', enum: TAX_DOCUMENT_SELECTIONS },
+        subjectSource: { type: 'string', enum: subjectSources }, composition: { type: 'string', enum: compositions },
         imageTreatment: { type: 'string', enum: imageTreatments }, textDensity: { type: 'string', enum: textDensities },
         ctaTreatment: { type: 'string', enum: ctaTreatments }, typographyHierarchy: { type: 'string', enum: typographyHierarchies } } },
   },
@@ -80,7 +84,8 @@ export function parseCreativeStrategy(value: unknown, hasApprovedHumanSource: bo
   const soWhat = Object.fromEntries(soWhatFields.map((field) => [field, parseString(soWhatValue[field])]));
   if (Object.values(soWhat).some((field) => !field) || !isRecord(value.execution)) return null;
   const execution = value.execution;
-  if (!hasOnly(execution, ['subjectSource', 'composition', 'imageTreatment', 'textDensity', 'ctaTreatment', 'typographyHierarchy'])
+  if (!hasOnly(execution, ['subjectSource', 'composition', 'imageTreatment', 'textDensity', 'ctaTreatment', 'typographyHierarchy', ...('taxDocumentReference' in execution ? ['taxDocumentReference'] : [])])
+    || ('taxDocumentReference' in execution && !isEnum(execution.taxDocumentReference, TAX_DOCUMENT_SELECTIONS))
     || !isEnum(execution.subjectSource, subjectSources) || !isEnum(execution.composition, compositions)
     || !isEnum(execution.imageTreatment, imageTreatments) || !isEnum(execution.textDensity, textDensities)
     || !isEnum(execution.ctaTreatment, ctaTreatments) || !isEnum(execution.typographyHierarchy, typographyHierarchies)

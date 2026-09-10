@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
+import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
+import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
@@ -149,6 +151,7 @@ const buildLayoutReferenceAnalysis = (
 });
 
 export const generatePromptOnlyCreativeImage = async (args: {
+  taxDocumentReference?: TaxDocumentSelection;
   primaryFormat: keyof typeof CREATIVE_FORMAT_LABELS;
   placement: CreativePlacement;
   context: string;
@@ -162,6 +165,7 @@ export const generatePromptOnlyCreativeImage = async (args: {
   }
 
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
+  const document = await prepareTaxDocumentReference(args.taxDocumentReference);
   const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
   const prompt = `
 Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
@@ -179,7 +183,7 @@ Description: ${args.copy.description}
 ${logoDirection}
 ${formatCreativeSafeZoneRules(args.placement)}
 TRA guardrails:
-- This request has no reference image. Invent the visual composition from scratch.
+- ${document ? 'Use the document exemplar only for the planned paperwork; compose the ad independently.' : 'This request has no reference image. Invent the visual composition from scratch.'}
 - Do not depict a person, face, spokesperson, or human figure. No approved TRA human identity is attached to this image-generation call, so use a non-human concept.
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
@@ -187,24 +191,25 @@ TRA guardrails:
 - Keep the design credible, consumer-friendly, and readable on a phone.
 - Use strong visual hierarchy and avoid tiny text or clutter.
 - The only company or brand name that may appear is Tax Relief Advocates or TRA.
+${document?.prompt ?? ''}
 `;
 
   const routed = await runCreativeImageModelRoute({
     operationType: args.operationType ?? 'PROMPT_GENERATION',
     generate: async (model) => {
-      const response = await fetchCreativeImage(`${OPENAI_BASE_URL}/images/generations`, {
+      const parameters = { model, prompt, size: placement.providerSize, quality: 'high', output_format: 'png' };
+      const form = new FormData();
+      if (document) {
+        for (const [key, value] of Object.entries(parameters)) form.set(key, value);
+        document.appendTo(form);
+      }
+      const response = await fetchCreativeImage(`${OPENAI_BASE_URL}/images/${document ? 'edits' : 'generations'}`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
+          ...(document ? {} : { 'Content-Type': 'application/json' }),
         },
-        body: JSON.stringify({
-          model,
-          prompt,
-          size: placement.providerSize,
-          quality: 'high',
-          output_format: 'png',
-        }),
+        body: document ? form : JSON.stringify(parameters),
       });
       if (!response.ok) {
         throw creativeImageHttpError(response.status, await getOpenAIError(response));
@@ -534,6 +539,7 @@ export async function POST(request: Request) {
 
           if (providerImageSource) {
             imageResult = await generateApprovedTraReferenceCreativeImage({
+              taxDocumentReference: item.strategy.execution.taxDocumentReference,
               source: providerImageSource.stored,
               primaryFormat: item.format,
               placement: parsed.data.placement,
@@ -543,6 +549,7 @@ export async function POST(request: Request) {
             });
           } else if (videoFrameSet) {
             const videoImageResult = await generateApprovedTraVideoFrameCreativeImage({
+              taxDocumentReference: item.strategy.execution.taxDocumentReference,
               frames: videoFrameSet.frames,
               primaryFormat: item.format,
               placement: parsed.data.placement,
@@ -554,6 +561,7 @@ export async function POST(request: Request) {
             providerFrames = videoImageResult.providerFrames;
           } else {
             imageResult = await generatePromptOnlyCreativeImage({
+              taxDocumentReference: item.strategy.execution.taxDocumentReference,
               primaryFormat: item.format,
               placement: parsed.data.placement,
               context: itemContext,

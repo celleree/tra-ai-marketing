@@ -226,9 +226,13 @@ Confirm current code before implementation because runtime behavior is authorita
 
 ## Exact next action
 
-Complete the six-image Sunburst render test above. Review the outputs before deciding the exact production implementation.
+The user reports completion of a hands-off 12-ad first-pass test: 12 rendered and 9 were creatively acceptable. Visual diversity, layout transfer, image quality and human realism were generally strong. Remaining weaknesses include repeated strategic propositions, desk/paper overuse, medium drift, incidental props/checkmarks/microprint, dimension mismatch and excessive correction passes on some concepts.
 
-If the six-image test is strong, validate 12 creatives next, then audit/planning-test 30+ before assuming the system scales.
+Proceed with contract-first production integration. Prefer approved TRA humans initially; fictional adults remain a later product decision and must not block this work. Reuse the existing video/frame infrastructure for a curated approved human library.
+
+The initial tax-document library consists of the two user-supplied notice/envelope photos. The seeded selection/render path is documented in `docs/image-workflow.md`. Conditional document rules apply only to selected document concepts; this slice does not complete the broader distilled-brief/reference-layout production migration.
+
+Next integrate the full per-ad planning/render contract and strategic diversity improvements, then validate the implemented API workflow at 6 and 12 outputs before assessing 30+. Manual results do not establish runtime visual acceptance. Preserve conditional human-photographic and attached-layout rules instead of accumulating universal renderer instructions.
 
 ## Related canonical sources
 

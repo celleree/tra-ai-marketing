@@ -1,4 +1,5 @@
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import type { hydrateSavedCreativeRevisionContext } from '@/lib/creatives/revision-source-hydration';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { CreativeIdentity } from '@/lib/creatives/identity';
@@ -37,15 +38,17 @@ export async function generateCreativeRevisionImage(args: {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured.');
   const spec = CREATIVE_PLACEMENT_SPECS[args.placement];
+  const document = await prepareTaxDocumentReference(args.concept.strategy.execution.taxDocumentReference);
   const prompt = `Create an original static Tax Relief Advocates (TRA) ad at ${spec.width}x${spec.height}, aspect ratio ${spec.aspectRatio}.
 Operation: ${args.operation}. ${DIRECTIONS[args.operation]}
 ${formatCreativeSafeZoneRules(args.placement)}
 The FIRST attached image is the selected saved EDITING_CANVAS. It is generated editing context, never an approved human-identity source or evidence for factual claims.
 ${originalApprovedSource
-    ? 'The remaining attachments are the separately validated original approved TRA reference or approved TRA video PNG frames. Only these attachments may supply human identity; preserve that identity without adding, blending or replacing people.'
+    ? 'The attachments named approved-tra-* are the separately validated original approved TRA reference or approved TRA video PNG frames. Only these attachments may supply human identity; preserve that identity without adding, blending or replacing people.'
     : 'There are no approved human source attachments. Do not depict any person, including a person visible in the editing canvas.'}
 ${args.concept.strategy.execution.subjectSource === 'non-human' ? 'The planned concept is non-human. Do not depict people even if original approved sources contain people.' : ''}
-No layout reference, external reference-library pixels, analysis JPEGs or logo artwork are attached as generation sources.
+No ad-layout reference, video-analysis JPEGs or logo artwork are attached as generation sources.
+${document?.prompt ?? ''}
 Current approved company context:
 ${args.companyContext}
 Requested creative direction (not factual approval): ${args.instruction || 'Follow the selected operation.'}
@@ -72,6 +75,7 @@ ${logoOverlay ? formatCreativeLogoReservation(args.placement) : ''}`;
         originalApprovedSource.frames.forEach((frame, index) =>
           append(form, frame.buffer, frame.mimeType, `approved-tra-frame-${index + 1}.png`));
       }
+      document?.appendTo(form);
       const response = await fetchCreativeImage('https://api.openai.com/v1/images/edits', {
         method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
       });

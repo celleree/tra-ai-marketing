@@ -48,6 +48,14 @@ Third-party/external ad used only as a design blueprint. It may influence layout
 
 It must never supply the external advertiser's person/model, logo, branding, copy, claims, or trademarks to final generation.
 
+### Seeded tax-document references
+
+User-provided tax-document exemplars are a separate document-structure source, not a Layout Reference, approved human source or factual evidence. Originals live in server-packaged `assets/tax-documents/`; their versioned IDs, SHA-256 hashes, original filenames, source and approved use live in `lib/references/tax-documents.ts`.
+
+Astra selects `execution.taxDocumentReference` for notices or tax-mail envelopes only when needed by the concept. Generation and revisions automatically attach that seed with conditional document instructions; no repeat upload is needed. Existing saved plans without this field remain supported. Saved planning retains the ID and the actual render prompt retains its version/hash.
+
+Use paper/envelope structure and physical construction only. Do not reproduce seals/logos, personal information, balances, SSNs, signatures, identifiers, source claims or pseudo-text. Sensitive fields stay blank; document wording must be explicitly planned. Document references do not grant human eligibility or advertising approval.
+
 ## Human-source invariant
 
 When a generated creative contains a human:

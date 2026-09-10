@@ -21,6 +21,9 @@ import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import type { StoredMediaFile } from '@/lib/media/types';
 
+import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
+import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
+
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 export interface CreativeReferenceAnalysis {
@@ -378,7 +381,8 @@ const buildApprovedTraSourceImagePrompt = (
   placement: CreativePlacement,
   context: string,
   copy: CreativeCopy,
-  reserveLogoArea: boolean
+  reserveLogoArea: boolean,
+  documentPrompt = ''
 ) => {
   const placementSpec = CREATIVE_PLACEMENT_SPECS[placement];
   return `
@@ -386,7 +390,8 @@ Create an ORIGINAL ${placementSpec.aspectRatio} static Facebook/Instagram ad for
 
 Compose natively for the ${placementSpec.aspectRatio} canvas (${placementSpec.width}x${placementSpec.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
-The ONE attached image is a validated, TRA-owned reference and is the only raw source image supplied to this generation call. Layout references, external reference-library images, and video frames are not attached.
+The first attached image is a validated, TRA-owned reference. Layout references and video frames are not attached.
+${documentPrompt}
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}
 ${
@@ -402,7 +407,7 @@ Primary text idea: ${copy.primaryText}
 Description: ${copy.description}
 
 Approved-source rules:
-- The attached TRA image is the only allowed raw visual and the only approved human-identity source for this generation call.
+- The first attached TRA image is the only approved human-identity source for this generation call.
 - If the output depicts a person, preserve the visible identity from the attached TRA image. Do not invent, replace, blend, or add another person.
 - Do not recreate the attached image verbatim or depend on its old layout unless the text direction explicitly asks for a high-level structural cue.
 - Make the result clearly original and specific to TRA.
@@ -433,7 +438,8 @@ const appendImage = (
 const generateImageEdit = async (
   prompt: string,
   images: Array<{ source: StoredMediaFile; fileName: string }>,
-  providerSize: string
+  providerSize: string,
+  document: Awaited<ReturnType<typeof prepareTaxDocumentReference>> = null
 ): Promise<ImageGenerationResult> => {
   const routed = await runCreativeImageModelRoute({
     operationType: 'TRA_REFERENCE_GENERATION',
@@ -445,6 +451,7 @@ const generateImageEdit = async (
       formData.set('quality', 'high');
       formData.set('output_format', 'png');
       for (const image of images) appendImage(formData, image.source, image.fileName);
+      document?.appendTo(formData);
       const response = await fetchCreativeImage(`${OPENAI_BASE_URL}/images/edits`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getApiKey()}` },
@@ -465,6 +472,7 @@ const generateImageEdit = async (
 };
 
 export async function generateApprovedTraReferenceCreativeImage(args: {
+  taxDocumentReference?: TaxDocumentSelection;
   source: StoredMediaFile;
   primaryFormat: CreativeFormatId;
   secondaryFormat?: CreativeFormatId;
@@ -473,13 +481,15 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
   copy: CreativeCopy;
   reserveLogoArea?: boolean;
 }): Promise<ImageGenerationResult> {
+  const document = await prepareTaxDocumentReference(args.taxDocumentReference);
   const prompt = buildApprovedTraSourceImagePrompt(
       args.primaryFormat,
       args.secondaryFormat,
       args.placement ?? 'SQUARE_1_1',
       args.context,
       args.copy,
-      Boolean(args.reserveLogoArea)
+      Boolean(args.reserveLogoArea),
+      document?.prompt
     );
   return generateImageEdit(
     prompt,
@@ -489,6 +499,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
         fileName: `approved-tra-source-${args.source.fileName}`,
       },
     ],
-    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize
+    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize,
+    document
   );
 }

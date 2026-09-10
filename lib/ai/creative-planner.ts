@@ -1,4 +1,5 @@
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
+import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeCopy } from '@/lib/creatives/generated';
 import type { CreativeBatchPlan, PlannedCreativeConcept } from '@/lib/creatives/planned';
@@ -12,6 +13,7 @@ const MAX_TEXT_LENGTH = 1000;
 
 const PLANNER_RULES = `
 Plan a batch of original static Meta ad concepts for Tax Relief Advocates (TRA).
+${TAX_DOCUMENT_PLANNING_GUIDANCE}
 Consider multiple alternatives internally, then return the strongest concepts first. Select strategically distinct fits to the supplied approved TRA context; do not make performance predictions or call concepts likely winners.
 The SO WHAT outcome chain must directly shape both the copy and visualDirection for every concept.
 Nearby concepts must differ on at least one strategic dimension and two execution dimensions. Do not use superficial headline swaps, recolors, person swaps, or minor rearrangements as variation.

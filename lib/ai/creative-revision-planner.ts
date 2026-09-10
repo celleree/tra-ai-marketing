@@ -1,4 +1,5 @@
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
+import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { CREATIVE_STRATEGY_JSON_SCHEMA, parseCreativeStrategy } from '@/lib/creatives/strategy';
@@ -11,6 +12,7 @@ export type CreativeRevisionPlan = {
 };
 
 const RULES = `Revise ONE saved static ad concept for Tax Relief Advocates (TRA).
+${TAX_DOCUMENT_PLANNING_GUIDANCE}
 For EDIT, follow the requested instruction and preserve all unrequested copy, strategy and execution where practical. Do not impose novelty or dimensional variation on an ordinary edit.
 For VARIATION, produce a meaningfully different concept: change category or awareness stage and at least two execution dimensions. Use a distinct headline and SO WHAT surface message. Recolors, source/person swaps and format swaps alone are insufficient.
 Retain a complete SO WHAT outcome chain that connects the message to a meaningful customer outcome.
