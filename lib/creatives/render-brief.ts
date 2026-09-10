@@ -59,7 +59,7 @@ export function formatCreativeRenderBrief(brief: CreativeRenderBrief): string {
   return `ONE-AD RENDER BRIEF v${brief.version}
 ${JSON.stringify(brief, null, 2)}
 Execute this planned concept; do not invent another angle, outcome, offer or message.
-Use exactCopy verbatim wherever rendered. Respect text density and hierarchy; do not add filler copy, microprint, badges or checkmarks. Retain required disclaimers exactly; never invent a disclaimer when none is supplied.
+Use exactCopy verbatim wherever rendered. Respect text density and hierarchy; do not add unplanned filler copy, microprint, badges or checkmarks. Retain required disclaimers exactly; never invent a disclaimer when none is supplied.
 Planned copy is not advertising approval. Do not add factual claims or treat source pixels as proof.
 Keep the selected medium, composition and visual direction. Include only the planned subjects and props; do not add decorative objects or extra visual systems.
 ${brief.execution.subjectSource === 'non-human' ? 'This planned concept is explicitly non-human. Do not depict people even when approved TRA source pixels are attached.' : ''}
