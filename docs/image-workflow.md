@@ -60,6 +60,18 @@ When a generated creative contains a human:
 
 This is a hard product requirement.
 
+### Manual six-image render-test exception
+
+The six-image Sunburst behavior-discovery experiment documented in `docs/image-gen-improvement.md` is a narrow manual test outside the app runtime. For that experiment only:
+
+- when no approved TRA human source is supplied, Sunburst may generate an entirely fictional adult that does not copy or resemble a specific reference person;
+- the assigned external layout-reference image may be attached directly to Sunburst as layout/structure inspiration only;
+- third-party people/identity, branding, logos, exact copy, claims, prices, statistics, testimonials, and proof must not transfer into the TRA output;
+- test output is not automatically approved for advertising use;
+- these exceptions do not change current application/runtime source-role or human-source requirements.
+
+Any production/runtime adoption of either exception requires a separate implementation change and verification after the manual experiment is reviewed.
+
 ## Reference preprocessing
 
 The source roles do not enter final generation in the same way.
