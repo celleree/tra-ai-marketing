@@ -127,6 +127,12 @@ GPT-6 Astra combines approved TRA context, approved TRA source pixels, layout in
 
 ## Company and brand grounding
 
+### Astra-to-renderer boundary
+
+Astra receives broad approved company knowledge, user direction, source analysis and batch context. Initial generation and revisions render from the versioned one-ad contract in `lib/creatives/render-brief.ts`: exact planned copy/CTA, visual direction and execution, relevant brand styling, hard compliance rules and required disclaimers. A selected cached layout blueprint may supply geometry. Company summaries, service/proof catalogs, personas, batch selection reasons and raw user requests stay with planning.
+
+Document rules remain conditional on a selected tax-document attachment. Human realism guidance applies only to approved-human photographic/documentary concepts. Edits carry their concrete visual instructions through Astra's revised `visualDirection`. Provider adapters retain placement, safe-zone, approved-source and deterministic-logo instructions; the saved actual prompt retains the complete rendered brief. This boundary does not itself approve copy or image quality for advertising.
+
 GPT-6 Astra must receive relevant approved TRA context automatically rather than relying only on logo/colors/fonts.
 
 Canonical context includes:

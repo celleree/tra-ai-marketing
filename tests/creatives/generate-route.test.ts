@@ -330,17 +330,28 @@ it('uses a seeded document from the real planner contract through rendering and 
       ? Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(plan) }] }] })
       : Response.json({ data: [{ b64_json: PNG.toString('base64') }] });
   }));
-  const events = await readStreamEvents(await POST(generationRequest([])));
+  const events = await readStreamEvents(await POST(generationRequest([], {
+    knowledgeBase: { companySummary: 'PLANNER_ONLY_SUMMARY' },
+    guardrails: { requiredDisclaimers: 'Results vary.' },
+  })));
   expect(events.filter(event => event.event === 'creative')).toHaveLength(2);
   expect(events.some(event => event.event === 'error')).toBe(false);
   const planner = JSON.parse(requests.find(request => request.url.endsWith('/responses'))!.body as string);
   expect(planner.input[0].content[0].text).toContain('Built-in tax-document references');
+  expect(planner.input[1].content[0].text).toContain('PLANNER_ONLY_SUMMARY');
   expect(planner.text.format.schema.properties.creatives.items.properties.strategy.properties.execution.required).toContain('taxDocumentReference');
   const edit = requests.find(request => request.url.endsWith('/images/edits'))!.body as FormData;
   const attached = edit.getAll('image[]') as File[];
   expect(attached).toHaveLength(1);
   expect(contentHash(Buffer.from(await attached[0].arrayBuffer()))).toBe(TAX_DOCUMENT_REFERENCES[0].sha256);
   const ordinary = JSON.parse(requests.find(request => request.url.endsWith('/images/generations'))!.body as string);
+  for (const prompt of [String(edit.get('prompt')), ordinary.prompt]) {
+    expect(prompt).toContain('ONE-AD RENDER BRIEF v1');
+    expect(prompt).toContain('Results vary.');
+    expect(prompt).not.toContain('PLANNER_ONLY_SUMMARY');
+    expect(prompt).not.toContain('Create compliant TRA concepts.');
+    expect(prompt).not.toContain('Distinct strategic fit');
+  }
   expect(ordinary.prompt).not.toContain('DOCUMENT-ONLY REFERENCE');
   expect(readMediaById).not.toHaveBeenCalled();
   const records = mocks.saveCreativeBatch.mock.calls.flatMap(([batch]) => batch);
@@ -499,7 +510,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
           },
         ],
       });
-      expect(provenance?.imageGeneration.prompt).toContain('STRUCTURED LAYOUT BLUEPRINT');
+      expect(provenance?.imageGeneration.prompt).toContain('"layoutBlueprint"');
     }
     expect(events.at(-1)).toMatchObject({
       event: 'complete',
@@ -523,9 +534,10 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(body.quality).toBe('high');
       expect(body.size).toBe('1024x1024');
       expect(body.prompt).toContain('1:1 canvas (1024x1024)');
-      expect(body.prompt).toContain('APPROVED TRA COMPANY CONTEXT');
-      expect(body.prompt).toContain('STRUCTURED LAYOUT BLUEPRINT');
-      expect(body.prompt).toContain('replace human placeholder geometry with a non-human');
+      expect(body.prompt).not.toContain('APPROVED TRA COMPANY CONTEXT');
+      expect(body.prompt).toContain('"layoutBlueprint"');
+      expect(body.prompt).toContain('HUMAN_PLACEHOLDER regions describe geometry only');
+      expect(body.prompt).toContain('This planned concept is explicitly non-human');
       expect(String(options?.body)).not.toContain(storedById[layoutId].buffer.toString('base64'));
     }
   });
@@ -776,10 +788,10 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     for (const [call] of mocks.generateApprovedTraVideoFrameCreativeImage.mock.calls) {
       expect(call.frames[0].sourceVideoMediaId).toBe(videoId);
-      expect(call.context).toContain('APPROVED TRA COMPANY CONTEXT');
-      expect(call.context).toContain('Runtime TRA layout-plus-video context.');
-      expect(call.context).toContain('STRUCTURED LAYOUT BLUEPRINT');
-      expect(call.context).toContain('Layout-reference mode');
+      expect(call.context).toContain('ONE-AD RENDER BRIEF v1');
+      expect(call.context).not.toContain('Runtime TRA layout-plus-video context.');
+      expect(call.context).toContain('"layoutBlueprint"');
+      expect(call.context).toContain('TEXT_LEFT_VISUAL_RIGHT');
     }
     expect(fetch).not.toHaveBeenCalled();
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
@@ -818,9 +830,9 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(call.source).toBe(storedById[traId]);
       expect(call.source).not.toBe(storedById[layoutId]);
       expect(call.source.mediaType).toBe('IMAGE');
-      expect(call.context).toContain('APPROVED TRA COMPANY CONTEXT');
-      expect(call.context).toContain('Runtime calm and direct.');
-      expect(call.context).toContain('STRUCTURED LAYOUT BLUEPRINT');
+      expect(call.context).toContain('ONE-AD RENDER BRIEF v1');
+      expect(call.context).not.toContain('Runtime calm and direct.');
+      expect(call.context).toContain('"layoutBlueprint"');
     }
     expect(fetch).not.toHaveBeenCalled();
     for (const { data } of events.filter(({ event }) => event === 'creative')) {
@@ -903,10 +915,10 @@ describe('layout blueprint and final image-provider boundaries', () => {
     ).toBe(true);
     const firstCall = mocks.generateApprovedTraReferenceCreativeImage.mock.calls[0][0];
     expect(firstCall.copy).toEqual(plannedCreative(1).copy);
-    expect(firstCall.context).toContain('Selection reason: Distinct strategic fit 1');
-    expect(firstCall.context).toContain('Surface message: Surface message 1');
-    expect(firstCall.context).toContain('Composition: single-focus');
-    expect(firstCall.context).toContain('Visual direction: Distinct visual direction 1');
+    expect(firstCall.context).not.toContain('Distinct strategic fit 1');
+    expect(firstCall.context).not.toContain('Surface message 1');
+    expect(firstCall.context).toContain('"composition": "single-focus"');
+    expect(firstCall.context).toContain('Distinct visual direction 1');
     expect(firstCall.context).toContain('This planned concept is explicitly non-human');
     const creatives = events
       .filter(({ event }) => event === 'creative')
@@ -1049,7 +1061,7 @@ describe('progressive creative delivery', () => {
       attachedSource: null,
       analysisSources: [],
     });
-    expect(provenance?.imageGeneration.prompt).toContain('PLANNED CREATIVE BRIEF');
+    expect(provenance?.imageGeneration.prompt).toContain('ONE-AD RENDER BRIEF v1');
   });
 
   it('streams a GENERATE identity for initial portrait generation', async () => {

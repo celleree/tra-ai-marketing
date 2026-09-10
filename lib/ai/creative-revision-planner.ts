@@ -14,6 +14,7 @@ export type CreativeRevisionPlan = {
 const RULES = `Revise ONE saved static ad concept for Tax Relief Advocates (TRA).
 ${TAX_DOCUMENT_PLANNING_GUIDANCE}
 For EDIT, follow the requested instruction and preserve all unrequested copy, strategy and execution where practical. Do not impose novelty or dimensional variation on an ordinary edit.
+Put all concrete visual edit instructions in strategy.visualDirection. The renderer receives only the revised concept, relevant styling and hard rules, not the raw user request or broad company context.
 For VARIATION, produce a meaningfully different concept: change category or awareness stage and at least two execution dimensions. Use a distinct headline and SO WHAT surface message. Recolors, source/person swaps and format swaps alone are insufficient.
 Retain a complete SO WHAT outcome chain that connects the message to a meaningful customer outcome.
 The parent concept is existing creative content, not evidence that its claims are approved. User instructions are creative direction, not factual approval. Ground facts only in explicit approved claims/proof in the supplied current company context. Unknown or unapproved facts are unavailable.

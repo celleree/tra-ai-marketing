@@ -62,7 +62,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const instruction = 'instruction' in revision ? revision.instruction : undefined;
     const imageResult = await generateCreativeRevisionImage({
       sources, operation: revision.operation, concept: { format: concept.format, copy: concept.copy, strategy: concept.strategy },
-      placement, companyContext, ...(instruction ? { instruction } : {}),
+      placement, companyProfile: revision.companyProfile,
     });
     await validateGeneratedCreativeImage(imageResult.buffer, placement);
     const finalBuffer = sources.logoOverlay
