@@ -74,7 +74,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       format: concept.format, placement, copy: concept.copy, identity,
       planning: { strategy: concept.strategy, selectionReason: concept.selectionReason, model: plannerModel, reasoningEffort: 'medium' },
       generationProvenance: {
-        ...provenance, imageGeneration: { prompt: imageResult.prompt, model: imageResult.model },
+        ...provenance, imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
         revision: { parentCreativeId: parentId, canvasMediaId: sources.canvas.mediaId, canvasSha256: sources.canvas.sha256, ...(instruction ? { instruction } : {}) },
       },
       ...(parent.referenceImageId ? { referenceImageId: parent.referenceImageId } : {}),

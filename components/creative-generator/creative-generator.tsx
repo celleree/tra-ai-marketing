@@ -4,10 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
-import {
-  DEFAULT_CREATIVE_IMAGE_MODEL,
-  type CreativeImageModel,
-} from '@/lib/creatives/image-models';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
@@ -94,9 +90,6 @@ export function CreativeGenerator() {
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
   const [placement, setPlacement] = useState<CreativePlacement>('SQUARE_1_1');
-  const [imageModel, setImageModel] = useState<CreativeImageModel>(
-    DEFAULT_CREATIVE_IMAGE_MODEL
-  );
   const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generating, setGenerating] = useState(false);
   const [generationComplete, setGenerationComplete] = useState(true);
@@ -217,7 +210,6 @@ export function CreativeGenerator() {
           context: context.trim(),
           variationCount,
           placement,
-          imageModel,
         }),
       });
       if (!response.ok || !isGenerationEventStream(response)) {
@@ -408,8 +400,6 @@ export function CreativeGenerator() {
                     onVariationCountChange={setVariationCount}
                     placement={placement}
                     onPlacementChange={setPlacement}
-                    imageModel={imageModel}
-                    onImageModelChange={setImageModel}
                     onSubmit={generate}
                     ready={ready}
                     generating={generating}

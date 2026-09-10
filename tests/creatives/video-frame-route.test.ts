@@ -72,7 +72,8 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const imageResult = {
   buffer: PNG,
   prompt: 'Mock final image prompt',
-  model: 'gpt-image-2',
+  model: 'gpt-image-2.5-sunburst',
+  routing: { operationType: 'TRA_VIDEO_FRAME_GENERATION' as const, preferredModel: 'gpt-image-2.5-sunburst' as const, actualModel: 'gpt-image-2.5-sunburst' as const, fallbackUsed: false, fallbackFromModel: null, fallbackReason: null },
 };
 const VIDEO_ID = `media_${'1'.repeat(32)}`;
 const HASH = createHash('sha256').update(REAL_ENCODED_MP4).digest('hex');
@@ -177,7 +178,7 @@ describe('creative generation TRA video integration', () => {
         (data.creative as { generationProvenance?: unknown }).generationProvenance
       );
       expect(provenance).toMatchObject({
-        imageGeneration: { prompt: imageResult.prompt, model: imageResult.model },
+        imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
         requestedSources: [
           { role: 'TRA_VIDEO', mediaId: VIDEO_ID, sha256: HASH },
         ],

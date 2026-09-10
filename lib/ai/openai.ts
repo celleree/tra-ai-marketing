@@ -5,7 +5,12 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
-import type { CreativeImageModel } from '@/lib/creatives/image-models';
+import {
+  creativeImageHttpError,
+  creativeImageMissingOutputError,
+  fetchCreativeImage,
+  runCreativeImageModelRoute,
+} from '@/lib/creatives/image-models';
 import {
   CREATIVE_PLACEMENT_SPECS,
   type CreativePlacement,
@@ -428,40 +433,35 @@ const appendImage = (
 const generateImageEdit = async (
   prompt: string,
   images: Array<{ source: StoredMediaFile; fileName: string }>,
-  providerSize: string,
-  imageModel?: CreativeImageModel
+  providerSize: string
 ): Promise<ImageGenerationResult> => {
-  const model = imageModel || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
-  const formData = new FormData();
-  formData.set('model', model);
-  formData.set('prompt', prompt);
-  formData.set('size', providerSize);
-  formData.set('quality', 'high');
-  formData.set('output_format', 'png');
-
-  for (const image of images) {
-    appendImage(formData, image.source, image.fileName);
-  }
-
-  const response = await fetch(`${OPENAI_BASE_URL}/images/edits`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${getApiKey()}` },
-    body: formData,
+  const routed = await runCreativeImageModelRoute({
+    operationType: 'TRA_REFERENCE_GENERATION',
+    generate: async (model) => {
+      const formData = new FormData();
+      formData.set('model', model);
+      formData.set('prompt', prompt);
+      formData.set('size', providerSize);
+      formData.set('quality', 'high');
+      formData.set('output_format', 'png');
+      for (const image of images) appendImage(formData, image.source, image.fileName);
+      const response = await fetchCreativeImage(`${OPENAI_BASE_URL}/images/edits`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getApiKey()}` },
+        body: formData,
+      });
+      if (!response.ok) {
+        throw creativeImageHttpError(response.status, await getErrorMessage(response));
+      }
+      const payload = (await response.json()) as {
+        data?: Array<{ b64_json?: string }>;
+      };
+      const base64 = payload.data?.[0]?.b64_json;
+      if (!base64) throw creativeImageMissingOutputError();
+      return Buffer.from(base64, 'base64');
+    },
   });
-
-  if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
-  }
-
-  const payload = (await response.json()) as {
-    data?: Array<{ b64_json?: string }>;
-  };
-  const base64 = payload.data?.[0]?.b64_json;
-  if (!base64) {
-    throw new Error('OpenAI returned no generated image.');
-  }
-
-  return { buffer: Buffer.from(base64, 'base64'), prompt, model };
+  return { buffer: routed.value, prompt, model: routed.routing.actualModel, routing: routed.routing };
 };
 
 export async function generateApprovedTraReferenceCreativeImage(args: {
@@ -472,7 +472,6 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
   context: string;
   copy: CreativeCopy;
   reserveLogoArea?: boolean;
-  imageModel?: CreativeImageModel;
 }): Promise<ImageGenerationResult> {
   const prompt = buildApprovedTraSourceImagePrompt(
       args.primaryFormat,
@@ -490,7 +489,6 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
         fileName: `approved-tra-source-${args.source.fileName}`,
       },
     ],
-    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize,
-    args.imageModel
+    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize
   );
 }

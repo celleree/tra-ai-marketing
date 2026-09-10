@@ -52,6 +52,37 @@ describe('creative generation provenance', () => {
     expect(parsed?.logoOverlaySource).toEqual({ mediaId: mediaId('e'), sha256: hash('e') });
   });
 
+  it('stores automatic routing and keeps legacy model-only provenance readable', () => {
+    const value = provenance();
+    value.imageGeneration.routing = {
+      operationType: 'EDIT',
+      preferredModel: 'gpt-image-2.5-sunburst',
+      actualModel: 'gpt-image-2.5-flare',
+      fallbackUsed: true,
+      fallbackFromModel: 'gpt-image-2.5-sunburst',
+      fallbackReason: 'provider_unavailable',
+    };
+    value.imageGeneration.model = 'gpt-image-2.5-flare';
+    expect(parseCreativeGenerationProvenance(value)?.imageGeneration.routing).toEqual(value.imageGeneration.routing);
+
+    const legacy = provenance();
+    expect(parseCreativeGenerationProvenance(legacy)?.imageGeneration).toEqual(legacy.imageGeneration);
+  });
+
+  it('rejects inconsistent or unsanitized routing provenance', () => {
+    const value = provenance();
+    value.imageGeneration.model = 'gpt-image-2.5-flare';
+    value.imageGeneration.routing = {
+      operationType: 'EDIT',
+      preferredModel: 'gpt-image-2.5-sunburst',
+      actualModel: 'gpt-image-2.5-flare',
+      fallbackUsed: true,
+      fallbackFromModel: 'gpt-image-2.5-sunburst',
+      fallbackReason: 'raw provider message!',
+    };
+    expect(parseCreativeGenerationProvenance(value)).toBeNull();
+  });
+
   it('accepts attached video frames and requires their matching requested source', () => {
     const value = provenance();
     const videoAttached: Extract<CreativeGenerationProvenance['attachedSource'], { type: 'TRA_VIDEO_FRAMES' }> = {

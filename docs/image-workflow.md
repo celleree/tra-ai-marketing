@@ -18,7 +18,9 @@ Current Stage 1 scope: static-image creative generation and editing. Do not impl
 
 The active target creative pipeline is:
 
-`User/Kinetiq inputs -> GPT-6 Astra (medium reasoning) creative planning/prompting -> GPT Image 2 generation -> user review/select -> save to TRA Creatives`
+`User/Kinetiq inputs -> GPT-6 Astra (medium reasoning) creative planning/prompting -> GPT Image 2.5 Sunburst generation/editing -> user review/select -> save to TRA Creatives`
+
+GPT Image 2.5 Sunburst is the only user-facing image model and is preferred for every image-generation and revision operation. GPT Image 2.5 Flare is a hidden, single-attempt fallback only for compatible transient provider failures; successful fallback use must be recorded in provenance and surfaced to the user.
 
 GPT-6 Astra is the current creative-planning/prompting model decision. When this path is wired through the OpenAI Responses API, use model `gpt-6-astra` with `reasoning.effort: medium`. Narrow preprocessing/analyzer tasks may continue to use cheaper models when they reliably satisfy their structured contract.
 

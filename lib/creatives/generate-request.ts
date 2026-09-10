@@ -4,10 +4,6 @@ import {
 } from '@/lib/creative-categories';
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import {
-  isCreativeImageModel,
-  type CreativeImageModel,
-} from '@/lib/creatives/image-models';
-import {
   isCreativePlacement,
   type CreativePlacement,
 } from '@/lib/creatives/placements';
@@ -33,7 +29,6 @@ export type GenerateCreativeRequest = {
   companyProfile?: RuntimeCompanyProfileSnapshot;
   videoFrameSelection?: GenerateVideoFrameSelection;
   placement?: CreativePlacement;
-  imageModel?: CreativeImageModel;
   context: string;
   variationCount: number;
 };
@@ -117,7 +112,6 @@ export function validateGenerateCreativeRequest(input: unknown):
       : parseGenerateVideoFrameSelection(body.videoFrameSelection);
   const placement =
     body.placement === undefined ? 'SQUARE_1_1' : body.placement;
-  const imageModel = body.imageModel;
   const brandLogoMediaId =
     typeof body.brandLogoMediaId === 'string'
       ? body.brandLogoMediaId.trim()
@@ -145,8 +139,8 @@ export function validateGenerateCreativeRequest(input: unknown):
     return { success: false, error: 'placement is unsupported' };
   }
 
-  if (imageModel !== undefined && !isCreativeImageModel(imageModel)) {
-    return { success: false, error: 'imageModel is unsupported' };
+  if (body.imageModel !== undefined) {
+    return { success: false, error: 'imageModel is selected automatically' };
   }
 
   if (
@@ -222,7 +216,6 @@ export function validateGenerateCreativeRequest(input: unknown):
     data: {
       sourceAssets,
       placement,
-      ...(imageModel ? { imageModel } : {}),
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),
