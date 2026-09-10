@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { parseCreativeIdentity } from '@/lib/creatives/identity';
+import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { TAX_DOCUMENT_REFERENCES } from '@/lib/references/tax-documents';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
@@ -312,6 +314,40 @@ let storedById: Record<string, StoredCreativeSourceMediaFile>;
 let readMediaById: ReturnType<typeof vi.fn>;
 let readImageById: ReturnType<typeof vi.fn>;
 let saveImage: ReturnType<typeof vi.fn>;
+
+it('uses a seeded document from the real planner contract through rendering and saved planning without uploads', async () => {
+  const original = await vi.importActual<typeof import('@/lib/ai/creative-planner')>('@/lib/ai/creative-planner');
+  mocks.planCreativeBatch.mockImplementation(original.planCreativeBatch);
+  const first = plannedCreative(1);
+  const plan = { creatives: [
+    { ...first, strategy: { ...first.strategy, execution: { ...first.strategy.execution, taxDocumentReference: 'irs-notice-v1' } } },
+    plannedCreative(2),
+  ] };
+  const requests: Array<{ url: string; body: string | FormData }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    requests.push({ url, body: init.body as string | FormData });
+    return url.endsWith('/responses')
+      ? Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(plan) }] }] })
+      : Response.json({ data: [{ b64_json: PNG.toString('base64') }] });
+  }));
+  const events = await readStreamEvents(await POST(generationRequest([])));
+  expect(events.filter(event => event.event === 'creative')).toHaveLength(2);
+  expect(events.some(event => event.event === 'error')).toBe(false);
+  const planner = JSON.parse(requests.find(request => request.url.endsWith('/responses'))!.body as string);
+  expect(planner.input[0].content[0].text).toContain('Built-in tax-document references');
+  expect(planner.text.format.schema.properties.creatives.items.properties.strategy.properties.execution.required).toContain('taxDocumentReference');
+  const edit = requests.find(request => request.url.endsWith('/images/edits'))!.body as FormData;
+  const attached = edit.getAll('image[]') as File[];
+  expect(attached).toHaveLength(1);
+  expect(contentHash(Buffer.from(await attached[0].arrayBuffer()))).toBe(TAX_DOCUMENT_REFERENCES[0].sha256);
+  const ordinary = JSON.parse(requests.find(request => request.url.endsWith('/images/generations'))!.body as string);
+  expect(ordinary.prompt).not.toContain('DOCUMENT-ONLY REFERENCE');
+  expect(readMediaById).not.toHaveBeenCalled();
+  const records = mocks.saveCreativeBatch.mock.calls.flatMap(([batch]) => batch);
+  const saved = records.find(record => record.planning.strategy.execution.taxDocumentReference === 'irs-notice-v1');
+  expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.execution.taxDocumentReference).toBe('irs-notice-v1');
+  expect(saved.generationProvenance.imageGeneration.prompt).toContain(TAX_DOCUMENT_REFERENCES[0].sha256);
+});
 
 it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model and placement rules for prompt-only %s', async (placement) => {
   vi.stubEnv('OPENAI_API_KEY', 'test-key');

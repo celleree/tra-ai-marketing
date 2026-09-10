@@ -11,6 +11,14 @@ const strategy = () => ({
 });
 
 describe('CreativeStrategy contract', () => {
+  it('retains built-in selection but rejects unknown document sources and preserves legacy plans', () => {
+    const withDocument = (taxDocumentReference: string) => ({
+      ...strategy(), execution: { ...strategy().execution, taxDocumentReference },
+    });
+    expect(parseCreativeStrategy(withDocument('irs-notice-v1'), false)?.execution.taxDocumentReference).toBe('irs-notice-v1');
+    expect(parseCreativeStrategy(withDocument('uploaded-unknown'), false)).toBeNull();
+    expect(parseCreativeStrategy(strategy(), false)?.execution).not.toHaveProperty('taxDocumentReference');
+  });
   it('preserves the complete trimmed SO WHAT chain', () => {
     const parsed = parseCreativeStrategy(strategy(), false);
     expect(parsed).toMatchObject({ persona: 'Busy taxpayer', soWhat: strategy().soWhat });

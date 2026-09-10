@@ -43,6 +43,20 @@ describe('approved TRA video-frame provider boundary', () => {
     expect(selectProviderVideoFrames(makeFrames()).map((frame) => frame.frameIndex)).toEqual([0, 2, 5]);
   });
 
+  it('adds a selected document after the approved frames without changing human provenance', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ data: [{ b64_json: PNG.toString('base64') }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await generateApprovedTraVideoFrameCreativeImage({
+      frames: makeFrames(1), primaryFormat: 'direct-response', context: 'A notice on a desk',
+      copy: { headline: 'Talk with TRA', primaryText: '', description: '' }, taxDocumentReference: 'irs-notice-v1',
+    });
+    const images = (fetchMock.mock.calls[0][1].body as FormData).getAll('image[]') as File[];
+    expect(images.map(file => file.type)).toEqual(['image/png', 'image/jpeg']);
+    expect(result.providerFrames).toEqual(makeFrames(1));
+    expect(result.prompt).toContain('NOT a TRA human source');
+  });
+
   it.each([false, true])('sends approved PNG pixels and preserves invisible logo reservation when enabled: %s', async (reserveLogoArea) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));

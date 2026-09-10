@@ -20,13 +20,19 @@ beforeEach(() => { vi.stubEnv('OPENAI_API_KEY', 'fixture-only'); vi.stubGlobal('
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('revision image provider', () => {
-  it('sends the editing canvas first with exact placement and returns actual prompt/model', async () => {
-    const result = await generateCreativeRevisionImage(args());
+  it.each(['none', 'irs-mail-v1'] as const)('keeps the editing canvas first with document selection %s', async taxDocumentReference => {
+    const input = args();
+    input.concept.strategy.execution.taxDocumentReference = taxDocumentReference;
+    const result = await generateCreativeRevisionImage(input);
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/images/edits');
     expect(body().get('size')).toBe('1024x1280');
     expect(body().get('quality')).toBe('high');
     expect(body().get('output_format')).toBe('png');
-    expect(files()).toHaveLength(1);
+    expect(files()).toHaveLength(taxDocumentReference === 'none' ? 1 : 2);
+    if (taxDocumentReference !== 'none') {
+      expect(files()[1].name).toBe('tax-document-irs-mail-v1.jpg');
+      expect(result.prompt).toContain('Leave sensitive fields blank');
+    } else expect(result.prompt).not.toContain('DOCUMENT-ONLY REFERENCE');
     expect(files()[0].name).toBe('editing-canvas-canvas.png');
     expect(Buffer.from(await files()[0].arrayBuffer()).toString()).toBe('canvas');
     expect(result).toMatchObject({ buffer: Buffer.from('provider-output'), prompt: body().get('prompt'), model: 'gpt-image-2.5-sunburst', routing: { operationType: 'EDIT', preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false } });

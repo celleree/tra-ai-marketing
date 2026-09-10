@@ -34,7 +34,7 @@ describe('approved TRA final image-provider boundary', () => {
     expect(prompt).toContain('x=105..401, y=322..546');
     expect(prompt).not.toContain('left 27%');
   });
-  it('attaches exactly the one approved TRA source passed by the route gate', async () => {
+  it.each(['none', 'irs-notice-v1'] as const)('keeps TRA identity separate from the selected document: %s', async taxDocumentReference => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const output = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -46,6 +46,7 @@ describe('approved TRA final image-provider boundary', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await generateApprovedTraReferenceCreativeImage({
+      taxDocumentReference,
       source,
       primaryFormat: 'direct-response',
       placement: 'PORTRAIT_4_5',
@@ -70,7 +71,11 @@ describe('approved TRA final image-provider boundary', () => {
     expect(formData.get('quality')).toBe('high');
     expect(formData.get('size')).toBe('1024x1280');
     const images = formData.getAll('image[]');
-    expect(images).toHaveLength(1);
+    expect(images).toHaveLength(taxDocumentReference === 'none' ? 1 : 2);
+    if (taxDocumentReference !== 'none') {
+      expect((images[1] as File).name).toBe('tax-document-irs-notice-v1.jpg');
+      expect(result.prompt).toContain('NOT a TRA human source');
+    } else expect(result.prompt).not.toContain('DOCUMENT-ONLY REFERENCE');
     expect(images[0]).toBeInstanceOf(File);
     const attached = images[0] as File;
     expect(attached.name).toBe(`approved-tra-source-${source.fileName}`);
