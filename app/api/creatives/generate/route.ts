@@ -12,6 +12,13 @@ import {
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import {
+  creativeImageHttpError,
+  creativeImageMissingOutputError,
+  fetchCreativeImage,
+  runCreativeImageModelRoute,
+  type CreativeImageOperationType,
+} from '@/lib/creatives/image-models';
 import { planCreativeBatch } from '@/lib/ai/creative-planner';
 import {
   analyzeApprovedTraVideoFrames,
@@ -147,13 +154,13 @@ export const generatePromptOnlyCreativeImage = async (args: {
   context: string;
   copy: CreativeCopy;
   reserveLogoArea: boolean;
+  operationType?: Extract<CreativeImageOperationType, 'PROMPT_GENERATION' | 'LAYOUT_REFERENCE_GENERATION'>;
 }): Promise<ImageGenerationResult> => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is not configured.');
   }
 
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
   const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
   const prompt = `
@@ -182,34 +189,35 @@ TRA guardrails:
 - The only company or brand name that may appear is Tax Relief Advocates or TRA.
 `;
 
-  const response = await fetch(`${OPENAI_BASE_URL}/images/generations`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
+  const routed = await runCreativeImageModelRoute({
+    operationType: args.operationType ?? 'PROMPT_GENERATION',
+    generate: async (model) => {
+      const response = await fetchCreativeImage(`${OPENAI_BASE_URL}/images/generations`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          size: placement.providerSize,
+          quality: 'high',
+          output_format: 'png',
+        }),
+      });
+      if (!response.ok) {
+        throw creativeImageHttpError(response.status, await getOpenAIError(response));
+      }
+      const payload = (await response.json()) as {
+        data?: Array<{ b64_json?: string }>;
+      };
+      const base64 = payload.data?.[0]?.b64_json;
+      if (!base64) throw creativeImageMissingOutputError();
+      return Buffer.from(base64, 'base64');
     },
-    body: JSON.stringify({
-      model,
-      prompt,
-      size: placement.providerSize,
-      quality: 'high',
-      output_format: 'png',
-    }),
   });
-
-  if (!response.ok) {
-    throw new Error(await getOpenAIError(response));
-  }
-
-  const payload = (await response.json()) as {
-    data?: Array<{ b64_json?: string }>;
-  };
-  const base64 = payload.data?.[0]?.b64_json;
-  if (!base64) {
-    throw new Error('OpenAI returned no generated image.');
-  }
-
-  return { buffer: Buffer.from(base64, 'base64'), prompt, model };
+  return { buffer: routed.value, prompt, model: routed.routing.actualModel, routing: routed.routing };
 };
 
 const buildReferenceCandidates = (
@@ -551,6 +559,7 @@ export async function POST(request: Request) {
               context: itemContext,
               copy,
               reserveLogoArea,
+              operationType: layoutBlueprint ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
             });
           }
 
@@ -594,6 +603,7 @@ export async function POST(request: Request) {
             imageGeneration: {
               prompt: imageResult.prompt,
               model: imageResult.model,
+              routing: imageResult.routing,
             },
             requestedSources,
             attachedSource,

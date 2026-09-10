@@ -1,21 +1,28 @@
 .field {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
+  margin: 0;
   color: #334155;
-  font-size: 14px;
 }
 
 .field select {
-  padding: 9px 12px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
-  color: inherit;
+  height: 38px;
+  min-width: 122px;
+  padding: 0 10px;
+  border: 1px solid #d9dfe6;
+  border-radius: 10px;
+  background: #f7f8fa;
+  color: #334155;
   font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
-.field select:disabled { opacity: 0.6; }
-.field select:focus-visible { outline: 2px solid #087af5; outline-offset: 2px; }
+.field select:disabled {
+  opacity: 0.6;
+}
+
+.field select:focus-visible {
+  outline: 2px solid #087af5;
+  outline-offset: 2px;
+}

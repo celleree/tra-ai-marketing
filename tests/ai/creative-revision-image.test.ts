@@ -16,7 +16,7 @@ const args = (): Args => ({
 const body = () => fetchMock.mock.calls[0][1].body as FormData;
 const files = () => body().getAll('image[]') as File[];
 const response = () => new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('provider-output').toString('base64') }] }));
-beforeEach(() => { vi.stubEnv('OPENAI_API_KEY', 'fixture-only'); vi.stubEnv('OPENAI_IMAGE_MODEL', ''); vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset().mockImplementation(async () => response()); });
+beforeEach(() => { vi.stubEnv('OPENAI_API_KEY', 'fixture-only'); vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset().mockImplementation(async () => response()); });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('revision image provider', () => {
@@ -29,7 +29,7 @@ describe('revision image provider', () => {
     expect(files()).toHaveLength(1);
     expect(files()[0].name).toBe('editing-canvas-canvas.png');
     expect(Buffer.from(await files()[0].arrayBuffer()).toString()).toBe('canvas');
-    expect(result).toEqual({ buffer: Buffer.from('provider-output'), prompt: body().get('prompt'), model: 'gpt-image-2' });
+    expect(result).toMatchObject({ buffer: Buffer.from('provider-output'), prompt: body().get('prompt'), model: 'gpt-image-2.5-sunburst', routing: { operationType: 'EDIT', preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false } });
     expect(result.prompt).toContain('never an approved human-identity source');
     expect(result.prompt).toContain('There are no approved human source attachments');
     expect(result.prompt).toContain('results vary');
@@ -55,13 +55,12 @@ describe('revision image provider', () => {
     expect(await Promise.all(files().map(async file => Buffer.from(await file.arrayBuffer()).toString()))).toEqual(['canvas', 'last', 'first']);
     expect(body().get('prompt')).toContain('Only these attachments may supply human identity');
   });
-  it.each(['EDIT', 'PLACEMENT', 'REGENERATE', 'VARIATION'] as const)('expresses %s intent and respects the configured image model', async operation => {
-    vi.stubEnv('OPENAI_IMAGE_MODEL', 'configured-image-model');
+  it.each(['EDIT', 'PLACEMENT', 'REGENERATE', 'VARIATION'] as const)('expresses %s intent and always prefers Sunburst', async operation => {
     await generateCreativeRevisionImage({ ...args(), operation, placement: 'VERTICAL_9_16' });
     expect(body().get('prompt')).toContain(`Operation: ${operation}.`);
     expect(body().get('size')).toBe('1152x2048');
     expect(body().get('prompt')).toContain('x=70..1081, y=287..1330');
-    expect(body().get('model')).toBe('configured-image-model');
+    expect(body().get('model')).toBe('gpt-image-2.5-sunburst');
   });
   it('rejects human strategy without original approval before spending', async () => {
     const input = args(); input.concept.strategy.execution.subjectSource = 'approved-tra-human';
@@ -74,8 +73,25 @@ describe('revision image provider', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     vi.stubEnv('OPENAI_API_KEY', 'fixture-only');
     fetchMock.mockResolvedValueOnce(new Response('{}', { status: 429 }));
-    await expect(generateCreativeRevisionImage(args())).rejects.toThrow('429');
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    await expect(generateCreativeRevisionImage(args())).rejects.toThrow('503');
     fetchMock.mockResolvedValueOnce(new Response('{"data":[]}'));
-    await expect(generateCreativeRevisionImage(args())).rejects.toThrow('no revised image');
+    fetchMock.mockResolvedValueOnce(new Response('{"data":[]}'));
+    await expect(generateCreativeRevisionImage(args())).rejects.toThrow('no generated image');
+  });
+
+  it('retries one transient failure with Flare and reports the fallback', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    fetchMock.mockResolvedValueOnce(response());
+    const result = await generateCreativeRevisionImage(args());
+    const models = fetchMock.mock.calls.map((call) => (call[1].body as FormData).get('model'));
+    expect(models).toEqual(['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']);
+    expect(result.routing).toMatchObject({ fallbackUsed: true, fallbackFromModel: 'gpt-image-2.5-sunburst', fallbackReason: 'provider_unavailable', actualModel: 'gpt-image-2.5-flare' });
+  });
+
+  it('does not retry deterministic provider rejection', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 400 }));
+    await expect(generateCreativeRevisionImage(args())).rejects.toThrow('400');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

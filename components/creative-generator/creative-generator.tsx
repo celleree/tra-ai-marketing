@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
-import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
@@ -43,6 +42,46 @@ const NAV_ITEMS: Array<{
   { id: 'company', label: 'Company', shortLabel: 'Company', icon: 'C' },
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
 ];
+
+const SECTION_HEADERS: Record<
+  WorkspaceSection,
+  { eyebrow: string; title: string; description: string }
+> = {
+  upload: {
+    eyebrow: 'Creative studio',
+    title: 'Create',
+    description: 'Generate new TRA creatives with AI or upload finished ads.',
+  },
+  'tra-creatives': {
+    eyebrow: 'TRA creative library',
+    title: 'Creatives',
+    description: 'Review, revise, and manage saved generated and uploaded TRA creatives.',
+  },
+  company: {
+    eyebrow: 'Company intelligence',
+    title: 'Company',
+    description:
+      'Manage the verified company profile, brand guidance, and guardrails used by the creative system.',
+  },
+  'reference-images': {
+    eyebrow: 'Reference library',
+    title: 'References',
+    description:
+      'Manage layout inspiration and TRA-owned source imagery used for new creatives.',
+  },
+};
+
+function WorkspaceSectionHeader({ section }: { section: WorkspaceSection }) {
+  const header = SECTION_HEADERS[section];
+
+  return (
+    <header className="workspace-section-header">
+      <p className="workspace-section-eyebrow">{header.eyebrow}</p>
+      <h1>{header.title}</h1>
+      <p>{header.description}</p>
+    </header>
+  );
+}
 
 export function CreativeGenerator() {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
@@ -288,18 +327,11 @@ export function CreativeGenerator() {
     void generate();
   }, [handoffGenerate, context, sourceAssets, variationCount]);
 
-  const activeLabel =
-    NAV_ITEMS.find((item) => item.id === activeSection)?.label || 'Create';
-
   return (
     <main className="workspace-shell">
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
           <div className="workspace-brand-mark">TRA</div>
-          <div>
-            <strong>AI Marketing</strong>
-            <span>Creative Studio</span>
-          </div>
         </div>
 
         <nav className="workspace-nav" aria-label="Creative workspace">
@@ -328,16 +360,10 @@ export function CreativeGenerator() {
       </aside>
 
       <section className="workspace-content">
-        <header className="workspace-topbar">
-          <div>
-            <p className="workspace-kicker">TRA AI Marketing</p>
-            <h1>{activeLabel}</h1>
-          </div>
-          <div className="workspace-badge">Internal</div>
-        </header>
-
         {activeSection === 'upload' ? (
           <div className="workspace-view workspace-view-upload">
+            <WorkspaceSectionHeader section="upload" />
+
             <div className="generator-grid">
               <div className="generator-main">
                 <div className={createStyles.modeSwitch} aria-label="Creative source">
@@ -362,8 +388,6 @@ export function CreativeGenerator() {
                 </div>
 
                 {creationMode === 'generate' ? (
-                  <>
-                  <CreativePlacementSelect value={placement} onChange={setPlacement} disabled={generating} />
                   <CreativeComposer
                     value={context}
                     onChange={setContext}
@@ -374,11 +398,12 @@ export function CreativeGenerator() {
                     onSourceRemoved={handleSourceRemoved}
                     variationCount={variationCount}
                     onVariationCountChange={setVariationCount}
+                    placement={placement}
+                    onPlacementChange={setPlacement}
                     onSubmit={generate}
                     ready={ready}
                     generating={generating}
                   />
-                  </>
                 ) : (
                   <DirectCreativeUploader
                     onUploadStart={handleUploadStart}
@@ -403,15 +428,18 @@ export function CreativeGenerator() {
             />
           </div>
         ) : activeSection === 'tra-creatives' ? (
-          <div className="workspace-view">
+          <div className="workspace-view workspace-view-standard">
+            <WorkspaceSectionHeader section="tra-creatives" />
             <CreativeLibrary />
           </div>
         ) : activeSection === 'company' ? (
-          <div className="workspace-view">
+          <div className="workspace-view workspace-view-standard">
+            <WorkspaceSectionHeader section="company" />
             <CompanyView />
           </div>
         ) : (
-          <div className="workspace-view">
+          <div className="workspace-view workspace-view-standard">
+            <WorkspaceSectionHeader section="reference-images" />
             <ReferenceLibrary />
           </div>
         )}

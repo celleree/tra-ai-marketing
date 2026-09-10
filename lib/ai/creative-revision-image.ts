@@ -5,6 +5,12 @@ import type { CreativeIdentity } from '@/lib/creatives/identity';
 import { CREATIVE_PLACEMENT_SPECS, type CreativePlacement } from '@/lib/creatives/placements';
 import { parseCreativeStrategy } from '@/lib/creatives/strategy';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
+import {
+  creativeImageHttpError,
+  creativeImageMissingOutputError,
+  fetchCreativeImage,
+  runCreativeImageModelRoute,
+} from '@/lib/creatives/image-models';
 
 type RevisionSources = Pick<Awaited<ReturnType<typeof hydrateSavedCreativeRevisionContext>>,
   'canvas' | 'originalApprovedSource' | 'logoOverlay'>;
@@ -49,27 +55,34 @@ Use the supplied copy and strategy for messaging. Saved canvas copy, user direct
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is Tax Relief Advocates or TRA.
 Keep text readable on a phone, with clear hierarchy and no clutter.
 ${logoOverlay ? formatCreativeLogoReservation(args.placement) : ''}`;
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
-  const form = new FormData();
-  for (const [key, value] of Object.entries({ model, prompt, size: spec.providerSize, quality: 'high', output_format: 'png' })) {
-    form.set(key, value);
-  }
-  const append = (buffer: Buffer, mimeType: string, name: string) =>
+  const append = (form: FormData, buffer: Buffer, mimeType: string, name: string) =>
     form.append('image[]', new Blob([new Uint8Array(buffer)], { type: mimeType }), name);
-  append(canvas.buffer, canvas.mimeType, `editing-canvas-${canvas.fileName}`);
-  if (originalApprovedSource?.kind === 'TRA_REFERENCE') {
-    const source = originalApprovedSource.source.stored;
-    append(source.buffer, source.mimeType, `approved-tra-source-${source.fileName}`);
-  } else if (originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES') {
-    originalApprovedSource.frames.forEach((frame, index) =>
-      append(frame.buffer, frame.mimeType, `approved-tra-frame-${index + 1}.png`));
-  }
-  const response = await fetch('https://api.openai.com/v1/images/edits', {
-    method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
+  const routed = await runCreativeImageModelRoute({
+    operationType: args.operation,
+    generate: async (model) => {
+      const form = new FormData();
+      for (const [key, value] of Object.entries({ model, prompt, size: spec.providerSize, quality: 'high', output_format: 'png' })) {
+        form.set(key, value);
+      }
+      append(form, canvas.buffer, canvas.mimeType, `editing-canvas-${canvas.fileName}`);
+      if (originalApprovedSource?.kind === 'TRA_REFERENCE') {
+        const source = originalApprovedSource.source.stored;
+        append(form, source.buffer, source.mimeType, `approved-tra-source-${source.fileName}`);
+      } else if (originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES') {
+        originalApprovedSource.frames.forEach((frame, index) =>
+          append(form, frame.buffer, frame.mimeType, `approved-tra-frame-${index + 1}.png`));
+      }
+      const response = await fetchCreativeImage('https://api.openai.com/v1/images/edits', {
+        method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
+      });
+      if (!response.ok) {
+        throw creativeImageHttpError(response.status, `OpenAI image revision failed with ${response.status}.`);
+      }
+      const payload = await response.json() as { data?: Array<{ b64_json?: string }> };
+      const base64 = payload.data?.[0]?.b64_json;
+      if (typeof base64 !== 'string' || !base64) throw creativeImageMissingOutputError();
+      return Buffer.from(base64, 'base64');
+    },
   });
-  if (!response.ok) throw new Error(`OpenAI image revision failed with ${response.status}.`);
-  const payload = await response.json() as { data?: Array<{ b64_json?: string }> };
-  const base64 = payload.data?.[0]?.b64_json;
-  if (typeof base64 !== 'string' || !base64) throw new Error('OpenAI returned no revised image.');
-  return { buffer: Buffer.from(base64, 'base64'), prompt, model };
+  return { buffer: routed.value, prompt, model: routed.routing.actualModel, routing: routed.routing };
 }

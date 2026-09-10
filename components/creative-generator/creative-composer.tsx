@@ -7,6 +7,8 @@ import type {
   DragEvent,
   KeyboardEvent,
 } from 'react';
+import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
+import type { CreativePlacement } from '@/lib/creatives/placements';
 import type {
   CreativeSourceAsset,
   CreativeSourceMediaAsset,
@@ -35,6 +37,8 @@ interface CreativeComposerProps {
   allowMultipleSources?: boolean;
   variationCount: number;
   onVariationCountChange: (value: number) => void;
+  placement?: CreativePlacement;
+  onPlacementChange?: (value: CreativePlacement) => void;
   onSubmit: () => void;
   ready: boolean;
   generating: boolean;
@@ -76,6 +80,8 @@ export function CreativeComposer({
   allowMultipleSources = true,
   variationCount,
   onVariationCountChange,
+  placement,
+  onPlacementChange,
   onSubmit,
   ready,
   generating,
@@ -455,13 +461,20 @@ export function CreativeComposer({
           >
             +
           </button>
-          <span className={styles.hint}>
-            {uploadBusy
-              ? 'Uploading source assets…'
-              : sourceLimitReached
-                ? `Maximum of ${MAX_CREATIVE_SOURCE_ASSETS} sources attached. Remove one to add another.`
-                : 'Images default to TRA_REFERENCE · MP4 uses TRA_VIDEO'}
-          </span>
+          {placement && onPlacementChange ? (
+            <CreativePlacementSelect
+              value={placement}
+              onChange={onPlacementChange}
+              disabled={generating}
+            />
+          ) : null}
+          {uploadBusy || sourceLimitReached ? (
+            <span className={styles.hint}>
+              {uploadBusy
+                ? 'Uploading source assets…'
+                : `Maximum of ${MAX_CREATIVE_SOURCE_ASSETS} sources attached. Remove one to add another.`}
+            </span>
+          ) : null}
         </div>
 
         <div className={styles.submitGroup}>

@@ -2,13 +2,20 @@ import {
   isCreativeSourceRole,
   type CreativeSourceRole,
 } from '@/lib/media/types';
+import {
+  isCreativeImageModel,
+  isCreativeImageOperationType,
+  FALLBACK_CREATIVE_IMAGE_MODEL,
+  PREFERRED_CREATIVE_IMAGE_MODEL,
+  type CreativeImageRouting,
+} from '@/lib/creatives/image-models';
 
 const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 
 export type CreativeGenerationProvenance = {
   version: 1;
-  imageGeneration: { prompt: string; model: string };
+  imageGeneration: { prompt: string; model: string; routing?: CreativeImageRouting };
   requestedSources: Array<{
     role: CreativeSourceRole;
     mediaId: string;
@@ -77,7 +84,11 @@ export const parseCreativeGenerationProvenance = (
     !hasExactKeys(value, rootKeys) ||
     value.version !== 1 ||
     !isRecord(value.imageGeneration) ||
-    !hasExactKeys(value.imageGeneration, ['prompt', 'model']) ||
+    !hasExactKeys(value.imageGeneration, [
+      'prompt',
+      'model',
+      ...('routing' in value.imageGeneration ? ['routing'] : []),
+    ]) ||
     typeof value.imageGeneration.prompt !== 'string' ||
     value.imageGeneration.prompt.length === 0 ||
     !isNonBlankModel(value.imageGeneration.model) ||
@@ -85,6 +96,40 @@ export const parseCreativeGenerationProvenance = (
     !Array.isArray(value.analysisSources)
   ) {
     return null;
+  }
+
+  let routing: CreativeImageRouting | undefined;
+  if ('routing' in value.imageGeneration) {
+    const route = value.imageGeneration.routing;
+    if (
+      !isRecord(route) ||
+      !hasExactKeys(route, [
+        'operationType',
+        'preferredModel',
+        'actualModel',
+        'fallbackUsed',
+        'fallbackFromModel',
+        'fallbackReason',
+      ]) ||
+      !isCreativeImageOperationType(route.operationType) ||
+      !isCreativeImageModel(route.preferredModel) ||
+      !isCreativeImageModel(route.actualModel) ||
+      route.preferredModel !== PREFERRED_CREATIVE_IMAGE_MODEL ||
+      typeof route.fallbackUsed !== 'boolean' ||
+      route.actualModel !== value.imageGeneration.model ||
+      (route.fallbackUsed
+        ? route.fallbackFromModel !== route.preferredModel ||
+          route.actualModel === route.preferredModel ||
+          route.actualModel !== FALLBACK_CREATIVE_IMAGE_MODEL ||
+          typeof route.fallbackReason !== 'string' ||
+          !/^[a-z0-9_]{1,80}$/.test(route.fallbackReason)
+        : route.fallbackFromModel !== null ||
+          route.fallbackReason !== null ||
+          route.actualModel !== route.preferredModel)
+    ) {
+      return null;
+    }
+    routing = route as CreativeImageRouting;
   }
 
   const requestedSources = value.requestedSources.map((source) => {
@@ -188,7 +233,11 @@ export const parseCreativeGenerationProvenance = (
 
   return {
     version: 1,
-    imageGeneration: { prompt: value.imageGeneration.prompt, model: value.imageGeneration.model },
+    imageGeneration: {
+      prompt: value.imageGeneration.prompt,
+      model: value.imageGeneration.model,
+      ...(routing ? { routing } : {}),
+    },
     requestedSources: validRequestedSources,
     attachedSource,
     analysisSources: analysisSources as CreativeGenerationProvenance['analysisSources'],

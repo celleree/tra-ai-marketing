@@ -2,15 +2,27 @@ body {
   font-family: var(--font-inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+.studio-account {
+  position: fixed;
+  z-index: 50;
+  top: 28px;
+  left: 200px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+}
+
 .workspace-brand-mark {
-  width: 46px;
-  height: 46px;
+  width: 64px;
+  height: 40px;
+  flex: 0 0 auto;
   border-radius: 10px;
   background-color: #ffffff;
   background-image: url('/tra-logo-sidebar.png');
   background-repeat: no-repeat;
   background-position: center;
-  background-size: 92% 92%;
+  background-size: 88% auto;
   color: transparent;
   text-indent: -9999px;
   overflow: hidden;
@@ -34,7 +46,73 @@ body {
 }
 
 .workspace-view-upload {
-  padding-top: 40px;
+  padding-top: 32px;
+}
+
+.workspace-view-standard {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 32px 0 72px;
+}
+
+.workspace-section-header {
+  max-width: 760px;
+  margin-bottom: 24px;
+}
+
+.workspace-section-eyebrow {
+  margin: 0 0 6px;
+  color: #2f5cc8;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-section-header h1 {
+  margin: 0 0 7px;
+  color: #17212b;
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+
+.workspace-section-header > p:last-child {
+  max-width: 680px;
+  margin: 0;
+  color: #6d7b89;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.workspace-view-standard > .workspace-section-header + div,
+.workspace-view-standard > .workspace-section-header + section {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.workspace-view-standard > .workspace-section-header + div > header:first-child {
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.workspace-view-standard > .workspace-section-header + div > header:first-child > div:first-child {
+  display: none;
+}
+
+.workspace-view-standard > .workspace-section-header + div > div:first-child {
+  display: none;
+}
+
+.workspace-view-standard > .workspace-section-header + section > div:first-child {
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.workspace-view-standard > .workspace-section-header + section > div:first-child > div:first-child {
+  display: none;
 }
 
 .workspace-intro {
@@ -59,9 +137,40 @@ body {
   border-radius: 10px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 920px) {
+  .studio-account {
+    top: 16px;
+    right: 18px;
+    left: auto;
+  }
+
+  .workspace-brand {
+    padding-right: 54px;
+  }
+
   .workspace-brand-mark {
-    width: 40px;
-    height: 40px;
+    width: 72px;
+    height: 44px;
+  }
+
+  .workspace-view-standard {
+    width: min(100% - 32px, 760px);
+    padding: 28px 0 56px;
+  }
+
+  .workspace-view-upload {
+    padding-top: 28px;
+  }
+
+  .workspace-section-header {
+    margin-bottom: 20px;
+  }
+
+  .workspace-section-header h1 {
+    font-size: 1.55rem;
+  }
+
+  .workspace-section-header > p:last-child {
+    font-size: 0.9rem;
   }
 }

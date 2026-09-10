@@ -89,7 +89,11 @@ import {
 } from '@/app/api/creatives/generate/route';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const imageResult = { buffer: PNG, prompt: 'Mock final image prompt', model: 'gpt-image-2' };
+const imageResultFor = (operationType: 'PROMPT_GENERATION' | 'TRA_REFERENCE_GENERATION' | 'TRA_VIDEO_FRAME_GENERATION') => ({
+  buffer: PNG, prompt: 'Mock final image prompt', model: 'gpt-image-2.5-sunburst',
+  routing: { operationType, preferredModel: 'gpt-image-2.5-sunburst' as const, actualModel: 'gpt-image-2.5-sunburst' as const, fallbackUsed: false, fallbackFromModel: null, fallbackReason: null },
+});
+const imageResult = imageResultFor('PROMPT_GENERATION');
 const MP4 = Buffer.from(REAL_ENCODED_MP4);
 const LIBRARY_ID = `video-library:${'a'.repeat(64)}`;
 const LIBRARY_FRAME_ID = `video-frame:${'b'.repeat(64)}`;
@@ -311,7 +315,6 @@ let saveImage: ReturnType<typeof vi.fn>;
 
 it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model and placement rules for prompt-only %s', async (placement) => {
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
-  vi.stubEnv('OPENAI_IMAGE_MODEL', 'test-image-model');
   const fetchMock = vi.fn().mockResolvedValue(
     new Response(
       JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
@@ -332,6 +335,8 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
   expect(result.buffer).toEqual(PNG);
   expect(result.prompt).toBe(body.prompt);
   expect(result.model).toBe(body.model);
+  expect(body.model).toBe('gpt-image-2.5-sunburst');
+  expect(result.routing).toMatchObject({ operationType: 'PROMPT_GENERATION', fallbackUsed: false });
   if (placement === 'VERTICAL_9_16') {
     expect(body.prompt).toContain('x=70..1081, y=287..1330');
     expect(body.prompt).toContain('x=105..401, y=322..546');
@@ -376,9 +381,9 @@ beforeEach(() => {
   mocks.planCreativeBatch.mockImplementation(
     async ({ count }: { count: number }) => batchPlan(count)
   );
-  mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(imageResult);
+  mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(imageResultFor('TRA_REFERENCE_GENERATION'));
   mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(
-    async ({ frames }) => ({ ...imageResult, providerFrames: [frames.at(-1)] })
+    async ({ frames }) => ({ ...imageResultFor('TRA_VIDEO_FRAME_GENERATION'), providerFrames: [frames.at(-1)] })
   );
   mocks.loadVideoSelectionContext.mockResolvedValue(null);
   mocks.getApprovedTraVideoFrames.mockImplementation(async (source) => ({
@@ -440,7 +445,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
         (data.creative as { generationProvenance?: unknown }).generationProvenance
       );
       expect(provenance).toMatchObject({
-        imageGeneration: { model: 'gpt-image-2' },
+        imageGeneration: { model: 'gpt-image-2.5-sunburst', routing: { operationType: 'LAYOUT_REFERENCE_GENERATION' } },
         requestedSources: [
           { role: 'LAYOUT_REFERENCE', mediaId: layoutId, sha256: contentHash(PNG) },
         ],
@@ -1003,7 +1008,7 @@ describe('progressive creative delivery', () => {
 
     expect(provenance).toMatchObject({
       version: 1,
-      imageGeneration: { model: 'gpt-image-2' },
+      imageGeneration: { model: 'gpt-image-2.5-sunburst', routing: { operationType: 'PROMPT_GENERATION' } },
       requestedSources: [],
       attachedSource: null,
       analysisSources: [],
@@ -1127,12 +1132,13 @@ describe('progressive creative delivery', () => {
   });
 
   it('emits an indexed render error and continues later creatives', async () => {
-    let attempts = 0;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => {
-        attempts += 1;
-        if (attempts === 1) return new Response('provider unavailable', { status: 503 });
+      vi.fn(async (_url, options) => {
+        const requestBody = JSON.parse(String(options?.body));
+        if (requestBody.prompt.includes('Headline: Headline 1')) {
+          return new Response('provider unavailable', { status: 503 });
+        }
         return new Response(
           JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }

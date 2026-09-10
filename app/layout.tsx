@@ -19,7 +19,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
   return (
     <html lang="en" className={inter.variable}>
-      <body>{publishableKey ? <ClerkProvider publishableKey={publishableKey} signInUrl="/sign-in" signUpUrl="/sign-up" signInFallbackRedirectUrl="/studio" signUpFallbackRedirectUrl="/studio" afterSignOutUrl="/sign-in">{children}</ClerkProvider> : children}</body>
+      <body>{publishableKey ? <ClerkProvider publishableKey={publishableKey} signInUrl="/sign-in" signUpUrl="/sign-up" signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/" afterSignOutUrl="/sign-in">{children}</ClerkProvider> : children}</body>
     </html>
   );
 }

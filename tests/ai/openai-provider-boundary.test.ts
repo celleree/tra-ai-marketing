@@ -64,6 +64,7 @@ describe('approved TRA final image-provider boundary', () => {
     expect(options?.body).toBeInstanceOf(FormData);
 
     const formData = options?.body as FormData;
+    expect(formData.get('model')).toBe('gpt-image-2.5-sunburst');
     expect(result.prompt).toBe(formData.get('prompt'));
     expect(result.model).toBe(formData.get('model'));
     expect(formData.get('quality')).toBe('high');
@@ -122,6 +123,7 @@ describe('approved TRA final image-provider boundary', () => {
     });
 
     const formData = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(formData.get('model')).toBe('gpt-image-2.5-sunburst');
     expect(formData.get('size')).toBe('1152x2048');
     expect(String(formData.get('prompt'))).toContain('9:16 canvas (1152x2048)');
     expect(formData.get('prompt')).toContain('x=70..1081, y=287..1330');

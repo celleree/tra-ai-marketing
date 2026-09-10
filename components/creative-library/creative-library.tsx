@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { CreativeRecord } from '@/lib/creatives/generated';
-import { RevisionControls } from '@/components/creative-library/revision-controls';
+import { CreativeImageFallbackNotice, RevisionControls } from '@/components/creative-library/revision-controls';
 import { HumanReviewControls } from '@/components/creative-library/human-review-controls';
 import styles from '@/components/creative-generator/creative-results.module.css';
 
@@ -95,6 +95,7 @@ export function CreativeLibrary() {
                 <p className={styles.description}>
                   Created {new Date(creative.createdAt).toLocaleString()}
                 </p>
+                <CreativeImageFallbackNotice creative={creative} />
                 {creative.identity ? (
                   <details style={{ overflowWrap: 'anywhere' }}>
                     <summary>Version history</summary>

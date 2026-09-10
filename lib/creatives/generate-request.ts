@@ -139,6 +139,10 @@ export function validateGenerateCreativeRequest(input: unknown):
     return { success: false, error: 'placement is unsupported' };
   }
 
+  if (body.imageModel !== undefined) {
+    return { success: false, error: 'imageModel is selected automatically' };
+  }
+
   if (
     body.companyProfile !== undefined &&
     (!body.companyProfile ||

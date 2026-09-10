@@ -40,7 +40,10 @@ beforeEach(() => {
   mocks.requireOperatorQuota.mockResolvedValue(null);
   const record = parent();
   mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrate(record));
-  mocks.generate.mockResolvedValue({ buffer: Buffer.from('raw'), prompt: 'actual revision prompt', model: 'actual-image-model' });
+  mocks.generate.mockImplementation(async ({ operation }) => ({
+    buffer: Buffer.from('raw'), prompt: 'actual revision prompt', model: 'gpt-image-2.5-sunburst',
+    routing: { operationType: operation, preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false, fallbackFromModel: null, fallbackReason: null },
+  }));
   mocks.validate.mockResolvedValue(undefined); mocks.logo.mockResolvedValue(Buffer.from('final branded'));
   mocks.saveImage.mockResolvedValue({ ...record.image, id: `media_${'d'.repeat(32)}`, fileName: `media_${'d'.repeat(32)}.png` });
   mocks.save.mockImplementation(async records => records);
@@ -57,7 +60,7 @@ describe('saved creative revision API', () => {
     expect(creative.identity).toMatchObject({ operation, parentCreativeId: parentId, fingerprint: original.identity!.fingerprint, conceptId: operation === 'PLACEMENT' ? parentId : creative.id });
     expect(creative.copy).toEqual(original.copy);
     expect(creative.placement).toBe(operation === 'PLACEMENT' ? 'PORTRAIT_4_5' : 'SQUARE_1_1');
-    expect(creative.generationProvenance).toMatchObject({ imageGeneration: { prompt: 'actual revision prompt', model: 'actual-image-model' }, revision: { parentCreativeId: parentId, canvasMediaId: mediaId, canvasSha256: 'c'.repeat(64) } });
+    expect(creative.generationProvenance).toMatchObject({ imageGeneration: { prompt: 'actual revision prompt', model: 'gpt-image-2.5-sunburst', routing: { preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false } }, revision: { parentCreativeId: parentId, canvasMediaId: mediaId, canvasSha256: 'c'.repeat(64) } });
     expect(mocks.plan).not.toHaveBeenCalled();
     expect(mocks.save.mock.calls[0][0]).toHaveLength(1);
     expect(mocks.list.mock.results[0].value).resolves.toEqual([original]);

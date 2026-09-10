@@ -9,10 +9,14 @@ export function CreativePlacementSelect({ value, onChange, disabled }: {
   disabled: boolean;
 }) {
   return <label className={styles.field}>
-    <span>Image shape</span>
-    <select value={value} disabled={disabled} onChange={(event) => {
-      if (isCreativePlacement(event.target.value)) onChange(event.target.value);
-    }}>
+    <select
+      aria-label="Creative format"
+      value={value}
+      disabled={disabled}
+      onChange={(event) => {
+        if (isCreativePlacement(event.target.value)) onChange(event.target.value);
+      }}
+    >
       <option value="SQUARE_1_1">Square · 1:1</option>
       <option value="PORTRAIT_4_5">Portrait · 4:5</option>
       <option value="VERTICAL_9_16">Vertical · 9:16</option>
