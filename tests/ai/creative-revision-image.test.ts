@@ -6,11 +6,12 @@ import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 type Args = Parameters<typeof generateCreativeRevisionImage>[0];
 const fetchMock = vi.fn();
 const args = (): Args => ({
-  operation: 'EDIT', placement: 'PORTRAIT_4_5', companyContext: 'Approved claims: consultation available. Required disclaimer: results vary.', instruction: 'Move the CTA down.',
+  operation: 'EDIT', placement: 'PORTRAIT_4_5',
+  companyProfile: { knowledgeBase: { companySummary: 'PRIVATE_COMPANY_SUMMARY' }, guardrails: { requiredDisclaimers: 'results vary.' } },
   concept: { format: 'direct-response', copy: { headline: 'Get clarity', primaryText: 'Find your next step', description: '' },
     strategy: { category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer', painPoint: 'Unclear next steps', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Get clarity', cta: 'Consult us', offer: null,
       soWhat: { surfaceMessage: 'Organize your case', functionalConsequence: 'Understand your options', meaningfulOutcome: 'Move forward confidently' },
-      execution: { subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'photographic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'A clean desk' } },
+      execution: { subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'photographic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'A clean desk with the CTA moved down.' } },
   sources: { canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId: 'canvas', fileName: 'canvas.png', mimeType: 'image/png', buffer: Buffer.from('canvas'), sha256: 'a'.repeat(64) }, originalApprovedSource: null, logoOverlay: null },
 });
 const body = () => fetchMock.mock.calls[0][1].body as FormData;
@@ -39,7 +40,9 @@ describe('revision image provider', () => {
     expect(result.prompt).toContain('never an approved human-identity source');
     expect(result.prompt).toContain('There are no approved human source attachments');
     expect(result.prompt).toContain('results vary');
-    expect(result.prompt).toContain('Move the CTA down.');
+    expect(result.prompt).toContain('CTA moved down');
+    expect(result.prompt).not.toContain('PRIVATE_COMPANY_SUMMARY');
+    expect(result.prompt).not.toContain('Current approved company context');
   });
   it('attaches the original reference separately and leaves original logo for server compositing', async () => {
     const input = args();

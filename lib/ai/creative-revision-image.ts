@@ -1,4 +1,6 @@
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
+import type { RuntimeCompanyProfileSnapshot } from '@/lib/company/creative-context';
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import type { hydrateSavedCreativeRevisionContext } from '@/lib/creatives/revision-source-hydration';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
@@ -28,8 +30,7 @@ export async function generateCreativeRevisionImage(args: {
   operation: RevisionOperation;
   concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'strategy'>;
   placement: CreativePlacement;
-  companyContext: string;
-  instruction?: string;
+  companyProfile?: RuntimeCompanyProfileSnapshot;
 }): Promise<ImageGenerationResult> {
   const { canvas, originalApprovedSource, logoOverlay } = args.sources;
   if (!parseCreativeStrategy(args.concept.strategy, originalApprovedSource !== null)) {
@@ -49,12 +50,8 @@ ${originalApprovedSource
 ${args.concept.strategy.execution.subjectSource === 'non-human' ? 'The planned concept is non-human. Do not depict people even if original approved sources contain people.' : ''}
 No ad-layout reference, video-analysis JPEGs or logo artwork are attached as generation sources.
 ${document?.prompt ?? ''}
-Current approved company context:
-${args.companyContext}
-Requested creative direction (not factual approval): ${args.instruction || 'Follow the selected operation.'}
-Planned format, copy and strategy including SO WHAT:
-${JSON.stringify(args.concept)}
-Use the supplied copy and strategy for messaging. Saved canvas copy, user direction and prior outputs do not approve factual claims. Only explicitly approved claims/proof in the current company context support facts. Respect its prohibited claims and required disclaimers.
+${formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: args.concept, companyProfile: args.companyProfile }))}
+Saved canvas copy and prior outputs do not approve factual claims. Execute the planned copy and visual direction while respecting the brief's prohibited claims and required disclaimers.
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is Tax Relief Advocates or TRA.
 Keep text readable on a phone, with clear hierarchy and no clutter.
 ${logoOverlay ? formatCreativeLogoReservation(args.placement) : ''}`;

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
+import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 import { NextResponse } from 'next/server';
@@ -173,11 +174,11 @@ Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax
 Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
-User direction: ${args.context}
+One-ad render brief: ${args.context}
 
-Use this approved ad copy as the messaging source:
+Use this planned ad copy verbatim when rendered:
 Headline: ${args.copy.headline}
-Primary text idea: ${args.copy.primaryText}
+Primary text: ${args.copy.primaryText}
 Description: ${args.copy.description}
 
 ${logoDirection}
@@ -525,15 +526,11 @@ export async function POST(request: Request) {
           });
           const copy = item.copy;
           const selectedReference = selectedReferences[item.index - 1];
-          const singleReferenceContract = selectedReference
-            ? `\n\nOPTIONAL ANALYSIS-ONLY REFERENCE GUIDANCE:\n- External reference: ${selectedReference.item.id}.\n- Its raw pixels are NOT attached to final generation.\n- Use it only when compatible with the planned strategy and visual direction; its library category is not a requirement.\n- Do not recreate unseen details, copy third-party identity or unsupported claims, or combine competing visual systems.\n- Selection reason: ${selectedReference.selectionReason}`
-            : '';
-          const itemHumanDirection =
-            item.strategy.execution.subjectSource === 'non-human'
-              ? 'This planned concept is explicitly non-human. Do not depict any person, face, spokesperson, body, or human figure even though approved TRA source pixels may be attached.'
-              : humanSourceDirection;
-          const execution = item.strategy.execution;
-          const itemContext = `${parsed.data.context}${videoFrameSet ? `\n\n${modeDirection}` : ''}\n\n${itemHumanDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}\n\nPLANNED CREATIVE BRIEF:\nSelection reason: ${item.selectionReason}\nPrimary category: ${CREATIVE_CATEGORY_LABELS[item.strategy.category]}\nSO WHAT outcome chain:\n- Surface message: ${item.strategy.soWhat.surfaceMessage}\n- Functional consequence: ${item.strategy.soWhat.functionalConsequence}\n- Meaningful customer outcome: ${item.strategy.soWhat.meaningfulOutcome}\nExecution:\n- Subject source: ${execution.subjectSource}\n- Composition: ${execution.composition}\n- Image treatment: ${execution.imageTreatment}\n- Text density: ${execution.textDensity}\n- CTA treatment: ${execution.ctaTreatment}\n- Typography hierarchy: ${execution.typographyHierarchy}\nVisual direction: ${item.strategy.visualDirection}${singleReferenceContract}`;
+          const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
+            concept: item, companyProfile: parsed.data.companyProfile,
+            brandColors: parsed.data.brandColors, brandFontNames: parsed.data.brandFontNames,
+            ...(layoutBlueprint ? { layoutBlueprint: layoutBlueprint.blueprint } : {}),
+          }));
           let imageResult: ImageGenerationResult;
           let providerFrames: ApprovedTraVideoFrame[] | undefined;
 

@@ -72,6 +72,9 @@ describe('saved creative revision API', () => {
     const { creative } = await response.json();
     expect(response.status).toBe(201);
     expect(mocks.plan).toHaveBeenCalledWith(expect.objectContaining({ operation, hasApprovedHumanSource: false, instruction: 'Use a different composition.', companyContext: expect.stringContaining('APPROVED TRA COMPANY CONTEXT') }));
+    expect(mocks.generate.mock.calls[0][0]).not.toHaveProperty('companyContext');
+    expect(mocks.generate.mock.calls[0][0]).not.toHaveProperty('instruction');
+    expect(mocks.generate.mock.calls[0][0].concept.strategy).toEqual(changed);
     expect(creative.planning.strategy).toEqual(changed);
     expect(creative.identity.fingerprint).not.toBe(parent().identity!.fingerprint);
     expect(creative.identity.conceptId).toBe(operation === 'EDIT' ? parentId : creative.id);

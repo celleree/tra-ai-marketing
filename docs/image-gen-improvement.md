@@ -218,7 +218,7 @@ At this checkpoint, the app still differs from the target in important ways:
 - the production planner currently uses Astra with medium reasoning;
 - current runtime rules prohibit invented humans when there is no approved TRA human source;
 - external layout/reference pixels are not currently attached to final image generation;
-- the renderer receives broad company/user context again in addition to Astra's planned creative brief;
+- initial generation and revisions now use a distilled, versioned one-ad render brief; broad company/user context stays with Astra;
 - Reference Library selections do not yet provide Astra the rich reusable angle + layout contract validated manually;
 - existing safe-zone rules and deterministic server-side TRA logo compositing should be preserved.
 
@@ -232,7 +232,7 @@ Proceed with contract-first production integration. Prefer approved TRA humans i
 
 The initial tax-document library consists of the two user-supplied notice/envelope photos. The seeded selection/render path is documented in `docs/image-workflow.md`. Conditional document rules apply only to selected document concepts; this slice does not complete the broader distilled-brief/reference-layout production migration.
 
-Next integrate the full per-ad planning/render contract and strategic diversity improvements, then validate the implemented API workflow at 6 and 12 outputs before assessing 30+. Manual results do not establish runtime visual acceptance. Preserve conditional human-photographic and attached-layout rules instead of accumulating universal renderer instructions.
+The one-ad renderer boundary is now implemented. Next expand the planner's explicit concept/reference choices and strategic diversity, then validate the implemented API workflow at 6 and 12 outputs before assessing 30+. Manual results do not establish runtime visual acceptance. Preserve conditional human-photographic and attached-layout rules instead of accumulating universal renderer instructions.
 
 ## Related canonical sources
 

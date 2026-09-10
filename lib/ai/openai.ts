@@ -399,11 +399,11 @@ ${
     ? `Secondary creative format: ${CREATIVE_FORMAT_LABELS[secondaryFormat]}`
     : ''
 }
-User direction: ${context}
+One-ad render brief: ${context}
 
-Use this approved ad copy as the messaging source:
+Use this planned ad copy verbatim when rendered:
 Headline: ${copy.headline}
-Primary text idea: ${copy.primaryText}
+Primary text: ${copy.primaryText}
 Description: ${copy.description}
 
 Approved-source rules:
