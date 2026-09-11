@@ -42,7 +42,9 @@ const sha256 = (buffer: Buffer) => createHash('sha256').update(buffer).digest('h
 export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   request, batchPlan, referenceCatalog, selectedReferences, requestedSources, analysisSources, logoOverlaySource,
   reserveLogoArea, brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage,
-}: CreativeRenderContext): Promise<GeneratedCreative> {
+}: CreativeRenderContext, options: { creativeId?: string; assertCurrentWork?: () => Promise<void> } = {}): Promise<GeneratedCreative> {
+  const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
+  if (!/^creative_[a-f0-9]{32}$/.test(creativeId)) throw new Error('Invalid reserved creative ID.');
   const human = item.strategy.approvedHumanId ? await resolveApprovedHumanFrame(item.strategy.approvedHumanId) : null;
   const itemVideoFrames = human?.selected ?? videoFrameSet;
   const itemImageSource = human ? null : providerImageSource;
@@ -51,7 +53,6 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     ...requestedSources.filter(source => source.mediaId !== human.record.source.sourceVideoMediaId),
     { role: 'TRA_VIDEO' as const, mediaId: human.record.source.sourceVideoMediaId, sha256: human.record.source.sourceVideoContentHash },
   ] : requestedSources;
-  const creativeId = `creative_${randomUUID().replaceAll('-', '')}`;
   const identity = buildCreativeIdentity({
     creativeId,
     operation: 'GENERATE',
@@ -66,6 +67,8 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   }));
   let imageResult: ImageGenerationResult;
   let providerFrames: ApprovedTraVideoFrame[] | undefined;
+
+  await options.assertCurrentWork?.();
 
   if (itemImageSource) {
     imageResult = await generateApprovedTraReferenceCreativeImage({
@@ -110,6 +113,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     `tra-creative-${item.index}.png`,
     { type: 'image/png' }
   );
+  await options.assertCurrentWork?.();
   const image = await storage.saveImage(generatedFile);
   const uploadedReferenceImageId =
     item.strategy.referenceSelection?.layoutSource ?? undefined;
@@ -180,6 +184,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
         ? { referenceImageId: uploadedReferenceImageId }
         : {}),
   };
+  await options.assertCurrentWork?.();
   const [saved] = await saveCreativeBatch([{ ...creative, createdAt: new Date().toISOString() }]);
   return { ...creative, finalization: { status: 'SAVED', createdAt: saved.createdAt } };
 }
