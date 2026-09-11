@@ -5,6 +5,7 @@ import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-requ
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import type { CreativeBatchPlan } from '@/lib/creatives/planned';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
+import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
@@ -13,7 +14,7 @@ export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDIN
 export type PortfolioPlanningPhase = 'INITIAL_PLAN' | 'DIVERSITY_AUDIT' | 'TARGETED_REPAIR' | 'READY_TO_RENDER';
 export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot; plannerArgs: CreativeBatchPlannerArgs };
 export type PortfolioPlanningState =
-  | { phase: 'INITIAL_PLAN' }
+  | { phase: 'INITIAL_PLAN'; preparation: PortfolioPreparationState }
   | { phase: 'DIVERSITY_AUDIT'; checkpoint: PortfolioPlanningCheckpoint; repairAttempted: boolean }
   | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint }
   | { phase: 'READY_TO_RENDER' };
@@ -31,7 +32,8 @@ export function newCreativePortfolio(request: ValidGenerateCreativeRequest, now 
     throw new Error('A portfolio requires 2 to 36 creatives.');
   }
   return { version: 1, id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
-    snapshot: null, planning: { phase: 'INITIAL_PLAN' }, lease: null, slots: Array.from({ length: request.variationCount }, (_, index) => ({
+    snapshot: null, planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } }, lease: null,
+    slots: Array.from({ length: request.variationCount }, (_, index) => ({
       index: index + 1, creativeId: id('creative_'), status: 'PENDING',
     })) };
 }
@@ -69,11 +71,23 @@ export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date
   return { status: 'WORK', job };
 }
 
+export function finishPortfolioPreparation(
+  current: CreativePortfolioJob, leaseId: string, preparation: PortfolioPreparationState, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'INITIAL_PLAN') {
+    throw new Error('Portfolio preparation does not match the reserved planning work.');
+  }
+  return { ...structuredClone(current), planning: { phase: 'INITIAL_PLAN' as const, preparation: structuredClone(preparation) },
+    lease: null, updatedAtMs: now };
+}
+
 export function finishPortfolioInitialPlan(
   current: CreativePortfolioJob, leaseId: string, checkpoint: PortfolioPlanningCheckpoint, now = Date.now(),
 ) {
   const lease = requireLease(current, leaseId, now);
   if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'INITIAL_PLAN'
+    || !current.planning.preparation.quotaReserved
     || checkpoint.snapshot.batchPlan.portfolioAudit || !planMatchesSlots(current, checkpoint.snapshot)
     || checkpoint.plannerArgs.count !== current.slots.length
     || !isDeepStrictEqual(checkpoint.plannerArgs.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)) {
@@ -169,9 +183,11 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
   if (slotIndex === null) {
     if (job.snapshot || !job.planningError) throw new Error('Portfolio planning does not require a retry.');
     delete job.planningError;
-    // A completed second audit is a known quality failure. An explicit retry restarts planning rather than repeating that paid audit.
+    // A completed second audit is a known quality failure. Restart planning explicitly without re-reserving portfolio quota.
     if (job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
-      && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) job.planning = { phase: 'INITIAL_PLAN' };
+      && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) {
+      job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true } };
+    }
   } else {
     const slot = job.slots.find(slot => slot.index === slotIndex);
     if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');
