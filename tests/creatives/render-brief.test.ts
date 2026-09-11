@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
+import { conceptDetails } from '../fixtures/creative-concept-details';
 
 const concept: PlannedCreativeConcept = {
   index: 1, format: 'educational', copy: { headline: 'Talk with TRA', primaryText: 'Explore your options', description: 'A consultation' },
@@ -17,6 +18,17 @@ const concept: PlannedCreativeConcept = {
 };
 
 describe('distilled render brief', () => {
+  it('passes visual concept details but excludes strategic fields and preserves exact copy', () => {
+    const details = { ...conceptDetails, angle: 'PRIVATE_ANGLE', proposition: 'PRIVATE_PROPOSITION',
+      objection: 'PRIVATE_OBJECTION', mainMessage: 'PRIVATE_MESSAGE' };
+    const brief = buildCreativeRenderBrief({ concept: { ...concept, strategy: { ...concept.strategy, conceptDetails: details } } });
+    expect(brief.visualConcept).toEqual({ visualArchetype: details.visualArchetype, visualMechanism: details.visualMechanism,
+      subject: details.subject, environment: details.environment, compositionInstructions: details.compositionInstructions });
+    expect(brief.exactCopy).toEqual({ ...concept.copy, cta: concept.strategy.cta });
+    expect(formatCreativeRenderBrief(brief)).not.toContain('PRIVATE_');
+    expect(buildCreativeRenderBrief({ concept })).not.toHaveProperty('visualConcept');
+  });
+
   it('retains execution, exact copy and hard rules while excluding broad planning context', () => {
     const brief = buildCreativeRenderBrief({
       concept, companyProfile: {

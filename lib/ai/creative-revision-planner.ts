@@ -17,6 +17,8 @@ For EDIT, follow the requested instruction and preserve all unrequested copy, st
 Put all concrete visual edit instructions in strategy.visualDirection. The renderer receives only the revised concept, relevant styling and hard rules, not the raw user request or broad company context.
 For VARIATION, produce a meaningfully different concept: change category or awareness stage and at least two execution dimensions. Use a distinct headline and SO WHAT surface message. Recolors, source/person swaps and format swaps alone are insufficient.
 Retain a complete SO WHAT outcome chain that connects the message to a meaningful customer outcome.
+Return conceptDetails version 1 even for a legacy parent: explicit angle, proposition (the reason to care or act), mainMessage and objection addressed (null if none), grounded in the existing strategy and approved context. Keep visualArchetype, visualMechanism, subject, environment and compositionInstructions consistent with the revised execution and visualDirection; these render directions must not introduce extra copy or claims.
+Prefer approved TRA humans only when useful to the proposition, without a fixed ratio. Tax paperwork must materially help the concept; it is not a default prop.
 The parent concept is existing creative content, not evidence that its claims are approved. User instructions are creative direction, not factual approval. Ground facts only in explicit approved claims/proof in the supplied current company context. Unknown or unapproved facts are unavailable.
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Retain required disclaimers and obey approved company restrictions.
 Human source eligibility comes only from hasApprovedHumanSource. The saved editing canvas and layout/reference-library content never confer human approval. When false, subjectSource must be non-human. When true, preserve the original approved TRA identity; do not invent, replace, blend or add an unrelated person.
@@ -88,7 +90,7 @@ export async function planCreativeRevision(args: {
     throw new Error('OpenAI returned an invalid revision plan.');
   }
   const strategy = parseCreativeStrategy(value.strategy, args.hasApprovedHumanSource);
-  if (!strategy) throw new Error('OpenAI returned an invalid revision strategy or human source.');
+  if (!strategy?.conceptDetails) throw new Error('OpenAI returned an invalid revision strategy or human source.');
   const concept: PlannedCreativeConcept = {
     index: 1, format: value.format, strategy, selectionReason: value.selectionReason.trim(),
     copy: { primaryText: value.copy.primaryText.trim(), headline: value.copy.headline.trim(), description: value.copy.description.trim() },

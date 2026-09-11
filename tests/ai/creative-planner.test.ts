@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { planCreativeBatch } from '@/lib/ai/creative-planner';
 import { CREATIVE_STRATEGY_JSON_SCHEMA } from '@/lib/creatives/strategy';
+import { conceptDetails } from '../fixtures/creative-concept-details';
 
 const analysis = {
   summary: 'Clear visual hierarchy', visibleText: [], visualStructure: 'Headline over image',
@@ -8,6 +9,7 @@ const analysis = {
   avoid: ['third-party identity'], unknowns: ['performance'], dominantCategory: 'customer-problems' as const,
 };
 const strategy = (subjectSource: 'non-human' | 'approved-tra-human' = 'non-human') => ({
+  conceptDetails,
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer with an IRS notice',
   painPoint: 'Unclear next steps', desiredOutcome: 'A clear path forward', emotion: 'Relief',
   hook: 'Turn uncertainty into a next step', cta: 'Talk with TRA', offer: null,
@@ -49,6 +51,7 @@ describe('creative batch planner', () => {
     expect(result).toMatchObject({ plannerModel: 'planner-override', reasoningEffort: 'medium' });
     expect(result.creatives.map((creative) => creative.index)).toEqual([1, 2]);
     expect(result.creatives[0].strategy.soWhat.meaningfulOutcome).toBe('Move forward with confidence');
+    expect(result.creatives[0].strategy.conceptDetails).toEqual(conceptDetails);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
@@ -57,6 +60,7 @@ describe('creative batch planner', () => {
     expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true });
     expect(body.text.format.schema.properties.creatives).toMatchObject({ minItems: 2, maxItems: 2 });
     expect(body.text.format.schema.properties.creatives.items.properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
+    expect(CREATIVE_STRATEGY_JSON_SCHEMA.required).toContain('conceptDetails');
     const requestInput = JSON.parse(body.input[1].content[0].text);
     expect(requestInput.creativeContext).toBe(context);
     expect(requestInput).not.toHaveProperty('approvedTraContext');
@@ -92,6 +96,7 @@ describe('creative batch planner', () => {
     ['wrong count', { creatives: [concept(1)] }, false],
     ['wrong index', { creatives: [concept(2), concept(1)] }, false],
     ['malformed strategy', { creatives: [{ ...concept(1), strategy: { ...strategy(), hook: '' } }, concept(2)] }, false],
+    ['missing concept details', { creatives: [{ ...concept(1), strategy: { ...strategy(), conceptDetails: undefined } }, concept(2)] }, false],
     ['human without approved source', { creatives: [concept(1, 'approved-tra-human'), concept(2)] }, false],
     ['overlong copy', { creatives: [{ ...concept(1), copy: { ...concept(1).copy, headline: 'x'.repeat(1001) } }, concept(2)] }, false],
   ])('rejects %s output', async (_name, value, hasApprovedHumanSource) => {

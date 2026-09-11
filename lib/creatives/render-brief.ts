@@ -1,7 +1,7 @@
 import { buildCreativeCompanyContext, type RuntimeCompanyProfileSnapshot } from '@/lib/company/creative-context';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
-import type { CreativeStrategy } from '@/lib/creatives/strategy';
+import type { CreativeConceptDetails, CreativeStrategy } from '@/lib/creatives/strategy';
 
 /** The renderer executes one plan; company knowledge and batch strategy stay with Astra. */
 export type CreativeRenderBrief = {
@@ -10,6 +10,7 @@ export type CreativeRenderBrief = {
   exactCopy: { headline: string; primaryText: string; description: string; cta: string };
   execution: CreativeStrategy['execution'];
   visualDirection: string;
+  visualConcept?: Pick<CreativeConceptDetails, 'visualArchetype' | 'visualMechanism' | 'subject' | 'environment' | 'compositionInstructions'>;
   layoutBlueprint?: LayoutBlueprint;
   brand: { colors: string; typography: string; visualStyle: string };
   compliance: {
@@ -38,6 +39,11 @@ export function buildCreativeRenderBrief(args: {
       ...(execution.taxDocumentReference ? { taxDocumentReference: execution.taxDocumentReference } : {}),
     },
     visualDirection: strategy.visualDirection,
+    ...(strategy.conceptDetails ? { visualConcept: {
+      visualArchetype: strategy.conceptDetails.visualArchetype, visualMechanism: strategy.conceptDetails.visualMechanism,
+      subject: strategy.conceptDetails.subject, environment: strategy.conceptDetails.environment,
+      compositionInstructions: strategy.conceptDetails.compositionInstructions,
+    } } : {}),
     ...(args.layoutBlueprint ? { layoutBlueprint: args.layoutBlueprint } : {}),
     brand: {
       colors: args.brandColors?.length ? args.brandColors.join(', ') : company.brandColors,

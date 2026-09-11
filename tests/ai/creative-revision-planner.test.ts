@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
+import { conceptDetails } from '../fixtures/creative-concept-details';
 
 const strategy: CreativeStrategy = {
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Busy taxpayer', painPoint: 'Unclear next steps', desiredOutcome: 'A clear plan', emotion: 'Relief', hook: 'Find a path forward', cta: 'Get a consultation', offer: null,
@@ -8,7 +9,7 @@ const strategy: CreativeStrategy = {
   execution: { subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'A clean desk',
 };
 const parent = { format: 'direct-response' as const, copy: { headline: 'Find a path forward', primaryText: 'Talk with TRA', description: '' }, strategy };
-const plan = () => ({ ...parent, selectionReason: 'Respect the requested edit.' });
+const plan = () => ({ ...parent, strategy: { ...strategy, conceptDetails }, selectionReason: 'Respect the requested edit.' });
 const payload = (value: unknown) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
 const fetchMock = vi.fn();
 const args = { parent, operation: 'EDIT' as const, instruction: 'Make the headline blue.', companyContext: 'APPROVED TRA COMPANY CONTEXT\nNo numeric claims approved.', hasApprovedHumanSource: false };
@@ -42,12 +43,13 @@ describe('single-creative revision planning', () => {
 
   it('rejects superficial variations and accepts meaningful strategic/execution differences', async () => {
     await expect(planCreativeRevision({ ...args, operation: 'VARIATION' })).rejects.toThrow('too similar');
-    const changed = { ...plan(), copy: { ...parent.copy, headline: 'Move beyond the notices' }, strategy: { ...strategy, awarenessStage: 'solution-aware', soWhat: { ...strategy.soWhat, surfaceMessage: 'Explore a resolution path' }, execution: { ...strategy.execution, composition: 'split', imageTreatment: 'illustrative' } } };
+    const changed = { ...plan(), copy: { ...parent.copy, headline: 'Move beyond the notices' }, strategy: { ...strategy, conceptDetails, awarenessStage: 'solution-aware', soWhat: { ...strategy.soWhat, surfaceMessage: 'Explore a resolution path' }, execution: { ...strategy.execution, composition: 'split', imageTreatment: 'illustrative' } } };
     fetchMock.mockResolvedValue(new Response(JSON.stringify(payload(changed))));
     expect((await planCreativeRevision({ ...args, operation: 'VARIATION' })).concept.strategy.awarenessStage).toBe('solution-aware');
   });
 
   it.each([
+    { ...plan(), strategy },
     { ...plan(), extra: true },
     { ...plan(), copy: { ...parent.copy, headline: 'x'.repeat(1001) } },
     { ...plan(), strategy: { ...strategy, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' } } },

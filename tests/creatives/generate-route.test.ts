@@ -315,14 +315,15 @@ let readMediaById: ReturnType<typeof vi.fn>;
 let readImageById: ReturnType<typeof vi.fn>;
 let saveImage: ReturnType<typeof vi.fn>;
 
-it('uses a seeded document from the real planner contract through rendering and saved planning without uploads', async () => {
+it('uses a seeded document and rich concept from the real planner through rendering and saved planning without uploads', async () => {
+  const { conceptDetails } = await import('../fixtures/creative-concept-details');
   const original = await vi.importActual<typeof import('@/lib/ai/creative-planner')>('@/lib/ai/creative-planner');
   mocks.planCreativeBatch.mockImplementation(original.planCreativeBatch);
   const first = plannedCreative(1);
   const plan = { creatives: [
     { ...first, strategy: { ...first.strategy, execution: { ...first.strategy.execution, taxDocumentReference: 'irs-notice-v1' } } },
     plannedCreative(2),
-  ] };
+  ].map(concept => ({ ...concept, strategy: { ...concept.strategy, conceptDetails } })) };
   const requests: Array<{ url: string; body: string | FormData }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     requests.push({ url, body: init.body as string | FormData });
@@ -348,6 +349,9 @@ it('uses a seeded document from the real planner contract through rendering and 
   for (const prompt of [String(edit.get('prompt')), ordinary.prompt]) {
     expect(prompt).toContain('ONE-AD RENDER BRIEF v1');
     expect(prompt).toContain('Results vary.');
+    expect(prompt).toContain(conceptDetails.visualMechanism);
+    expect(prompt).toContain(conceptDetails.compositionInstructions);
+    expect(prompt).not.toContain(conceptDetails.proposition);
     expect(prompt).not.toContain('PLANNER_ONLY_SUMMARY');
     expect(prompt).not.toContain('Create compliant TRA concepts.');
     expect(prompt).not.toContain('Distinct strategic fit');
@@ -357,6 +361,7 @@ it('uses a seeded document from the real planner contract through rendering and 
   const records = mocks.saveCreativeBatch.mock.calls.flatMap(([batch]) => batch);
   const saved = records.find(record => record.planning.strategy.execution.taxDocumentReference === 'irs-notice-v1');
   expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.execution.taxDocumentReference).toBe('irs-notice-v1');
+  expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.conceptDetails).toEqual(conceptDetails);
   expect(saved.generationProvenance.imageGeneration.prompt).toContain(TAX_DOCUMENT_REFERENCES[0].sha256);
 });
 
