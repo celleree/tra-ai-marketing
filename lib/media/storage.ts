@@ -42,6 +42,7 @@ export class MediaValidationError extends Error {
 
 export interface MediaStorage {
   saveMedia(file: File): Promise<CreativeSourceMediaAsset>;
+  getMediaDeliveryUrl?(fileName: string): Promise<string | null>;
   readMedia(fileName: string): Promise<StoredCreativeSourceMediaFile | null>;
   readMediaById(mediaId: string): Promise<StoredCreativeSourceMediaFile | null>;
   saveImage(file: File): Promise<MediaAsset>;

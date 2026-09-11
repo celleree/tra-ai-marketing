@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   requireOperatorAccess: vi.fn(),
   saveMedia: vi.fn(),
+  getMediaDeliveryUrl: vi.fn(),
   readMediaById: vi.fn(),
   readMedia: vi.fn(),
 }));
@@ -12,6 +13,7 @@ vi.mock('@/lib/auth/require-operator', () => ({
 vi.mock('@/lib/media/local-storage', () => ({
   getMediaStorage: () => ({
     saveMedia: mocks.saveMedia,
+    getMediaDeliveryUrl: mocks.getMediaDeliveryUrl,
     readMediaById: mocks.readMediaById,
     readMedia: mocks.readMedia,
   }),
@@ -36,6 +38,9 @@ describe('media operator guards', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.requireOperatorAccess.mockResolvedValue(null);
+    mocks.getMediaDeliveryUrl.mockResolvedValue(
+      'https://bucket.account.r2.cloudflarestorage.com/fixture.png?signed=true'
+    );
   });
 
   it.each([401, 403, 503].flatMap((status) =>
@@ -46,6 +51,7 @@ describe('media operator guards', () => {
     expect(deniedRequest.formData).not.toHaveBeenCalled();
     expect(deniedRequest.json).not.toHaveBeenCalled();
     expect(mocks.saveMedia).not.toHaveBeenCalled();
+    expect(mocks.getMediaDeliveryUrl).not.toHaveBeenCalled();
     expect(mocks.readMediaById).not.toHaveBeenCalled();
     expect(mocks.readMedia).not.toHaveBeenCalled();
   });
@@ -63,9 +69,9 @@ describe('media operator guards', () => {
     expect((await uploadUrl(new Request('http://localhost/upload-url', { method: 'POST' }))).json())
       .resolves.toEqual({ direct: false });
 
-    mocks.readMedia.mockResolvedValue({ mimeType: 'image/png', buffer: png });
     const response = await mediaFile(new Request('http://localhost/file'), fileContext);
-    expect(response.status).toBe(200);
-    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(png));
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toContain('r2.cloudflarestorage.com');
+    expect(mocks.readMedia).not.toHaveBeenCalled();
   });
 });

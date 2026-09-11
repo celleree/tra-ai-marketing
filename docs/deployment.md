@@ -25,15 +25,15 @@ This gate checks configuration presence and Clerk environment markers, not crede
 
 Production media storage requires the R2 variables listed in `.env.example`.
 
-Direct browser uploads use short-lived presigned PUT URLs. The production bucket must have a CORS policy that:
+Direct browser uploads and downloads use short-lived presigned URLs. The production bucket must have a CORS policy that:
 
-- allows only the exact approved application origins that need browser uploads;
-- allows `PUT`;
+- allows only the exact approved application origins that need browser media access;
+- allows `GET` and `PUT`;
 - allows the `Content-Type` request header;
 - may expose `ETag` when needed by the client;
 - does not use a wildcard production origin.
 
-Preview origins should be added only when those previews need direct uploads. R2 credentials remain server-side.
+Preview origins should be added only when those previews need direct media access. R2 credentials remain server-side.
 
 Cloudflare configuration is authoritative for the live bucket. Keep this document to requirements, not copied account IDs, credentials, or dashboard snapshots.
 
