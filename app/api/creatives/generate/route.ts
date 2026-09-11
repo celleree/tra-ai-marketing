@@ -1,6 +1,6 @@
+import { assertGenerationAvailable, hydrateGenerationSources, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 export { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
-import { createHash } from 'crypto';
 import { buildReferencePlanningCatalog } from '@/lib/references/planning.server';
 import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
 import { NextResponse } from 'next/server';
@@ -29,8 +29,6 @@ import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-pr
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
-import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
-import { isDurableVideoIntelligenceAvailable } from '@/lib/video/preview-availability';
 import {
   formatLayoutBlueprintForPlanning,
   LAYOUT_BLUEPRINT_SCHEMA_VERSION,
@@ -40,32 +38,16 @@ import {
   getOrAnalyzeLayoutBlueprint,
   type ResolvedLayoutBlueprint,
 } from '@/lib/layouts/service';
-import { getMediaStorage } from '@/lib/media/local-storage';
-import {
-  CreativeSourceHydrationError,
-  findEligibleProviderImageSource,
-  hydrateCreativeSourceSelections,
-  type HydratedCreativeSourceAsset,
-} from '@/lib/media/source-hydration';
+import { CreativeSourceHydrationError } from '@/lib/media/source-hydration';
 import { isUsableApprovedHumanSource } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
-import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
-import { videoSourceHash } from '@/lib/video/library-service';
-import { extractVideoSelectionFrames, loadVideoSelectionContext } from '@/lib/video/selection-context';
-import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
-import type {
-  ApprovedTraVideoFrameSet,
-} from '@/lib/video/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const RENDER_CONCURRENCY = 2;
-
-const sha256 = (buffer: Buffer) =>
-  createHash('sha256').update(buffer).digest('hex');
 
 const encodeSseEvent = (
   encoder: TextEncoder,
@@ -129,14 +111,6 @@ const buildReferenceCandidates = (
     imageUrl: new URL(item.url, requestUrl).toString(),
   }));
 
-const findGenerationSource = (
-  sources: HydratedCreativeSourceAsset[]
-): HydratedCreativeSourceAsset | undefined =>
-  sources.find(
-    (source) =>
-      source.role === 'LAYOUT_REFERENCE' && source.media.mediaType === 'IMAGE'
-  ) || sources.find((source) => source.media.mediaType === 'IMAGE');
-
 export async function POST(request: Request) {
   const access = await getOperatorAccess();
   if (!access.allowed) return operatorAccessDeniedResponse(access);
@@ -149,22 +123,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
-    if (
-      parsed.data.videoFrameSelection &&
-      !isDurableVideoIntelligenceAvailable()
-    ) {
-      return NextResponse.json(
-        { error: 'Selected TRA video frame generation is available in local development or protected Vercel Preview only.' },
-        { status: 404 }
-      );
-    }
-
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: 'OpenAI generation is not configured yet.' },
-        { status: 503 }
-      );
-    }
+    assertGenerationAvailable(parsed.data);
 
     const quotaDenied = await requireOperatorQuota(
       access.userId,
@@ -173,121 +132,8 @@ export async function POST(request: Request) {
     );
     if (quotaDenied) return quotaDenied;
 
-    const storage = getMediaStorage();
-    let sourceAssets: HydratedCreativeSourceAsset[];
-    try {
-      sourceAssets = await hydrateCreativeSourceSelections(
-        storage,
-        parsed.data.sourceAssets
-      );
-    } catch (error) {
-      if (error instanceof CreativeSourceHydrationError) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: error.status }
-        );
-      }
-      throw error;
-    }
-
-    const generationSourceAsset = findGenerationSource(sourceAssets);
-    const requestedSources: CreativeGenerationProvenance['requestedSources'] =
-      sourceAssets.map((sourceAsset) => ({
-        role: sourceAsset.role,
-        mediaId: sourceAsset.media.id,
-        sha256: sha256(sourceAsset.stored.buffer),
-      }));
-    const source =
-      generationSourceAsset?.stored.mediaType === 'IMAGE'
-        ? generationSourceAsset.stored
-        : null;
-    const providerImageSource = findEligibleProviderImageSource(sourceAssets);
-    const traVideoSource = sourceAssets.find(
-      (sourceAsset) => sourceAsset.role === 'TRA_VIDEO'
-    ) as HydratedTraVideoSource | undefined;
-    let videoFrameSet: ApprovedTraVideoFrameSet | null = null;
-    let generatedVideoFrameSelection: GeneratedVideoFrameSelection | undefined;
-
-    if (parsed.data.videoFrameSelection && traVideoSource) {
-      const requestedSelection = parsed.data.videoFrameSelection;
-      const sourceContentHash = videoSourceHash(traVideoSource);
-      if (sourceContentHash !== requestedSelection.sourceVideoContentHash) {
-        return NextResponse.json(
-          { error: 'The selected TRA video frames are stale. Reanalyze the video and select frames again.' },
-          { status: 409 }
-        );
-      }
-      const selectionContext = await loadVideoSelectionContext(traVideoSource);
-      const library = selectionContext?.library;
-      if (!library) {
-        return NextResponse.json(
-          { error: 'The selected TRA video frame library is missing or invalid. Reanalyze the video and select frames again.' },
-          { status: 409 }
-        );
-      }
-      if (library.id !== requestedSelection.libraryId) {
-        return NextResponse.json(
-          { error: 'The selected TRA video frame library does not match this request. Select frames again.' },
-          { status: 409 }
-        );
-      }
-      try {
-        const selectedFrameSet = await extractVideoSelectionFrames(
-          traVideoSource,
-          selectionContext!,
-          requestedSelection.frameIds
-        );
-        videoFrameSet = selectedFrameSet;
-        generatedVideoFrameSelection = {
-          libraryId: library.id,
-          sourceVideoMediaId: traVideoSource.media.id,
-          sourceVideoContentHash: selectedFrameSet.sourceVideoContentHash,
-          frames: selectedFrameSet.selectionProvenance,
-        };
-      } catch (error) {
-        return NextResponse.json(
-          {
-            error:
-              error instanceof Error
-                ? error.message
-                : 'The selected TRA video frames could not be verified. Select frames again.',
-          },
-          { status: 409 }
-        );
-      }
-    } else if (traVideoSource && !providerImageSource) {
-      try {
-        videoFrameSet = await getApprovedTraVideoFrames(traVideoSource);
-      } catch (error) {
-        if (error instanceof TraVideoProcessingError) {
-          return NextResponse.json(
-            { error: error.message },
-            { status: error.status }
-          );
-        }
-        throw error;
-      }
-    }
-
-    const brandLogo = parsed.data.brandLogoMediaId
-      ? await storage.readImageById(parsed.data.brandLogoMediaId)
-      : null;
-    if (parsed.data.brandLogoMediaId && !brandLogo) {
-      return NextResponse.json(
-        {
-          error:
-            'The saved TRA logo could not be found. Re-upload the logo in Company > Brand Guidelines and try again.',
-        },
-        { status: 404 }
-      );
-    }
-    const reserveLogoArea = Boolean(brandLogo);
-    const logoOverlaySource = brandLogo && parsed.data.brandLogoMediaId
-      ? {
-          mediaId: parsed.data.brandLogoMediaId,
-          sha256: sha256(brandLogo.buffer),
-        }
-      : undefined;
+    const { storage, generationSourceAsset, requestedSources, source, providerImageSource, videoFrameSet,
+      generatedVideoFrameSelection, brandLogo, reserveLogoArea, logoOverlaySource } = await hydrateGenerationSources(parsed.data);
 
     let analysis: CreativeReferenceAnalysis;
     let layoutBlueprint: ResolvedLayoutBlueprint | null = null;
@@ -489,6 +335,9 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof CreativeGenerationPreparationError || error instanceof CreativeSourceHydrationError || error instanceof TraVideoProcessingError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('Creative generation failed', error);
     return NextResponse.json(
       { error: 'Creative generation failed. Check the server configuration and try again.' },
