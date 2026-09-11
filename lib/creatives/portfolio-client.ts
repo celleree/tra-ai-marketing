@@ -1,0 +1,55 @@
+import type { GenerateCreativeRequest } from '@/lib/creatives/generate-request';
+import type { GeneratedCreative } from '@/lib/creatives/generated';
+import { parseCreative } from '@/lib/creatives/parse-generation-response';
+import { parsePortfolioProgress, type PortfolioProgress } from '@/lib/creatives/portfolio-progress';
+
+export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string };
+type Command = { action: 'create'; request: GenerateCreativeRequest } | { action: 'load' | 'advance'; id: string }
+  | { action: 'retry'; id: string; slotIndex: number | null };
+const endpoint = '/api/creatives/portfolios';
+
+export async function requestPortfolio(command: Command): Promise<PortfolioResponse> {
+  const response = await fetch(command.action === 'load' ? endpoint + '?id=' + encodeURIComponent(command.id) : endpoint, {
+    method: command.action === 'load' ? 'GET' : command.action === 'create' ? 'POST' : 'PATCH', cache: 'no-store',
+    ...(command.action === 'load' ? {} : { headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(command.action === 'create' ? command.request : command) }),
+  });
+  const value = await response.json().catch(() => { throw new Error('Portfolio response was interrupted. Reload saved progress before resuming.'); });
+  const job = parsePortfolioProgress(value?.job);
+  if (!job || !Array.isArray(value.creatives)) throw new Error(typeof value?.error === 'string' ? value.error : 'Invalid portfolio response. Reload saved progress.');
+  if (command.action === 'create' ? job.requestedCount !== command.request.variationCount : job.id !== command.id) {
+    throw new Error('Portfolio response does not match the requested work. Reload saved progress.');
+  }
+  const creatives = value.creatives.map(parseCreative) as Array<GeneratedCreative | null>;
+  if (creatives.some(creative => !creative || creative.finalization?.status !== 'SAVED'
+    || job.slots[creative.index - 1]?.creativeId !== creative.id) || new Set(creatives.map(creative => creative!.id)).size !== creatives.length) {
+    throw new Error('Invalid saved portfolio creatives. Reload saved progress.');
+  }
+  const error = typeof value.error === 'string' ? value.error : !response.ok ? 'Portfolio request failed. Reload saved progress.' : undefined;
+  return { job, creatives: creatives as GeneratedCreative[], ...(error ? { error } : {}) };
+}
+export const portfolioCanAdvance = (job: PortfolioProgress) =>
+  Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING') : !job.planningError);
+
+/** Called only after Generate/Resume. Poll active work with GET; never retry a failed slot automatically. */
+export async function runPortfolio(
+  initial: PortfolioResponse, onUpdate: (value: PortfolioResponse) => void, shouldStop: () => boolean,
+  wait: () => Promise<void> = () => new Promise(resolve => setTimeout(resolve, 2000)),
+) {
+  if (initial.error) throw new Error(initial.error);
+  let current = initial;
+  while (!shouldStop() && portfolioCanAdvance(current.job)) {
+    const polling = Boolean(current.job.lease && current.job.lease.expiresAtMs > Date.now());
+    if (polling) { await wait(); if (shouldStop()) break; }
+    const next = await requestPortfolio({ action: polling ? 'load' : 'advance', id: current.job.id });
+    if (next.job.requestedCount !== current.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
+    onUpdate(next);
+    const newFailedSlot = next.job.slots.some((slot, index) => slot.status === 'RETRY_REQUIRED' && current.job.slots[index].status !== 'RETRY_REQUIRED');
+    if (next.error && !(newFailedSlot && next.job.planReady && !next.job.lease && portfolioCanAdvance(next.job))) throw new Error(next.error);
+    if (!polling && !next.job.lease && JSON.stringify(next.job) === JSON.stringify(current.job) && portfolioCanAdvance(next.job)) {
+      throw new Error('Portfolio progress did not advance. Reload saved progress before resuming.');
+    }
+    current = next;
+  }
+  return current;
+}
