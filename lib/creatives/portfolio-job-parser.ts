@@ -32,11 +32,24 @@ const validSourceLayout = (value: unknown) => {
   try { parseLayoutBlueprint(value.blueprint); return true; } catch { return false; }
 };
 
+const validSelectedReferences = (value: unknown) => Array.isArray(value) && value.every(selection => {
+  if (!record(selection) || !text(selection.imageUrl) || !text(selection.selectionReason) || !record(selection.item)) return false;
+  const item = selection.item;
+  return typeof item.id === 'string' && /^media_[a-f0-9]{32}$/.test(item.id)
+    && text(item.fileName) && text(item.originalName)
+    && ['image/png', 'image/jpeg', 'image/webp'].includes(String(item.mimeType))
+    && typeof item.size === 'number' && Number.isFinite(item.size) && item.size > 0
+    && text(item.url) && text(item.addedAt) && Number.isFinite(Date.parse(String(item.addedAt)))
+    && item.referenceType === 'layout'
+    && typeof item.angle === 'string' && CREATIVE_CATEGORIES.includes(item.angle as (typeof CREATIVE_CATEGORIES)[number])
+    && ['ai', 'manual', 'legacy', 'fallback'].includes(String(item.angleSource));
+});
+
 const validPreparation = (value: unknown): value is PortfolioPreparationState => {
   if (!record(value) || typeof value.quotaReserved !== 'boolean') return false;
   if (value.analysis !== undefined && !validAnalysis(value.analysis)) return false;
   if (value.sourceLayout !== undefined && !validSourceLayout(value.sourceLayout)) return false;
-  if (value.selectedReferences !== undefined && !Array.isArray(value.selectedReferences)) return false;
+  if (value.selectedReferences !== undefined && !validSelectedReferences(value.selectedReferences)) return false;
   if (value.referenceCatalog !== undefined && !parseReferenceCatalog(value.referenceCatalog)) return false;
   return true;
 };
@@ -51,7 +64,7 @@ const validSnapshot = (
     const plan = snapshot.batchPlan;
     const audit = plan.portfolioAudit === undefined ? undefined : parsePortfolioAudit(plan.portfolioAudit);
     if (snapshot.version !== 1 || !isDeepStrictEqual(snapshot.request, job.request)
-      || !Array.isArray(snapshot.referenceCatalog) || !Array.isArray(snapshot.selectedReferences)
+      || !Array.isArray(snapshot.referenceCatalog) || !validSelectedReferences(snapshot.selectedReferences)
       || !Array.isArray(snapshot.requestedSources) || !Array.isArray(snapshot.analysisSources) || !Array.isArray(snapshot.videoFrames)
       || snapshot.videoFrames.some(frame => !time(frame.timestampMs) || !/^[a-f0-9]{64}$/.test(frame.sha256))
       || !plan || !Array.isArray(plan.creatives) || plan.creatives.length !== job.slots.length
