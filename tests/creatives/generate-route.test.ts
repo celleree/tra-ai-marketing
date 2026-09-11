@@ -547,7 +547,10 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('APPROVED TRA COMPANY CONTEXT');
     expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('Runtime approved TRA summary.');
     expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('Runtime approved claim.');
-    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('STRUCTURED LAYOUT BLUEPRINT');
+    const plannerInput = mocks.planCreativeBatch.mock.calls[0][0];
+    expect(plannerInput.analysis.visualStructure).toContain('STRUCTURED LAYOUT BLUEPRINT');
+    expect(plannerInput.context).not.toContain(plannerInput.analysis.visualStructure);
+    expect(plannerInput.context).toContain('Use referenceAnalysis as analysis-only source guidance');
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
 
