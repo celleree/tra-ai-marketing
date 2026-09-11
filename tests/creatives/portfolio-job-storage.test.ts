@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioInitialPlan, finishPortfolioPlan, finishPortfolioPreparation, finishPortfolioSlot,
-  retryPortfolioWork, PORTFOLIO_LEASE_MS, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
+  newCreativePortfolio, retryPortfolioWork, PORTFOLIO_LEASE_MS, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { MemoryPortfolioStorage as MemoryStorage, portfolioRequest as request, portfolioSnapshot as snapshot } from '../fixtures/creative-portfolio';
