@@ -70,6 +70,11 @@ describe('durable creative portfolio storage', () => {
     expect(saved.planning.phase).toBe('DIVERSITY_AUDIT');
     expect(await readCreativePortfolio(job.id, storage)).toEqual(saved);
   });
+  it('fails closed on malformed selected-reference preparation checkpoints', () => {
+    const job = { ...newCreativePortfolio(request(), 1000),
+      planning: { phase: 'INITIAL_PLAN' as const, preparation: { quotaReserved: true, selectedReferences: [null] } } };
+    expect(() => parseCreativePortfolioJob(encode(job), job.id)).toThrow('invalid');
+  });
   it('fails closed on corrupted state, invalid IDs and incomplete saved audits', async () => {
     const storage = new MemoryStorage(), job = await createCreativePortfolio(request(), storage, 1000);
     for (const value of [{}, { ...job, slots: [] }, { ...job, lease: { id: 'x', slotIndex: 1, expiresAtMs: 5000 } },
