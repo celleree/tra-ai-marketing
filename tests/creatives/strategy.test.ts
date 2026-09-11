@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCreativeStrategy } from '@/lib/creatives/strategy';
+import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { conceptDetails } from '../fixtures/creative-concept-details';
 
 const strategy = () => ({
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: ' Busy taxpayer ',
@@ -11,6 +13,23 @@ const strategy = () => ({
 });
 
 describe('CreativeStrategy contract', () => {
+  it('round-trips rich concept details through saved planning without upgrading legacy records', () => {
+    const planning = { strategy: { ...strategy(), conceptDetails: { ...conceptDetails, proposition: ' Understand options before committing ' } },
+      selectionReason: 'A distinct reason to act', model: 'gpt-6-astra', reasoningEffort: 'medium' };
+    expect(parseCreativePlanning(JSON.parse(JSON.stringify(planning)))?.strategy.conceptDetails).toEqual(conceptDetails);
+    expect(parseCreativeStrategy(strategy(), false)).not.toHaveProperty('conceptDetails');
+    expect(parseCreativeStrategy({ ...strategy(), conceptDetails: { ...conceptDetails, objection: null } }, false)?.conceptDetails?.objection).toBeNull();
+  });
+
+  it.each([
+    null, { ...conceptDetails, version: 2 }, { ...conceptDetails, proposition: ' ' },
+    { ...conceptDetails, subject: 42 }, { ...conceptDetails, environment: 'x'.repeat(1001) },
+    { ...conceptDetails, objection: false }, { ...conceptDetails, proofRecordId: 'unverified' },
+    { ...conceptDetails, visualMechanism: undefined },
+  ])('rejects malformed or unsupported rich details %#', details => {
+    expect(parseCreativeStrategy({ ...strategy(), conceptDetails: details }, false)).toBeNull();
+  });
+
   it('retains built-in selection but rejects unknown document sources and preserves legacy plans', () => {
     const withDocument = (taxDocumentReference: string) => ({
       ...strategy(), execution: { ...strategy().execution, taxDocumentReference },

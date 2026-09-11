@@ -17,7 +17,11 @@ const typographyHierarchies = ['headline-dominant', 'balanced', 'proof-dominant'
 type AwarenessStage = (typeof awarenessStages)[number];
 type SubjectSource = (typeof subjectSources)[number];
 
+const conceptFields = ['angle', 'proposition', 'mainMessage', 'visualArchetype', 'visualMechanism', 'subject', 'environment', 'compositionInstructions'] as const;
+export type CreativeConceptDetails = Record<(typeof conceptFields)[number], string> & { version: 1; objection: string | null };
+
 export type CreativeStrategy = {
+  conceptDetails?: CreativeConceptDetails; // Absent on legacy saved plans; required for new planner output.
   category: CreativeCategoryId;
   awarenessStage: AwarenessStage;
   persona: string;
@@ -46,8 +50,13 @@ const soWhatFields = ['surfaceMessage', 'functionalConsequence', 'meaningfulOutc
 
 export const CREATIVE_STRATEGY_JSON_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['category', 'awarenessStage', ...stringFields, 'offer', 'soWhat', 'execution'],
+  required: ['category', 'awarenessStage', ...stringFields, 'offer', 'soWhat', 'execution', 'conceptDetails'],
   properties: {
+    conceptDetails: { type: 'object', additionalProperties: false,
+      required: ['version', ...conceptFields, 'objection'],
+      properties: { version: { type: 'integer', enum: [1] },
+        ...Object.fromEntries(conceptFields.map((field) => [field, stringSchema])),
+        objection: { anyOf: [stringSchema, { type: 'null' }] } } },
     category: { type: 'string', enum: CREATIVE_CATEGORIES }, awarenessStage: { type: 'string', enum: awarenessStages },
     ...Object.fromEntries(stringFields.map((field) => [field, stringSchema])),
     offer: { anyOf: [stringSchema, { type: 'null' }] },
@@ -75,7 +84,16 @@ const parseString = (value: unknown) => {
 };
 
 export function parseCreativeStrategy(value: unknown, hasApprovedHumanSource: boolean): CreativeStrategy | null {
-  if (!isRecord(value) || !hasOnly(value, [...stringFields, 'category', 'awarenessStage', 'offer', 'soWhat', 'execution'])) return null;
+  if (!isRecord(value) || !hasOnly(value, [...stringFields, 'category', 'awarenessStage', 'offer', 'soWhat', 'execution', ...('conceptDetails' in value ? ['conceptDetails'] : [])])) return null;
+  let conceptDetails: CreativeConceptDetails | undefined;
+  if ('conceptDetails' in value) {
+    const details = value.conceptDetails;
+    if (!isRecord(details) || !hasOnly(details, ['version', ...conceptFields, 'objection']) || details.version !== 1) return null;
+    const fields = Object.fromEntries(conceptFields.map((field) => [field, parseString(details[field])]));
+    if (Object.values(fields).some((field) => !field) || (details.objection !== null && !parseString(details.objection))) return null;
+    conceptDetails = { ...fields as Record<(typeof conceptFields)[number], string>, version: 1,
+      objection: details.objection === null ? null : parseString(details.objection)! };
+  }
   if (!isEnum(value.awarenessStage, awarenessStages) || typeof value.category !== 'string' || !isCreativeCategory(value.category)) return null;
   const strings = Object.fromEntries(stringFields.map((field) => [field, parseString(value[field])])) as Record<(typeof stringFields)[number], string | null>;
   if (Object.values(strings).some((field) => !field) || (value.offer !== null && !parseString(value.offer))) return null;
@@ -92,5 +110,6 @@ export function parseCreativeStrategy(value: unknown, hasApprovedHumanSource: bo
     || (execution.subjectSource === 'approved-tra-human' && !hasApprovedHumanSource)) return null;
   return { category: value.category, awarenessStage: value.awarenessStage, ...strings as Record<(typeof stringFields)[number], string>,
     offer: value.offer === null ? null : parseString(value.offer)!,
-    soWhat: soWhat as CreativeStrategy['soWhat'], execution: execution as CreativeStrategy['execution'] };
+    soWhat: soWhat as CreativeStrategy['soWhat'], execution: execution as CreativeStrategy['execution'],
+    ...(conceptDetails ? { conceptDetails } : {}) };
 }

@@ -16,6 +16,9 @@ Plan a batch of original static Meta ad concepts for Tax Relief Advocates (TRA).
 ${TAX_DOCUMENT_PLANNING_GUIDANCE}
 Consider multiple alternatives internally, then return the strongest concepts first. Select strategically distinct fits to the supplied approved TRA context; do not make performance predictions or call concepts likely winners.
 The SO WHAT outcome chain must directly shape both the copy and visualDirection for every concept.
+Plan proposition first: conceptDetails.angle describes the strategic framing; proposition states the particular reason to care or act, not a category label. Connect mainMessage and any objection addressed (null if none) to the existing painPoint, emotion, awareness and SO WHAT outcome chain.
+Make visualArchetype, visualMechanism, subject, environment and compositionInstructions explicit and consistent with execution and visualDirection. Describe the mechanism that makes the proposition visible, exact planned subjects/props and their spatial hierarchy. For graphic concepts, describe the graphic field as the environment. These are rendering directions, not additional copy or factual evidence.
+Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Use tax paperwork only when it materially helps the concept; do not default to desks, paper or next-step messaging.
 Nearby concepts must differ on at least one strategic dimension and two execution dimensions. Do not use superficial headline swaps, recolors, person swaps, or minor rearrangements as variation.
 Use a human only when hasApprovedHumanSource is true, and then only as an approved supplied TRA source. When false, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
@@ -86,7 +89,7 @@ const parseConcept = (
   if (!primaryText || !headline || typeof value.copy.description !== 'string' || value.copy.description.length > MAX_TEXT_LENGTH) return null;
   const strategy = parseCreativeStrategy(value.strategy, hasApprovedHumanSource);
   const selectionReason = parseRequiredText(value.selectionReason);
-  if (!strategy || !selectionReason) return null;
+  if (!strategy?.conceptDetails || !selectionReason) return null;
   const copy: CreativeCopy = { primaryText, headline, description: value.copy.description.trim() };
   return { index: expectedIndex, format: value.format, copy, strategy, selectionReason };
 };
