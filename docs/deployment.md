@@ -63,4 +63,4 @@ See [Clerk access restrictions](https://clerk.com/docs/guides/secure/restricting
 
 ## Verification
 
-Before production release, verify the deployment builds successfully, required environment variables are present in the intended environment, R2 uploads work from approved origins, and any external OpenAI/Meta credentials have the intended least-privilege access.
+Before production release, verify the deployment builds successfully, required environment variables are present in the intended environment, R2 uploads work from approved origins, and any external OpenAI/Meta credentials have the intended least-privilege access. For stored media, verify the authenticated `/api/media/files/...` request returns a `307` redirect and the browser then receives the actual media bytes directly from Cloudflare R2 with a successful response.
