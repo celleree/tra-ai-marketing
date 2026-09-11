@@ -93,7 +93,7 @@ describe('bounded resumable portfolio execution', () => {
     expect(mocks.prepare).toHaveBeenCalledOnce();
     expect(mocks.plan).toHaveBeenCalledTimes(2);
     expect(mocks.audit).toHaveBeenCalledTimes(2);
-    const planningQuota = [...storage.data.entries()].filter(([key]) => key.includes('/CREATIVE_PLANNING.')).map(([, value]) => JSON.parse(value.bytes.toString()));
+    const planningQuota = [...storage.data.entries()].filter(([key]) => key.includes('/CREATIVE_PLANNING.json')).map(([, value]) => JSON.parse(value.bytes.toString()));
     expect(planningQuota).toEqual([expect.objectContaining({ usedUnits: 2 })]);
   });
   it('retries an interrupted audit explicitly without repeating the completed initial plan', async () => {
