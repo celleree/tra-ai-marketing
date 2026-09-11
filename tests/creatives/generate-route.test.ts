@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
+import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { parseCreativeIdentity } from '@/lib/creatives/identity';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
@@ -1040,6 +1042,34 @@ describe('layout blueprint and final image-provider boundaries', () => {
 });
 
 describe('progressive creative delivery', () => {
+  const prepared = () => prepareCreativeGeneration({ sourceAssets: [], placement: 'SQUARE_1_1', context: 'Frozen direction', variationCount: 2 }, 'http://localhost');
+  it('uses the reserved identity and checks work ownership before provider, image and metadata writes', async () => {
+    const context = await prepared(), creativeId = `creative_${'a'.repeat(32)}`;
+    const assertCurrentWork = vi.fn(async () => {});
+    const result = await renderPlannedCreative(context.batchPlan.creatives[0], context, { creativeId, assertCurrentWork });
+    expect(result.id).toBe(creativeId);
+    expect(result.identity?.conceptId).toBe(creativeId);
+    expect(mocks.saveCreativeBatch.mock.calls[0][0][0].id).toBe(creativeId);
+    expect(assertCurrentWork).toHaveBeenCalledTimes(3);
+    expect(assertCurrentWork.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(fetch).mock.invocationCallOrder[0]);
+    expect(assertCurrentWork.mock.invocationCallOrder[1]).toBeLessThan(saveImage.mock.invocationCallOrder[0]);
+    expect(assertCurrentWork.mock.invocationCallOrder[2]).toBeLessThan(mocks.saveCreativeBatch.mock.invocationCallOrder[0]);
+  });
+  it.each([1, 2, 3])('stops stale work at ownership checkpoint %s without saving a creative record', async checkpoint => {
+    const context = await prepared(); let calls = 0;
+    await expect(renderPlannedCreative(context.batchPlan.creatives[0], context, { assertCurrentWork: async () => {
+      if (++calls === checkpoint) throw new Error('Lease lost');
+    } })).rejects.toThrow('Lease lost');
+    expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();
+    expect(saveImage).toHaveBeenCalledTimes(checkpoint === 3 ? 1 : 0);
+    expect(fetch).toHaveBeenCalledTimes(checkpoint === 1 ? 0 : 1);
+  });
+  it('rejects a malformed reserved identity before any image provider call', async () => {
+    const context = await prepared();
+    await expect(renderPlannedCreative(context.batchPlan.creatives[0], context, { creativeId: 'bad' })).rejects.toThrow('reserved creative ID');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(saveImage).not.toHaveBeenCalled();
+  });
   it('saves final logo pixels and metadata before marking a creative as saved', async () => {
     const finalPixels = Buffer.from('composited PNG fixture');
     readImageById.mockResolvedValue(image('7'));
