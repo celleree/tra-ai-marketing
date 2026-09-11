@@ -1331,6 +1331,13 @@ describe('progressive creative delivery', () => {
     expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
   });
 
+  it('shares the planning quota with resumable portfolios before legacy provider work', async () => {
+    mocks.requireOperatorQuota.mockResolvedValueOnce(null).mockResolvedValueOnce(new Response('{}', { status: 429 }));
+    expect((await POST(generationRequest([], undefined, 2))).status).toBe(429);
+    expect(mocks.requireOperatorQuota).toHaveBeenNthCalledWith(2, 'operator', 'CREATIVE_PLANNING', 2);
+    expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it.each([429, 503])('rejects quota admission %i before hydration, planning, provider, or saving', async (status) => {
     mocks.requireOperatorQuota.mockResolvedValue(new Response(JSON.stringify({ error: 'Quota unavailable.' }), {
       status, headers: { 'Cache-Control': 'private, no-store', ...(status === 429 ? { 'Retry-After': '60' } : {}) },

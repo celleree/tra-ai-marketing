@@ -44,6 +44,9 @@ export async function POST(request: Request) {
     );
     if (quotaDenied) return quotaDenied;
 
+    const planningQuotaDenied = await requireOperatorQuota(access.userId, 'CREATIVE_PLANNING', parsed.data.variationCount);
+    if (planningQuotaDenied) return planningQuotaDenied;
+
     const renderContext = await prepareCreativeGeneration(parsed.data, request.url);
     const creativePlan = renderContext.batchPlan.creatives;
     const renderCreative = (item: PlannedCreativeConcept) => renderPlannedCreative(item, renderContext);
