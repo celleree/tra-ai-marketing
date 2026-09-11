@@ -1,16 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import type { CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
+import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
+import type { CreativeBatchPlan } from '@/lib/creatives/planned';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 export const PORTFOLIO_LEASE_MS = 10 * 60 * 1000;
 export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED'; error?: string };
+export type PortfolioPlanningPhase = 'INITIAL_PLAN' | 'DIVERSITY_AUDIT' | 'TARGETED_REPAIR' | 'READY_TO_RENDER';
+export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot; plannerArgs: CreativeBatchPlannerArgs };
+export type PortfolioPlanningState =
+  | { phase: 'INITIAL_PLAN' }
+  | { phase: 'DIVERSITY_AUDIT'; checkpoint: PortfolioPlanningCheckpoint; repairAttempted: boolean }
+  | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint }
+  | { phase: 'READY_TO_RENDER' };
 export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;
   request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
-  planningError?: string;
+  planning: PortfolioPlanningState; planningError?: string;
   lease: { id: string; slotIndex: number | null; expiresAtMs: number } | null;
 };
 export type PortfolioClaim = { status: 'WORK' | 'BUSY' | 'COMPLETE' | 'RETRY_REQUIRED'; job: CreativePortfolioJob };
@@ -21,7 +31,7 @@ export function newCreativePortfolio(request: ValidGenerateCreativeRequest, now 
     throw new Error('A portfolio requires 2 to 36 creatives.');
   }
   return { version: 1, id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
-    snapshot: null, lease: null, slots: Array.from({ length: request.variationCount }, (_, index) => ({
+    snapshot: null, planning: { phase: 'INITIAL_PLAN' }, lease: null, slots: Array.from({ length: request.variationCount }, (_, index) => ({
       index: index + 1, creativeId: id('creative_'), status: 'PENDING',
     })) };
 }
@@ -29,6 +39,10 @@ const requireLease = (job: CreativePortfolioJob, leaseId: string, now: number) =
   if (!job.lease || job.lease.id !== leaseId || job.lease.expiresAtMs <= now) throw new Error('Portfolio work lease is no longer current.');
   return job.lease;
 };
+const planMatchesSlots = (job: CreativePortfolioJob, snapshot: CreativePortfolioSnapshot) =>
+  isDeepStrictEqual(snapshot.request, job.request)
+    && snapshot.batchPlan.creatives.length === job.slots.length
+    && snapshot.batchPlan.creatives.every((concept, index) => concept.index === job.slots[index].index);
 const failed = (job: CreativePortfolioJob, message: string) => {
   const next = structuredClone(job);
   if (next.lease!.slotIndex === null) next.planningError = message;
@@ -55,14 +69,72 @@ export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date
   return { status: 'WORK', job };
 }
 
+export function finishPortfolioInitialPlan(
+  current: CreativePortfolioJob, leaseId: string, checkpoint: PortfolioPlanningCheckpoint, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'INITIAL_PLAN'
+    || checkpoint.snapshot.batchPlan.portfolioAudit || !planMatchesSlots(current, checkpoint.snapshot)
+    || checkpoint.plannerArgs.count !== current.slots.length
+    || !isDeepStrictEqual(checkpoint.plannerArgs.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)) {
+    throw new Error('Portfolio initial plan does not match the reserved work.');
+  }
+  return { ...structuredClone(current), planning: { phase: 'DIVERSITY_AUDIT' as const,
+    checkpoint: structuredClone(checkpoint), repairAttempted: false }, lease: null, updatedAtMs: now };
+}
+
+export function finishPortfolioAuditForRepair(
+  current: CreativePortfolioJob, leaseId: string, audit: PortfolioAudit, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'DIVERSITY_AUDIT'
+    || current.planning.repairAttempted || current.planning.checkpoint.snapshot.batchPlan.portfolioAudit
+    || audit.conceptCount !== current.slots.length) throw new Error('Portfolio audit does not match the current initial plan.');
+  const job = structuredClone(current);
+  job.planning = { phase: 'TARGETED_REPAIR', checkpoint: { ...job.planning.checkpoint,
+    snapshot: { ...job.planning.checkpoint.snapshot, batchPlan: { ...job.planning.checkpoint.snapshot.batchPlan, portfolioAudit: structuredClone(audit) } } } };
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
+export function finishPortfolioRepair(
+  current: CreativePortfolioJob, leaseId: string, batchPlan: CreativeBatchPlan, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'TARGETED_REPAIR'
+    || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
+    || batchPlan.creatives.length !== current.slots.length
+    || batchPlan.creatives.some((concept, index) => concept.index !== current.slots[index].index)) {
+    throw new Error('Portfolio repair does not match the current audited plan.');
+  }
+  const job = structuredClone(current), checkpoint = job.planning.checkpoint;
+  job.planning = { phase: 'DIVERSITY_AUDIT', checkpoint: { ...checkpoint,
+    snapshot: { ...checkpoint.snapshot, batchPlan: structuredClone(batchPlan) } }, repairAttempted: true };
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
+export function finishPortfolioAuditFailure(
+  current: CreativePortfolioJob, leaseId: string, audit: PortfolioAudit, message: string, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'DIVERSITY_AUDIT'
+    || !current.planning.repairAttempted || current.planning.checkpoint.snapshot.batchPlan.portfolioAudit
+    || audit.conceptCount !== current.slots.length) throw new Error('Portfolio audit failure does not match the repaired plan.');
+  const job = structuredClone(current);
+  job.planning.checkpoint.snapshot.batchPlan.portfolioAudit = structuredClone(audit);
+  job.planningError = message.slice(0, 1000) || 'Creative planning did not pass the diversity audit.';
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
 export function finishPortfolioPlan(current: CreativePortfolioJob, leaseId: string, snapshot: CreativePortfolioSnapshot, now = Date.now()) {
   const lease = requireLease(current, leaseId, now);
-  if (lease.slotIndex !== null || current.snapshot || !isDeepStrictEqual(snapshot.request, current.request)
-    || snapshot.batchPlan.creatives.length !== current.slots.length
-    || snapshot.batchPlan.creatives.some((concept, index) => concept.index !== current.slots[index].index)) {
+  if (lease.slotIndex !== null || current.snapshot || !planMatchesSlots(current, snapshot)) {
     throw new Error('Portfolio plan does not match the reserved slots.');
   }
-  return { ...structuredClone(current), snapshot: structuredClone(snapshot), lease: null, updatedAtMs: now };
+  return { ...structuredClone(current), snapshot: structuredClone(snapshot), planning: { phase: 'READY_TO_RENDER' as const },
+    lease: null, updatedAtMs: now };
 }
 
 export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: string, creativeId: string, now = Date.now()) {
@@ -93,6 +165,9 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
   if (slotIndex === null) {
     if (job.snapshot || !job.planningError) throw new Error('Portfolio planning does not require a retry.');
     delete job.planningError;
+    // A completed second audit is a known quality failure. An explicit retry restarts planning rather than repeating that paid audit.
+    if (job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
+      && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) job.planning = { phase: 'INITIAL_PLAN' };
   } else {
     const slot = job.slots.find(slot => slot.index === slotIndex);
     if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');

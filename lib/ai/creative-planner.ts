@@ -111,14 +111,16 @@ const parseConcept = (
   return { index: expectedIndex, format: value.format, copy, strategy, selectionReason };
 };
 
-async function requestCreativeBatch(args: {
+export type CreativeBatchPlannerArgs = {
   count: number;
   context: string;
   analysis: CreativeReferenceAnalysis;
   hasApprovedHumanSource: boolean;
   referenceCatalog?: ReferencePlanningCandidate[];
   approvedHumanOptions?: ApprovedHumanOption[];
-}): Promise<CreativeBatchPlan> {
+};
+
+export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Promise<CreativeBatchPlan> {
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
     throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
   }
@@ -190,7 +192,12 @@ async function requestCreativeBatch(args: {
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
 }
 
-export async function planCreativeBatch(args: Parameters<typeof requestCreativeBatch>[0]): Promise<CreativeBatchPlan> {
+export const creativeRepairFeedback = (
+  issue: string,
+  portfolioAudit: Awaited<ReturnType<typeof auditCreativePortfolio>>,
+) => `\nPORTFOLIO REPAIR: ${issue}\nPreserve strong ideas; replace repeated hypotheses with genuinely different grounded propositions. Do not relabel or paraphrase duplicates.\n${JSON.stringify(portfolioAudit)}`;
+
+export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise<CreativeBatchPlan> {
   let feedback = '';
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const plan = await requestCreativeBatch({ ...args, context: args.context + feedback });
@@ -198,7 +205,7 @@ export async function planCreativeBatch(args: Parameters<typeof requestCreativeB
     const issue = getCreativeDiversityIssue(plan.creatives, portfolioAudit);
     if (!issue) return { ...plan, portfolioAudit };
     if (attempt === 1) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${issue}. No images were generated.`);
-    feedback = `\nPORTFOLIO REPAIR: ${issue}\nPreserve strong ideas; replace repeated hypotheses with genuinely different grounded propositions. Do not relabel or paraphrase duplicates.\n${JSON.stringify(portfolioAudit)}`;
+    feedback = creativeRepairFeedback(issue, portfolioAudit);
   }
   throw new Error('Portfolio planning did not complete.');
 }

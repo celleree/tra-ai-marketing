@@ -6,7 +6,8 @@ import { portfolioRequest } from '../fixtures/creative-portfolio';
 
 const initial = (): PortfolioResponse => ({ job: portfolioProgress(newCreativePortfolio(portfolioRequest())), creatives: [] });
 const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED'>): PortfolioResponse => ({
-  job: { ...value.job, planReady: true, lease: null, slots: value.job.slots.map((slot, index) => ({ ...slot, status: statuses[index] })) },
+  job: { ...value.job, planReady: true, planningPhase: 'READY_TO_RENDER', lease: null,
+    slots: value.job.slots.map((slot, index) => ({ ...slot, status: statuses[index] })) },
   creatives: value.job.slots.filter((_, index) => statuses[index] === 'SAVED').map(slot => ({
     id: slot.creativeId, index: slot.index, category: 'customer-problems', format: 'direct-response',
     copy: { headline: 'Headline', primaryText: 'Copy', description: '' },

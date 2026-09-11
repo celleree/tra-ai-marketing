@@ -3,17 +3,68 @@ import { isCreativeFormat } from '@/lib/creative-formats';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
-import { MAX_PORTFOLIO_CREATIVES, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
+import { parsePortfolioAudit } from '@/lib/creatives/portfolio-audit';
+import { MAX_PORTFOLIO_CREATIVES, type CreativePortfolioJob, type PortfolioPlanningCheckpoint } from '@/lib/creatives/portfolio-job';
+import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
+import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS } from '@/lib/video/approved-human';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
 const time = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0;
+const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const textArray = (value: unknown) => Array.isArray(value) && value.every(item => typeof item === 'string');
+
+const validAnalysis = (value: unknown) => record(value)
+  && text(value.summary) && textArray(value.visibleText) && text(value.visualStructure) && text(value.hookOrAngle)
+  && text(value.offerOrCta) && text(value.styleNotes) && textArray(value.preserve) && textArray(value.avoid)
+  && textArray(value.unknowns) && text(value.dominantCategory);
+
+const validSnapshot = (
+  snapshot: CreativePortfolioSnapshot,
+  job: CreativePortfolioJob,
+  auditMode: 'required' | 'forbidden' | 'optional',
+  requireDiverse: boolean,
+) => {
+  try {
+    const plan = snapshot.batchPlan;
+    const audit = plan.portfolioAudit === undefined ? undefined : parsePortfolioAudit(plan.portfolioAudit);
+    if (snapshot.version !== 1 || !isDeepStrictEqual(snapshot.request, job.request)
+      || !Array.isArray(snapshot.referenceCatalog) || !Array.isArray(snapshot.selectedReferences)
+      || !Array.isArray(snapshot.requestedSources) || !Array.isArray(snapshot.analysisSources) || !Array.isArray(snapshot.videoFrames)
+      || snapshot.videoFrames.some(frame => !time(frame.timestampMs) || !/^[a-f0-9]{64}$/.test(frame.sha256))
+      || !plan || !Array.isArray(plan.creatives) || plan.creatives.length !== job.slots.length
+      || (auditMode === 'required' && !audit) || (auditMode === 'forbidden' && plan.portfolioAudit !== undefined)
+      || (plan.portfolioAudit !== undefined && (!audit || audit.conceptCount !== job.slots.length))
+      || plan.creatives.some((concept, index) => concept.index !== index + 1 || !isCreativeFormat(concept.format)
+        || ![concept.copy.headline, concept.copy.primaryText].every(text) || typeof concept.copy.description !== 'string'
+        || !parseCreativePlanning({ strategy: concept.strategy, selectionReason: concept.selectionReason,
+          model: plan.plannerModel, reasoningEffort: plan.reasoningEffort,
+          referenceCatalog: snapshot.referenceCatalog, ...(audit ? { portfolioAudit: audit } : {}) }))) return false;
+    if (requireDiverse && audit && getCreativeDiversityIssue(plan.creatives, audit)) return false;
+    return true;
+  } catch { return false; }
+};
+
+const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: 'required' | 'forbidden' | 'optional') => {
+  if (!record(value) || !record(value.plannerArgs) || !record(value.snapshot)) return false;
+  const checkpoint = value as unknown as PortfolioPlanningCheckpoint, args = checkpoint.plannerArgs;
+  if (args.count !== job.slots.length || !text(args.context) || !validAnalysis(args.analysis)
+    || typeof args.hasApprovedHumanSource !== 'boolean'
+    || !isDeepStrictEqual(args.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)) return false;
+  if (args.approvedHumanOptions !== undefined && (!Array.isArray(args.approvedHumanOptions)
+    || args.approvedHumanOptions.length > MAX_APPROVED_HUMAN_OPTIONS
+    || new Set(args.approvedHumanOptions.map(option => option?.id)).size !== args.approvedHumanOptions.length
+    || args.approvedHumanOptions.some(option => !record(option) || !isApprovedHumanId(option.id)
+      || !text(option.sourceName) || !text(option.description)))) return false;
+  return validSnapshot(checkpoint.snapshot, job, auditMode, false);
+};
 
 /** Internal saved-state validation; never grants media or human-source eligibility. */
 export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): CreativePortfolioJob {
   try {
     if (bytes.length > 2 * 1024 * 1024 || !isPortfolioId(expectedId)) throw new Error();
-    const job = JSON.parse(bytes.toString('utf8')) as CreativePortfolioJob;
+    const raw = JSON.parse(bytes.toString('utf8')) as CreativePortfolioJob & { planning?: unknown };
+    const job = { ...raw, planning: raw.planning ?? { phase: raw.snapshot ? 'READY_TO_RENDER' : 'INITIAL_PLAN' } } as CreativePortfolioJob;
     if (job.version !== 1 || job.id !== expectedId || !time(job.createdAtMs) || !time(job.updatedAtMs)
       || job.updatedAtMs < job.createdAtMs || !text(job.request.context)
       // Stored context already includes Company context. Validate request fields without wrapping it again.
@@ -22,21 +73,28 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
       || new Set(job.slots.map(slot => slot.creativeId)).size !== job.slots.length
       || job.slots.some((slot, index) => slot.index !== index + 1 || !/^creative_[a-f0-9]{32}$/.test(slot.creativeId)
         || !['PENDING', 'SAVED', 'RETRY_REQUIRED'].includes(slot.status)
-        || (slot.status === 'RETRY_REQUIRED' ? !text(slot.error) : slot.error !== undefined))) throw new Error();
-    if (job.snapshot !== null) {
-      const snapshot = job.snapshot, plan = snapshot.batchPlan;
-      if (snapshot.version !== 1 || !isDeepStrictEqual(snapshot.request, job.request)
-        || !Array.isArray(snapshot.referenceCatalog) || !Array.isArray(snapshot.selectedReferences)
-        || !Array.isArray(snapshot.requestedSources) || !Array.isArray(snapshot.analysisSources) || !Array.isArray(snapshot.videoFrames)
-        || snapshot.videoFrames.some(frame => !time(frame.timestampMs) || !/^[a-f0-9]{64}$/.test(frame.sha256))
-        || plan.creatives.length !== job.slots.length || !plan.portfolioAudit
-        || plan.creatives.some((concept, index) => concept.index !== index + 1 || !isCreativeFormat(concept.format)
-          || ![concept.copy.headline, concept.copy.primaryText].every(text) || typeof concept.copy.description !== 'string'
-          || !parseCreativePlanning({ strategy: concept.strategy, selectionReason: concept.selectionReason,
-            model: plan.plannerModel, reasoningEffort: plan.reasoningEffort,
-            referenceCatalog: snapshot.referenceCatalog, portfolioAudit: plan.portfolioAudit }))
-        || getCreativeDiversityIssue(plan.creatives, plan.portfolioAudit)) throw new Error();
-    } else if (job.slots.some(slot => slot.status !== 'PENDING')) throw new Error();
+        || (slot.status === 'RETRY_REQUIRED' ? !text(slot.error) : slot.error !== undefined))
+      || !record(job.planning) || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planning.phase)) throw new Error();
+
+    if (job.planning.phase === 'READY_TO_RENDER') {
+      if (!job.snapshot || !validSnapshot(job.snapshot, job, 'required', true)) throw new Error();
+    } else {
+      if (job.snapshot !== null || job.slots.some(slot => slot.status !== 'PENDING')) throw new Error();
+      if (job.planning.phase === 'INITIAL_PLAN') {
+        if (Object.keys(job.planning).length !== 1) throw new Error();
+      } else if (job.planning.phase === 'TARGETED_REPAIR') {
+        if (!validCheckpoint(job.planning.checkpoint, job, 'required')
+          || !getCreativeDiversityIssue(job.planning.checkpoint.snapshot.batchPlan.creatives,
+            job.planning.checkpoint.snapshot.batchPlan.portfolioAudit)) throw new Error();
+      } else {
+        if (typeof job.planning.repairAttempted !== 'boolean') throw new Error();
+        const hasAudit = job.planning.checkpoint?.snapshot?.batchPlan?.portfolioAudit !== undefined;
+        if (!validCheckpoint(job.planning.checkpoint, job, hasAudit ? 'required' : 'forbidden')
+          || (hasAudit && (!job.planning.repairAttempted || !job.planningError
+            || !getCreativeDiversityIssue(job.planning.checkpoint.snapshot.batchPlan.creatives,
+              job.planning.checkpoint.snapshot.batchPlan.portfolioAudit)))) throw new Error();
+      }
+    }
     if (job.planningError !== undefined && (!text(job.planningError) || job.snapshot || job.lease)) throw new Error();
     if (job.lease !== null && (!text(job.lease.id) || !time(job.lease.expiresAtMs)
       || (job.lease.slotIndex === null ? job.snapshot !== null

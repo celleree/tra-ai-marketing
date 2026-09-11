@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
+import { creativeRepairFeedback, requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
+import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
-import { claimCreativePortfolio, finishPortfolioPlan, finishPortfolioSlot, failPortfolioWork, releasePortfolioWork,
+import { claimCreativePortfolio, finishPortfolioAuditFailure, finishPortfolioAuditForRepair, finishPortfolioInitialPlan,
+  finishPortfolioPlan, finishPortfolioRepair, finishPortfolioSlot, failPortfolioWork, releasePortfolioWork,
   type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
@@ -13,7 +17,7 @@ import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage'
 
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
 
-/** One whole-plan preparation OR one image; no background loop or automatic failed-provider retry. */
+/** One persisted planning phase OR one image; no background loop or automatic failed-provider retry. */
 export async function advanceCreativePortfolio(
   id: string, operatorId: string, requestUrl: string, storage?: VideoIntelligenceStorage,
 ): Promise<PortfolioStepResult> {
@@ -28,20 +32,52 @@ export async function advanceCreativePortfolio(
   };
   let providerWorkStarted = false;
   try {
-    const quota = await reserveOperatorQuota({ operatorId,
-      group: slotIndex === null ? 'CREATIVE_PLANNING' : 'CREATIVE_GENERATION',
-      units: slotIndex === null ? job.request.variationCount : 1,
-    }, { storage });
-    if (!quota.allowed) return {
-      job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
-      status: 429, error: 'Operator quota reached. Resume after the quota window resets.', retryAfterSeconds: quota.retryAfterSeconds,
-    };
+    // CREATIVE_PLANNING counts planned concepts/hour, so reserve it once for the initial plan, not again for audit/repair phases.
+    if (slotIndex !== null || job.planning.phase === 'INITIAL_PLAN') {
+      const quota = await reserveOperatorQuota({ operatorId,
+        group: slotIndex === null ? 'CREATIVE_PLANNING' : 'CREATIVE_GENERATION',
+        units: slotIndex === null ? job.request.variationCount : 1,
+      }, { storage });
+      if (!quota.allowed) return {
+        job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
+        status: 429, error: 'Operator quota reached. Resume after the quota window resets.', retryAfterSeconds: quota.retryAfterSeconds,
+      };
+    }
     await assertCurrentWork();
     providerWorkStarted = true;
     if (slotIndex === null) {
-      const prepared = await prepareCreativeGeneration(job.request, requestUrl);
-      const snapshot = snapshotCreativePortfolio(prepared);
-      return { job: await updateCreativePortfolio(id, current => finishPortfolioPlan(current, token, snapshot), storage) };
+      if (job.planning.phase === 'INITIAL_PLAN') {
+        const prepared = await prepareCreativeGeneration(job.request, requestUrl, { initialPlanOnly: true });
+        if (!prepared.plannerArgs) throw new Error('Creative planning context was not preserved.');
+        const checkpoint = { snapshot: snapshotCreativePortfolio(prepared), plannerArgs: structuredClone(prepared.plannerArgs) };
+        return { job: await updateCreativePortfolio(id, current => finishPortfolioInitialPlan(current, token, checkpoint), storage) };
+      }
+      if (job.planning.phase === 'DIVERSITY_AUDIT') {
+        const { checkpoint, repairAttempted } = job.planning;
+        const audit = await auditCreativePortfolio(checkpoint.snapshot.batchPlan.creatives);
+        const issue = getCreativeDiversityIssue(checkpoint.snapshot.batchPlan.creatives, audit);
+        if (!issue) {
+          const snapshot = structuredClone(checkpoint.snapshot);
+          snapshot.batchPlan.portfolioAudit = audit;
+          return { job: await updateCreativePortfolio(id, current => finishPortfolioPlan(current, token, snapshot), storage) };
+        }
+        if (!repairAttempted) {
+          return { job: await updateCreativePortfolio(id, current => finishPortfolioAuditForRepair(current, token, audit), storage) };
+        }
+        const message = `Portfolio remains insufficiently distinct after one planning repair: ${issue}. No images were generated.`;
+        return { job: await updateCreativePortfolio(id, current => finishPortfolioAuditFailure(current, token, audit, message), storage),
+          error: message, status: 502 };
+      }
+      if (job.planning.phase === 'TARGETED_REPAIR') {
+        const { checkpoint } = job.planning;
+        const audit = checkpoint.snapshot.batchPlan.portfolioAudit!;
+        const issue = getCreativeDiversityIssue(checkpoint.snapshot.batchPlan.creatives, audit);
+        if (!issue) throw new Error('Portfolio repair was requested without a diversity issue.');
+        const batchPlan = await requestCreativeBatch({ ...checkpoint.plannerArgs,
+          context: checkpoint.plannerArgs.context + creativeRepairFeedback(issue, audit) });
+        return { job: await updateCreativePortfolio(id, current => finishPortfolioRepair(current, token, batchPlan), storage) };
+      }
+      throw new Error('Portfolio planning phase is not executable.');
     }
     const context = await restoreCreativePortfolio(job.snapshot!);
     const slot = job.slots[slotIndex - 1];
