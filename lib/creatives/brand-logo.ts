@@ -139,7 +139,7 @@ const fetchDrawableImage = async (
 ): Promise<DrawableImage> => {
   let response: Response;
   try {
-    response = await fetch(url, { cache: 'no-store' });
+    response = await fetch(url);
   } catch {
     throw new Error(`${label} could not be fetched from this deployment.`);
   }
