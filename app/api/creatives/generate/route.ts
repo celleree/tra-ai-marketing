@@ -1,7 +1,7 @@
+import { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
+export { generatePromptOnlyCreativeImage };
 import { createHash, randomUUID } from 'crypto';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
-import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
-import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 import { buildReferencePlanningCatalog } from '@/lib/references/planning.server';
 import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
 import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
@@ -9,7 +9,6 @@ import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { requireOperatorQuota } from '@/lib/quotas/require-quota';
-import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
 import {
@@ -19,13 +18,6 @@ import {
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
-import {
-  creativeImageHttpError,
-  creativeImageMissingOutputError,
-  fetchCreativeImage,
-  runCreativeImageModelRoute,
-  type CreativeImageOperationType,
-} from '@/lib/creatives/image-models';
 import { planCreativeBatch } from '@/lib/ai/creative-planner';
 import {
   analyzeApprovedTraVideoFrames,
@@ -37,20 +29,15 @@ import {
   type SelectedReferenceCreative,
 } from '@/lib/ai/reference-selector';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
-import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import {
   validateGenerateCreativeRequest,
 } from '@/lib/creatives/generate-request';
-import type { GeneratedCreative, CreativeCopy } from '@/lib/creatives/generated';
+import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
-import {
-  CREATIVE_PLACEMENT_SPECS,
-  type CreativePlacement,
-} from '@/lib/creatives/placements';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { isDurableVideoIntelligenceAvailable } from '@/lib/video/preview-availability';
 import {
@@ -85,7 +72,6 @@ import type {
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const RENDER_CONCURRENCY = 2;
 
 const sha256 = (buffer: Buffer) =>
@@ -96,17 +82,6 @@ const encodeSseEvent = (
   event: 'creative' | 'error' | 'complete',
   payload: object
 ) => encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
-
-const getOpenAIError = async (response: Response) => {
-  try {
-    const payload = (await response.json()) as {
-      error?: { message?: string };
-    };
-    return payload.error?.message || `OpenAI request failed with ${response.status}.`;
-  } catch {
-    return `OpenAI request failed with ${response.status}.`;
-  }
-};
 
 const buildPromptOnlyAnalysis = (
   context: string
@@ -154,81 +129,6 @@ const buildLayoutReferenceAnalysis = (
   unknowns: [],
   dominantCategory: 'customer-problems',
 });
-
-export const generatePromptOnlyCreativeImage = async (args: {
-  taxDocumentReference?: TaxDocumentSelection;
-  primaryFormat: keyof typeof CREATIVE_FORMAT_LABELS;
-  placement: CreativePlacement;
-  context: string;
-  copy: CreativeCopy;
-  reserveLogoArea: boolean;
-  operationType?: Extract<CreativeImageOperationType, 'PROMPT_GENERATION' | 'LAYOUT_REFERENCE_GENERATION'>;
-}): Promise<ImageGenerationResult> => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY is not configured.');
-  }
-
-  const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
-  const document = await prepareTaxDocumentReference(args.taxDocumentReference);
-  const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
-  const prompt = `
-Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
-
-Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
-
-Primary creative format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
-One-ad render brief: ${args.context}
-
-Use this planned ad copy verbatim when rendered:
-Headline: ${args.copy.headline}
-Primary text: ${args.copy.primaryText}
-Description: ${args.copy.description}
-
-${logoDirection}
-${formatCreativeSafeZoneRules(args.placement)}
-TRA guardrails:
-- ${document ? 'Use the document exemplar only for the planned paperwork.' : 'This request has no attached reference image.'} Follow the selected blueprint in the one-ad brief when present; otherwise create the planned original layout.
-- Do not depict a person, face, spokesperson, or human figure. No approved TRA human identity is attached to this image-generation call, so use a non-human concept.
-- Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
-- If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
-- Do not imply universal tax-debt results.
-- Keep the design credible, consumer-friendly, and readable on a phone.
-- Use strong visual hierarchy and avoid tiny text or clutter.
-- The only company or brand name that may appear is Tax Relief Advocates or TRA.
-${document?.prompt ?? ''}
-`;
-
-  const routed = await runCreativeImageModelRoute({
-    operationType: args.operationType ?? 'PROMPT_GENERATION',
-    generate: async (model) => {
-      const parameters = { model, prompt, size: placement.providerSize, quality: 'high', output_format: 'png' };
-      const form = new FormData();
-      if (document) {
-        for (const [key, value] of Object.entries(parameters)) form.set(key, value);
-        document.appendTo(form);
-      }
-      const response = await fetchCreativeImage(`${OPENAI_BASE_URL}/images/${document ? 'edits' : 'generations'}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          ...(document ? {} : { 'Content-Type': 'application/json' }),
-        },
-        body: document ? form : JSON.stringify(parameters),
-      });
-      if (!response.ok) {
-        throw creativeImageHttpError(response.status, await getOpenAIError(response));
-      }
-      const payload = (await response.json()) as {
-        data?: Array<{ b64_json?: string }>;
-      };
-      const base64 = payload.data?.[0]?.b64_json;
-      if (!base64) throw creativeImageMissingOutputError();
-      return Buffer.from(base64, 'base64');
-    },
-  });
-  return { buffer: routed.value, prompt, model: routed.routing.actualModel, routing: routed.routing };
-};
 
 const buildReferenceCandidates = (
   library: ReferenceLibraryItem[],

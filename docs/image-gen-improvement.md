@@ -61,6 +61,8 @@ Semantic similarity requires judgment. Use Astra's structured audit and human ad
 
 ## 4. Approved TRA human-frame library
 
+Implementation checkpoint: Video Studio now supports exact-frame preview, explicit approval and deactivate/reactivate controls over persistent source-bound records. Generation offers a bounded, source-checked shortlist of curated notes; Astra selects stable human IDs per concept. Selected sources are freshly extracted and validated before rendering, and complete provenance persists. Revisions recheck approval and remove human-source attachments when edited to a graphic. Optional catalog failures leave graphic/direct-source planning available; selected-source failures stop that human's render. No live visual acceptance has been measured.
+
 **User experience.** Extend the video workflow with inspect/approve/annotate/revoke controls. Future batches discover approved human frames without reuploading or reanalyzing unchanged videos.
 
 **Ranking and deduplication.**
