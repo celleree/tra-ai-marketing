@@ -485,7 +485,7 @@ export async function POST(request: Request) {
       referenceCatalog,
     });
     const creativePlan = batchPlan.creatives;
-    const diversityIssue = getCreativeDiversityIssue(creativePlan);
+    const diversityIssue = getCreativeDiversityIssue(creativePlan, batchPlan.portfolioAudit);
     if (diversityIssue) {
       return NextResponse.json(
         {
@@ -630,6 +630,7 @@ export async function POST(request: Request) {
               selectionReason: item.selectionReason,
               model: batchPlan.plannerModel,
               reasoningEffort: batchPlan.reasoningEffort,
+              ...(batchPlan.portfolioAudit ? { portfolioAudit: batchPlan.portfolioAudit } : {}),
               referenceCatalog: referenceCatalog.filter(reference =>
                 [item.strategy.referenceSelection?.angleSource, item.strategy.referenceSelection?.layoutSource].includes(reference.referenceId)),
             },

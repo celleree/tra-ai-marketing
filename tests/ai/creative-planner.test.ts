@@ -3,6 +3,9 @@ import { planCreativeBatch } from '@/lib/ai/creative-planner';
 import { CREATIVE_STRATEGY_JSON_SCHEMA } from '@/lib/creatives/strategy';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 import { referenceCandidate } from '../fixtures/reference-catalog';
+import { portfolioAudit } from '../fixtures/portfolio-audit';
+import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
+vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: vi.fn(async (concepts: unknown[]) => portfolioAudit(concepts.length)) }));
 
 const analysis = {
   summary: 'Clear visual hierarchy', visibleText: [], visualStructure: 'Headline over image',
@@ -21,14 +24,28 @@ const strategy = (subjectSource: 'non-human' | 'approved-tra-human' = 'non-human
 const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human' = 'non-human') => ({
   index, format: index === 1 ? 'educational' : 'proof',
   copy: { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' },
-  strategy: strategy(subjectSource), selectionReason: `Distinct reason ${index}`,
+  strategy: { ...strategy(subjectSource), soWhat: { ...strategy().soWhat, surfaceMessage: `Distinct message ${index}` },
+    conceptDetails: { ...conceptDetails, proposition: `Different proposition ${index}` } }, selectionReason: `Distinct reason ${index}`,
 });
 const payload = (value: unknown) => ({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
 const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value)), { status: 200 });
 
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); });
 
 describe('creative batch planner', () => {
+  it('repairs a repeated semantic group once before returning the audited portfolio', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const repeated = { ...portfolioAudit(), groups: [{ conceptIndexes: [1, 2], proposition: 'Conversation leads to next steps', distinction: 'Paraphrases of the same idea' }] };
+    vi.mocked(auditCreativePortfolio).mockResolvedValueOnce(repeated);
+    const fetchMock = vi.fn(async () => okResponse({ creatives: [concept(1), concept(2)] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.portfolioAudit?.groups).toHaveLength(2);
+    vi.mocked(auditCreativePortfolio).mockResolvedValueOnce(repeated).mockResolvedValueOnce(repeated);
+    await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow('after one planning repair');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
   it('lets Astra choose all independent combinations and resolves known IDs deterministically', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const referenceCatalog = [referenceCandidate('a'), referenceCandidate('b')];
@@ -65,7 +82,7 @@ describe('creative batch planner', () => {
     expect(result).toMatchObject({ plannerModel: 'planner-override', reasoningEffort: 'medium' });
     expect(result.creatives.map((creative) => creative.index)).toEqual([1, 2]);
     expect(result.creatives[0].strategy.soWhat.meaningfulOutcome).toBe('Move forward with confidence');
-    expect(result.creatives[0].strategy.conceptDetails).toEqual(conceptDetails);
+    expect(result.creatives[0].strategy.conceptDetails).toEqual(concept(1).strategy.conceptDetails);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
@@ -79,7 +96,7 @@ describe('creative batch planner', () => {
     expect(requestInput.creativeContext).toBe(context);
     expect(requestInput).not.toHaveProperty('approvedTraContext');
     expect(body.input[0].content[0].text).toContain('strongest concepts first');
-    expect(body.input[0].content[0].text).toContain('one strategic dimension and two execution dimensions');
+    expect(body.input[0].content[0].text).toContain('Strong ideas may share a category or layout');
     expect(body.input[0].content[0].text).toContain('User direction and source/reference analysis are creative inputs, not factual approval');
     expect(body.input[0].content[0].text).toContain('Only claims or proof explicitly present in approved company claims/proof fields');
   });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
+import { portfolioAudit } from '../fixtures/portfolio-audit';
+import { parsePortfolioAudit } from '@/lib/creatives/portfolio-audit';
 
 const strategy = (changes: Partial<CreativeStrategy> = {}): CreativeStrategy => ({
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer',
@@ -21,6 +23,23 @@ const different = () => concept('Get clarity today', {
 });
 
 describe('getCreativeDiversityIssue', () => {
+  it('accepts distinct audited propositions sharing category, awareness and execution', () => {
+    const left = concept('Privacy matters');
+    const right = concept('Understand the cost of waiting', { soWhat: { surfaceMessage: 'Consider timing', functionalConsequence: 'Compare options', meaningfulOutcome: 'Make an informed choice' } });
+    expect(getCreativeDiversityIssue([left, right], portfolioAudit())).toBeNull();
+    const repeated = { ...portfolioAudit(), groups: [{ conceptIndexes: [1, 2], proposition: 'Questions lead to conversation and next steps', distinction: 'These are paraphrases' }] };
+    expect(getCreativeDiversityIssue([left, right], repeated)).toContain('repeat a strategic proposition');
+    expect(getCreativeDiversityIssue([left, left], portfolioAudit())).toContain('duplicate headlines');
+  });
+
+  it('requires a complete, unique global audit partition, including at 30 concepts', () => {
+    expect(parsePortfolioAudit(portfolioAudit(30))?.groups).toHaveLength(30);
+    const omitted = portfolioAudit(30); omitted.groups.pop();
+    expect(parsePortfolioAudit(omitted)).toBeNull();
+    const repeated = portfolioAudit(); repeated.groups[1].conceptIndexes = [1];
+    expect(parsePortfolioAudit(repeated)).toBeNull();
+    expect(getCreativeDiversityIssue([concept('A'), different()], portfolioAudit(3))).toContain('does not cover');
+  });
   it('accepts meaningfully distinct concepts', () => {
     expect(getCreativeDiversityIssue([concept('Organize your case'), different()])).toBeNull();
   });

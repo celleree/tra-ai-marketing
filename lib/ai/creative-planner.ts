@@ -1,5 +1,7 @@
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
+import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
+import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeCopy } from '@/lib/creatives/generated';
@@ -20,7 +22,7 @@ The SO WHAT outcome chain must directly shape both the copy and visualDirection 
 Plan proposition first: conceptDetails.angle describes the strategic framing; proposition states the particular reason to care or act, not a category label. Connect mainMessage and any objection addressed (null if none) to the existing painPoint, emotion, awareness and SO WHAT outcome chain.
 Make visualArchetype, visualMechanism, subject, environment and compositionInstructions explicit and consistent with execution and visualDirection. Describe the mechanism that makes the proposition visible, exact planned subjects/props and their spatial hierarchy. For graphic concepts, describe the graphic field as the environment. These are rendering directions, not additional copy or factual evidence.
 Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Use tax paperwork only when it materially helps the concept; do not default to desks, paper or next-step messaging.
-Nearby concepts must differ on at least one strategic dimension and two execution dimensions. Do not use superficial headline swaps, recolors, person swaps, or minor rearrangements as variation.
+Plan the portfolio globally around distinct reasons to care or act: vary problem/outcome framing, objections, emotions, awareness and propositions. Strong ideas may share a category or layout. Compare mechanisms, subjects, archetypes and CTA approaches separately; headline swaps, recolors, person swaps or minor rearrangements do not create a new marketing idea.
 Use a human only when hasApprovedHumanSource is true, and then only as an approved supplied TRA source. When false, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 The creativeContext may contain both USER CREATIVE DIRECTION and APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
@@ -100,7 +102,7 @@ const parseConcept = (
   return { index: expectedIndex, format: value.format, copy, strategy, selectionReason };
 };
 
-export async function planCreativeBatch(args: {
+async function requestCreativeBatch(args: {
   count: number;
   context: string;
   analysis: CreativeReferenceAnalysis;
@@ -169,4 +171,17 @@ export async function planCreativeBatch(args: {
   const creatives = parsed.creatives.map((value, index) => parseConcept(value, index + 1, args.hasApprovedHumanSource, args.referenceCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
+}
+
+export async function planCreativeBatch(args: Parameters<typeof requestCreativeBatch>[0]): Promise<CreativeBatchPlan> {
+  let feedback = '';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const plan = await requestCreativeBatch({ ...args, context: args.context + feedback });
+    const portfolioAudit = await auditCreativePortfolio(plan.creatives);
+    const issue = getCreativeDiversityIssue(plan.creatives, portfolioAudit);
+    if (!issue) return { ...plan, portfolioAudit };
+    if (attempt === 1) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${issue}. No images were generated.`);
+    feedback = `\nPORTFOLIO REPAIR: ${issue}\nPreserve strong ideas; replace repeated hypotheses with genuinely different grounded propositions. Do not relabel or paraphrase duplicates.\n${JSON.stringify(portfolioAudit)}`;
+  }
+  throw new Error('Portfolio planning did not complete.');
 }

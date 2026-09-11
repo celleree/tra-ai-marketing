@@ -9,6 +9,7 @@ import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-v
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
+import { portfolioAudit } from '../fixtures/portfolio-audit';
 
 const mocks = vi.hoisted(() => ({
   compositeCreativeBrandLogo: vi.fn(),
@@ -326,10 +327,14 @@ it('uses a seeded document and rich concept from the real planner through render
   const plan = { creatives: [
     { ...first, strategy: { ...first.strategy, execution: { ...first.strategy.execution, taxDocumentReference: 'irs-notice-v1' } } },
     plannedCreative(2),
-  ].map(concept => ({ ...concept, strategy: { ...concept.strategy, conceptDetails }, referenceChoices: { angleSource: null, layoutSource: null } })) };
+  ].map(concept => ({ ...concept, strategy: { ...concept.strategy, conceptDetails: { ...conceptDetails, proposition: `Different proposition ${concept.index}` } }, referenceChoices: { angleSource: null, layoutSource: null } })) };
   const requests: Array<{ url: string; body: string | FormData }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     requests.push({ url, body: init.body as string | FormData });
+    if (url.endsWith('/responses') && JSON.parse(String(init.body)).text.format.name === 'tra_portfolio_audit') {
+      const { groups, executionNotes } = portfolioAudit();
+      return Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ groups, executionNotes }) }] }] });
+    }
     return url.endsWith('/responses')
       ? Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(plan) }] }] })
       : Response.json({ data: [{ b64_json: PNG.toString('base64') }] });
@@ -364,7 +369,9 @@ it('uses a seeded document and rich concept from the real planner through render
   const records = mocks.saveCreativeBatch.mock.calls.flatMap(([batch]) => batch);
   const saved = records.find(record => record.planning.strategy.execution.taxDocumentReference === 'irs-notice-v1');
   expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.execution.taxDocumentReference).toBe('irs-notice-v1');
-  expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.conceptDetails).toEqual(conceptDetails);
+  expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.conceptDetails).toEqual(plan.creatives[0].strategy.conceptDetails);
+  expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.portfolioAudit).toEqual(portfolioAudit());
+  expect(saved.generationProvenance.imageGeneration.prompt).not.toContain(portfolioAudit().executionNotes);
   expect(saved.generationProvenance.imageGeneration.prompt).toContain(TAX_DOCUMENT_REFERENCES[0].sha256);
 });
 

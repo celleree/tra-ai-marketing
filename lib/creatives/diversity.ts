@@ -1,4 +1,5 @@
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
+import { parsePortfolioAudit, type PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 
 type CreativeCopy = { headline: string };
 
@@ -20,10 +21,15 @@ type CreativeConcept = {
 const positions = (first: number, second: number) => `Variations ${first + 1} and ${second + 1}`;
 
 /**
- * Checks planned variations for deterministic structural differences. This does
- * not establish semantic originality, which remains subject to human review.
+ * Audited portfolios use semantic groups plus exact-duplicate checks. Legacy
+ * callers retain structural checks. Neither path establishes human acceptance.
  */
-export function getCreativeDiversityIssue(concepts: ReadonlyArray<CreativeConcept>): string | null {
+export function getCreativeDiversityIssue(concepts: ReadonlyArray<CreativeConcept>, audit?: PortfolioAudit): string | null {
+  if (audit) {
+    if (!parsePortfolioAudit(audit) || audit.conceptCount !== concepts.length) return 'Portfolio audit does not cover this batch.';
+    const duplicate = audit.groups.find(group => group.conceptIndexes.length > 1);
+    if (duplicate) return `Concepts ${duplicate.conceptIndexes.join(', ')} repeat a strategic proposition: ${duplicate.proposition}`;
+  }
   for (let first = 0; first < concepts.length; first += 1) {
     for (let second = first + 1; second < concepts.length; second += 1) {
       const left = concepts[first];
@@ -37,6 +43,13 @@ export function getCreativeDiversityIssue(concepts: ReadonlyArray<CreativeConcep
         return `${pair} have duplicate SO WHAT surface messages.`;
       }
 
+      if (audit) {
+        if (left.strategy.conceptDetails && right.strategy.conceptDetails
+          && normalizeMessage(left.strategy.conceptDetails.proposition) === normalizeMessage(right.strategy.conceptDetails.proposition)) {
+          return `${pair} have duplicate propositions.`;
+        }
+        continue; // Audited strategic distinctions need not change category or execution enums.
+      }
       const hasStrategicDifference = left.strategy.category !== right.strategy.category
         || left.strategy.awarenessStage !== right.strategy.awarenessStage;
       if (!hasStrategicDifference) {
