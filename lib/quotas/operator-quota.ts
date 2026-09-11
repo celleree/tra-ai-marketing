@@ -4,6 +4,7 @@ import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/li
 const VERSION = 1, WINDOW_MS = 60 * 60 * 1_000, MAX_RECORD_BYTES = 4 * 1024, CAS_ATTEMPTS = 4;
 export const OPERATOR_QUOTA_POLICY = {
   WEBSITE_ANALYSIS: 12, FONT_ANALYSIS: 12, CREATIVE_GENERATION: 60, CREATIVE_REVISION: 24,
+  CREATIVE_PLANNING: 60, // Planned concepts/hour; resumable renders separately consume CREATIVE_GENERATION units.
   REFERENCE_CLASSIFICATION: 100, // One full supported reference batch per operator/hour.
   VIDEO_SELECTION: 24, VIDEO_PROVIDER_WORK: 120, VIDEO_FRAME_PREVIEW: 30, VIDEO_PREPARATION: 12,
 } as const;

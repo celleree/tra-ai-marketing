@@ -11,7 +11,7 @@ const reserve = (units: number, now = 0, storage?: VideoIntelligenceStorage) =>
 
 describe('operator quota', () => {
   it('uses the approved hourly technical limits', () => {
-    expect(OPERATOR_QUOTA_POLICY).toEqual({ WEBSITE_ANALYSIS: 12, FONT_ANALYSIS: 12, CREATIVE_GENERATION: 60,
+    expect(OPERATOR_QUOTA_POLICY).toEqual({ WEBSITE_ANALYSIS: 12, FONT_ANALYSIS: 12, CREATIVE_GENERATION: 60, CREATIVE_PLANNING: 60,
       CREATIVE_REVISION: 24, REFERENCE_CLASSIFICATION: 100, VIDEO_SELECTION: 24, VIDEO_PROVIDER_WORK: 120, VIDEO_FRAME_PREVIEW: 30, VIDEO_PREPARATION: 12 });
   });
 
