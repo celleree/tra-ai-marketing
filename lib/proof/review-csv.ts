@@ -106,7 +106,7 @@ export function parseReviewCsv(input: string): ReviewCsvRow[] {
   if (!headerRecord) throw new Error('CSV must include a header row.');
 
   const headers = headerRecord.cells.map((header, index) =>
-    (index === 0 ? header.replace(/^\uFEFF/, '') : header).trim()
+    index === 0 ? header.replace(/^\uFEFF/, '') : header
   );
   if (headers.some((header) => !HEADERS.has(header))) {
     const unknown = headers.find((header) => !HEADERS.has(header));
@@ -119,12 +119,14 @@ export function parseReviewCsv(input: string): ReviewCsvRow[] {
     rowError(headerRecord.rowNumber, 'required header "originalReviewText" is missing.');
   }
 
-  const dataRecords = records.filter((record) => record.rowNumber > headerRecord.rowNumber);
-  const rows = dataRecords.filter(({ cells }) => cells.some((cell) => cell.length));
-  if (!rows.length) throw new Error('CSV must include at least one nonblank data row.');
-  if (rows.length > 100) throw new Error('CSV may include at most 100 nonblank data rows.');
+  const rows = records.filter((record) => record.rowNumber > headerRecord.rowNumber);
+  if (!rows.length) throw new Error('CSV must include at least one data row.');
+  if (rows.length > 100) throw new Error('CSV may include at most 100 data rows.');
 
   return rows.map(({ cells, rowNumber }) => {
+    if (cells.every((cell) => cell.length === 0)) {
+      rowError(rowNumber, 'blank data rows are not allowed.');
+    }
     if (cells.length !== headers.length) {
       rowError(rowNumber, `expected ${headers.length} columns but found ${cells.length}.`);
     }

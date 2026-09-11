@@ -39,6 +39,23 @@ describe('parseReviewCsv', () => {
     expect(() => parseReviewCsv('originalReviewText\n   ')).toThrow(/originalReviewText must not be blank/);
   });
 
+  it('rejects blank and comma-only data rows without inventing one for a final line terminator', () => {
+    expect(() => parseReviewCsv('originalReviewText\nExact text\n\nnext text')).toThrow(
+      /CSV row 3: blank data rows are not allowed/
+    );
+    expect(() => parseReviewCsv('originalReviewText,source\nExact text,Google\n,')).toThrow(
+      /CSV row 3: blank data rows are not allowed/
+    );
+    expect(parseReviewCsv('originalReviewText\nExact text\n')).toHaveLength(1);
+  });
+
+  it('rejects whitespace-padded headers instead of normalizing them', () => {
+    expect(() => parseReviewCsv(' originalReviewText\nExact text')).toThrow(/unknown header/);
+    expect(() => parseReviewCsv('originalReviewText ,source\nExact text,Google')).toThrow(
+      /unknown header/
+    );
+  });
+
   it('rejects unknown and duplicate headers and enforces row count', () => {
     expect(() => parseReviewCsv('originalReviewText,wat\ntext,x')).toThrow(/unknown header/);
     expect(() => parseReviewCsv('originalReviewText,originalReviewText\ntext,text')).toThrow(/duplicate/);
