@@ -19,6 +19,14 @@ beforeEach(() => {
   mocks.context.mockResolvedValue({ library: { id: 'library', representativeFrames: Array.from({length:10}, (_,i)=>frame(i+1)) } });
 });
 describe('bounded approved-human planning options', () => {
+  it('keeps graphic planning available when the optional catalog cannot be read', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.list.mockRejectedValue(new Error('Catalog corrupt or storage unavailable'));
+    expect(await loadApprovedHumanOptions()).toEqual([]);
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('without library human options'));
+    warning.mockRestore();
+  });
   it('offers at most eight curated options and hydrates each shared source once', async () => {
     mocks.list.mockResolvedValue(Array.from({length:10}, (_,i)=>record(i+1)));
     const result = await loadApprovedHumanOptions();

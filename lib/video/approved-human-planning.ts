@@ -10,7 +10,13 @@ import { loadVideoSelectionContext } from '@/lib/video/selection-context';
 /** Curated notes are planning options, never factual proof or provider pixels. */
 export async function loadApprovedHumanOptions(): Promise<ApprovedHumanOption[]> {
   if (!isDurableVideoIntelligenceAvailable()) return [];
-  const records = (await listApprovedHumanFrames()).filter(record => record.active)
+  let available: Awaited<ReturnType<typeof listApprovedHumanFrames>>;
+  try { available = await listApprovedHumanFrames(); }
+  catch {
+    console.warn('Approved-human catalog unavailable; planning without library human options.');
+    return [];
+  }
+  const records = available.filter(record => record.active)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)).slice(0, 24);
   const sourceContexts = new Map<string, Promise<{ hash: string; context: Awaited<ReturnType<typeof loadVideoSelectionContext>> } | null>>();
   const result: ApprovedHumanOption[] = [];
