@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
-import { claimCreativePortfolio, finishPortfolioPlan, finishPortfolioSlot, retryPortfolioWork, PORTFOLIO_LEASE_MS,
-  type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
+import { claimCreativePortfolio, finishPortfolioInitialPlan, finishPortfolioPlan, finishPortfolioPreparation, finishPortfolioSlot,
+  retryPortfolioWork, PORTFOLIO_LEASE_MS, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { MemoryPortfolioStorage as MemoryStorage, portfolioRequest as request, portfolioSnapshot as snapshot } from '../fixtures/creative-portfolio';
@@ -47,6 +47,28 @@ describe('durable creative portfolio storage', () => {
     const retried = await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null, 3000 + PORTFOLIO_LEASE_MS), storage);
     expect(retried.slots).toEqual(expired.slots);
     expect(retried.planningError).toBeUndefined();
+  });
+  it('accepts provider-valid empty analysis strings in resumable checkpoints', async () => {
+    const storage = new MemoryStorage(), job = await createCreativePortfolio(request(), storage, 1000);
+    await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, 2000, 'quota').job, storage);
+    await updateCreativePortfolio(job.id, current => finishPortfolioPreparation(current, 'quota', { quotaReserved: true }, 2500), storage);
+    await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, 3000, 'plan').job, storage);
+    const planned = snapshot(job);
+    const { portfolioAudit: _audit, ...batchPlan } = planned.batchPlan;
+    const checkpoint = {
+      snapshot: { ...planned, batchPlan },
+      plannerArgs: {
+        count: job.slots.length,
+        context: 'Prepared context',
+        analysis: { summary: '', visibleText: [], visualStructure: '', hookOrAngle: '', offerOrCta: '', styleNotes: '',
+          preserve: [], avoid: [], unknowns: [], dominantCategory: 'customer-problems' as const },
+        hasApprovedHumanSource: false,
+        referenceCatalog: planned.referenceCatalog,
+      },
+    };
+    const saved = await updateCreativePortfolio(job.id, current => finishPortfolioInitialPlan(current, 'plan', checkpoint, 3500), storage);
+    expect(saved.planning.phase).toBe('DIVERSITY_AUDIT');
+    expect(await readCreativePortfolio(job.id, storage)).toEqual(saved);
   });
   it('fails closed on corrupted state, invalid IDs and incomplete saved audits', async () => {
     const storage = new MemoryStorage(), job = await createCreativePortfolio(request(), storage, 1000);
