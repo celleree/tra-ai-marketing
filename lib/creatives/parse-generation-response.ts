@@ -62,7 +62,7 @@ const isMediaAsset = (value: unknown): value is MediaAsset => {
   );
 };
 
-const parseCreative = (value: unknown): GeneratedCreative | null => {
+export const parseCreative = (value: unknown): GeneratedCreative | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const creative = value as Record<string, unknown>;
   const copy = creative.copy;
