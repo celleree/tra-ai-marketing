@@ -81,6 +81,9 @@ describe('Proof Library API', () => {
 
   it('rejects malformed or oversized batches before storage', async () => {
     expect((await route.POST(request('POST', { items: [] }))).status).toBe(400);
+    expect((await route.POST(request('POST', { items: [{
+      type: 'review', originalReviewText: 'Valid',
+    }], status: 'INACTIVE' }))).status).toBe(400);
     expect((await route.POST(request('POST', {
       items: [{ type: 'review', originalReviewText: 'Valid', invented: 'no' }],
     }))).status).toBe(400);
@@ -124,6 +127,13 @@ describe('Proof Library API', () => {
   });
 
   it('returns conflict and not-found responses without exposing storage errors', async () => {
+    expect((await route.PATCH(request('PATCH', {
+      id: review().id,
+      expectedUpdatedAt: review().updatedAt,
+      status: 'ACTIVE',
+      item: { type: 'review', originalReviewText: 'Exact' },
+      updatedAt: '2026-09-10T13:00:00.000Z',
+    }))).status).toBe(400);
     expect((await route.PATCH(request('PATCH', {
       id: review().id,
       expectedUpdatedAt: review().updatedAt,

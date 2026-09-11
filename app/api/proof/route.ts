@@ -22,6 +22,8 @@ const CASE_STUDY_KEYS = [
   'requiredDisclaimer',
   'tags',
 ];
+const CREATE_KEYS = ['items'];
+const UPDATE_KEYS = ['id', 'expectedUpdatedAt', 'status', 'item'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -73,7 +75,13 @@ export async function POST(request: Request) {
   const denied = await requireOperatorAccess();
   if (denied) return denied;
   const body = await requestBody(request);
-  if (!body || !Array.isArray(body.items) || body.items.length < 1 || body.items.length > 100) {
+  if (
+    !body ||
+    !hasOnly(body, CREATE_KEYS) ||
+    !Array.isArray(body.items) ||
+    body.items.length < 1 ||
+    body.items.length > 100
+  ) {
     return NextResponse.json({ error: 'Add between 1 and 100 proof records.' }, { status: 400 });
   }
   const drafts = body.items.map(parseDraft);
@@ -106,6 +114,8 @@ export async function PATCH(request: Request) {
   const status = body?.status;
   const draft = parseDraft(body?.item);
   if (
+    !body ||
+    !hasOnly(body, UPDATE_KEYS) ||
     !isProofId(id) ||
     !isIsoDate(expectedUpdatedAt) ||
     (status !== 'ACTIVE' && status !== 'INACTIVE') ||
