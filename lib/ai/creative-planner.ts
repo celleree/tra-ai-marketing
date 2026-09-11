@@ -14,24 +14,31 @@ import {
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const MAX_TEXT_LENGTH = 1000;
+// Compact per-concept allowance: ~1,024 tokens for the 3 copy fields, 20 strategy/
+// concept text fields, selection rationale, enums/IDs and JSON; 512 for reasoning
+// and detail variance. Retain 4,096 batch reasoning tokens (Responses counts both).
+const planningOutputTokens = (count: number) => 4096 + 1536 * count;
 
 const PLANNER_RULES = `
 Plan a batch of original static Meta ad concepts for Tax Relief Advocates (TRA).
 ${TAX_DOCUMENT_PLANNING_GUIDANCE}
-Consider multiple alternatives internally, then return the strongest concepts first. Select strategically distinct fits to the supplied approved TRA context; do not make performance predictions or call concepts likely winners.
+Consider alternatives internally; return the strongest concepts first. Select distinct fits to approved TRA context, without performance predictions or calling concepts likely winners.
 The SO WHAT outcome chain must directly shape both the copy and visualDirection for every concept.
-Plan proposition first: conceptDetails.angle describes the strategic framing; proposition states the particular reason to care or act, not a category label. Connect mainMessage and any objection addressed (null if none) to the existing painPoint, emotion, awareness and SO WHAT outcome chain.
-Make visualArchetype, visualMechanism, subject, environment and compositionInstructions explicit and consistent with execution and visualDirection. Describe the mechanism that makes the proposition visible, exact planned subjects/props and their spatial hierarchy. For graphic concepts, describe the graphic field as the environment. These are rendering directions, not additional copy or factual evidence.
-Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Use tax paperwork only when it materially helps the concept; do not default to desks, paper or next-step messaging.
-Plan the portfolio globally around distinct reasons to care or act: vary problem/outcome framing, objections, emotions, awareness and propositions. Strong ideas may share a category or layout. Compare mechanisms, subjects, archetypes and CTA approaches separately; headline swaps, recolors, person swaps or minor rearrangements do not create a new marketing idea.
+Plan proposition first: angle is strategic framing; proposition is the particular reason to care or act, not a category. Connect mainMessage and objection (null if none) to painPoint, emotion, awareness and SO WHAT.
+Make visualArchetype, visualMechanism, subject and environment explicit and consistent with execution. Specify the mechanism making the proposition visible and exact subjects/props; a graphic field is an environment. These directions never add copy or evidence.
+Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Avoid default desks, paper or next-step messaging.
+Plan globally distinct problem/outcome framings, objections, emotions, awareness and propositions. Strong ideas may share a category or layout. Compare mechanisms, subjects, archetypes and CTAs separately; headline/person swaps, recolors or rearrangements are not new ideas.
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
-The creativeContext may contain both USER CREATIVE DIRECTION and APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
+creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, or other evidence.
-Proof-like, review-like, statistics-like, and comparison formats remain valid when strategically useful, but express them without unsupported numeric or testimonial claims.
-Do not restrict concepts to the analysis category. Ground every factual statement only in explicitly approved company claims/proof fields within creativeContext.
+Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
+Do not restrict concepts to the analysis category.
 Return exactly the requested count with sequential indexes beginning at 1.
-When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). References support the proposition; they do not dictate it. Give user-priority references first consideration, not exclusive use. Same-reference, different-reference, one-original and fully original choices are all valid. Do not force reference use or uniqueness across ads. Explain the choices, including relevant unused user references, in selectionReason. The renderer receives only the selected design-only blueprint; reference angles, people, branding, logos, copy, claims, testimonials, pricing and proof cannot supply output content or factual approval.
+Write compact JSON: short, specific phrases for strategy/concept fields; one causal clause per SO WHAT step. Preserve distinct meanings, not repeated sentences. Put spatial hierarchy in compositionInstructions and remaining actionable treatment, lighting, crop and styling in visualDirection. Do not repeat the company brief, copy, enum labels or rationale there; retain all execution details, claim qualifications and required disclaimers.
+selectionReason briefly explains marginal strategic value and source choices, not the copy or SO WHAT chain again.
+When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). Give user-priority references first consideration, not exclusivity. Matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
+When approvedHumanOptions is supplied, choose a listed approvedHumanId only for material credibility, relatability, explanation or emotional specificity; face availability alone is insufficient. Explain why in selectionReason. That identity replaces other supplied humans; never mix identities. Approval covers visible identity only, never claims, credentials, quotes, testimonials or outcomes. Use null for a non-human concept or an explicitly supplied approved TRA source.
 `;
 
 const getApiKey = () => {
@@ -136,29 +143,28 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
     body: JSON.stringify({
       model,
       reasoning: { effort: 'medium' },
-      // Bound paid reasoning/output while allowing larger supported batches more room.
-      max_output_tokens: Math.min(65536, 4096 + 2048 * args.count),
+      max_output_tokens: planningOutputTokens(args.count),
       store: false,
       input: [
-        { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES + (args.approvedHumanOptions ? '\nChoose approvedHumanId from the supplied options, or null for no library human. Select a person only when they materially strengthen credibility, relatability, explanation or emotional specificity of the proposition; face availability alone is insufficient. Explain why in selectionReason. No fixed human/graphic ratio. A selected library identity replaces any other supplied human source for that concept; never mix identities. Approval covers visible identity only, never claims, credentials, quotes, testimonials or outcomes. Use null with a non-human concept, or when using an explicitly supplied approved TRA source.' : '') }] },
+        { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
+          creativeContext: args.context,
           requestedCount: args.count,
           hasApprovedHumanSource: args.hasApprovedHumanSource,
-          creativeContext: args.context,
           referenceAnalysis: args.analysis,
-          ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog } : {}),
+          // Hashes/analyzer versions stay in the persisted catalog, not Astra's decisions.
+          ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog.map(({ referenceId, priority, angleDescription, blueprint }) =>
+            ({ referenceId, priority, angleDescription, blueprint })) } : {}),
           ...(args.approvedHumanOptions ? { approvedHumanOptions: args.approvedHumanOptions } : {}),
-        }, null, 2) }] },
+        }) }] },
       ],
       text: { format: { type: 'json_schema', name: 'tra_creative_batch_plan', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['creatives'], properties: {
-          creatives: { type: 'array', minItems: args.count, maxItems: args.count, items: {
+          // Keep invariant schema content before request-specific counts/ID enums.
+          creatives: { type: 'array', items: {
             type: 'object', additionalProperties: false,
             required: ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['approvedHumanId'] : [])],
             properties: {
-              ...(args.approvedHumanOptions ? { approvedHumanId: { type: ['string', 'null'], enum: [null, ...args.approvedHumanOptions.map(option => option.id)] } } : {}),
-              ...(args.referenceCatalog ? { referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) } : {}),
-              index: { type: 'integer', minimum: 1, maximum: args.count },
               format: { type: 'string', enum: CREATIVE_FORMATS },
               copy: { type: 'object', additionalProperties: false, required: ['primaryText', 'headline', 'description'], properties: {
                 primaryText: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
@@ -167,8 +173,11 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
               } },
               strategy: CREATIVE_STRATEGY_JSON_SCHEMA,
               selectionReason: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
+              index: { type: 'integer', minimum: 1, maximum: args.count },
+              ...(args.approvedHumanOptions ? { approvedHumanId: { type: ['string', 'null'], enum: [null, ...args.approvedHumanOptions.map(option => option.id)] } } : {}),
+              ...(args.referenceCatalog ? { referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) } : {}),
             },
-          } },
+          }, minItems: args.count, maxItems: args.count },
         },
       } } },
     }),

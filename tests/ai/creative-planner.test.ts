@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { planCreativeBatch } from '@/lib/ai/creative-planner';
+import { planCreativeBatch, requestCreativeBatch } from '@/lib/ai/creative-planner';
+import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
+import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
+import { buildCreativeRenderBrief } from '@/lib/creatives/render-brief';
+import { portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { CREATIVE_STRATEGY_JSON_SCHEMA } from '@/lib/creatives/strategy';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 import { referenceCandidate } from '../fixtures/reference-catalog';
@@ -18,7 +22,7 @@ const strategy = (subjectSource: 'non-human' | 'approved-tra-human' = 'non-human
   painPoint: 'Unclear next steps', desiredOutcome: 'A clear path forward', emotion: 'Relief',
   hook: 'Turn uncertainty into a next step', cta: 'Talk with TRA', offer: null,
   soWhat: { surfaceMessage: 'Understand the notice', functionalConsequence: 'Know the next step', meaningfulOutcome: 'Move forward with confidence' },
-  execution: { subjectSource, composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' },
+  execution: { taxDocumentReference: 'none', subjectSource, composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' },
   visualDirection: 'An organized notice leading toward one clear next step',
 });
 const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human' = 'non-human') => ({
@@ -33,6 +37,74 @@ const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); });
 
 describe('creative batch planner', () => {
+  it('keeps the developer prefix stable and sends compact decision inputs without mutating provenance', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives: [concept(1), concept(2)] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: 'Approved company context', analysis, hasApprovedHumanSource: false };
+    await requestCreativeBatch(args);
+    const referenceCatalog = [referenceCandidate('a')];
+    const before = structuredClone(referenceCatalog);
+    const id = `human_${'a'.repeat(64)}`;
+    fetchMock.mockResolvedValueOnce(okResponse({ creatives: [1, 2, 3].map(index => ({ ...concept(index), approvedHumanId: null,
+      referenceChoices: { angleSource: null, layoutSource: null } })) }));
+    await requestCreativeBatch({ ...args, count: 3, referenceCatalog,
+      approvedHumanOptions: [{ id, sourceName: 'TRA', description: 'Approved frame' }] });
+    const [first, second] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(first.input[0]).toEqual(second.input[0]);
+    const inputText = second.input[1].content[0].text;
+    const input = JSON.parse(inputText);
+    expect(inputText).toBe(JSON.stringify(input));
+    expect(input).toMatchObject({ creativeContext: args.context, referenceAnalysis: analysis });
+    expect(input.referenceCatalog).toEqual(before.map(({ referenceId, priority, angleDescription, blueprint }) =>
+      ({ referenceId, priority, angleDescription, blueprint })));
+    expect(referenceCatalog).toEqual(before);
+    expect(inputText.length).toBeLessThan(JSON.stringify({ ...input, referenceCatalog: before }, null, 2).length);
+    const properties = second.text.format.schema.properties.creatives.items.properties;
+    expect(Object.keys(properties).indexOf('strategy')).toBeLessThan(Object.keys(properties).indexOf('approvedHumanId'));
+    expect(properties.referenceChoices.properties.layoutSource.anyOf[0].enum).toEqual([before[0].referenceId]);
+    expect(properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
+    const rules = first.input[0].content[0].text;
+    for (const rule of ['SO WHAT', 'Never invent testimonials', 'Without either, every subjectSource must be non-human',
+      'third-party identity, branding, exact copy, people, claims, or evidence', 'document structure only',
+      'Approval covers visible identity only', 'required disclaimers', 'Strong ideas may share a category or layout',
+      'one causal clause per SO WHAT step', 'retain all execution details']) expect(rules).toContain(rule);
+  });
+
+  it('persists the real initial request result through the PR A checkpoint and retains the complete render/strategy contract', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const referenceCatalog = [referenceCandidate('a')], id = `human_${'a'.repeat(64)}`;
+    const creatives = [1, 2].map(index => ({ ...concept(index, 'approved-tra-human'), approvedHumanId: id,
+      referenceChoices: { angleSource: referenceCatalog[0].referenceId, layoutSource: referenceCatalog[0].referenceId } }));
+    const fetchMock = vi.fn(async () => okResponse({ creatives }));
+    vi.stubGlobal('fetch', fetchMock);
+    const plannerArgs = { count: 2, context: 'Frozen approved company context', analysis, hasApprovedHumanSource: false,
+      referenceCatalog, approvedHumanOptions: [{ id, sourceName: 'TRA', description: 'Approved frame' }] };
+    const batchPlan = await requestCreativeBatch(plannerArgs);
+    const job = newCreativePortfolio(portfolioRequest());
+    job.planning = { phase: 'DIVERSITY_AUDIT', repairAttempted: false,
+      checkpoint: { plannerArgs, snapshot: { ...portfolioSnapshot(job), referenceCatalog, batchPlan } } };
+    const reloaded = parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id);
+    expect(reloaded).toEqual(job);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(auditCreativePortfolio).not.toHaveBeenCalled();
+    expect(batchPlan).toMatchObject({ plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    expect(batchPlan).not.toHaveProperty('portfolioAudit');
+    batchPlan.creatives.forEach((planned, index) => {
+      expect(planned).toMatchObject({ index: index + 1, format: creatives[index].format, copy: creatives[index].copy,
+        selectionReason: creatives[index].selectionReason,
+        strategy: { ...creatives[index].strategy, approvedHumanId: id,
+          referenceSelection: { ...creatives[index].referenceChoices, referenceRelationship: 'matched' } } });
+      const brief = buildCreativeRenderBrief({ concept: planned, referenceCatalog });
+      expect(brief).toMatchObject({ exactCopy: { ...planned.copy, cta: planned.strategy.cta },
+        execution: planned.strategy.execution, visualDirection: planned.strategy.visualDirection,
+        layoutBlueprint: referenceCatalog[0].blueprint, visualConcept: {
+          visualArchetype: conceptDetails.visualArchetype, visualMechanism: conceptDetails.visualMechanism,
+          subject: conceptDetails.subject, environment: conceptDetails.environment,
+          compositionInstructions: conceptDetails.compositionInstructions } });
+    });
+  });
+
   it('selects a known library human independently per concept without a fixed ratio', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const id = `human_${'a'.repeat(64)}`;
@@ -121,7 +193,7 @@ describe('creative batch planner', () => {
     const [url, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
     expect(url).toBe('https://api.openai.com/v1/responses');
-    expect(body).toMatchObject({ model: 'planner-override', reasoning: { effort: 'medium' }, store: false, max_output_tokens: 8192 });
+    expect(body).toMatchObject({ model: 'planner-override', reasoning: { effort: 'medium' }, store: false, max_output_tokens: 7168 });
     expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true });
     expect(body.text.format.schema.properties.creatives).toMatchObject({ minItems: 2, maxItems: 2 });
     expect(body.text.format.schema.properties.creatives.items.properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
@@ -141,7 +213,7 @@ describe('creative batch planner', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it.each([30, 36])('audits the whole %s-ad portfolio with the existing maximum output allowance', async count => {
+  it.each([[2, 7168], [12, 22528], [30, 50176], [36, 59392]])('audits the whole %s-ad portfolio with a compact output allowance of %s', async (count, limit) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn().mockResolvedValue(okResponse({ creatives: Array.from({ length: count }, (_, i) => concept(i + 1)) }));
     vi.stubGlobal('fetch', fetchMock);
@@ -149,7 +221,9 @@ describe('creative batch planner', () => {
     expect(result.creatives).toHaveLength(count);
     expect(result.portfolioAudit?.conceptCount).toBe(count);
     expect(vi.mocked(auditCreativePortfolio).mock.calls.at(-1)?.[0]).toHaveLength(count);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_output_tokens).toBe(65536);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_output_tokens).toBe(limit);
+    expect(limit).toBeLessThan(Math.min(65536, 4096 + 2048 * count));
   });
 
   it.each(['incomplete', 'failed'])('rejects %s responses even with parseable concepts and never retries', async (status) => {
