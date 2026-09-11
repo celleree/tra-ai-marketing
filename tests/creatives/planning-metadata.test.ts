@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { referenceCandidate } from '../fixtures/reference-catalog';
+import { resolveReferenceSelection } from '@/lib/references/planning';
 
 const strategy = () => ({
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Busy taxpayer',
@@ -15,6 +17,15 @@ const planning = () => ({
 });
 
 describe('CreativePlanningMetadata transport contract', () => {
+  it('round-trips independent sources with their catalog while retaining legacy compatibility', () => {
+    const referenceCatalog = [referenceCandidate()];
+    const referenceSelection = resolveReferenceSelection({ angleSource: null, layoutSource: referenceCatalog[0].referenceId }, referenceCatalog);
+    const metadata = { ...planning(), strategy: { ...strategy(), referenceSelection }, referenceCatalog };
+    expect(parseCreativePlanning(JSON.parse(JSON.stringify(metadata)))?.strategy.referenceSelection).toEqual(referenceSelection);
+    expect(parseCreativePlanning({ ...metadata, referenceCatalog: [] })).toBeNull();
+    expect(parseCreativePlanning({ ...metadata, referenceCatalog: undefined })).toBeNull();
+    expect(parseCreativePlanning(planning())?.strategy).not.toHaveProperty('referenceSelection');
+  });
   it('preserves an exact planning shape with trimmed text', () => {
     expect(parseCreativePlanning(planning())).toMatchObject({
       selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium',

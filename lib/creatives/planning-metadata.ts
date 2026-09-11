@@ -2,8 +2,10 @@ import {
   parseCreativeStrategy,
   type CreativeStrategy,
 } from '@/lib/creatives/strategy';
+import { parseReferenceCatalog, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
 
 export type CreativePlanningMetadata = {
+  referenceCatalog?: ReferencePlanningCandidate[];
   strategy: CreativeStrategy;
   selectionReason: string;
   model: string;
@@ -25,7 +27,7 @@ const parseText = (value: unknown, maximumLength: number) => {
 export const parseCreativePlanning = (
   value: unknown
 ): CreativePlanningMetadata | null => {
-  if (!isRecord(value) || !hasOnly(value, ['strategy', 'selectionReason', 'model', 'reasoningEffort'])) {
+  if (!isRecord(value) || !hasOnly(value, ['strategy', 'selectionReason', 'model', 'reasoningEffort', ...('referenceCatalog' in value ? ['referenceCatalog'] : [])])) {
     return null;
   }
 
@@ -37,5 +39,11 @@ export const parseCreativePlanning = (
     return null;
   }
 
-  return { strategy, selectionReason, model, reasoningEffort: 'medium' };
+  const referenceCatalog = 'referenceCatalog' in value ? parseReferenceCatalog(value.referenceCatalog) : undefined;
+  if (referenceCatalog === null) return null;
+  if (strategy.referenceSelection) {
+    if (!referenceCatalog) return null;
+    try { selectedLayout(strategy.referenceSelection, referenceCatalog); } catch { return null; }
+  }
+  return { strategy, selectionReason, model, reasoningEffort: 'medium', ...(referenceCatalog ? { referenceCatalog } : {}) };
 };
