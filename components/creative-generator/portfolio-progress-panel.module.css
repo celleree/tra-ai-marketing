@@ -1,0 +1,4 @@
+.panel { margin-top: 16px; overflow-wrap: anywhere; }
+.panel p { margin: 0 0 12px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.failures { margin-top: 16px; }
