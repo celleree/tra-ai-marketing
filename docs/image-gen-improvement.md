@@ -45,6 +45,8 @@ Enrich the existing cache with angle summaries, mechanisms and missing compositi
 
 ## 3. Strategic diversity
 
+Implementation checkpoint: initial batches now receive a separate Astra semantic audit before any image rendering. Complete grouping coverage is validated in code; repeated groups and exact duplicate copy/propositions trigger at most one planning repair and re-audit, then fail without image generation if unresolved. Distinct audited ideas may share category, awareness or execution labels. Audit/model/coverage and execution-concentration notes persist with saved planning and stay out of Sunburst. Ordinary edits discard stale portfolio assessments; placement/regeneration retains them. Single-parent VARIATION still uses its existing structural check. This is a bounded batch-audit step, not live validation or the later persisted/resumable portfolio system.
+
 **User experience.** The batch presents different reasons to choose TRA. Strong concepts sharing a category remain eligible.
 
 Use a compact hypothesis record: **problem framing → proposition/objection addressed → functional consequence → meaningful outcome**, plus emotion and awareness. Compare execution separately: archetype, mechanism, subject/environment, composition, treatment and CTA approach. A changed CTA shape, actor or headline does not establish a new marketing idea.

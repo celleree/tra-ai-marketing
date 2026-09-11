@@ -3,8 +3,10 @@ import {
   type CreativeStrategy,
 } from '@/lib/creatives/strategy';
 import { parseReferenceCatalog, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
+import { parsePortfolioAudit, type PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 
 export type CreativePlanningMetadata = {
+  portfolioAudit?: PortfolioAudit;
   referenceCatalog?: ReferencePlanningCandidate[];
   strategy: CreativeStrategy;
   selectionReason: string;
@@ -27,7 +29,7 @@ const parseText = (value: unknown, maximumLength: number) => {
 export const parseCreativePlanning = (
   value: unknown
 ): CreativePlanningMetadata | null => {
-  if (!isRecord(value) || !hasOnly(value, ['strategy', 'selectionReason', 'model', 'reasoningEffort', ...('referenceCatalog' in value ? ['referenceCatalog'] : [])])) {
+  if (!isRecord(value) || !hasOnly(value, ['strategy', 'selectionReason', 'model', 'reasoningEffort', ...('referenceCatalog' in value ? ['referenceCatalog'] : []), ...('portfolioAudit' in value ? ['portfolioAudit'] : [])])) {
     return null;
   }
 
@@ -45,5 +47,7 @@ export const parseCreativePlanning = (
     if (!referenceCatalog) return null;
     try { selectedLayout(strategy.referenceSelection, referenceCatalog); } catch { return null; }
   }
-  return { strategy, selectionReason, model, reasoningEffort: 'medium', ...(referenceCatalog ? { referenceCatalog } : {}) };
+  const portfolioAudit = 'portfolioAudit' in value ? parsePortfolioAudit(value.portfolioAudit) : undefined;
+  if (portfolioAudit === null) return null;
+  return { strategy, selectionReason, model, reasoningEffort: 'medium', ...(referenceCatalog ? { referenceCatalog } : {}), ...(portfolioAudit ? { portfolioAudit } : {}) };
 };
