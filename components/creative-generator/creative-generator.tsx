@@ -301,7 +301,7 @@ export function CreativeGenerator() {
               generationComplete={
                 creationMode !== 'generate' || generationComplete
               }
-              generationFailures={generationFailures}
+              generationFailures={creationMode === 'generate' ? generationFailures : {}}
             />
           </div>
         ) : activeSection === 'tra-creatives' ? (
