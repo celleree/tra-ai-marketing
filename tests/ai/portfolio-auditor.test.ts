@@ -12,6 +12,18 @@ const response = (value: unknown) => Response.json({ status: 'completed', output
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('Astra semantic portfolio audit', () => {
+  it('audits all 36 concepts through the real implementation and rejects 37 before a provider call', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'fixture');
+    const fetchMock = vi.fn(async (_url: string, _options: RequestInit) => response(portfolioAudit(36)));
+    vi.stubGlobal('fetch', fetchMock);
+    const batch = Array.from({ length: 36 }, (_, index) => ({ ...concepts[0], index: index + 1 }));
+    expect((await auditCreativePortfolio(batch)).conceptCount).toBe(36);
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(JSON.parse(body.input[1].content[0].text)).toHaveLength(36);
+    expect(body.text.format.schema.properties.groups.maxItems).toBe(36);
+    await expect(auditCreativePortfolio([...batch, concepts[0]])).rejects.toThrow('2–36');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
   it('submits the whole portfolio to a separate bounded audit and preserves duplicate groups', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'fixture'); vi.stubEnv('OPENAI_TEXT_MODEL', 'gpt-6-astra');
     const groups = [{ conceptIndexes: [1, 2], proposition: 'Conversation to next steps', distinction: 'No strategic distinction; different wording' }];

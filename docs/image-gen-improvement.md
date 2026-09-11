@@ -88,8 +88,6 @@ Adapt the existing metadata selector for human retrieval using curated annotatio
 
 ## 5. Plan a portfolio, then render it
 
-Resumable implementation checkpoint: shared preparation/rendering, serializable audited-plan snapshots with source revalidation, and stable slot/lease/retry state are implemented. Durable job storage, bounded execution endpoints and resume UI remain to be wired before scale validation. Existing single-request generation keeps its 30-ad ceiling; the shared planner/audit contract supports 36 with the existing maximum planning output allowance.
-
 1. **Ground and inventory:** approved TRA facts/constraints, user priorities, eligible references and humans, recent selected hypotheses and evidence-backed creative patterns.
 2. **Sketch alternatives:** produce compact hypotheses before full render briefs. Consider both human and graphic executions for promising ideas. Bound exploration by the planning budget; stop adding weak near-duplicates merely to reach a count.
 3. **Select for marginal value:** prioritize relevance, factual support and persuasive strength, then the strategic contribution to the existing portfolio, execution feasibility and visual distinction. Repeat a broad angle only when the new proposition earns its place.
