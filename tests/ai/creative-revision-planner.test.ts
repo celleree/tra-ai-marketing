@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 import { conceptDetails } from '../fixtures/creative-concept-details';
+import { referenceCandidate } from '../fixtures/reference-catalog';
 
 const strategy: CreativeStrategy = {
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Busy taxpayer', painPoint: 'Unclear next steps', desiredOutcome: 'A clear plan', emotion: 'Relief', hook: 'Find a path forward', cta: 'Get a consultation', offer: null,
@@ -23,6 +24,15 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('single-creative revision planning', () => {
+  it('resolves independent revision choices and rejects missing catalog IDs', async () => {
+    const referenceCatalog = [referenceCandidate()];
+    const referenceChoices = { angleSource: referenceCatalog[0].referenceId, layoutSource: null };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(payload({ ...plan(), referenceChoices }))));
+    expect((await planCreativeRevision({ ...args, referenceCatalog })).concept.strategy.referenceSelection)
+      .toEqual({ ...referenceChoices, referenceRelationship: 'mixed' });
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(payload({ ...plan(), referenceChoices }))));
+    await expect(planCreativeRevision({ ...args, referenceCatalog: [] })).rejects.toThrow('Unavailable');
+  });
   it('uses one Astra Medium request and permits an ordinary edit without variation requirements', async () => {
     const result = await planCreativeRevision(args);
     expect(result).toMatchObject({ concept: { ...plan(), index: 1 }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });

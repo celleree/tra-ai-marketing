@@ -2,6 +2,7 @@ import { buildCreativeCompanyContext, type RuntimeCompanyProfileSnapshot } from 
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { CreativeConceptDetails, CreativeStrategy } from '@/lib/creatives/strategy';
+import { selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
 
 /** The renderer executes one plan; company knowledge and batch strategy stay with Astra. */
 export type CreativeRenderBrief = {
@@ -25,10 +26,13 @@ export function buildCreativeRenderBrief(args: {
   brandColors?: readonly string[];
   brandFontNames?: readonly string[];
   layoutBlueprint?: LayoutBlueprint;
+  referenceCatalog?: ReferencePlanningCandidate[];
 }): CreativeRenderBrief {
   const company = buildCreativeCompanyContext(args.companyProfile);
   const { strategy, copy, format } = args.concept;
   const execution = strategy.execution;
+  const layoutBlueprint = strategy.referenceSelection
+    ? selectedLayout(strategy.referenceSelection, args.referenceCatalog ?? []) : args.layoutBlueprint;
   return {
     version: 1, format,
     exactCopy: { headline: copy.headline, primaryText: copy.primaryText, description: copy.description, cta: strategy.cta },
@@ -44,7 +48,7 @@ export function buildCreativeRenderBrief(args: {
       subject: strategy.conceptDetails.subject, environment: strategy.conceptDetails.environment,
       compositionInstructions: strategy.conceptDetails.compositionInstructions,
     } } : {}),
-    ...(args.layoutBlueprint ? { layoutBlueprint: args.layoutBlueprint } : {}),
+    ...(layoutBlueprint ? { layoutBlueprint } : {}),
     brand: {
       colors: args.brandColors?.length ? args.brandColors.join(', ') : company.brandColors,
       typography: args.brandFontNames?.length ? args.brandFontNames.join('\n') : company.fonts,

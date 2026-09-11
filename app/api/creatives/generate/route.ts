@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'crypto';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
+import { buildReferencePlanningCatalog } from '@/lib/references/planning.server';
 import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
@@ -11,6 +12,7 @@ import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
 import {
   analyzeTraSourceCreative,
+  analyzeReferenceCreative,
   generateApprovedTraReferenceCreativeImage,
   type CreativeReferenceAnalysis,
 } from '@/lib/ai/openai';
@@ -130,7 +132,7 @@ const buildLayoutReferenceAnalysis = (
   blueprint: LayoutBlueprint
 ): CreativeReferenceAnalysis => ({
   summary:
-    'External layout reference reduced to a validated design-only LayoutBlueprint. It supplies no creative strategy, copy, claims, brand identity, trademark identity, or person identity.',
+    'External layout reference reduced to a validated design-only LayoutBlueprint. Its separately analyzed angle is optional planning inspiration, never approved copy, claims, brand identity, trademark identity or person identity.',
   visibleText: [],
   visualStructure: formatLayoutBlueprintForPlanning(blueprint),
   hookOrAngle:
@@ -184,7 +186,7 @@ Description: ${args.copy.description}
 ${logoDirection}
 ${formatCreativeSafeZoneRules(args.placement)}
 TRA guardrails:
-- ${document ? 'Use the document exemplar only for the planned paperwork; compose the ad independently.' : 'This request has no reference image. Invent the visual composition from scratch.'}
+- ${document ? 'Use the document exemplar only for the planned paperwork.' : 'This request has no attached reference image.'} Follow the selected blueprint in the one-ad brief when present; otherwise create the planned original layout.
 - Do not depict a person, face, spokesperson, or human figure. No approved TRA human identity is attached to this image-generation call, so use a non-human concept.
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
@@ -402,23 +404,11 @@ export async function POST(request: Request) {
     if (source && generationSourceAsset?.role === 'LAYOUT_REFERENCE') {
       layoutBlueprint = await getOrAnalyzeLayoutBlueprint(source);
       analysis = buildLayoutReferenceAnalysis(layoutBlueprint.blueprint);
+      // Strategy analysis is planner-only; the renderer still receives controlled geometry.
+      analysis.hookOrAngle = (await analyzeReferenceCreative(source, parsed.data.context)).hookOrAngle;
     } else if (source && generationSourceAsset?.role === 'TRA_REFERENCE') {
       analysis = await analyzeTraSourceCreative(source, parsed.data.context);
 
-      const library = await listReferenceLibrary();
-      const requestedReferenceCount = Math.min(
-        parsed.data.variationCount,
-        library.length
-      );
-      if (requestedReferenceCount > 0) {
-        selectedReferences = await selectBestReferenceCreatives({
-          candidates: buildReferenceCandidates(library, request.url),
-          requestedCount: requestedReferenceCount,
-          userContext: parsed.data.context,
-          traSummary: analysis.summary,
-          traPreserve: analysis.preserve,
-        });
-      }
     } else if (videoFrameSet) {
       analysis = await analyzeApprovedTraVideoFrames({
         frames: videoFrameSet.frames,
@@ -428,6 +418,16 @@ export async function POST(request: Request) {
       analysis = buildPromptOnlyAnalysis(parsed.data.context);
     }
 
+    const library = (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
+    const requestedReferenceCount = Math.min(8, parsed.data.variationCount, library.length);
+    if (requestedReferenceCount > 0) selectedReferences = await selectBestReferenceCreatives({
+      candidates: buildReferenceCandidates(library, request.url), requestedCount: requestedReferenceCount,
+      userContext: parsed.data.context, traSummary: analysis.summary, traPreserve: analysis.preserve,
+    });
+    const referenceCatalog = await buildReferencePlanningCatalog({ storage, selections: selectedReferences,
+      ...(source && generationSourceAsset ? { uploaded: { referenceId: generationSourceAsset.media.id, source,
+        angleDescription: analysis.hookOrAngle, ...(layoutBlueprint ? { layout: layoutBlueprint } : {}) } } : {}),
+    });
     const referenceDirections = selectedReferences.length
       ? selectedReferences
           .map((selection) =>
@@ -438,10 +438,10 @@ export async function POST(request: Request) {
     const modeDirection = source
       ? generationSourceAsset?.role === 'TRA_REFERENCE'
         ? 'TRA ad mode: the validated uploaded TRA reference may be attached to final generation. Any selected library references are optional analysis-only design guidance for planning. They do not dictate a creative category, do not need to be used by every output, and their raw pixels are never attached to final generation.'
-        : 'Layout-reference mode: the uploaded external image has already been reduced to a validated structured LayoutBlueprint. Use only that design mechanism plus approved TRA context. Its raw pixels and any person identity in it must never reach final image generation.'
+        : 'Layout-reference mode: consider the uploaded reference angle and cached blueprint independently as priority options in the catalog. Either choice may be original. Its raw pixels and any person identity in it must never reach final image generation.'
       : videoFrameSet
         ? `Video-source mode: the raw TRA video ${videoFrameSet.source.media.id} remains server-side and is never attached to the image provider. A bounded set of server-extracted approved still frames is available as TRA human/content source pixels. Do not treat old video framing, captions, or graphics as a required static-ad layout.`
-        : 'No-image mode: create original TRA ads from the user direction.';
+        : 'No-image mode: create TRA ads from the user direction, using catalog references only when they support the proposition.';
 
     const approvedHumanSource =
       providerImageSource || videoFrameSet?.source || null;
@@ -482,6 +482,7 @@ export async function POST(request: Request) {
       context: generationContext,
       analysis,
       hasApprovedHumanSource: hasUsableApprovedHumanSource,
+      referenceCatalog,
     });
     const creativePlan = batchPlan.creatives;
     const diversityIssue = getCreativeDiversityIssue(creativePlan);
@@ -525,11 +526,11 @@ export async function POST(request: Request) {
             strategy: item.strategy,
           });
           const copy = item.copy;
-          const selectedReference = selectedReferences[item.index - 1];
+          const selectedReference = selectedReferences.find(reference => reference.item.id === item.strategy.referenceSelection?.layoutSource);
           const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
             concept: item, companyProfile: parsed.data.companyProfile,
             brandColors: parsed.data.brandColors, brandFontNames: parsed.data.brandFontNames,
-            ...(layoutBlueprint ? { layoutBlueprint: layoutBlueprint.blueprint } : {}),
+            referenceCatalog,
           }));
           let imageResult: ImageGenerationResult;
           let providerFrames: ApprovedTraVideoFrame[] | undefined;
@@ -564,7 +565,7 @@ export async function POST(request: Request) {
               context: itemContext,
               copy,
               reserveLogoArea,
-              operationType: layoutBlueprint ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
+              operationType: item.strategy.referenceSelection?.layoutSource ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
             });
           }
 
@@ -579,9 +580,7 @@ export async function POST(request: Request) {
           );
           const image = await storage.saveImage(generatedFile);
           const uploadedReferenceImageId =
-            generationSourceAsset?.role === 'LAYOUT_REFERENCE'
-              ? generationSourceAsset.media.id
-              : undefined;
+            item.strategy.referenceSelection?.layoutSource ?? undefined;
           const attachedSource: CreativeGenerationProvenance['attachedSource'] =
             providerImageSource
               ? {
@@ -631,6 +630,8 @@ export async function POST(request: Request) {
               selectionReason: item.selectionReason,
               model: batchPlan.plannerModel,
               reasoningEffort: batchPlan.reasoningEffort,
+              referenceCatalog: referenceCatalog.filter(reference =>
+                [item.strategy.referenceSelection?.angleSource, item.strategy.referenceSelection?.layoutSource].includes(reference.referenceId)),
             },
             ...(generatedVideoFrameSelection
               ? { videoFrameSelection: generatedVideoFrameSelection }

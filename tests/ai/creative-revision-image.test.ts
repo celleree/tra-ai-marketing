@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateCreativeRevisionImage } from '@/lib/ai/creative-revision-image';
 import type { EligibleProviderImageSource } from '@/lib/media/source-hydration';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
+import { referenceCandidate } from '../fixtures/reference-catalog';
+import { resolveReferenceSelection } from '@/lib/references/planning';
 
 type Args = Parameters<typeof generateCreativeRevisionImage>[0];
 const fetchMock = vi.fn();
@@ -21,6 +23,19 @@ beforeEach(() => { vi.stubEnv('OPENAI_API_KEY', 'fixture-only'); vi.stubGlobal('
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('revision image provider', () => {
+  it.each(['EDIT', 'PLACEMENT', 'REGENERATE', 'VARIATION'] as const)('uses the saved selected blueprint for %s without attaching reference pixels', async operation => {
+    const input = args();
+    input.operation = operation;
+    input.referenceCatalog = [referenceCandidate('a'), referenceCandidate('b')];
+    input.referenceCatalog[1].blueprint.ctaTreatment = 'OUTLINE';
+    input.concept.strategy.referenceSelection = resolveReferenceSelection({ angleSource: input.referenceCatalog[0].referenceId,
+      layoutSource: input.referenceCatalog[1].referenceId }, input.referenceCatalog);
+    const result = await generateCreativeRevisionImage(input);
+    expect(result.prompt).toContain('"ctaTreatment": "OUTLINE"');
+    expect(result.prompt).not.toContain('"ctaTreatment": "PILL"');
+    expect(result.prompt).not.toContain(input.referenceCatalog[0].angleDescription);
+    expect(files().map(file => file.name)).toEqual(['editing-canvas-canvas.png']);
+  });
   it.each(['none', 'irs-mail-v1'] as const)('keeps the editing canvas first with document selection %s', async taxDocumentReference => {
     const input = args();
     input.concept.strategy.execution.taxDocumentReference = taxDocumentReference;

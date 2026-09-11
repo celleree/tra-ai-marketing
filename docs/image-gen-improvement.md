@@ -19,6 +19,8 @@ Video code permits configured Production, despite older documentation describing
 
 ## 2. Independent angle and layout
 
+Implementation checkpoint: versioned proposition/visual fields and independent angle/layout IDs are implemented. Initial planning now receives user-priority uploads plus a bounded library shortlist, with existing cached blueprints. Source relationships are derived by code; selected source/blueprint snapshots persist for revisions. Only the chosen blueprint reaches the renderer; external layout pixels remain excluded. Angle descriptions use current analysis/category metadata and are not a new persistent semantic-analysis cache. Semantic portfolio auditing is the next checkpoint; live visual acceptance is still unmeasured.
+
 **User experience.** Concept cards explain the idea and show separate angle/layout sources. Relevant uploaded references materially influence the portfolio without controlling every ad. Original choices remain available.
 
 **Contract.** Extend existing strategy/SO WHAT fields rather than duplicate them. Add explicit `angle`, `proposition`, `objection`, `mainMessage`, `visualArchetype`, `visualMechanism`, `subject`, `environment` and detailed composition instructions. Retain existing hook, emotion, outcome, awareness, treatment, density and CTA fields. A category is a broad label; a proposition is the particular reason to care or act.
