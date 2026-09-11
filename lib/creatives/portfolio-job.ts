@@ -90,9 +90,10 @@ export function finishPortfolioAuditForRepair(
   if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'DIVERSITY_AUDIT'
     || current.planning.repairAttempted || current.planning.checkpoint.snapshot.batchPlan.portfolioAudit
     || audit.conceptCount !== current.slots.length) throw new Error('Portfolio audit does not match the current initial plan.');
+  const checkpoint = structuredClone(current.planning.checkpoint);
   const job = structuredClone(current);
-  job.planning = { phase: 'TARGETED_REPAIR', checkpoint: { ...job.planning.checkpoint,
-    snapshot: { ...job.planning.checkpoint.snapshot, batchPlan: { ...job.planning.checkpoint.snapshot.batchPlan, portfolioAudit: structuredClone(audit) } } } };
+  job.planning = { phase: 'TARGETED_REPAIR', checkpoint: { ...checkpoint,
+    snapshot: { ...checkpoint.snapshot, batchPlan: { ...checkpoint.snapshot.batchPlan, portfolioAudit: structuredClone(audit) } } } };
   job.lease = null; job.updatedAtMs = now;
   return job;
 }
@@ -107,7 +108,8 @@ export function finishPortfolioRepair(
     || batchPlan.creatives.some((concept, index) => concept.index !== current.slots[index].index)) {
     throw new Error('Portfolio repair does not match the current audited plan.');
   }
-  const job = structuredClone(current), checkpoint = job.planning.checkpoint;
+  const checkpoint = structuredClone(current.planning.checkpoint);
+  const job = structuredClone(current);
   job.planning = { phase: 'DIVERSITY_AUDIT', checkpoint: { ...checkpoint,
     snapshot: { ...checkpoint.snapshot, batchPlan: structuredClone(batchPlan) } }, repairAttempted: true };
   job.lease = null; job.updatedAtMs = now;
@@ -121,8 +123,10 @@ export function finishPortfolioAuditFailure(
   if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'DIVERSITY_AUDIT'
     || !current.planning.repairAttempted || current.planning.checkpoint.snapshot.batchPlan.portfolioAudit
     || audit.conceptCount !== current.slots.length) throw new Error('Portfolio audit failure does not match the repaired plan.');
+  const checkpoint = structuredClone(current.planning.checkpoint);
+  checkpoint.snapshot.batchPlan.portfolioAudit = structuredClone(audit);
   const job = structuredClone(current);
-  job.planning.checkpoint.snapshot.batchPlan.portfolioAudit = structuredClone(audit);
+  job.planning = { phase: 'DIVERSITY_AUDIT', checkpoint, repairAttempted: true };
   job.planningError = message.slice(0, 1000) || 'Creative planning did not pass the diversity audit.';
   job.lease = null; job.updatedAtMs = now;
   return job;
