@@ -15,7 +15,8 @@ export type ApprovedHumanFrame = {
 };
 export const isApprovedHumanId = (value: unknown): value is string => typeof value === 'string' && /^human_[a-f0-9]{64}$/.test(value);
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
-const date = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value));
+const date = (value: unknown): value is string => typeof value === 'string'
+  && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 
 export function parseApprovedHumanFrame(value: unknown): ApprovedHumanFrame | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
