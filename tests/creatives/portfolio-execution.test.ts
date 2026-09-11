@@ -7,8 +7,8 @@ import type { CreativeRecord } from '@/lib/creatives/generated';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 
-const mocks = vi.hoisted(() => ({ prepare: vi.fn(), plan: vi.fn(), audit: vi.fn(), restore: vi.fn(), render: vi.fn(), list: vi.fn() }));
-vi.mock('@/lib/creatives/prepare-generation', () => ({ prepareCreativeGeneration: mocks.prepare }));
+const mocks = vi.hoisted(() => ({ prepareStep: vi.fn(), plan: vi.fn(), audit: vi.fn(), restore: vi.fn(), render: vi.fn(), list: vi.fn() }));
+vi.mock('@/lib/creatives/portfolio-preparation', () => ({ advancePortfolioPreparation: mocks.prepareStep }));
 vi.mock('@/lib/ai/creative-planner', () => ({
   requestCreativeBatch: mocks.plan,
   creativeRepairFeedback: (issue: string, audit: unknown) => `\nrepair:${issue}\n${JSON.stringify(audit)}`,
@@ -29,16 +29,17 @@ const unAuditedPlan = (request: ReturnType<typeof portfolioRequest>) => {
 const repeatedAudit = () => ({ ...portfolioAudit(2), groups: [{ conceptIndexes: [1, 2], proposition: 'Same reason to act', distinction: 'Paraphrases' }] });
 
 beforeEach(() => {
-  records = []; mocks.prepare.mockReset(); mocks.plan.mockReset(); mocks.audit.mockReset(); mocks.restore.mockReset(); mocks.render.mockReset();
+  records = []; mocks.prepareStep.mockReset(); mocks.plan.mockReset(); mocks.audit.mockReset(); mocks.restore.mockReset(); mocks.render.mockReset();
   mocks.list.mockReset().mockImplementation(async () => records);
   mocks.plan.mockImplementation(async args => unAuditedPlan(portfolioRequest(args.count)));
   mocks.audit.mockImplementation(async concepts => portfolioAudit(concepts.length));
-  mocks.prepare.mockImplementation(async request => {
+  mocks.prepareStep.mockImplementation(async (request, _url, _state, onProviderStart) => {
+    onProviderStart();
     const plannerArgs = { count: request.variationCount, context: 'Prepared planning context', analysis,
       hasApprovedHumanSource: false, referenceCatalog: [] };
     const batchPlan = await mocks.plan(plannerArgs);
-    return { request, batchPlan, plannerArgs, referenceCatalog: [], selectedReferences: [], requestedSources: [], analysisSources: [],
-      videoFrameSet: null, providerImageSource: null, brandLogo: null, reserveLogoArea: false };
+    return { prepared: { request, batchPlan, plannerArgs, referenceCatalog: [], selectedReferences: [], requestedSources: [], analysisSources: [],
+      videoFrameSet: null, providerImageSource: null, brandLogo: null, reserveLogoArea: false } };
   });
   mocks.restore.mockImplementation(async snapshot => snapshot);
   mocks.render.mockImplementation(async (concept, context, options) => {
@@ -56,6 +57,9 @@ describe('bounded resumable portfolio execution', () => {
   it('persists planning before completing 36 single-image steps without double-charging quotas', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(36), storage);
     let result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.job.planning).toMatchObject({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: true } });
+    expect(mocks.prepareStep).not.toHaveBeenCalled();
+    result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning.phase).toBe('DIVERSITY_AUDIT');
     expect(result.job.snapshot).toBeNull();
     expect(mocks.render).not.toHaveBeenCalled();
@@ -68,7 +72,7 @@ describe('bounded resumable portfolio execution', () => {
       expect(result.job.slots.filter(slot => slot.status === 'SAVED')).toHaveLength(index);
     }
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
-    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(mocks.prepareStep).toHaveBeenCalledOnce();
     expect(mocks.plan).toHaveBeenCalledOnce();
     expect(mocks.audit).toHaveBeenCalledOnce();
     expect(mocks.render).toHaveBeenCalledTimes(36);
@@ -79,10 +83,29 @@ describe('bounded resumable portfolio execution', () => {
       expect.objectContaining({ group: 'CREATIVE_GENERATION', usedUnits: 36 }),
     ]));
   });
+
+  it('checkpoints pre-plan provider work before starting the next operation', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    mocks.prepareStep.mockImplementationOnce(async (_request, _url, state, onProviderStart) => {
+      onProviderStart();
+      return { state: { ...state, analysis } };
+    });
+    const checkpointed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(checkpointed.job.planning).toMatchObject({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis } });
+    expect(mocks.plan).not.toHaveBeenCalled();
+    const planned = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(planned.job.planning.phase).toBe('DIVERSITY_AUDIT');
+    expect(mocks.prepareStep).toHaveBeenCalledTimes(2);
+    expect(mocks.plan).toHaveBeenCalledOnce();
+  });
+
   it('saves audit and repair boundaries and performs only the next provider operation on resume', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
     mocks.audit.mockResolvedValueOnce(repeatedAudit()).mockResolvedValueOnce(portfolioAudit(2));
     let result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.job.planning.phase).toBe('INITIAL_PLAN');
+    result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning.phase).toBe('DIVERSITY_AUDIT');
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning.phase).toBe('TARGETED_REPAIR');
@@ -90,14 +113,16 @@ describe('bounded resumable portfolio execution', () => {
     expect(result.job.planning).toMatchObject({ phase: 'DIVERSITY_AUDIT', repairAttempted: true });
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning.phase).toBe('READY_TO_RENDER');
-    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(mocks.prepareStep).toHaveBeenCalledOnce();
     expect(mocks.plan).toHaveBeenCalledTimes(2);
     expect(mocks.audit).toHaveBeenCalledTimes(2);
     const planningQuota = [...storage.data.entries()].filter(([key]) => key.includes('/CREATIVE_PLANNING.json')).map(([, value]) => JSON.parse(value.bytes.toString()));
     expect(planningQuota).toEqual([expect.objectContaining({ usedUnits: 2 })]);
   });
+
   it('retries an interrupted audit explicitly without repeating the completed initial plan', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     mocks.audit.mockRejectedValueOnce(new Error('Audit connection lost'));
     const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
@@ -105,22 +130,27 @@ describe('bounded resumable portfolio execution', () => {
     await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
     const retried = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(retried.job.planning.phase).toBe('READY_TO_RENDER');
-    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(mocks.prepareStep).toHaveBeenCalledOnce();
     expect(mocks.plan).toHaveBeenCalledOnce();
     expect(mocks.audit).toHaveBeenCalledTimes(2);
   });
+
   it('serializes concurrent advances and pauses known quota denials before provider work', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(36), storage);
     await Promise.all([1, 2].map(() => advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage)));
-    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(mocks.prepareStep).not.toHaveBeenCalled();
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(mocks.prepareStep).toHaveBeenCalledOnce();
     const second = await createCreativePortfolio(portfolioRequest(36), storage);
     const denied = await advanceCreativePortfolio(second.id, 'operator', 'http://localhost', storage);
     expect(denied).toMatchObject({ status: 429, job: { snapshot: null, lease: null } });
     expect(denied.retryAfterSeconds).toBeGreaterThan(0);
-    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(mocks.prepareStep).toHaveBeenCalledOnce();
   });
+
   it('requires explicit retry for a failed slot, preserves its ID, and never replans', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     mocks.render.mockRejectedValueOnce(new Error('Provider failed'));
@@ -134,10 +164,12 @@ describe('bounded resumable portfolio execution', () => {
     const retried = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(retried.job.slots.every(slot => slot.status === 'SAVED')).toBe(true);
     expect(mocks.render.mock.calls[2][2].creativeId).toBe(job.slots[0].creativeId);
-    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(mocks.prepareStep).toHaveBeenCalledOnce();
   });
+
   it('recovers a saved image after a lost progress write before spending on another attempt', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     const write = storage.write.bind(storage); let dropped = false;
@@ -153,6 +185,7 @@ describe('bounded resumable portfolio execution', () => {
     expect(mocks.render).toHaveBeenCalledTimes(2);
     expect(records.map(record => record.id)).toEqual(job.slots.map(slot => slot.creativeId));
   });
+
   it('releases quota infrastructure failures without starting provider work', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
     const write = storage.write.bind(storage);
@@ -162,6 +195,6 @@ describe('bounded resumable portfolio execution', () => {
     };
     expect(await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage)).toMatchObject({ status: 503 });
     expect((await readCreativePortfolio(job.id, storage))?.lease).toBeNull();
-    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.prepareStep).not.toHaveBeenCalled();
   });
 });
