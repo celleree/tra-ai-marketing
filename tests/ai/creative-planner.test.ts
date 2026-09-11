@@ -33,6 +33,40 @@ const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); });
 
 describe('creative batch planner', () => {
+  it('selects a known library human independently per concept without a fixed ratio', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const id = `human_${'a'.repeat(64)}`;
+    const approvedHumanOptions = [{ id, sourceName: 'TRA video', description: 'Approved presenter with room for copy' }];
+    let creatives = [{ ...concept(1, 'approved-tra-human'), approvedHumanId: id }, { ...concept(2), approvedHumanId: null }];
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: '', analysis, hasApprovedHumanSource: false, approvedHumanOptions };
+    const result = await planCreativeBatch(args);
+    expect(result.creatives[0].strategy.approvedHumanId).toBe(id);
+    expect(result.creatives[1].strategy).not.toHaveProperty('approvedHumanId');
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(JSON.parse(body.input[1].content[0].text).approvedHumanOptions).toEqual(approvedHumanOptions);
+    expect(body.text.format.schema.properties.creatives.items.properties.approvedHumanId.enum).toEqual([null, id]);
+    expect(body.input[0].content[0].text).toContain('face availability alone is insufficient');
+    creatives = [{ ...concept(1, 'approved-tra-human'), approvedHumanId: null }, { ...concept(2), approvedHumanId: null }];
+    await expect(planCreativeBatch(args)).rejects.toThrow('invalid');
+    creatives[0].approvedHumanId = `human_${'b'.repeat(64)}`;
+    await expect(planCreativeBatch(args)).rejects.toThrow('invalid');
+    creatives = [{ ...concept(1), approvedHumanId: id }, { ...concept(2), approvedHumanId: null }];
+    await expect(planCreativeBatch(args)).rejects.toThrow('invalid');
+  });
+  it('bounds human options and keeps explicit supplied-source planning compatible', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn(async () => okResponse({ creatives: [
+      { ...concept(1, 'approved-tra-human'), approvedHumanId: null }, { ...concept(2), approvedHumanId: null },
+    ] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: '', analysis, hasApprovedHumanSource: true, approvedHumanOptions: [] };
+    expect((await planCreativeBatch(args)).creatives[0].strategy).not.toHaveProperty('approvedHumanId');
+    const option = { id: `human_${'a'.repeat(64)}`, sourceName: 'TRA video', description: 'Presenter' };
+    await expect(planCreativeBatch({ ...args, approvedHumanOptions: Array(9).fill(option) })).rejects.toThrow('bounded');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it('repairs a repeated semantic group once before returning the audited portfolio', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const repeated = { ...portfolioAudit(), groups: [{ conceptIndexes: [1, 2], proposition: 'Conversation leads to next steps', distinction: 'Paraphrases of the same idea' }] };

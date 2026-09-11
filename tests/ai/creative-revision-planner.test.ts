@@ -24,6 +24,17 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('single-creative revision planning', () => {
+  it('preserves a curated identity for human revisions and drops the choice for a graphic edit', async () => {
+    const approvedHumanId = `human_${'a'.repeat(64)}`;
+    const humanStrategy = { ...strategy, approvedHumanId, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' as const } };
+    const humanArgs = { ...args, parent: { ...parent, strategy: humanStrategy }, hasApprovedHumanSource: true };
+    const humanOutput = { ...plan(), strategy: { ...strategy, conceptDetails, execution: humanStrategy.execution } };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload(humanOutput))));
+    expect((await planCreativeRevision(humanArgs)).concept.strategy.approvedHumanId).toBe(approvedHumanId);
+    expect((await planCreativeRevision(humanArgs)).concept.strategy).not.toHaveProperty('approvedHumanId');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload({ ...humanOutput, strategy: { ...humanOutput.strategy, approvedHumanId } }))));
+    await expect(planCreativeRevision(humanArgs)).rejects.toThrow('cannot replace');
+  });
   it('resolves independent revision choices and rejects missing catalog IDs', async () => {
     const referenceCatalog = [referenceCandidate()];
     const referenceChoices = { angleSource: referenceCatalog[0].referenceId, layoutSource: null };

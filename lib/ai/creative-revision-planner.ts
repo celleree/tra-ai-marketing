@@ -96,6 +96,10 @@ export async function planCreativeRevision(args: {
   }
   const strategy = parseCreativeStrategy(value.strategy, args.hasApprovedHumanSource);
   if (!strategy?.conceptDetails) throw new Error('OpenAI returned an invalid revision strategy or human source.');
+  if (strategy.approvedHumanId) throw new Error('The revision planner cannot replace the approved human identity.');
+  if (args.parent.strategy.approvedHumanId && strategy.execution.subjectSource === 'approved-tra-human') {
+    strategy.approvedHumanId = args.parent.strategy.approvedHumanId;
+  }
   if (args.referenceCatalog) strategy.referenceSelection = resolveReferenceSelection(value.referenceChoices, args.referenceCatalog);
   const concept: PlannedCreativeConcept = {
     index: 1, format: value.format, strategy, selectionReason: value.selectionReason.trim(),
