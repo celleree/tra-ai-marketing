@@ -6,7 +6,7 @@ import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeCopy } from '@/lib/creatives/generated';
-import type { CreativeBatchPlan, PlannedCreativeConcept } from '@/lib/creatives/planned';
+import { MAX_PORTFOLIO_CREATIVES, type CreativeBatchPlan, type PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
   CREATIVE_STRATEGY_JSON_SCHEMA,
   parseCreativeStrategy,
@@ -119,8 +119,8 @@ async function requestCreativeBatch(args: {
   referenceCatalog?: ReferencePlanningCandidate[];
   approvedHumanOptions?: ApprovedHumanOption[];
 }): Promise<CreativeBatchPlan> {
-  if (!Number.isInteger(args.count) || args.count < 2 || args.count > 30) {
-    throw new Error('Creative batch count must be an integer from 2 to 30.');
+  if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
+    throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
   }
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
   if (args.approvedHumanOptions && (args.approvedHumanOptions.length > MAX_APPROVED_HUMAN_OPTIONS
@@ -135,7 +135,7 @@ async function requestCreativeBatch(args: {
       model,
       reasoning: { effort: 'medium' },
       // Bound paid reasoning/output while allowing larger supported batches more room.
-      max_output_tokens: 4096 + 2048 * args.count,
+      max_output_tokens: Math.min(65536, 4096 + 2048 * args.count),
       store: false,
       input: [
         { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES + (args.approvedHumanOptions ? '\nChoose approvedHumanId from the supplied options, or null for no library human. Select a person only when they materially strengthen credibility, relatability, explanation or emotional specificity of the proposition; face availability alone is insufficient. Explain why in selectionReason. No fixed human/graphic ratio. A selected library identity replaces any other supplied human source for that concept; never mix identities. Approval covers visible identity only, never claims, credentials, quotes, testimonials or outcomes. Use null with a non-human concept, or when using an explicitly supplied approved TRA source.' : '') }] },

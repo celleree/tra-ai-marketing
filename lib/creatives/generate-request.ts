@@ -1,3 +1,4 @@
+import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 import {
   CREATIVE_CATEGORIES,
   type CreativeCategoryId,
@@ -82,7 +83,7 @@ const stringArray = (value: unknown, max: number) =>
         .slice(0, max)
     : [];
 
-export function validateGenerateCreativeRequest(input: unknown):
+export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30 | typeof MAX_PORTFOLIO_CREATIVES = 30):
   | { success: true; data: ValidGenerateCreativeRequest }
   | { success: false; error: string } {
   if (!input || typeof input !== 'object') {
@@ -187,11 +188,11 @@ export function validateGenerateCreativeRequest(input: unknown):
   if (
     !Number.isInteger(variationCount) ||
     variationCount < 2 ||
-    variationCount > 30
+    variationCount > maximumCount
   ) {
     return {
       success: false,
-      error: 'variationCount must be an integer between 2 and 30',
+      error: `variationCount must be an integer between 2 and ${maximumCount}`,
     };
   }
 
