@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
+import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 export const PORTFOLIO_LEASE_MS = 10 * 60 * 1000;
-export const MAX_PORTFOLIO_CREATIVES = 36;
 export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED'; error?: string };
 export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;

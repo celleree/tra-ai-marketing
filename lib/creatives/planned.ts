@@ -3,6 +3,8 @@ import type { CreativeCopy } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 
+export const MAX_PORTFOLIO_CREATIVES = 36;
+
 export type PlannedCreativeConcept = {
   index: number;
   format: CreativeFormatId;

@@ -32,9 +32,10 @@ describe('getCreativeDiversityIssue', () => {
     expect(getCreativeDiversityIssue([left, left], portfolioAudit())).toContain('duplicate headlines');
   });
 
-  it('requires a complete, unique global audit partition, including at 30 concepts', () => {
-    expect(parsePortfolioAudit(portfolioAudit(30))?.groups).toHaveLength(30);
-    const omitted = portfolioAudit(30); omitted.groups.pop();
+  it('requires a complete, unique global audit partition, including at 36 concepts', () => {
+    expect(parsePortfolioAudit(portfolioAudit(36))?.groups).toHaveLength(36);
+    expect(parsePortfolioAudit(portfolioAudit(37))).toBeNull();
+    const omitted = portfolioAudit(36); omitted.groups.pop();
     expect(parsePortfolioAudit(omitted)).toBeNull();
     const repeated = portfolioAudit(); repeated.groups[1].conceptIndexes = [1];
     expect(parsePortfolioAudit(repeated)).toBeNull();

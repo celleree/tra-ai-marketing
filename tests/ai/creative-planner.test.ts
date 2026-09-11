@@ -135,17 +135,20 @@ describe('creative batch planner', () => {
     expect(body.input[0].content[0].text).toContain('Only claims or proof explicitly present in approved company claims/proof fields');
   });
 
-  it.each([1, 31, 2.5])('rejects invalid count %s before calling the provider', async (count) => {
+  it.each([1, 37, 2.5])('rejects invalid count %s before calling the provider', async (count) => {
     const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
-    await expect(planCreativeBatch({ count, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/2 to 30/);
+    await expect(planCreativeBatch({ count, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/2 to 36/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('allows the largest supported batch with a finite scaled output allowance', async () => {
+  it.each([30, 36])('audits the whole %s-ad portfolio with the existing maximum output allowance', async count => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ creatives: Array.from({ length: 30 }, (_, i) => concept(i + 1)) }));
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ creatives: Array.from({ length: count }, (_, i) => concept(i + 1)) }));
     vi.stubGlobal('fetch', fetchMock);
-    expect((await planCreativeBatch({ count: 30, context: '', analysis, hasApprovedHumanSource: false })).creatives).toHaveLength(30);
+    const result = await planCreativeBatch({ count, context: '', analysis, hasApprovedHumanSource: false });
+    expect(result.creatives).toHaveLength(count);
+    expect(result.portfolioAudit?.conceptCount).toBe(count);
+    expect(vi.mocked(auditCreativePortfolio).mock.calls.at(-1)?.[0]).toHaveLength(count);
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_output_tokens).toBe(65536);
   });
 
