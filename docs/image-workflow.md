@@ -244,6 +244,10 @@ The current image workflow is ready when these work end-to-end:
 
 ## Current remaining roadmap for Astra
 
+The approved [image productionization checkpoint](image-gen-improvement.md) defines the remaining proposition-first planner, independent angle/layout, portfolio-diversity and approved-human-library work. Prefer approved TRA humans when strategically useful, without fixed human/graphic quotas; fictional adults remain a later product decision. Use tax documents only when they materially help the concept. Historical manual-test exceptions do not change these implementation boundaries.
+
+A future Proof Library of exact customer reviews and verified case studies will extend Company proof/customer-insight context. Keep future stable proof-record selection separate from angle/layout and asset provenance; proof retrieval/approval is deferred from this workstream.
+
 This is the active Stage 1 implementation order. Astra must verify current `staging` and relevant code/tests before treating any item as incomplete.
 
 Treat already-merged foundations as complete unless current code/tests show a regression or a clearly missing contract. Do not reopen completed historical Issues merely because an older document still describes them as future work.
