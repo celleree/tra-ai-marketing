@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { creativeRepairFeedback, requestCreativeBatch } from '@/lib/ai/creative-planner';
-import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
+import { advancePortfolioPreparation } from '@/lib/creatives/portfolio-preparation';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioAuditFailure, finishPortfolioAuditForRepair, finishPortfolioInitialPlan,
-  finishPortfolioPlan, finishPortfolioRepair, finishPortfolioSlot, failPortfolioWork, releasePortfolioWork,
+  finishPortfolioPlan, finishPortfolioPreparation, finishPortfolioRepair, finishPortfolioSlot, failPortfolioWork, releasePortfolioWork,
   type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
@@ -17,7 +17,7 @@ import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage'
 
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
 
-/** One persisted planning phase OR one image; no background loop or automatic failed-provider retry. */
+/** One persisted provider-capable planning step OR one image; no background loop or automatic failed-provider retry. */
 export async function advanceCreativePortfolio(
   id: string, operatorId: string, requestUrl: string, storage?: VideoIntelligenceStorage,
 ): Promise<PortfolioStepResult> {
@@ -32,26 +32,50 @@ export async function advanceCreativePortfolio(
   };
   let providerWorkStarted = false;
   try {
-    // CREATIVE_PLANNING counts planned concepts/hour, so reserve it once for the initial plan, not again for audit/repair phases.
-    if (slotIndex !== null || job.planning.phase === 'INITIAL_PLAN') {
-      const quota = await reserveOperatorQuota({ operatorId,
-        group: slotIndex === null ? 'CREATIVE_PLANNING' : 'CREATIVE_GENERATION',
-        units: slotIndex === null ? job.request.variationCount : 1,
+    if (slotIndex === null && job.planning.phase === 'INITIAL_PLAN' && !job.planning.preparation.quotaReserved) {
+      const quota = await reserveOperatorQuota({
+        operatorId,
+        group: 'CREATIVE_PLANNING',
+        units: job.request.variationCount,
       }, { storage });
       if (!quota.allowed) return {
         job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
-        status: 429, error: 'Operator quota reached. Resume after the quota window resets.', retryAfterSeconds: quota.retryAfterSeconds,
+        status: 429,
+        error: 'Operator quota reached. Resume after the quota window resets.',
+        retryAfterSeconds: quota.retryAfterSeconds,
+      };
+      const preparation = { ...job.planning.preparation, quotaReserved: true };
+      return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, preparation), storage) };
+    }
+
+    if (slotIndex !== null) {
+      const quota = await reserveOperatorQuota({ operatorId, group: 'CREATIVE_GENERATION', units: 1 }, { storage });
+      if (!quota.allowed) return {
+        job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
+        status: 429,
+        error: 'Operator quota reached. Resume after the quota window resets.',
+        retryAfterSeconds: quota.retryAfterSeconds,
       };
     }
+
     await assertCurrentWork();
-    providerWorkStarted = true;
     if (slotIndex === null) {
       if (job.planning.phase === 'INITIAL_PLAN') {
-        const prepared = await prepareCreativeGeneration(job.request, requestUrl, { initialPlanOnly: true });
+        const result = await advancePortfolioPreparation(
+          job.request,
+          requestUrl,
+          job.planning.preparation,
+          () => { providerWorkStarted = true; },
+        );
+        if (result.state) {
+          return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, result.state), storage) };
+        }
+        const prepared = result.prepared;
         if (!prepared.plannerArgs) throw new Error('Creative planning context was not preserved.');
         const checkpoint = { snapshot: snapshotCreativePortfolio(prepared), plannerArgs: structuredClone(prepared.plannerArgs) };
         return { job: await updateCreativePortfolio(id, current => finishPortfolioInitialPlan(current, token, checkpoint), storage) };
       }
+      providerWorkStarted = true;
       if (job.planning.phase === 'DIVERSITY_AUDIT') {
         const { checkpoint, repairAttempted } = job.planning;
         const audit = await auditCreativePortfolio(checkpoint.snapshot.batchPlan.creatives);
@@ -79,10 +103,13 @@ export async function advanceCreativePortfolio(
       }
       throw new Error('Portfolio planning phase is not executable.');
     }
+
+    providerWorkStarted = true;
     const context = await restoreCreativePortfolio(job.snapshot!);
     const slot = job.slots[slotIndex - 1];
     const creative = await renderPlannedCreative(context.batchPlan.creatives[slotIndex - 1], context, {
-      creativeId: slot.creativeId, assertCurrentWork,
+      creativeId: slot.creativeId,
+      assertCurrentWork,
     });
     return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
   } catch (error) {
@@ -90,7 +117,7 @@ export async function advanceCreativePortfolio(
     const message = error instanceof CreativeGenerationPreparationError || error instanceof GeneratedImageValidationError
       ? error.message : 'Portfolio work could not be completed. Review its status before retrying.';
     const current = await updateCreativePortfolio(id, value => {
-      if (value.lease?.id !== token) return value; // Another worker's progress is authoritative.
+      if (value.lease?.id !== token) return value;
       if (value.lease.expiresAtMs <= Date.now()) return claimCreativePortfolio(value).job;
       return providerWorkStarted ? failPortfolioWork(value, token, message) : releasePortfolioWork(value, token);
     }, storage);
