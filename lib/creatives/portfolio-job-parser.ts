@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { CREATIVE_CATEGORIES } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
@@ -6,18 +7,39 @@ import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parsePortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { MAX_PORTFOLIO_CREATIVES, type CreativePortfolioJob, type PortfolioPlanningCheckpoint } from '@/lib/creatives/portfolio-job';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
+import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
+import { parseLayoutBlueprint } from '@/lib/layouts/blueprint';
+import { parseReferenceCatalog } from '@/lib/references/planning';
 import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS } from '@/lib/video/approved-human';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
+const string = (value: unknown) => typeof value === 'string';
 const time = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0;
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const textArray = (value: unknown) => Array.isArray(value) && value.every(item => typeof item === 'string');
 
+/** Match the provider analysis schema: required strings may legitimately be empty. */
 const validAnalysis = (value: unknown) => record(value)
-  && text(value.summary) && textArray(value.visibleText) && text(value.visualStructure) && text(value.hookOrAngle)
-  && text(value.offerOrCta) && text(value.styleNotes) && textArray(value.preserve) && textArray(value.avoid)
-  && textArray(value.unknowns) && text(value.dominantCategory);
+  && string(value.summary) && textArray(value.visibleText) && string(value.visualStructure) && string(value.hookOrAngle)
+  && string(value.offerOrCta) && string(value.styleNotes) && textArray(value.preserve) && textArray(value.avoid)
+  && textArray(value.unknowns) && typeof value.dominantCategory === 'string'
+  && CREATIVE_CATEGORIES.includes(value.dominantCategory as (typeof CREATIVE_CATEGORIES)[number]);
+
+const validSourceLayout = (value: unknown) => {
+  if (!record(value) || typeof value.contentHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.contentHash)
+    || !text(value.analyzerModel) || typeof value.cacheHit !== 'boolean') return false;
+  try { parseLayoutBlueprint(value.blueprint); return true; } catch { return false; }
+};
+
+const validPreparation = (value: unknown): value is PortfolioPreparationState => {
+  if (!record(value) || typeof value.quotaReserved !== 'boolean') return false;
+  if (value.analysis !== undefined && !validAnalysis(value.analysis)) return false;
+  if (value.sourceLayout !== undefined && !validSourceLayout(value.sourceLayout)) return false;
+  if (value.selectedReferences !== undefined && !Array.isArray(value.selectedReferences)) return false;
+  if (value.referenceCatalog !== undefined && !parseReferenceCatalog(value.referenceCatalog)) return false;
+  return true;
+};
 
 const validSnapshot = (
   snapshot: CreativePortfolioSnapshot,
@@ -64,10 +86,13 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
   try {
     if (bytes.length > 2 * 1024 * 1024 || !isPortfolioId(expectedId)) throw new Error();
     const raw = JSON.parse(bytes.toString('utf8')) as CreativePortfolioJob & { planning?: unknown };
-    const job = { ...raw, planning: raw.planning ?? { phase: raw.snapshot ? 'READY_TO_RENDER' : 'INITIAL_PLAN' } } as CreativePortfolioJob;
+    const legacyPlanning = raw.planning ?? { phase: raw.snapshot ? 'READY_TO_RENDER' : 'INITIAL_PLAN' };
+    const planning = record(legacyPlanning) && legacyPlanning.phase === 'INITIAL_PLAN' && !('preparation' in legacyPlanning)
+      ? { ...legacyPlanning, preparation: { quotaReserved: false } }
+      : legacyPlanning;
+    const job = { ...raw, planning } as CreativePortfolioJob;
     if (job.version !== 1 || job.id !== expectedId || !time(job.createdAtMs) || !time(job.updatedAtMs)
       || job.updatedAtMs < job.createdAtMs || !text(job.request.context)
-      // Stored context already includes Company context. Validate request fields without wrapping it again.
       || !validateGenerateCreativeRequest({ ...job.request, context: 'Saved portfolio' }, MAX_PORTFOLIO_CREATIVES).success
       || !Array.isArray(job.slots) || job.slots.length !== job.request.variationCount
       || new Set(job.slots.map(slot => slot.creativeId)).size !== job.slots.length
@@ -81,7 +106,7 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
     } else {
       if (job.snapshot !== null || job.slots.some(slot => slot.status !== 'PENDING')) throw new Error();
       if (job.planning.phase === 'INITIAL_PLAN') {
-        if (Object.keys(job.planning).length !== 1) throw new Error();
+        if (!validPreparation(job.planning.preparation)) throw new Error();
       } else if (job.planning.phase === 'TARGETED_REPAIR') {
         if (!validCheckpoint(job.planning.checkpoint, job, 'required')
           || !getCreativeDiversityIssue(job.planning.checkpoint.snapshot.batchPlan.creatives,
