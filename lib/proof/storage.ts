@@ -178,6 +178,11 @@ const writeR2 = async (index: ProofLibraryIndex, snapshot: R2Snapshot) => {
 };
 
 let localQueue: Promise<void> = Promise.resolve();
+const readLocalQueued = () => {
+  const operation = localQueue.then(readLocal);
+  localQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+};
 const mutateLocal = <T>(mutate: IndexMutation<T>) => {
   const operation = localQueue.then(async () => {
     const outcome = mutate(await readLocal());
@@ -205,7 +210,10 @@ const mutateIndex = <T>(mutate: IndexMutation<T>) =>
   process.env.NODE_ENV === 'production' ? mutateR2(mutate) : mutateLocal(mutate);
 
 export const listProofRecords = async () => {
-  const index = process.env.NODE_ENV === 'production' ? (await readR2()).index : await readLocal();
+  const index =
+    process.env.NODE_ENV === 'production'
+      ? (await readR2()).index
+      : await readLocalQueued();
   return [...index.items].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 };
 
@@ -237,7 +245,8 @@ export const updateProofRecord = async (
     if (
       current.type !== normalized.type ||
       current.updatedAt !== expectedUpdatedAt ||
-      current.createdAt !== normalized.createdAt
+      current.createdAt !== normalized.createdAt ||
+      Date.parse(normalized.updatedAt) <= Date.parse(current.updatedAt)
     ) {
       throw new Error('Proof record changed before this update could be saved.');
     }

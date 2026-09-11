@@ -79,6 +79,30 @@ describe('Proof Library storage', () => {
     await expect(updateProofRecord(inactive, '2026-09-10T11:00:00.000Z')).rejects.toThrow(
       'changed before this update'
     );
+    await expect(updateProofRecord(current, current.updatedAt)).rejects.toThrow(
+      'changed before this update'
+    );
+  });
+
+  it('queues local reads behind an in-progress write', async () => {
+    let releaseWrite!: () => void;
+    const blocked = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let stored = index([]);
+    readFileMock.mockImplementation(async () => stored);
+    writeFileMock.mockImplementation(async (_path, raw) => {
+      await blocked;
+      stored = raw as string;
+    });
+
+    const saving = addProofRecords([review()]);
+    await vi.waitFor(() => expect(writeFileMock).toHaveBeenCalledOnce());
+    const listing = listProofRecords();
+    await Promise.resolve();
+    expect(readFileMock).toHaveBeenCalledOnce();
+    releaseWrite();
+
+    await saving;
+    await expect(listing).resolves.toEqual([review()]);
   });
 
   it('uses a conditional create for a missing R2 index', async () => {
