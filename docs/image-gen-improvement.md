@@ -88,7 +88,7 @@ Adapt the existing metadata selector for human retrieval using curated annotatio
 
 ## 5. Plan a portfolio, then render it
 
-Resumable implementation checkpoint: shared preparation/rendering, audited-plan snapshots with source revalidation, stable slot/lease/retry state and durable local/R2 job storage are implemented. The planner and real semantic auditor support 36; existing single-request generation remains capped at 30. Bounded execution endpoints, saved-result reconciliation and resume UI remain before live scale validation.
+Resumable implementation checkpoint: Create supports persisted portfolios of 2–36 creatives, one globally audited plan, stable reserved IDs, fresh source validation, bounded work requests and saved-result reconciliation. Reopening is read-only until Resume; failed or uncertain work requires explicit retry. Planning and image attempts use separate shared operator counters, including the legacy route. Existing single-request generation remains capped at 30. Deterministic and mocked-browser checks establish infrastructure behavior; paid 12/36-ad staging quality, cost and latency validation remains unmeasured.
 
 1. **Ground and inventory:** approved TRA facts/constraints, user priorities, eligible references and humans, recent selected hypotheses and evidence-backed creative patterns.
 2. **Sketch alternatives:** produce compact hypotheses before full render briefs. Consider both human and graphic executions for promising ideas. Bound exploration by the planning budget; stop adding weak near-duplicates merely to reach a count.

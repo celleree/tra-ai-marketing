@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
+import { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
+import { PortfolioProgressPanel } from '@/components/creative-generator/portfolio-progress-panel';
+import { portfolioCanAdvance } from '@/lib/creatives/portfolio-client';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
@@ -11,17 +14,7 @@ import createStyles from '@/components/creative-generator/creative-create-mode.m
 import { ReferenceLibrary } from '@/components/reference-library/reference-library';
 import { ProofLibrary } from '@/components/proof-library/proof-library';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
-import { applyBrandLogoToCreatives } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
-import {
-  consumeGenerationEventStream,
-  isGenerationEventStream,
-  parseGenerationResponse,
-} from '@/lib/creatives/parse-generation-response';
-import {
-  completeProgressiveCreative,
-  insertCreativeByIndex,
-} from '@/lib/creatives/progressive-delivery';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { consumeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
 import type {
@@ -97,16 +90,19 @@ export function CreativeGenerator() {
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
   const [placement, setPlacement] = useState<CreativePlacement>('SQUARE_1_1');
-  const [creatives, setCreatives] = useState<GeneratedCreative[]>([]);
-  const [generating, setGenerating] = useState(false);
-  const [generationComplete, setGenerationComplete] = useState(true);
-  const [generationFailures, setGenerationFailures] = useState<Record<number, string>>({});
+  const [uploadedCreatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generationError, setGenerationError] = useState('');
   const [handoffGenerate, setHandoffGenerate] = useState(false);
   const handoffConsumedRef = useRef(false);
   const handoffGenerationStartedRef = useRef(false);
-  const completedIndexesRef = useRef(new Set<number>());
-  const failedIndexesRef = useRef(new Map<number, string>());
+  const portfolio = useCreativePortfolio();
+  const generating = portfolio.running;
+  const savedPortfolio = portfolio.response?.job;
+  const creatives = creationMode === 'generate' ? portfolio.response?.creatives ?? [] : uploadedCreatives;
+  const generationComplete = !savedPortfolio || (!generating && !portfolioCanAdvance(savedPortfolio));
+  const generationFailures = Object.fromEntries((savedPortfolio?.slots ?? [])
+    .filter(slot => slot.status === 'RETRY_REQUIRED').map(slot => [slot.index, slot.error || 'Could not be completed.']));
+  const displayGenerationError = creationMode === 'generate' ? portfolio.error || generationError : generationError;
 
   const ready = Boolean(context.trim());
 
@@ -115,7 +111,7 @@ export function CreativeGenerator() {
     handoffConsumedRef.current = true;
 
     const draft = consumeLandingCreativeDraft();
-    if (!draft) return;
+    if (!draft) { void portfolio.restoreSaved(); return; }
 
     setActiveSection('upload');
     setCreationMode('generate');
@@ -123,24 +119,18 @@ export function CreativeGenerator() {
     setContext(draft.context);
     setVariationCount(draft.variationCount);
     setCreatives([]);
-    setGenerationComplete(true);
-    setGenerationFailures({});
     setGenerationError('');
     setHandoffGenerate(draft.generateOnOpen);
   }, []);
 
   const handleUploadStart = () => {
     setCreatives([]);
-    setGenerationComplete(true);
-    setGenerationFailures({});
     setGenerationError('');
   };
 
   const handleUploaded = (source: CreativeSourceAsset) => {
     setSourceAssets((current) => [...current, source]);
     setCreatives([]);
-    setGenerationComplete(true);
-    setGenerationFailures({});
     setGenerationError('');
   };
 
@@ -154,8 +144,6 @@ export function CreativeGenerator() {
       )
     );
     setCreatives([]);
-    setGenerationComplete(true);
-    setGenerationFailures({});
     setGenerationError('');
   };
 
@@ -164,15 +152,11 @@ export function CreativeGenerator() {
       current.filter((source) => source.media.id !== mediaId)
     );
     setCreatives([]);
-    setGenerationComplete(true);
-    setGenerationFailures({});
     setGenerationError('');
   };
 
   const handleDirectUploaded = (nextCreatives: GeneratedCreative[]) => {
     setCreatives(nextCreatives);
-    setGenerationComplete(true);
-    setGenerationFailures({});
     setGenerationError('');
   };
 
@@ -180,142 +164,25 @@ export function CreativeGenerator() {
     if (nextMode === creationMode) return;
     setCreationMode(nextMode);
     setCreatives([]);
-    setGenerationComplete(true);
-    setGenerationFailures({});
     setGenerationError('');
-    setGenerating(false);
   };
 
   const generate = async () => {
     if (!context.trim() || generating) return;
-
-    setGenerating(true);
-    setGenerationComplete(false);
-    setGenerationFailures({});
     setGenerationError('');
-    setCreatives([]);
-    completedIndexesRef.current = new Set();
-    failedIndexesRef.current = new Map();
-
     try {
       const brand = readStoredBrandGuidance();
       const companyProfile = readStoredRuntimeCompanyProfile();
-      const response = await fetch('/api/creatives/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sourceAssets: sourceAssets.map((source) => ({
-            mediaId: source.media.id,
-            role: source.role,
-          })),
-          ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
-          ...(brand.colors.length ? { brandColors: brand.colors } : {}),
-          ...(brand.fontGuidance.length
-            ? { brandFontNames: brand.fontGuidance }
-            : {}),
-          ...(companyProfile ? { companyProfile } : {}),
-          context: context.trim(),
-          variationCount,
-          placement,
-        }),
+      await portfolio.start({
+        sourceAssets: sourceAssets.map(source => ({ mediaId: source.media.id, role: source.role })),
+        ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
+        ...(brand.colors.length ? { brandColors: brand.colors } : {}),
+        ...(brand.fontGuidance.length ? { brandFontNames: brand.fontGuidance } : {}),
+        ...(companyProfile ? { companyProfile } : {}),
+        context: context.trim(), variationCount, placement,
       });
-      if (!response.ok || !isGenerationEventStream(response)) {
-        const payload = await parseGenerationResponse(response);
-        throw new Error(
-          payload.error || `Creative generation failed (HTTP ${response.status}).`
-        );
-      }
-
-      let receivedComplete = false;
-      const recordFailure = (index: number, message: string) => {
-        failedIndexesRef.current.set(index, message);
-        setGenerationFailures(Object.fromEntries(failedIndexesRef.current));
-      };
-
-      await consumeGenerationEventStream(response, async (event) => {
-        if (event.type === 'error') {
-          if (event.index) recordFailure(event.index, event.error);
-          else setGenerationError(event.error);
-          return;
-        }
-
-        if (event.type === 'complete') {
-          receivedComplete = true;
-          event.failedIndexes.forEach((index) => {
-            if (!failedIndexesRef.current.has(index)) {
-              recordFailure(index, `Creative ${index} could not be generated.`);
-            }
-          });
-          return;
-        }
-
-        try {
-          const completedCreative = await completeProgressiveCreative({
-            creative: event.creative,
-            ...(brand.logo ? { logoUrl: brand.logo.url } : {}),
-            applyBrandLogo: applyBrandLogoToCreatives,
-            persist: async (creative) => {
-              const saveResponse = await fetch('/api/creatives', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  creatives: [
-                    {
-                      id: creative.id,
-                      image: creative.image,
-                      category: creative.category,
-                      copy: creative.copy,
-                      format: creative.format,
-                      placement: creative.placement,
-                      planning: creative.planning,
-                      generationProvenance: creative.generationProvenance,
-                      videoFrameSelection: creative.videoFrameSelection,
-                      identity: creative.identity,
-                      ...(creative.referenceImageId
-                        ? { referenceImageId: creative.referenceImageId }
-                        : {}),
-                    },
-                  ],
-                }),
-              });
-              const savePayload = await saveResponse.json();
-              if (!saveResponse.ok) {
-                throw new Error(savePayload.error || 'Generated creative could not be saved.');
-              }
-            },
-          });
-
-          completedIndexesRef.current.add(completedCreative.index);
-          setCreatives((current) =>
-            insertCreativeByIndex(current, completedCreative)
-          );
-        } catch (error) {
-          recordFailure(
-            event.creative.index,
-            error instanceof Error
-              ? error.message
-              : `Creative ${event.creative.index} could not be completed.`
-          );
-        }
-      });
-
-      if (!receivedComplete) {
-        throw new Error('Creative generation ended before reporting completion.');
-      }
-
-      setGenerationComplete(true);
-      const failedCount = failedIndexesRef.current.size;
-      if (failedCount) {
-        setGenerationError(
-          `Completed ${completedIndexesRef.current.size} of ${variationCount} creatives. ${failedCount} failed.`
-        );
-      }
     } catch (error) {
-      setGenerationError(
-        error instanceof Error ? error.message : 'Creative generation failed.'
-      );
-    } finally {
-      setGenerating(false);
+      setGenerationError(error instanceof Error ? error.message : 'Creative generation failed.');
     }
   };
 
@@ -379,6 +246,7 @@ export function CreativeGenerator() {
                     className={`${createStyles.modeButton} ${
                       creationMode === 'generate' ? createStyles.modeButtonActive : ''
                     }`}
+                    disabled={generating}
                     onClick={() => switchCreationMode('generate')}
                   >
                     Generate with AI
@@ -388,6 +256,7 @@ export function CreativeGenerator() {
                     className={`${createStyles.modeButton} ${
                       creationMode === 'direct-upload' ? createStyles.modeButtonActive : ''
                     }`}
+                    disabled={generating}
                     onClick={() => switchCreationMode('direct-upload')}
                   >
                     Upload finished creatives
@@ -418,8 +287,9 @@ export function CreativeGenerator() {
                   />
                 )}
 
-                {generationError ? (
-                  <p className="error-message generation-error">{generationError}</p>
+                {creationMode === 'generate' ? <PortfolioProgressPanel portfolio={portfolio} /> : null}
+                {displayGenerationError ? (
+                  <p className="error-message generation-error">{displayGenerationError}</p>
                 ) : null}
               </div>
             </div>
@@ -427,11 +297,11 @@ export function CreativeGenerator() {
             <CreativeResults
               creatives={creatives}
               generating={creationMode === 'generate' && generating}
-              requestedCount={variationCount}
+              requestedCount={creationMode === 'generate' ? savedPortfolio?.requestedCount ?? variationCount : variationCount}
               generationComplete={
                 creationMode !== 'generate' || generationComplete
               }
-              generationFailures={generationFailures}
+              generationFailures={creationMode === 'generate' ? generationFailures : {}}
             />
           </div>
         ) : activeSection === 'tra-creatives' ? (

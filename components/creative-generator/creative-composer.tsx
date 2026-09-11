@@ -1,5 +1,7 @@
 'use client';
 
+import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   ChangeEvent,
@@ -61,7 +63,7 @@ const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_VIDEO_TYPES = ['video/mp4'];
 const MIN_VARIATIONS = 2;
-const MAX_VARIATIONS = 30;
+const MAX_VARIATIONS = MAX_PORTFOLIO_CREATIVES;
 
 const ROLE_LABELS: Record<CreativeSourceRole, string> = {
   TRA_VIDEO: 'TRA_VIDEO',
