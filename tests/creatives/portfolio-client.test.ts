@@ -17,6 +17,16 @@ const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED'
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('resumable portfolio browser controller', () => {
+  it('surfaces expired planning work without automatically retrying the uncertain call', async () => {
+    const value = initial();
+    value.job.lease = { slotIndex: null, expiresAtMs: Date.now() - 1 };
+    const interrupted = { ...value, job: { ...value.job, lease: null, planningError: 'Previous planning was interrupted.' } };
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(interrupted));
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await runPortfolio(value, vi.fn(), () => false)).job.planningError).toBe(interrupted.job.planningError);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).action).toBe('advance');
+  });
   it('reopens without paid work, polls an active lease, then advances only pending work', async () => {
     const value = withSlots(initial(), ['PENDING', 'PENDING']);
     value.job.lease = { slotIndex: 1, expiresAtMs: Date.now() + 60000 };

@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ProofLibraryError, ProofRecordCard, proofLibraryLoadFailureMessage } from '@/components/proof-library/proof-library';
+import { ProofLibraryError, ProofRecordCard, ReviewCsvImport, proofLibraryLoadFailureMessage } from '@/components/proof-library/proof-library';
 import { createProofEditFields, normalizeProofTextareaEdit, proofEditValues } from '@/components/proof-library/proof-library';
 import type { ProofRecord } from '@/lib/proof/types';
 
@@ -52,5 +52,18 @@ describe('Proof Library UI', () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain('aria-live="assertive"');
     expect(html).toContain('No changes can be made until it loads successfully.');
+  });
+
+  it('provides an accessible, CSV-only review import control', () => {
+    const html = renderToStaticMarkup(createElement(ReviewCsvImport, { onImported: () => {} }));
+    expect(html).toContain('Import reviews from CSV');
+    expect(html).toContain('type="file"');
+    expect(html).toContain('accept=".csv,text/csv"');
+    expect(html).toContain('required=""');
+    expect(html).toContain('Required: <code>originalReviewText</code>. Optional:');
+    expect(html).toContain('pipe-separated <code>tags</code>');
+    expect(html).toContain('Quote fields containing commas, quotes, or line breaks.');
+    expect(html).toContain('Imports up to 100 reviews in one batch.');
+    expect(html).toContain('Original review text is preserved exactly as supplied.');
   });
 });

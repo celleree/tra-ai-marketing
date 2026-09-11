@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { MAX_REVIEW_CSV_BYTES, parseReviewCsv } from '@/lib/proof/review-csv';
 import type { ProofRecord } from '@/lib/proof/types';
 import styles from './proof-library.module.css';
 
@@ -76,6 +77,59 @@ export function ProofRecordCard({
       {record.tags.length ? <p className={styles.tags}>{record.tags.map((tag) => <span key={tag}>{tag}</span>)}</p> : null}
       <small className={styles.id}>{record.id}</small>
     </article>
+  );
+}
+
+export function ReviewCsvImport({ onImported }: { onImported: (records: ProofRecord[]) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const file = input.current?.files?.[0];
+    setError('');
+    setSuccess('');
+    if (!file) {
+      setError('Choose a CSV file to import.');
+      return;
+    }
+    if (file.size > MAX_REVIEW_CSV_BYTES) {
+      setError(`CSV files must be ${MAX_REVIEW_CSV_BYTES} bytes or smaller.`);
+      return;
+    }
+    setPending(true);
+    try {
+      const items = parseReviewCsv(await file.text());
+      const response = await fetch('/api/proof', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Reviews could not be imported.');
+      onImported(payload.items);
+      input.current?.form?.reset();
+      setSuccess(`${payload.items.length} review${payload.items.length === 1 ? '' : 's'} imported.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Reviews could not be imported.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <form className={styles.import} onSubmit={submit} aria-busy={pending}>
+      <fieldset disabled={pending}>
+        <label>Import reviews from CSV<input ref={input} type="file" accept=".csv,text/csv" required /></label>
+        <p>Required: <code>originalReviewText</code>. Optional: <code>source</code>, <code>displayAttribution</code> with explicit <code>attributionAllowed=true</code>, <code>rating</code>, and pipe-separated <code>tags</code>. Quote fields containing commas, quotes, or line breaks.</p>
+        <p>Imports up to 100 reviews in one batch. Original review text is preserved exactly as supplied.</p>
+        <button className={styles.primary} type="submit">{pending ? 'Importing…' : 'Import reviews'}</button>
+      </fieldset>
+      {error ? <ProofLibraryError>{error}</ProofLibraryError> : null}
+      {success ? <p className={styles.success} role="status" aria-live="polite">{success}</p> : null}
+    </form>
   );
 }
 
@@ -242,6 +296,9 @@ export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord
       : [record, ...current]);
     setEditing((current) => current?.id === record.id ? null : current);
   };
+  const imported = (records: ProofRecord[]) => {
+    setItems((current) => [...records, ...current]);
+  };
   const toggle = async (record: ProofRecord) => {
     setError('');
     try {
@@ -261,6 +318,7 @@ export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord
       <nav className={styles.tabs} aria-label="Proof Library sections">{tabs.map((tab) => <button key={tab.id} type="button" aria-pressed={activeTab === tab.id} className={activeTab === tab.id ? styles.activeTab : ''} onClick={() => { setActiveTab(tab.id); setEditing(null); }}>{tab.label}</button>)}</nav>
       <p className={styles.note}>{activeTab === 'review' ? 'Original review text is stored exactly. Any future quoted excerpt must be a contiguous verbatim substring.' : 'Verified facts remain separate from the exact advertising wording approved for use.'}</p>
       {loading ? <p className={styles.empty}>Loading proof records…</p> : loaded ? <>
+        {activeTab === 'review' ? <ReviewCsvImport onImported={imported} /> : null}
         <ProofForm key={editing?.id ?? activeTab} type={activeTab} record={editing} onSaved={saved} onCancel={() => setEditing(null)} />
         {error ? <ProofLibraryError>{error}</ProofLibraryError> : null}
         <section className={styles.list} aria-label={activeTab === 'review' ? 'Saved reviews' : 'Saved case studies'}>
