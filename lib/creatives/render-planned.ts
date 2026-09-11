@@ -1,0 +1,185 @@
+import { createHash, randomUUID } from 'crypto';
+import { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
+import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/openai';
+import { generateApprovedTraVideoFrameCreativeImage } from '@/lib/ai/video-frame-generation';
+import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
+import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
+import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
+import { saveCreativeBatch } from '@/lib/creatives/storage';
+import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
+import { validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
+import type { GeneratedCreative } from '@/lib/creatives/generated';
+import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
+import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import type { CreativeBatchPlan, PlannedCreativeConcept } from '@/lib/creatives/planned';
+import type { MediaStorage } from '@/lib/media/storage';
+import type { StoredMediaFile } from '@/lib/media/types';
+import type { EligibleProviderImageSource } from '@/lib/media/source-hydration';
+import type { ReferencePlanningCandidate } from '@/lib/references/planning';
+import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
+import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
+
+export type CreativeRenderContext = {
+  request: ValidGenerateCreativeRequest;
+  batchPlan: Pick<CreativeBatchPlan, 'plannerModel' | 'reasoningEffort' | 'portfolioAudit'>;
+  referenceCatalog: ReferencePlanningCandidate[];
+  selectedReferences: SelectedReferenceCreative[];
+  requestedSources: CreativeGenerationProvenance['requestedSources'];
+  analysisSources: CreativeGenerationProvenance['analysisSources'];
+  logoOverlaySource?: CreativeGenerationProvenance['logoOverlaySource'];
+  reserveLogoArea: boolean;
+  brandLogo: StoredMediaFile | null;
+  providerImageSource?: EligibleProviderImageSource;
+  videoFrameSet: ApprovedTraVideoFrameSet | null;
+  generatedVideoFrameSelection?: GeneratedVideoFrameSelection;
+  storage: MediaStorage;
+};
+const sha256 = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
+
+/** The shared one-ad provider, validation, branding and persistence path. */
+export async function renderPlannedCreative(item: PlannedCreativeConcept, {
+  request, batchPlan, referenceCatalog, selectedReferences, requestedSources, analysisSources, logoOverlaySource,
+  reserveLogoArea, brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage,
+}: CreativeRenderContext): Promise<GeneratedCreative> {
+  const human = item.strategy.approvedHumanId ? await resolveApprovedHumanFrame(item.strategy.approvedHumanId) : null;
+  const itemVideoFrames = human?.selected ?? videoFrameSet;
+  const itemImageSource = human ? null : providerImageSource;
+  const itemFrameSelection = human?.record.source ?? generatedVideoFrameSelection;
+  const itemRequestedSources = human ? [
+    ...requestedSources.filter(source => source.mediaId !== human.record.source.sourceVideoMediaId),
+    { role: 'TRA_VIDEO' as const, mediaId: human.record.source.sourceVideoMediaId, sha256: human.record.source.sourceVideoContentHash },
+  ] : requestedSources;
+  const creativeId = `creative_${randomUUID().replaceAll('-', '')}`;
+  const identity = buildCreativeIdentity({
+    creativeId,
+    operation: 'GENERATE',
+    strategy: item.strategy,
+  });
+  const copy = item.copy;
+  const selectedReference = selectedReferences.find(reference => reference.item.id === item.strategy.referenceSelection?.layoutSource);
+  const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
+    concept: item, companyProfile: request.companyProfile,
+    brandColors: request.brandColors, brandFontNames: request.brandFontNames,
+    referenceCatalog,
+  }));
+  let imageResult: ImageGenerationResult;
+  let providerFrames: ApprovedTraVideoFrame[] | undefined;
+
+  if (itemImageSource) {
+    imageResult = await generateApprovedTraReferenceCreativeImage({
+      taxDocumentReference: item.strategy.execution.taxDocumentReference,
+      source: itemImageSource.stored,
+      primaryFormat: item.format,
+      placement: request.placement,
+      context: itemContext,
+      copy,
+      reserveLogoArea,
+    });
+  } else if (itemVideoFrames) {
+    const videoImageResult = await generateApprovedTraVideoFrameCreativeImage({
+      taxDocumentReference: item.strategy.execution.taxDocumentReference,
+      frames: itemVideoFrames.frames,
+      primaryFormat: item.format,
+      placement: request.placement,
+      context: itemContext,
+      copy,
+      reserveLogoArea,
+    });
+    imageResult = videoImageResult;
+    providerFrames = videoImageResult.providerFrames;
+  } else {
+    imageResult = await generatePromptOnlyCreativeImage({
+      taxDocumentReference: item.strategy.execution.taxDocumentReference,
+      primaryFormat: item.format,
+      placement: request.placement,
+      context: itemContext,
+      copy,
+      reserveLogoArea,
+      operationType: item.strategy.referenceSelection?.layoutSource ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
+    });
+  }
+
+  await validateGeneratedCreativeImage(imageResult.buffer, request.placement);
+  const finalImage = brandLogo
+    ? await compositeCreativeBrandLogo(imageResult.buffer, brandLogo.buffer, request.placement)
+    : imageResult.buffer;
+  const generatedFile = new File(
+    [new Uint8Array(finalImage)],
+    `tra-creative-${item.index}.png`,
+    { type: 'image/png' }
+  );
+  const image = await storage.saveImage(generatedFile);
+  const uploadedReferenceImageId =
+    item.strategy.referenceSelection?.layoutSource ?? undefined;
+  const attachedSource: CreativeGenerationProvenance['attachedSource'] =
+    itemImageSource
+      ? {
+          type: 'TRA_REFERENCE_IMAGE',
+          mediaId: itemImageSource.media.id,
+          sha256: sha256(itemImageSource.stored.buffer),
+        }
+      : providerFrames
+        ? {
+            type: 'TRA_VIDEO_FRAMES',
+            mediaId: providerFrames[0].sourceVideoMediaId,
+            sourceSha256: providerFrames[0].sourceVideoContentHash,
+            selectionMode: itemFrameSelection
+              ? 'USER_SELECTED'
+              : 'AUTOMATIC',
+            frames: providerFrames.map((frame) => ({
+              timestampMs: frame.timestampMs,
+              approvedPngSha256: frame.frameSha256,
+            })),
+          }
+        : null;
+  const generationProvenance: CreativeGenerationProvenance = {
+    version: 1,
+    imageGeneration: {
+      prompt: imageResult.prompt,
+      model: imageResult.model,
+      routing: imageResult.routing,
+    },
+    requestedSources: itemRequestedSources,
+    attachedSource,
+    analysisSources,
+    ...(logoOverlaySource ? { logoOverlaySource } : {}),
+  };
+
+  const creative: GeneratedCreative = {
+    id: creativeId,
+    index: item.index,
+    category: item.strategy.category,
+    format: item.format,
+    placement: request.placement,
+    image,
+    copy,
+    generationProvenance,
+    identity,
+    planning: {
+      strategy: item.strategy,
+      selectionReason: item.selectionReason,
+      model: batchPlan.plannerModel,
+      reasoningEffort: batchPlan.reasoningEffort,
+      ...(batchPlan.portfolioAudit ? { portfolioAudit: batchPlan.portfolioAudit } : {}),
+      referenceCatalog: referenceCatalog.filter(reference =>
+        [item.strategy.referenceSelection?.angleSource, item.strategy.referenceSelection?.layoutSource].includes(reference.referenceId)),
+    },
+    ...(itemFrameSelection
+      ? { videoFrameSelection: itemFrameSelection }
+      : {}),
+    ...(selectedReference
+      ? {
+          referenceImageId: selectedReference.item.id,
+          referenceImageUrl: selectedReference.item.url,
+          referenceCategory: selectedReference.item.angle,
+          referenceSelectionReason: selectedReference.selectionReason,
+        }
+      : uploadedReferenceImageId
+        ? { referenceImageId: uploadedReferenceImageId }
+        : {}),
+  };
+  const [saved] = await saveCreativeBatch([{ ...creative, createdAt: new Date().toISOString() }]);
+  return { ...creative, finalization: { status: 'SAVED', createdAt: saved.createdAt } };
+}
