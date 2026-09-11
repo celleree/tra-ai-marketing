@@ -5,7 +5,8 @@ import { fingerprintCreativeStrategy } from '@/lib/creatives/identity.server';
 import type { HydratedCreativeSourceAsset } from '@/lib/media/source-hydration';
 import type { MediaStorage } from '@/lib/media/storage';
 
-const mocks = vi.hoisted(() => ({ hydrate: vi.fn(), frames: vi.fn() }));
+const mocks = vi.hoisted(() => ({ hydrate: vi.fn(), frames: vi.fn(), human: vi.fn() }));
+vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
 vi.mock('@/lib/media/source-hydration', async (original) => ({
   ...await original<typeof import('@/lib/media/source-hydration')>(),
   hydrateCreativeSourceSelections: mocks.hydrate,
@@ -42,9 +43,18 @@ const source = (role: 'TRA_REFERENCE' | 'TRA_VIDEO' = 'TRA_REFERENCE'): Hydrated
 });
 const storage = (files: Record<string, ReturnType<typeof image> | null>) => ({ readImageById: vi.fn(async (mediaId: string) => files[mediaId] ?? null) }) as unknown as MediaStorage;
 
-beforeEach(() => { mocks.hydrate.mockReset(); mocks.frames.mockReset(); });
+beforeEach(() => { mocks.hydrate.mockReset(); mocks.frames.mockReset(); mocks.human.mockReset(); });
 
 describe('saved creative revision hydration', () => {
+  it('checks selected library approval before hydrating its source for revision', async () => {
+    const record = parent({ attached: 'video' });
+    record.planning!.strategy.approvedHumanId = `human_${'a'.repeat(64)}`;
+    record.identity!.fingerprint = fingerprintCreativeStrategy(record.planning!.strategy);
+    mocks.human.mockRejectedValue(new Error('Selected human is inactive'));
+    await expect(hydrateSavedCreativeRevisionContext(record, storage({ [id('a')]: image() }))).rejects.toMatchObject({status:409});
+    expect(mocks.human).toHaveBeenCalledWith(record.planning!.strategy.approvedHumanId, record.videoFrameSelection);
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+  });
   it('returns the saved canvas, TRA reference, and persisted logo without reading analysis assets', async () => {
     const record = parent({ logo: true }); const store = storage({ [id('a')]: image(), [id('c')]: image(PNG, id('c')) });
     mocks.hydrate.mockResolvedValue([source()]);

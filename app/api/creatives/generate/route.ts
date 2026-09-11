@@ -3,6 +3,8 @@ import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creat
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 import { buildReferencePlanningCatalog } from '@/lib/references/planning.server';
+import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
+import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
 import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
@@ -454,7 +456,10 @@ export async function POST(request: Request) {
           sourceSuppliedToImageGeneration
         )
       : false;
-    const humanSourceDirection = videoFrameSet
+    const approvedHumanOptions = await loadApprovedHumanOptions();
+    const humanSourceDirection = approvedHumanOptions.length
+      ? 'Curated approvedHumanOptions are available as independent human sources. Choose a stable ID only when that person strengthens the proposition; selecting one replaces any supplied human source for that concept. Choose null for a graphic concept or an explicitly supplied approved source. No invented people or identity-based claims.'
+      : videoFrameSet
       ? `Use only a person visibly grounded in the attached approved TRA video frames from source ${videoFrameSet.source.media.id}. Preserve that visible identity; do not invent, replace, blend, or add another person. Layout-reference and library-reference people remain forbidden human sources.`
       : hasUsableApprovedHumanSource
         ? 'Use only the attached approved TRA human identity when depicting a person.'
@@ -483,6 +488,7 @@ export async function POST(request: Request) {
       analysis,
       hasApprovedHumanSource: hasUsableApprovedHumanSource,
       referenceCatalog,
+      ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
     });
     const creativePlan = batchPlan.creatives;
     const diversityIssue = getCreativeDiversityIssue(creativePlan, batchPlan.portfolioAudit);
@@ -519,6 +525,14 @@ export async function POST(request: Request) {
     const renderCreative = async (
       item: PlannedCreativeConcept
     ): Promise<GeneratedCreative> => {
+          const human = item.strategy.approvedHumanId ? await resolveApprovedHumanFrame(item.strategy.approvedHumanId) : null;
+          const itemVideoFrames = human?.selected ?? videoFrameSet;
+          const itemImageSource = human ? null : providerImageSource;
+          const itemFrameSelection = human?.record.source ?? generatedVideoFrameSelection;
+          const itemRequestedSources = human ? [
+            ...requestedSources.filter(source => source.mediaId !== human.record.source.sourceVideoMediaId),
+            { role: 'TRA_VIDEO' as const, mediaId: human.record.source.sourceVideoMediaId, sha256: human.record.source.sourceVideoContentHash },
+          ] : requestedSources;
           const creativeId = `creative_${randomUUID().replaceAll('-', '')}`;
           const identity = buildCreativeIdentity({
             creativeId,
@@ -535,20 +549,20 @@ export async function POST(request: Request) {
           let imageResult: ImageGenerationResult;
           let providerFrames: ApprovedTraVideoFrame[] | undefined;
 
-          if (providerImageSource) {
+          if (itemImageSource) {
             imageResult = await generateApprovedTraReferenceCreativeImage({
               taxDocumentReference: item.strategy.execution.taxDocumentReference,
-              source: providerImageSource.stored,
+              source: itemImageSource.stored,
               primaryFormat: item.format,
               placement: parsed.data.placement,
               context: itemContext,
               copy,
               reserveLogoArea,
             });
-          } else if (videoFrameSet) {
+          } else if (itemVideoFrames) {
             const videoImageResult = await generateApprovedTraVideoFrameCreativeImage({
               taxDocumentReference: item.strategy.execution.taxDocumentReference,
-              frames: videoFrameSet.frames,
+              frames: itemVideoFrames.frames,
               primaryFormat: item.format,
               placement: parsed.data.placement,
               context: itemContext,
@@ -582,18 +596,18 @@ export async function POST(request: Request) {
           const uploadedReferenceImageId =
             item.strategy.referenceSelection?.layoutSource ?? undefined;
           const attachedSource: CreativeGenerationProvenance['attachedSource'] =
-            providerImageSource
+            itemImageSource
               ? {
                   type: 'TRA_REFERENCE_IMAGE',
-                  mediaId: providerImageSource.media.id,
-                  sha256: sha256(providerImageSource.stored.buffer),
+                  mediaId: itemImageSource.media.id,
+                  sha256: sha256(itemImageSource.stored.buffer),
                 }
               : providerFrames
                 ? {
                     type: 'TRA_VIDEO_FRAMES',
                     mediaId: providerFrames[0].sourceVideoMediaId,
                     sourceSha256: providerFrames[0].sourceVideoContentHash,
-                    selectionMode: generatedVideoFrameSelection
+                    selectionMode: itemFrameSelection
                       ? 'USER_SELECTED'
                       : 'AUTOMATIC',
                     frames: providerFrames.map((frame) => ({
@@ -609,7 +623,7 @@ export async function POST(request: Request) {
               model: imageResult.model,
               routing: imageResult.routing,
             },
-            requestedSources,
+            requestedSources: itemRequestedSources,
             attachedSource,
             analysisSources,
             ...(logoOverlaySource ? { logoOverlaySource } : {}),
@@ -634,8 +648,8 @@ export async function POST(request: Request) {
               referenceCatalog: referenceCatalog.filter(reference =>
                 [item.strategy.referenceSelection?.angleSource, item.strategy.referenceSelection?.layoutSource].includes(reference.referenceId)),
             },
-            ...(generatedVideoFrameSelection
-              ? { videoFrameSelection: generatedVideoFrameSelection }
+            ...(itemFrameSelection
+              ? { videoFrameSelection: itemFrameSelection }
               : {}),
             ...(selectedReference
               ? {
