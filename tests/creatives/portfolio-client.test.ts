@@ -6,7 +6,8 @@ import { portfolioRequest } from '../fixtures/creative-portfolio';
 
 const initial = (): PortfolioResponse => ({ job: portfolioProgress(newCreativePortfolio(portfolioRequest())), creatives: [] });
 const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED'>): PortfolioResponse => ({
-  job: { ...value.job, planReady: true, lease: null, slots: value.job.slots.map((slot, index) => ({ ...slot, status: statuses[index] })) },
+  job: { ...value.job, planReady: true, planningPhase: 'READY_TO_RENDER', lease: null,
+    slots: value.job.slots.map((slot, index) => ({ ...slot, status: statuses[index] })) },
   creatives: value.job.slots.filter((_, index) => statuses[index] === 'SAVED').map(slot => ({
     id: slot.creativeId, index: slot.index, category: 'customer-problems', format: 'direct-response',
     copy: { headline: 'Headline', primaryText: 'Copy', description: '' },
@@ -26,6 +27,18 @@ describe('resumable portfolio browser controller', () => {
     expect((await runPortfolio(value, vi.fn(), () => false)).job.planningError).toBe(interrupted.job.planningError);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).action).toBe('advance');
+  });
+  it('continues across durable preparation checkpoints that stay in INITIAL_PLAN', async () => {
+    const value = initial();
+    const first = { ...value, job: { ...value.job, planningCheckpoint: value.job.planningCheckpoint + 1 } };
+    const second = { ...value, job: { ...value.job, planningCheckpoint: value.job.planningCheckpoint + 2 } };
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(first)).mockResolvedValueOnce(Response.json(second));
+    vi.stubGlobal('fetch', fetchMock);
+    let updates = 0;
+    const completed = await runPortfolio(value, () => { updates += 1; }, () => updates === 2);
+    expect(completed.job).toMatchObject({ planningPhase: 'INITIAL_PLAN', planningCheckpoint: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance']);
   });
   it('reopens without paid work, polls an active lease, then advances only pending work', async () => {
     const value = withSlots(initial(), ['PENDING', 'PENDING']);

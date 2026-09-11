@@ -5,7 +5,7 @@ import type { CreativeBatchPlan } from '@/lib/creatives/planned';
 import { buildReferencePlanningCatalog } from '@/lib/references/planning.server';
 import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
 import { analyzeTraSourceCreative, analyzeReferenceCreative, type CreativeReferenceAnalysis } from '@/lib/ai/openai';
-import { planCreativeBatch } from '@/lib/ai/creative-planner';
+import { planCreativeBatch, requestCreativeBatch, type CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
 import { analyzeApprovedTraVideoFrames } from '@/lib/ai/video-frame-generation';
 import { selectBestReferenceCreatives, type ReferenceSelectionCandidate, type SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
@@ -73,11 +73,14 @@ const buildReferenceCandidates = (
     imageUrl: new URL(item.url, requestUrl).toString(),
   }));
 
-export type PreparedCreativeGeneration = CreativeRenderContext & { batchPlan: CreativeBatchPlan };
+export type PreparedCreativeGeneration = CreativeRenderContext & {
+  batchPlan: CreativeBatchPlan;
+  plannerArgs?: CreativeBatchPlannerArgs;
+};
 
-/** Prepare and audit the complete portfolio before any individual image render. */
+/** Prepare the complete portfolio context. Durable portfolio execution may stop after the initial Astra plan. */
 export async function prepareCreativeGeneration(
-  data: ValidGenerateCreativeRequest, requestUrl: string,
+  data: ValidGenerateCreativeRequest, requestUrl: string, options: { initialPlanOnly?: boolean } = {},
 ): Promise<PreparedCreativeGeneration> {
   const { storage, generationSourceAsset, requestedSources, source, providerImageSource, videoFrameSet,
     generatedVideoFrameSelection, brandLogo, reserveLogoArea, logoOverlaySource } = await hydrateGenerationSources(data);
@@ -165,20 +168,24 @@ export async function prepareCreativeGeneration(
       : '';
 
   const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
-  const batchPlan = await planCreativeBatch({
+  const plannerArgs: CreativeBatchPlannerArgs = {
     count: data.variationCount,
     context: generationContext,
     analysis,
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
     referenceCatalog,
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
-  });
-  const creativePlan = batchPlan.creatives;
-  const diversityIssue = getCreativeDiversityIssue(creativePlan, batchPlan.portfolioAudit);
-  if (diversityIssue) {
-    throw new CreativeGenerationPreparationError(
-      `Creative planner returned an insufficiently diverse batch: ${diversityIssue}`, 502,
-    );
+  };
+  const batchPlan = options.initialPlanOnly
+    ? await requestCreativeBatch(plannerArgs)
+    : await planCreativeBatch(plannerArgs);
+  if (!options.initialPlanOnly) {
+    const diversityIssue = getCreativeDiversityIssue(batchPlan.creatives, batchPlan.portfolioAudit);
+    if (diversityIssue) {
+      throw new CreativeGenerationPreparationError(
+        `Creative planner returned an insufficiently diverse batch: ${diversityIssue}`, 502,
+      );
+    }
   }
 
   const analysisSources: CreativeGenerationProvenance['analysisSources'] = [
@@ -203,7 +210,7 @@ export async function prepareCreativeGeneration(
   ];
 
   return {
-    request: data, batchPlan, referenceCatalog, selectedReferences, requestedSources, analysisSources,
+    request: data, batchPlan, plannerArgs, referenceCatalog, selectedReferences, requestedSources, analysisSources,
     logoOverlaySource, reserveLogoArea, brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage,
   };
 }

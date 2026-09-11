@@ -4,13 +4,20 @@ import { portfolioCanAdvance } from '@/lib/creatives/portfolio-client';
 import type { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
 import styles from './portfolio-progress-panel.module.css';
 
+const planningLabel = {
+  INITIAL_PLAN: 'Initial plan…',
+  DIVERSITY_AUDIT: 'Diversity audit…',
+  TARGETED_REPAIR: 'Planning repair…',
+  READY_TO_RENDER: 'Generating…',
+} as const;
+
 export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<typeof useCreativePortfolio> }) {
   const job = portfolio.response?.job;
   if (!job) return null;
   const failed = job.slots.filter(slot => slot.status === 'RETRY_REQUIRED');
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
     <p aria-live="polite"><strong>{job.slots.filter(slot => slot.status === 'SAVED').length} of {job.requestedCount} creatives saved</strong>
-      {portfolio.running ? job.planReady ? ' · Generating…' : ' · Planning…' : ''}</p>
+      {portfolio.running ? ` · ${planningLabel[job.planningPhase]}` : ''}</p>
     <p className="muted">Resume uses this portfolio’s saved brief and sources.</p>
     <div className={styles.actions}>
       {portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.pausing} onClick={portfolio.pause}>
