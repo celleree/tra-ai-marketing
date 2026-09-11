@@ -6,7 +6,8 @@ import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-v
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn() }));
+vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.getOperatorAccess }));
 vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.requireOperatorQuota }));
 vi.mock('@/lib/creatives/storage', async importOriginal => ({ ...await importOriginal<object>(), listCreatives: mocks.list, saveCreativeBatch: mocks.save }));
@@ -51,6 +52,25 @@ beforeEach(() => {
 });
 
 describe('saved creative revision API', () => {
+  it('drops a removed library human and prevents later reuse after deactivation', async () => {
+    const record = parent();
+    record.planning!.strategy = { ...strategy, approvedHumanId: `human_${'a'.repeat(64)}`, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' } };
+    record.identity = buildCreativeIdentity({ creativeId: record.id, operation:'GENERATE', strategy: record.planning!.strategy });
+    record.videoFrameSelection = { libraryId:`video-library:${'a'.repeat(64)}`, sourceVideoMediaId:mediaId, sourceVideoContentHash:'b'.repeat(64),
+      frames:[{frameIndex:0,libraryFrameId:`video-frame:${'c'.repeat(64)}`,candidateFrameSha256:'d'.repeat(64),timestampMs:1000,approvedPngSha256:'e'.repeat(64)}] };
+    mocks.list.mockResolvedValue([record]);
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[]} });
+    const response = await call({ operation:'EDIT', instruction:'Remove the person and make this a graphic ad.' });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource).toBeNull();
+    expect(creative.generationProvenance.attachedSource).toBeNull();
+    expect(creative).not.toHaveProperty('videoFrameSelection');
+    expect(creative.planning.strategy).not.toHaveProperty('approvedHumanId');
+    mocks.generate.mockClear(); mocks.human.mockRejectedValue(new Error('Human deactivated after planning'));
+    expect((await call({operation:'REGENERATE'})).status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
   it.each(['REGENERATE', 'PLACEMENT'] as const)('creates a new saved %s without replanning or modifying the parent', async operation => {
     const original = parent();
     const result = await call({ operation, ...(operation === 'PLACEMENT' ? { placement: 'PORTRAIT_4_5' } : {}) });

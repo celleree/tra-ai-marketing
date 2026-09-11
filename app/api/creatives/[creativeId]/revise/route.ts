@@ -11,6 +11,7 @@ import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { validateCreativeRevisionRequest } from '@/lib/creatives/revision-request';
 import { CreativeRevisionHydrationError, hydrateSavedCreativeRevisionContext } from '@/lib/creatives/revision-source-hydration';
+import { requireActiveHumanSelection } from '@/lib/video/approved-human-service';
 import { isSafeCreativeId, listCreatives, saveCreativeBatch } from '@/lib/creatives/storage';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import type { CreativeRecord } from '@/lib/creatives/generated';
@@ -61,8 +62,14 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       ? buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent, strategy: concept.strategy })
       : buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent });
     const instruction = 'instruction' in revision ? revision.instruction : undefined;
+    if (concept.strategy.approvedHumanId) {
+      try { await requireActiveHumanSelection(concept.strategy.approvedHumanId, parent.videoFrameSelection); }
+      catch (error) { throw new CreativeRevisionHydrationError(error instanceof Error ? error.message : 'The approved human is unavailable.', 409); }
+    }
+    const removedLibraryHuman = !!planning.strategy.approvedHumanId && concept.strategy.execution.subjectSource === 'non-human';
     const imageResult = await generateCreativeRevisionImage({
-      sources, operation: revision.operation, concept: { format: concept.format, copy: concept.copy, strategy: concept.strategy },
+      sources: removedLibraryHuman ? { ...sources, originalApprovedSource: null } : sources,
+      operation: revision.operation, concept: { format: concept.format, copy: concept.copy, strategy: concept.strategy },
       placement, companyProfile: revision.companyProfile,
       referenceCatalog: planning.referenceCatalog,
     });
@@ -79,11 +86,12 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}) },
       generationProvenance: {
         ...provenance, imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
+        ...(removedLibraryHuman ? { attachedSource: null } : {}),
         revision: { parentCreativeId: parentId, canvasMediaId: sources.canvas.mediaId, canvasSha256: sources.canvas.sha256, ...(instruction ? { instruction } : {}) },
       },
       ...((concept.strategy.referenceSelection ? concept.strategy.referenceSelection.layoutSource : parent.referenceImageId)
         ? { referenceImageId: concept.strategy.referenceSelection?.layoutSource ?? parent.referenceImageId } : {}),
-      ...(parent.videoFrameSelection ? { videoFrameSelection: parent.videoFrameSelection } : {}),
+      ...(!removedLibraryHuman && parent.videoFrameSelection ? { videoFrameSelection: parent.videoFrameSelection } : {}),
     };
     const [saved] = await saveCreativeBatch([record]);
     return NextResponse.json({ creative: saved }, { status: 201 });

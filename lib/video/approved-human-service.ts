@@ -64,6 +64,16 @@ export async function getApprovedHumanFrame(id: string, storage = getVideoIntell
   return record;
 }
 
+/** Approval is separate from source extraction; revisions reuse their existing fresh-PNG validator. */
+export async function requireActiveHumanSelection(id: string, selection: unknown, storage = getVideoIntelligenceStorage()) {
+  const record = await getApprovedHumanFrame(id, storage);
+  const source = parseGeneratedVideoFrameSelection(selection);
+  if (!record.active || !source || JSON.stringify(source) !== JSON.stringify(record.source)) {
+    throw new Error('The selected human is inactive or no longer matches this creative.');
+  }
+  return record;
+}
+
 async function validateApprovedSource(record: ApprovedHumanFrame) {
   const { source, selected } = await freshSelection(record.source.sourceVideoMediaId, {
     libraryId: record.source.libraryId, sourceVideoContentHash: record.source.sourceVideoContentHash,

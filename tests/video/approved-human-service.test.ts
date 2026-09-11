@@ -8,7 +8,7 @@ vi.mock('@/lib/media/source-hydration', () => ({ hydrateCreativeSourceSelections
 vi.mock('@/lib/video/library-service', () => ({ videoSourceHash: mocks.hash }));
 vi.mock('@/lib/video/preview-availability', () => ({ assertDurableVideoIntelligenceAvailable: mocks.available }));
 vi.mock('@/lib/video/selection-context', () => ({ loadVideoSelectionContext: mocks.context, extractVideoSelectionFrames: mocks.extract }));
-import { approveHumanFrame, changeApprovedHumanActive, readApprovedHumanPreview, resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
+import { approveHumanFrame, changeApprovedHumanActive, readApprovedHumanPreview, resolveApprovedHumanFrame, requireActiveHumanSelection } from '@/lib/video/approved-human-service';
 import { listApprovedHumanFrames } from '@/lib/video/approved-human-store';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
@@ -37,6 +37,13 @@ beforeEach(() => {
 });
 
 describe('approved-human source boundary', () => {
+  it('requires current approval and exact saved selection for revision reuse', async () => {
+    const storage = new MemoryStorage(); const record = await approveHumanFrame(input, 'operator', storage);
+    await expect(requireActiveHumanSelection(record.id, record.source, storage)).resolves.toEqual(record);
+    await expect(requireActiveHumanSelection(record.id, { ...record.source, sourceVideoContentHash: 'f'.repeat(64) }, storage)).rejects.toThrow('matches');
+    await changeApprovedHumanActive(record.id, false, storage);
+    await expect(requireActiveHumanSelection(record.id, record.source, storage)).rejects.toThrow('inactive');
+  });
   it('approves a fresh preview-bound PNG and always re-extracts before reuse', async () => {
     const storage = new MemoryStorage();
     const record = await approveHumanFrame(input, 'operator', storage);

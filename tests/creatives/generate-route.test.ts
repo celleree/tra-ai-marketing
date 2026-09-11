@@ -12,6 +12,8 @@ import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 
 const mocks = vi.hoisted(() => ({
+  humanOptions: vi.fn(),
+  resolveHuman: vi.fn(),
   compositeCreativeBrandLogo: vi.fn(),
   saveCreativeBatch: vi.fn(),
   validateGeneratedCreativeImage: vi.fn(),
@@ -31,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   getOperatorAccess: vi.fn(),
   requireOperatorQuota: vi.fn(),
 }));
+vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: mocks.humanOptions }));
+vi.mock('@/lib/video/approved-human-service', () => ({ resolveApprovedHumanFrame: mocks.resolveHuman }));
 
 vi.mock('@/lib/auth/server-access', () => ({
   getOperatorAccess: mocks.getOperatorAccess,
@@ -411,6 +415,8 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.humanOptions.mockResolvedValue([]);
+  mocks.resolveHuman.mockReset();
   mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
   mocks.requireOperatorQuota.mockResolvedValue(null);
   mocks.compositeCreativeBrandLogo.mockReset().mockImplementation(async (buffer) => buffer);
@@ -1076,6 +1082,35 @@ describe('progressive creative delivery', () => {
     expect(events.at(-1)?.data).toMatchObject({ successfulCount: 1, failedCount: 1 });
   });
 
+  it('routes only a selected library human and saves its stable ID and source provenance', async () => {
+    const humanId = `human_${'a'.repeat(64)}`; const traId = mediaId('4'); const videoId = mediaId('3');
+    storedById[traId] = image('4');
+    const frame = { frameIndex:0,timestampMs:1000,mimeType:'image/png',buffer:PNG,frameSha256:contentHash(PNG),byteLength:PNG.length,
+      sourceRole:'TRA_VIDEO',sourceVideoMediaId:videoId,sourceVideoFileName:`${videoId}.mp4`,sourceVideoContentHash:'b'.repeat(64),approvedHumanSource:true,cacheKey:null };
+    const source = { libraryId:`video-library:${'c'.repeat(64)}`,sourceVideoMediaId:videoId,sourceVideoContentHash:'b'.repeat(64),
+      frames:[{frameIndex:0,libraryFrameId:`video-frame:${'d'.repeat(64)}`,candidateFrameSha256:'e'.repeat(64),timestampMs:1000,approvedPngSha256:contentHash(PNG)}] };
+    mocks.humanOptions.mockResolvedValue([{id:humanId,sourceName:'TRA video',description:'Approved explanatory presenter'}]);
+    mocks.resolveHuman.mockResolvedValue({record:{id:humanId,source},selected:{frames:[frame]}});
+    mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2), creatives:batchPlan(2).creatives.map((item,index)=>index===0
+      ? {...item,strategy:{...item.strategy,approvedHumanId:humanId,execution:{...item.strategy.execution,subjectSource:'approved-tra-human'}}} : item) });
+    const events = await readStreamEvents(await POST(generationRequest([{mediaId:traId,role:'TRA_REFERENCE'}])));
+    expect(mocks.planCreativeBatch.mock.calls[0][0].approvedHumanOptions[0].id).toBe(humanId);
+    expect(mocks.resolveHuman).toHaveBeenCalledExactlyOnceWith(humanId);
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({frames:[frame]}));
+    expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(1);
+    const saved = mocks.saveCreativeBatch.mock.calls.flatMap(call=>call[0]).find(item=>item.index===1);
+    expect(saved.planning.strategy.approvedHumanId).toBe(humanId); expect(saved.videoFrameSelection).toEqual(source);
+    expect(parseCreativePlanning(saved.planning)).not.toBeNull();
+    expect(parseCreativeGenerationProvenance(saved.generationProvenance)).toMatchObject({
+      requestedSources:expect.arrayContaining([{role:'TRA_VIDEO',mediaId:videoId,sha256:'b'.repeat(64)}]),
+      attachedSource:{type:'TRA_VIDEO_FRAMES',mediaId:videoId,sourceSha256:'b'.repeat(64)},
+    });
+    expect(events.at(-1)?.data.successfulCount).toBe(2);
+    mocks.resolveHuman.mockRejectedValue(new Error('Human inactive'));
+    const failed = await readStreamEvents(await POST(generationRequest([{mediaId:traId,role:'TRA_REFERENCE'}])));
+    expect(failed.at(-1)?.data).toMatchObject({successfulCount:1,failedIndexes:[1]});
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(1);
+  });
   it('streams exact prompt-only image provenance without fabricated sources', async () => {
     const response = await POST(generationRequest([], undefined, 2));
     const events = await readStreamEvents(response);
