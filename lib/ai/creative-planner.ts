@@ -1,4 +1,5 @@
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
+import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
@@ -23,7 +24,7 @@ Plan proposition first: conceptDetails.angle describes the strategic framing; pr
 Make visualArchetype, visualMechanism, subject, environment and compositionInstructions explicit and consistent with execution and visualDirection. Describe the mechanism that makes the proposition visible, exact planned subjects/props and their spatial hierarchy. For graphic concepts, describe the graphic field as the environment. These are rendering directions, not additional copy or factual evidence.
 Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Use tax paperwork only when it materially helps the concept; do not default to desks, paper or next-step messaging.
 Plan the portfolio globally around distinct reasons to care or act: vary problem/outcome framing, objections, emotions, awareness and propositions. Strong ideas may share a category or layout. Compare mechanisms, subjects, archetypes and CTA approaches separately; headline swaps, recolors, person swaps or minor rearrangements do not create a new marketing idea.
-Use a human only when hasApprovedHumanSource is true, and then only as an approved supplied TRA source. When false, every subjectSource must be non-human. Never invent or borrow a person's identity.
+Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 The creativeContext may contain both USER CREATIVE DIRECTION and APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, or other evidence.
@@ -84,17 +85,25 @@ const parseConcept = (
   value: unknown,
   expectedIndex: number,
   hasApprovedHumanSource: boolean,
-  referenceCatalog?: ReferencePlanningCandidate[]
+  referenceCatalog?: ReferencePlanningCandidate[],
+  approvedHumanOptions?: ApprovedHumanOption[]
 ): PlannedCreativeConcept | null => {
-  if (!isRecord(value) || !hasOnly(value, ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : [])])) return null;
+  if (!isRecord(value) || !hasOnly(value, ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['approvedHumanId'] : [])])) return null;
   if (value.index !== expectedIndex || typeof value.format !== 'string' || !isCreativeFormat(value.format)) return null;
   if (!isRecord(value.copy) || !hasOnly(value.copy, ['primaryText', 'headline', 'description'])) return null;
   const primaryText = parseRequiredText(value.copy.primaryText);
   const headline = parseRequiredText(value.copy.headline);
   if (!primaryText || !headline || typeof value.copy.description !== 'string' || value.copy.description.length > MAX_TEXT_LENGTH) return null;
-  const strategy = parseCreativeStrategy(value.strategy, hasApprovedHumanSource);
+  if (isRecord(value.strategy) && 'approvedHumanId' in value.strategy) return null;
+  const humanId = approvedHumanOptions ? value.approvedHumanId : null;
+  if (humanId !== null && (!isApprovedHumanId(humanId) || !approvedHumanOptions?.some(option => option.id === humanId))) return null;
+  const strategy = parseCreativeStrategy(value.strategy, hasApprovedHumanSource || humanId !== null);
   const selectionReason = parseRequiredText(value.selectionReason);
   if (!strategy?.conceptDetails || !selectionReason) return null;
+  if (humanId !== null) {
+    if (strategy.execution.subjectSource !== 'approved-tra-human') return null;
+    strategy.approvedHumanId = humanId as string;
+  }
   if (referenceCatalog) {
     try { strategy.referenceSelection = resolveReferenceSelection(value.referenceChoices, referenceCatalog); } catch { return null; }
   }
@@ -108,11 +117,17 @@ async function requestCreativeBatch(args: {
   analysis: CreativeReferenceAnalysis;
   hasApprovedHumanSource: boolean;
   referenceCatalog?: ReferencePlanningCandidate[];
+  approvedHumanOptions?: ApprovedHumanOption[];
 }): Promise<CreativeBatchPlan> {
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > 30) {
     throw new Error('Creative batch count must be an integer from 2 to 30.');
   }
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  if (args.approvedHumanOptions && (args.approvedHumanOptions.length > MAX_APPROVED_HUMAN_OPTIONS
+    || args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
+    || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
+    throw new Error('Invalid bounded approved-human options.');
+  }
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
@@ -123,21 +138,23 @@ async function requestCreativeBatch(args: {
       max_output_tokens: 4096 + 2048 * args.count,
       store: false,
       input: [
-        { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
+        { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES + (args.approvedHumanOptions ? '\nChoose approvedHumanId from the supplied options, or null for no library human. Select a person only when they materially strengthen credibility, relatability, explanation or emotional specificity of the proposition; face availability alone is insufficient. Explain why in selectionReason. No fixed human/graphic ratio. A selected library identity replaces any other supplied human source for that concept; never mix identities. Approval covers visible identity only, never claims, credentials, quotes, testimonials or outcomes. Use null with a non-human concept, or when using an explicitly supplied approved TRA source.' : '') }] },
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
           requestedCount: args.count,
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           creativeContext: args.context,
           referenceAnalysis: args.analysis,
           ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog } : {}),
+          ...(args.approvedHumanOptions ? { approvedHumanOptions: args.approvedHumanOptions } : {}),
         }, null, 2) }] },
       ],
       text: { format: { type: 'json_schema', name: 'tra_creative_batch_plan', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['creatives'], properties: {
           creatives: { type: 'array', minItems: args.count, maxItems: args.count, items: {
             type: 'object', additionalProperties: false,
-            required: ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : [])],
+            required: ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['approvedHumanId'] : [])],
             properties: {
+              ...(args.approvedHumanOptions ? { approvedHumanId: { type: ['string', 'null'], enum: [null, ...args.approvedHumanOptions.map(option => option.id)] } } : {}),
               ...(args.referenceCatalog ? { referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) } : {}),
               index: { type: 'integer', minimum: 1, maximum: args.count },
               format: { type: 'string', enum: CREATIVE_FORMATS },
@@ -168,7 +185,7 @@ async function requestCreativeBatch(args: {
   if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== args.count) {
     throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${args.count} creatives.`);
   }
-  const creatives = parsed.creatives.map((value, index) => parseConcept(value, index + 1, args.hasApprovedHumanSource, args.referenceCatalog));
+  const creatives = parsed.creatives.map((value, index) => parseConcept(value, index + 1, args.hasApprovedHumanSource, args.referenceCatalog, args.approvedHumanOptions));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
 }

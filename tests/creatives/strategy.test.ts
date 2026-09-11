@@ -13,6 +13,16 @@ const strategy = () => ({
 });
 
 describe('CreativeStrategy contract', () => {
+  it('persists a stable human choice only with a human execution and keeps old plans unchanged', () => {
+    const approvedHumanId = `human_${'a'.repeat(64)}`;
+    const human = { ...strategy(), approvedHumanId, execution: { ...strategy().execution, subjectSource: 'approved-tra-human' } };
+    const planning = { strategy: human, selectionReason: 'Credible explanation', model: 'gpt-6-astra', reasoningEffort: 'medium' };
+    expect(parseCreativePlanning(JSON.parse(JSON.stringify(planning)))?.strategy.approvedHumanId).toBe(approvedHumanId);
+    expect(parseCreativeStrategy(human, false)).toBeNull();
+    expect(parseCreativeStrategy({ ...strategy(), approvedHumanId }, true)).toBeNull();
+    expect(parseCreativeStrategy({ ...human, approvedHumanId: 'unknown' }, true)).toBeNull();
+    expect(parseCreativeStrategy(strategy(), false)).not.toHaveProperty('approvedHumanId');
+  });
   it('round-trips rich concept details through saved planning without upgrading legacy records', () => {
     const planning = { strategy: { ...strategy(), conceptDetails: { ...conceptDetails, proposition: ' Understand options before committing ' } },
       selectionReason: 'A distinct reason to act', model: 'gpt-6-astra', reasoningEffort: 'medium' };

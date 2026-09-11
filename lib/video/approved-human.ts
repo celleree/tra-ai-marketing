@@ -14,6 +14,8 @@ export type ApprovedHumanFrame = {
   active: boolean;
 };
 export const isApprovedHumanId = (value: unknown): value is string => typeof value === 'string' && /^human_[a-f0-9]{64}$/.test(value);
+export type ApprovedHumanOption = Pick<ApprovedHumanFrame, 'id' | 'description' | 'sourceName'>;
+export const MAX_APPROVED_HUMAN_OPTIONS = 8;
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 const date = (value: unknown): value is string => typeof value === 'string'
   && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
