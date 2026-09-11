@@ -28,6 +28,18 @@ describe('resumable portfolio browser controller', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).action).toBe('advance');
   });
+  it('continues across durable preparation checkpoints that stay in INITIAL_PLAN', async () => {
+    const value = initial();
+    const first = { ...value, job: { ...value.job, planningCheckpoint: value.job.planningCheckpoint + 1 } };
+    const second = { ...value, job: { ...value.job, planningCheckpoint: value.job.planningCheckpoint + 2 } };
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(first)).mockResolvedValueOnce(Response.json(second));
+    vi.stubGlobal('fetch', fetchMock);
+    let updates = 0;
+    const completed = await runPortfolio(value, () => { updates += 1; }, () => updates === 2);
+    expect(completed.job).toMatchObject({ planningPhase: 'INITIAL_PLAN', planningCheckpoint: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance']);
+  });
   it('reopens without paid work, polls an active lease, then advances only pending work', async () => {
     const value = withSlots(initial(), ['PENDING', 'PENDING']);
     value.job.lease = { slotIndex: 1, expiresAtMs: Date.now() + 60000 };
