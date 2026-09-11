@@ -12,6 +12,7 @@ import { CreativeResults } from '@/components/creative-generator/creative-result
 import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
 import createStyles from '@/components/creative-generator/creative-create-mode.module.css';
 import { ReferenceLibrary } from '@/components/reference-library/reference-library';
+import { ProofLibrary } from '@/components/proof-library/proof-library';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
@@ -21,7 +22,7 @@ import type {
   CreativeSourceRole,
 } from '@/lib/media/types';
 
-type WorkspaceSection = 'upload' | 'tra-creatives' | 'company' | 'reference-images';
+type WorkspaceSection = 'upload' | 'tra-creatives' | 'company' | 'proof-library' | 'reference-images';
 type CreationMode = 'generate' | 'direct-upload';
 
 const NAV_ITEMS: Array<{
@@ -33,6 +34,7 @@ const NAV_ITEMS: Array<{
   { id: 'upload', label: 'Create', shortLabel: 'Create', icon: '+' },
   { id: 'tra-creatives', label: 'TRA Creatives', shortLabel: 'Creatives', icon: 'T' },
   { id: 'company', label: 'Company', shortLabel: 'Company', icon: 'C' },
+  { id: 'proof-library', label: 'Proof Library', shortLabel: 'Proof', icon: 'P' },
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
 ];
 
@@ -55,6 +57,11 @@ const SECTION_HEADERS: Record<
     title: 'Company',
     description:
       'Manage the verified company profile, brand guidance, and guardrails used by the creative system.',
+  },
+  'proof-library': {
+    eyebrow: 'Verified evidence',
+    title: 'Proof Library',
+    description: 'Manage exact customer reviews and approved case-study evidence.',
   },
   'reference-images': {
     eyebrow: 'Reference library',
@@ -306,6 +313,11 @@ export function CreativeGenerator() {
           <div className="workspace-view workspace-view-standard">
             <WorkspaceSectionHeader section="company" />
             <CompanyView />
+          </div>
+        ) : activeSection === 'proof-library' ? (
+          <div className="workspace-view workspace-view-standard">
+            <WorkspaceSectionHeader section="proof-library" />
+            <ProofLibrary />
           </div>
         ) : (
           <div className="workspace-view workspace-view-standard">
