@@ -73,6 +73,7 @@
 .selection p { margin: 0; color: #44576a; font-size: .83rem; line-height: 1.45; }
 .selection b { display: block; margin-bottom: 3px; color: #173eac; }
 .selectedGeneration { margin-top: 16px; border-top: 1px solid #d9e3f5; padding-top: 14px; }
+.approvalNotes { display: block; width: 100%; min-height: 80px; box-sizing: border-box; margin-top: 8px; padding: 8px; resize: vertical; border: 1px solid #cbd5e1; border-radius: 8px; }
 .selectedGeneration > .primary { width: 100%; margin-top: 8px; font-size: .78rem; }
 .selectedFrames { display: grid; gap: 8px; margin: 0; border: 0; padding: 0; }
 .selectedFrames legend { font-size: .8rem; font-weight: 800; }

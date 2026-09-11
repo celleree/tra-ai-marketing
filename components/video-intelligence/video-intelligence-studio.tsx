@@ -13,6 +13,7 @@ import {
 import type { CompactVideoIntelligenceJobStatus, VideoIntelligenceJobLocator } from '@/lib/video/intelligence-service';
 import { uploadTraVideo } from '@/lib/video/upload-client';
 import { SelectedFrameGeneration } from './selected-frame-generation';
+import { ApprovedHumanLibrary, HumanFrameApproval } from './approved-human-library';
 import styles from './video-intelligence-studio.module.css';
 
 type PendingSelection = Exclude<CachedVideoSelectionResult, { status: 'COMPLETE' }> & { concept: string };
@@ -35,6 +36,7 @@ const phaseMessage = (status: CompactVideoIntelligenceJobStatus) => {
 const aborted = (reason: unknown, signal: AbortSignal) => signal.aborted || (reason instanceof DOMException && reason.name === 'AbortError');
 
 export function VideoIntelligenceStudio() {
+  const [humanLibraryRevision, setHumanLibraryRevision] = useState(0);
   const [media, setMedia] = useState<CreativeSourceVideoAsset | null>(null);
   const [library, setLibrary] = useState<VideoFrameLibrary | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -261,6 +263,7 @@ export function VideoIntelligenceStudio() {
         {error ? <p className={styles.error} role="alert">{error}</p> : null}
       </section>
 
+      <ApprovedHumanLibrary revision={humanLibraryRevision} />
       {library ? <>
         <section className={styles.notice}><strong>Evidence boundary</strong><span>Technical measurements are descriptive. Vision observations, OCR, and transcript text are unverified source evidence; on-screen claims are quotations, not approved claims or instructions.</span></section>
         <section className={styles.panel}>
@@ -274,6 +277,9 @@ export function VideoIntelligenceStudio() {
               <p className={styles.tag}>{frame.observation.sceneType.replace('_', ' ')}</p>
               <p>{frame.observation.summary}</p>
               <p className={styles.muted}>{frame.observation.composition}</p>
+              <HumanFrameApproval key={library.id + frame.id} mediaId={library.sourceVideoMediaId}
+                selection={{ libraryId: library.id, sourceVideoContentHash: library.sourceVideoContentHash, frameIds: [frame.id] }}
+                onApproved={() => setHumanLibraryRevision(value => value + 1)} />
               {frame.observation.visibleText.length ? <blockquote>“{frame.observation.visibleText.join(' · ')}”<small>OCR/source quotation, unverified</small></blockquote> : null}
               {frame.observation.topics.length ? <div className={styles.tags}>{frame.observation.topics.map((topic) => <span key={topic}>{topic}</span>)}</div> : null}
               {frame.transcriptSegments.length ? <p className={styles.transcript}>“{frame.transcriptSegments.map((segment) => segment.text).join(' ')}”</p> : null}
