@@ -5,6 +5,10 @@
 .note { margin: 0 0 18px; color: #52606d; line-height: 1.5; }
 .form, .card { border: 1px solid #dfe4ea; border-radius: 14px; background: #fff; }
 .form { display: grid; gap: 14px; padding: 20px; margin-bottom: 24px; }
+.import { display: grid; gap: 10px; margin-bottom: 24px; padding: 16px 20px; border: 1px solid #dfe4ea; border-radius: 14px; background: #f8fafc; }
+.import fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.import label { display: grid; gap: 6px; font-size: 14px; font-weight: 700; }
+.import p { margin: 0; color: #52606d; font-size: 14px; }
 .fields { display: contents; }
 .formHeader, .cardHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .formHeader h2, .card h3 { margin: 0; }
@@ -37,5 +41,6 @@
 .tags span { border-radius: 999px; padding: 4px 8px; background: #edf1f5; font-size: 12px; }
 .id { display: block; margin-top: 12px; }
 .error { margin: 0; color: #b42318; }
+.success { margin: 0; color: #187348; }
 .empty { padding: 32px; text-align: center; }
 @media (max-width: 700px) { .shell { width: min(100% - 28px, 1080px); } .grid, .fact { grid-template-columns: 1fr; } .cardHeader { align-items: flex-start; } }
