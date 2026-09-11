@@ -86,10 +86,10 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
   try {
     if (bytes.length > 2 * 1024 * 1024 || !isPortfolioId(expectedId)) throw new Error();
     const raw = JSON.parse(bytes.toString('utf8')) as CreativePortfolioJob & { planning?: unknown };
-    const legacyPlanning = raw.planning ?? { phase: raw.snapshot ? 'READY_TO_RENDER' : 'INITIAL_PLAN' };
-    const planning = record(legacyPlanning) && legacyPlanning.phase === 'INITIAL_PLAN' && !('preparation' in legacyPlanning)
-      ? { ...legacyPlanning, preparation: { quotaReserved: false } }
-      : legacyPlanning;
+    let planning: unknown = raw.planning ?? { phase: raw.snapshot ? 'READY_TO_RENDER' : 'INITIAL_PLAN' };
+    if (record(planning) && planning.phase === 'INITIAL_PLAN' && !('preparation' in planning)) {
+      planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } };
+    }
     const job = { ...raw, planning } as CreativePortfolioJob;
     if (job.version !== 1 || job.id !== expectedId || !time(job.createdAtMs) || !time(job.updatedAtMs)
       || job.updatedAtMs < job.createdAtMs || !text(job.request.context)
