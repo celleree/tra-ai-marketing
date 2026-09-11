@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { conceptDetails } from '../fixtures/creative-concept-details';
+import { referenceCandidate } from '../fixtures/reference-catalog';
+import { resolveReferenceSelection } from '@/lib/references/planning';
 
 const concept: PlannedCreativeConcept = {
   index: 1, format: 'educational', copy: { headline: 'Talk with TRA', primaryText: 'Explore your options', description: 'A consultation' },
@@ -18,6 +20,20 @@ const concept: PlannedCreativeConcept = {
 };
 
 describe('distilled render brief', () => {
+  it('uses only the selected layout and honors original over an uploaded legacy blueprint', () => {
+    const referenceCatalog = [referenceCandidate('a'), referenceCandidate('b')];
+    referenceCatalog[1].blueprint.ctaTreatment = 'OUTLINE';
+    const [a, b] = referenceCatalog.map(item => item.referenceId);
+    for (const layoutSource of [b, null]) {
+      const referenceSelection = resolveReferenceSelection({ angleSource: a, layoutSource }, referenceCatalog);
+      const brief = buildCreativeRenderBrief({ concept: { ...concept, strategy: { ...concept.strategy, referenceSelection } },
+        referenceCatalog, layoutBlueprint: referenceCatalog[0].blueprint });
+      expect(brief.layoutBlueprint).toEqual(layoutSource ? referenceCatalog[1].blueprint : undefined);
+      const prompt = formatCreativeRenderBrief(brief);
+      expect(prompt).not.toContain(a);
+      expect(prompt).not.toContain(referenceCatalog[0].angleDescription);
+    }
+  });
   it('passes visual concept details but excludes strategic fields and preserves exact copy', () => {
     const details = { ...conceptDetails, angle: 'PRIVATE_ANGLE', proposition: 'PRIVATE_PROPOSITION',
       objection: 'PRIVATE_OBJECTION', mainMessage: 'PRIVATE_MESSAGE' };

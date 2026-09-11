@@ -1,6 +1,7 @@
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
 import type { RuntimeCompanyProfileSnapshot } from '@/lib/company/creative-context';
+import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import type { hydrateSavedCreativeRevisionContext } from '@/lib/creatives/revision-source-hydration';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
@@ -31,6 +32,7 @@ export async function generateCreativeRevisionImage(args: {
   concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'strategy'>;
   placement: CreativePlacement;
   companyProfile?: RuntimeCompanyProfileSnapshot;
+  referenceCatalog?: ReferencePlanningCandidate[];
 }): Promise<ImageGenerationResult> {
   const { canvas, originalApprovedSource, logoOverlay } = args.sources;
   if (!parseCreativeStrategy(args.concept.strategy, originalApprovedSource !== null)) {
@@ -50,7 +52,7 @@ ${originalApprovedSource
 ${args.concept.strategy.execution.subjectSource === 'non-human' ? 'The planned concept is non-human. Do not depict people even if original approved sources contain people.' : ''}
 No ad-layout reference, video-analysis JPEGs or logo artwork are attached as generation sources.
 ${document?.prompt ?? ''}
-${formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: args.concept, companyProfile: args.companyProfile }))}
+${formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: args.concept, companyProfile: args.companyProfile, referenceCatalog: args.referenceCatalog }))}
 Saved canvas copy and prior outputs do not approve factual claims. Execute the planned copy and visual direction while respecting the brief's prohibited claims and required disclaimers.
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is Tax Relief Advocates or TRA.
 Keep text readable on a phone, with clear hierarchy and no clutter.

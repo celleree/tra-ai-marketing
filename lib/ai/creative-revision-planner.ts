@@ -1,5 +1,6 @@
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
+import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { CREATIVE_STRATEGY_JSON_SCHEMA, parseCreativeStrategy } from '@/lib/creatives/strategy';
@@ -66,6 +67,7 @@ export async function planCreativeRevision(args: {
   instruction: string;
   companyContext: string;
   hasApprovedHumanSource: boolean;
+  referenceCatalog?: ReferencePlanningCandidate[];
 }): Promise<CreativeRevisionPlan> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY is not configured.');
@@ -73,9 +75,12 @@ export async function planCreativeRevision(args: {
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, input: [
-      { role: 'system', content: [{ type: 'input_text', text: RULES }] },
+      { role: 'system', content: [{ type: 'input_text', text: RULES + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(args) }] },
-    ], text: { format: { type: 'json_schema', name: 'tra_creative_revision', strict: true, schema: SCHEMA } } }),
+    ], text: { format: { type: 'json_schema', name: 'tra_creative_revision', strict: true, schema: args.referenceCatalog ? {
+      ...SCHEMA, required: [...SCHEMA.required, 'referenceChoices'], properties: { ...SCHEMA.properties,
+        referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) },
+    } : SCHEMA } } }),
   });
   if (!response.ok) throw new Error(`Revision planning failed (HTTP ${response.status}).`);
   let value: unknown;
@@ -83,7 +88,7 @@ export async function planCreativeRevision(args: {
     if (error instanceof SyntaxError) throw new Error('OpenAI returned malformed revision plan JSON.');
     throw error;
   }
-  if (!isRecord(value) || !exactKeys(value, ['format', 'copy', 'strategy', 'selectionReason']) ||
+  if (!isRecord(value) || !exactKeys(value, ['format', 'copy', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : [])]) ||
     typeof value.format !== 'string' || !isCreativeFormat(value.format) || !isText(value.selectionReason) ||
     !isRecord(value.copy) || !exactKeys(value.copy, ['primaryText', 'headline', 'description']) ||
     !isText(value.copy.primaryText) || !isText(value.copy.headline) || typeof value.copy.description !== 'string' || value.copy.description.length > 1000) {
@@ -91,6 +96,7 @@ export async function planCreativeRevision(args: {
   }
   const strategy = parseCreativeStrategy(value.strategy, args.hasApprovedHumanSource);
   if (!strategy?.conceptDetails) throw new Error('OpenAI returned an invalid revision strategy or human source.');
+  if (args.referenceCatalog) strategy.referenceSelection = resolveReferenceSelection(value.referenceChoices, args.referenceCatalog);
   const concept: PlannedCreativeConcept = {
     index: 1, format: value.format, strategy, selectionReason: value.selectionReason.trim(),
     copy: { primaryText: value.copy.primaryText.trim(), headline: value.copy.headline.trim(), description: value.copy.description.trim() },

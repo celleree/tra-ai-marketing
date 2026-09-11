@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { planCreativeBatch } from '@/lib/ai/creative-planner';
 import { CREATIVE_STRATEGY_JSON_SCHEMA } from '@/lib/creatives/strategy';
 import { conceptDetails } from '../fixtures/creative-concept-details';
+import { referenceCandidate } from '../fixtures/reference-catalog';
 
 const analysis = {
   summary: 'Clear visual hierarchy', visibleText: [], visualStructure: 'Headline over image',
@@ -28,6 +29,19 @@ const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('creative batch planner', () => {
+  it('lets Astra choose all independent combinations and resolves known IDs deterministically', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const referenceCatalog = [referenceCandidate('a'), referenceCandidate('b')];
+    const [a, b] = referenceCatalog.map(item => item.referenceId);
+    const choices = [[a, a], [a, b], [a, null], [null, b], [null, null]];
+    const creatives = choices.map(([angleSource, layoutSource], index) => ({ ...concept(index + 1), referenceChoices: { angleSource, layoutSource } }));
+    const fetchMock = vi.fn(async () => okResponse({ creatives }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await planCreativeBatch({ count: 5, context: 'Approved company proof remains here', analysis, hasApprovedHumanSource: false, referenceCatalog });
+    expect(result.creatives.map(item => item.strategy.referenceSelection?.referenceRelationship)).toEqual(['matched', 'mixed', 'mixed', 'mixed', 'original']);
+    creatives[0].referenceChoices.layoutSource = referenceCandidate('c').referenceId;
+    await expect(planCreativeBatch({ count: 5, context: '', analysis, hasApprovedHumanSource: false, referenceCatalog })).rejects.toThrow('invalid');
+  });
   it('defaults the planner model to GPT-6 Astra', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => okResponse({ creatives: [concept(1), concept(2)] }));

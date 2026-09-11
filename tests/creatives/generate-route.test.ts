@@ -4,6 +4,7 @@ import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-pr
 import { parseCreativeIdentity } from '@/lib/creatives/identity';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { TAX_DOCUMENT_REFERENCES } from '@/lib/references/tax-documents';
+import { resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   saveCreativeBatch: vi.fn(),
   validateGeneratedCreativeImage: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
+  analyzeReferenceCreative: vi.fn(),
   generateApprovedTraReferenceCreativeImage: vi.fn(),
   planCreativeBatch: vi.fn(),
   analyzeApprovedTraVideoFrames: vi.fn(),
@@ -45,6 +47,7 @@ vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
 }));
 
 vi.mock('@/lib/ai/openai', () => ({
+  analyzeReferenceCreative: mocks.analyzeReferenceCreative,
   analyzeTraSourceCreative: mocks.analyzeTraSourceCreative,
   generateApprovedTraReferenceCreativeImage:
     mocks.generateApprovedTraReferenceCreativeImage,
@@ -323,7 +326,7 @@ it('uses a seeded document and rich concept from the real planner through render
   const plan = { creatives: [
     { ...first, strategy: { ...first.strategy, execution: { ...first.strategy.execution, taxDocumentReference: 'irs-notice-v1' } } },
     plannedCreative(2),
-  ].map(concept => ({ ...concept, strategy: { ...concept.strategy, conceptDetails } })) };
+  ].map(concept => ({ ...concept, strategy: { ...concept.strategy, conceptDetails }, referenceChoices: { angleSource: null, layoutSource: null } })) };
   const requests: Array<{ url: string; body: string | FormData }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     requests.push({ url, body: init.body as string | FormData });
@@ -428,10 +431,15 @@ beforeEach(() => {
   });
   mocks.getOrAnalyzeLayoutBlueprint.mockResolvedValue(layoutResolution);
   mocks.analyzeTraSourceCreative.mockResolvedValue(analysis);
+  mocks.analyzeReferenceCreative.mockResolvedValue(analysis);
   mocks.analyzeApprovedTraVideoFrames.mockResolvedValue(analysis);
   mocks.listReferenceLibrary.mockResolvedValue([]);
   mocks.planCreativeBatch.mockImplementation(
-    async ({ count }: { count: number }) => batchPlan(count)
+    async ({ count, referenceCatalog = [] }: { count: number; referenceCatalog?: ReferencePlanningCandidate[] }) => ({
+      ...batchPlan(count), creatives: batchPlan(count).creatives.map(concept => ({ ...concept, strategy: { ...concept.strategy,
+        referenceSelection: resolveReferenceSelection({ angleSource: null, layoutSource: referenceCatalog[0]?.referenceId ?? null }, referenceCatalog),
+      } })),
+    })
   );
   mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(imageResultFor('TRA_REFERENCE_GENERATION'));
   mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(
@@ -902,7 +910,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(response.status).toBe(200);
     expect(readMediaById).toHaveBeenCalledTimes(1);
     expect(readMediaById).toHaveBeenCalledWith(traId);
-    expect(mocks.getOrAnalyzeLayoutBlueprint).not.toHaveBeenCalled();
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledTimes(3);
     expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
@@ -929,7 +937,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
       .filter(({ event }) => event === 'creative')
       .map(({ data }) => data.creative as { index: number; planning?: unknown });
     expect(creatives).toHaveLength(2);
-    expect(creatives.find(({ index }) => index === 1)?.planning).toEqual({
+    expect(creatives.find(({ index }) => index === 1)?.planning).toMatchObject({
       strategy: plannedCreative(1).strategy,
       selectionReason: 'Distinct strategic fit 1',
       model: 'gpt-6-astra',
@@ -976,6 +984,12 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const traId = mediaId('5');
     const reference = libraryItem('4');
     storedById[traId] = image('5');
+    readImageById.mockResolvedValue(image('4'));
+    mocks.planCreativeBatch.mockImplementation(async ({ referenceCatalog }) => ({ ...batchPlan(2),
+      creatives: batchPlan(2).creatives.map((concept, index) => ({ ...concept, strategy: { ...concept.strategy,
+        referenceSelection: resolveReferenceSelection({ angleSource: traId, layoutSource: index === 0 ? reference.id : null }, referenceCatalog),
+      } })),
+    }));
     mocks.listReferenceLibrary.mockResolvedValue([reference]);
     mocks.selectBestReferenceCreatives.mockResolvedValue([
       {
@@ -1003,6 +1017,12 @@ describe('layout blueprint and final image-provider boundaries', () => {
       .map(({ data }) => data.creative as { index: number; referenceImageId?: string });
     expect(creatives.find(({ index }) => index === 1)?.referenceImageId).toBe(reference.id);
     expect(creatives.find(({ index }) => index === 2)?.referenceImageId).toBeUndefined();
+    const records = mocks.saveCreativeBatch.mock.calls.flatMap(([batch]) => batch);
+    const saved = records.map(record => parseCreativePlanning(JSON.parse(JSON.stringify(record.planning))));
+    expect(saved.every(Boolean)).toBe(true);
+    expect(saved[0]?.strategy.referenceSelection).toMatchObject({ angleSource: traId, layoutSource: reference.id, referenceRelationship: 'mixed' });
+    expect(saved[1]?.strategy.referenceSelection?.layoutSource).toBeNull();
+    expect(saved[0]?.referenceCatalog?.map(item => item.referenceId)).toEqual([traId, reference.id]);
   });
 });
 

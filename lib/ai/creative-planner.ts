@@ -1,5 +1,6 @@
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
+import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeCopy } from '@/lib/creatives/generated';
 import type { CreativeBatchPlan, PlannedCreativeConcept } from '@/lib/creatives/planned';
@@ -27,6 +28,7 @@ Unsupported claims and analysis unknowns are unavailable; do not infer or fill t
 Proof-like, review-like, statistics-like, and comparison formats remain valid when strategically useful, but express them without unsupported numeric or testimonial claims.
 Do not restrict concepts to the analysis category. Ground every factual statement only in explicitly approved company claims/proof fields within creativeContext.
 Return exactly the requested count with sequential indexes beginning at 1.
+When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). References support the proposition; they do not dictate it. Give user-priority references first consideration, not exclusive use. Same-reference, different-reference, one-original and fully original choices are all valid. Do not force reference use or uniqueness across ads. Explain the choices, including relevant unused user references, in selectionReason. The renderer receives only the selected design-only blueprint; reference angles, people, branding, logos, copy, claims, testimonials, pricing and proof cannot supply output content or factual approval.
 `;
 
 const getApiKey = () => {
@@ -79,9 +81,10 @@ const parseRequiredText = (value: unknown) => {
 const parseConcept = (
   value: unknown,
   expectedIndex: number,
-  hasApprovedHumanSource: boolean
+  hasApprovedHumanSource: boolean,
+  referenceCatalog?: ReferencePlanningCandidate[]
 ): PlannedCreativeConcept | null => {
-  if (!isRecord(value) || !hasOnly(value, ['index', 'format', 'copy', 'strategy', 'selectionReason'])) return null;
+  if (!isRecord(value) || !hasOnly(value, ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : [])])) return null;
   if (value.index !== expectedIndex || typeof value.format !== 'string' || !isCreativeFormat(value.format)) return null;
   if (!isRecord(value.copy) || !hasOnly(value.copy, ['primaryText', 'headline', 'description'])) return null;
   const primaryText = parseRequiredText(value.copy.primaryText);
@@ -90,6 +93,9 @@ const parseConcept = (
   const strategy = parseCreativeStrategy(value.strategy, hasApprovedHumanSource);
   const selectionReason = parseRequiredText(value.selectionReason);
   if (!strategy?.conceptDetails || !selectionReason) return null;
+  if (referenceCatalog) {
+    try { strategy.referenceSelection = resolveReferenceSelection(value.referenceChoices, referenceCatalog); } catch { return null; }
+  }
   const copy: CreativeCopy = { primaryText, headline, description: value.copy.description.trim() };
   return { index: expectedIndex, format: value.format, copy, strategy, selectionReason };
 };
@@ -99,6 +105,7 @@ export async function planCreativeBatch(args: {
   context: string;
   analysis: CreativeReferenceAnalysis;
   hasApprovedHumanSource: boolean;
+  referenceCatalog?: ReferencePlanningCandidate[];
 }): Promise<CreativeBatchPlan> {
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > 30) {
     throw new Error('Creative batch count must be an integer from 2 to 30.');
@@ -120,14 +127,16 @@ export async function planCreativeBatch(args: {
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           creativeContext: args.context,
           referenceAnalysis: args.analysis,
+          ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog } : {}),
         }, null, 2) }] },
       ],
       text: { format: { type: 'json_schema', name: 'tra_creative_batch_plan', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['creatives'], properties: {
           creatives: { type: 'array', minItems: args.count, maxItems: args.count, items: {
             type: 'object', additionalProperties: false,
-            required: ['index', 'format', 'copy', 'strategy', 'selectionReason'],
+            required: ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : [])],
             properties: {
+              ...(args.referenceCatalog ? { referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) } : {}),
               index: { type: 'integer', minimum: 1, maximum: args.count },
               format: { type: 'string', enum: CREATIVE_FORMATS },
               copy: { type: 'object', additionalProperties: false, required: ['primaryText', 'headline', 'description'], properties: {
@@ -157,7 +166,7 @@ export async function planCreativeBatch(args: {
   if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== args.count) {
     throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${args.count} creatives.`);
   }
-  const creatives = parsed.creatives.map((value, index) => parseConcept(value, index + 1, args.hasApprovedHumanSource));
+  const creatives = parsed.creatives.map((value, index) => parseConcept(value, index + 1, args.hasApprovedHumanSource, args.referenceCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
 }

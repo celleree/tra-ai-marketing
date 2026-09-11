@@ -51,6 +51,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         parent: { format: concept.format, copy: concept.copy, strategy: concept.strategy },
         operation: revision.operation, instruction: revision.instruction, companyContext,
         hasApprovedHumanSource: sources.originalApprovedSource !== null,
+        ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}),
       });
       concept = plan.concept;
       plannerModel = plan.plannerModel;
@@ -63,6 +64,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const imageResult = await generateCreativeRevisionImage({
       sources, operation: revision.operation, concept: { format: concept.format, copy: concept.copy, strategy: concept.strategy },
       placement, companyProfile: revision.companyProfile,
+      referenceCatalog: planning.referenceCatalog,
     });
     await validateGeneratedCreativeImage(imageResult.buffer, placement);
     const finalBuffer = sources.logoOverlay
@@ -72,12 +74,14 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const record: CreativeRecord = {
       id, createdAt: new Date().toISOString(), image, category: concept.strategy.category,
       format: concept.format, placement, copy: concept.copy, identity,
-      planning: { strategy: concept.strategy, selectionReason: concept.selectionReason, model: plannerModel, reasoningEffort: 'medium' },
+      planning: { strategy: concept.strategy, selectionReason: concept.selectionReason, model: plannerModel, reasoningEffort: 'medium',
+        ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}) },
       generationProvenance: {
         ...provenance, imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
         revision: { parentCreativeId: parentId, canvasMediaId: sources.canvas.mediaId, canvasSha256: sources.canvas.sha256, ...(instruction ? { instruction } : {}) },
       },
-      ...(parent.referenceImageId ? { referenceImageId: parent.referenceImageId } : {}),
+      ...((concept.strategy.referenceSelection ? concept.strategy.referenceSelection.layoutSource : parent.referenceImageId)
+        ? { referenceImageId: concept.strategy.referenceSelection?.layoutSource ?? parent.referenceImageId } : {}),
       ...(parent.videoFrameSelection ? { videoFrameSelection: parent.videoFrameSelection } : {}),
     };
     const [saved] = await saveCreativeBatch([record]);
