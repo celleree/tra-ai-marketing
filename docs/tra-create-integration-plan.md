@@ -30,6 +30,7 @@ This plan is the single umbrella for this integration completion work. Keep impl
 - [PR #222](https://github.com/celleree/tra-ai-marketing/pull/222) / `docs/human-reference-pool.md` owns the detailed human-pool and Proof requirements. Reuse and reconcile it; do not build a second competing implementation.
 - [Issue #224](https://github.com/celleree/tra-ai-marketing/issues/224) owns planning speed/resumability. A/B are present; targeted repair C and optional auditor evaluation D remain separate. Fix source/copy quality first, then reassess C; D remains optional. Do not duplicate or silently close [Issue #224](https://github.com/celleree/tra-ai-marketing/issues/224).
 - Coordinate with any active planning-system cleanup before editing `portfolio-preparation`, `prepare-generation`, planner schemas or persisted jobs. Do not combine unrelated cleanup into these PRs.
+- Cleanup ownership remains **unconfirmed**. No identified cleanup PR is not proof that no cleanup exists; confirm the branch/worktree and owner before overlapping runtime edits.
 - `docs/image-workflow.md` remains the architecture authority except for the explicitly newer decisions below. The attached historical roadmap's Claude/Sol/Image-2 chain must not override current Astra/Sunburst behavior.
 - Recheck live staging and active branches before each PR; this SHA is an audit baseline, not a frozen future base.
 
@@ -61,6 +62,27 @@ Each listed checkpoint is a proposed smallest coherent PR, not permission to bun
 - [ ] **A2:** Route each supplied source independently through both current entry points. In the persisted path, save each result separately; layout completion must never mean video analysis is complete. Share narrowly scoped composition/validation where it prevents divergence; leave broader extraction to the cleanup owner.
 
 - [ ] **A3:** Complete reusable reference planning metadata using the existing reference/layout cache: stable reference ID, angle summary, layout blueprint, visual mechanism and optional curated notes/tags. Separate cached reusable analysis from per-request selection rationale; invalidate by content hash/model/schema version. Avoid a second reference store and repeated analysis of unchanged assets.
+
+#### A1 contract checkpoint
+
+`PlanningSourcePacketV1` in `lib/creatives/planning-source-packet.ts` defines the shared inventory using existing domain types. This is a type/documentation checkpoint, not runtime integration or final staging verification. A1 acceptance remains pending PR review/merge; all final inventory checks remain pending.
+
+| Packet field | Existing authority and boundary |
+|---|---|
+| `requestedSources` | Existing role/media-ID/SHA-256 provenance. Every supplied role remains accounted for independently. |
+| `videoIntelligence` | Existing job locator/analyzer fingerprint, job ID, result artifact hash and library identity/version; bounded timestamped transcript/observation projections, explicitly unverified as evidence and provider-ineligible. |
+| `traReferenceAnalyses` | Existing `CreativeReferenceAnalysis` per TRA image ID/hash. Capture model/schema/context hash when produced; unknown historical analyzer metadata stays null. Analysis is inspiration, not approved claims. |
+| `referenceCatalog` | Existing `ReferencePlanningCandidate` and versioned blueprint/cache. Retain IDs/hashes/model and independent angle/layout choices; no external pixels. Reusable semantic enrichment remains A3. |
+| `humanCandidates` | Existing approved-human records, selected-frame provenance and TRA-image identities. Readiness is not permission; C revalidates approval, source binding and exact fresh pixels. No external-human candidate. |
+| `proofReferences` | Existing Proof record ID/type/`updatedAt` revision token. D hydrates exact text, approved wording, attribution permission, restrictions and disclaimer before use. No duplicate evidence store. |
+
+Readiness is `PENDING`, `READY`, `UNAVAILABLE` or `RETRY_REQUIRED`; catalogs also distinguish `NOT_REQUESTED` from `READY` with zero results. Missing requested sources cannot become empty arrays or successful preparation. A supplied layout remains unresolved until its matching ID/hash is accounted for in the catalog. `READY` means data is available, never that evidence, identity or provider use is approved. These are inventory observations; existing jobs remain authoritative for leases, advancement and retry.
+
+Keep packet data JSON-serializable and compact: no buffers, thumbnails, hydrated eligibility objects or complete video libraries. Preserve the portfolio parser's current 2 MiB bound. Company/brand context stays in its existing planner path; the separate customer-insights file is not assumed loaded. Video observations, reference inspiration and human approval do not establish factual evidence.
+
+Compatibility decisions remain pending for implementation: A2/B must define legacy partially prepared job transitions before adopting the packet. Do not invent missing analyses, analyzer versions or historical source choices; keep existing completed/uncertain-work retry behavior. D must resolve Proof advertising-use approval semantics; `ACTIVE`, CSV import or record presence alone does not confer permission. C owns full-pool eligibility/selection. A1 changes no request, planner response, parser, persisted job or provider behavior.
+
+**Next bounded A2 task:** confirm cleanup ownership, then assess and implement the smallest coherent independent-source composition slice across `generation-sources.ts`, `portfolio-preparation.ts` and `prepare-generation.ts`, including required planner/parser/snapshot compatibility and focused tests. Preserve one provider-capable operation per persisted advance. Existing mixed-source tests encode suppression and must be revised; the explicit-frame request currently requires exactly one TRA video. Resolve that request boundary deliberately. Do not fold B's automatic Video Intelligence, C/D selection, A3 metadata enrichment or #224 targeted repair into A2. If the connected change exceeds the size target, split only at a valid intermediate boundary or justify it.
 
 **Verify:** actual portfolio entry plus legacy entry with video-only, layout-only, TRA-image-only, video+layout, and video+TRA-image+layout fixtures. Assert both video and layout facts reach the real Astra request and survive checkpoint/reload. Missing required sources produce a visible, specific state.
 

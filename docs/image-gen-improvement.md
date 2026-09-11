@@ -5,6 +5,8 @@ Verified implementation baseline: staging `d1c84b823356a3cc8f373f9fe03b2b8fb1b0c
 
 Approved target behavior, not a claim of implementation. This checkpoint supersedes the six-ad experiment instructions; code/tests govern runtime behavior. Follow docs/image-workflow.md for the active image boundaries.
 
+The newer [Create integration plan](tra-create-integration-plan.md) owns remaining source composition, automatic Video Intelligence/Proof integration, full selected human pools and separate image/Meta copy. Its A1 packet establishes types only; runtime wiring, Proof approval semantics, legacy-job transitions and final staging verification remain pending. Earlier three-frame/deferred-Proof directions below describe historical scope, not the new target.
+
 ## 1. Foundations to preserve
 
 | Area | Implemented and reusable | Specific gap |
@@ -37,9 +39,9 @@ Keep these pointers separate from the library's existing `angleSource: ai | manu
 |---|---|
 | Astra | Choose the strategic idea and execution, then the best supporting angle/layout combination. Consider an angle reference's own layout first, but replace it when another option improves fit or portfolio diversity. Explain unused relevant user references briefly |
 | Application | Supply a bounded, diverse shortlist with user references included; hydrate known IDs, check roles/availability, derive relationship, resolve each concept's selected layout and preserve original choices. Reuse cached blueprints; replace the selector's one-reference-per-output requirement |
-| Sunburst | Receive the distilled execution/copy, only the selected layout image when applicable, and separately selected approved human/document inputs. Never receive angle-only source pixels, the reference shortlist or portfolio reasoning |
+| Sunburst | Receive distilled execution/copy, the selected validated layout blueprint when applicable, and separately selected approved human/document inputs. Never receive external layout pixels, angle-only pixels, the reference shortlist or portfolio reasoning |
 | Persistence | Store concept/source choices, actual attached asset IDs/hashes/roles, cache versions, selection rationale and render brief with the creative. Preserve old records without inventing historical source choices |
-| Conditional rules | Apply third-party layout-transfer restrictions only with a layout attachment. Transfer structure, hierarchy, spacing and composition—not people, logos, branding, exact copy, prices, claims, statistics, testimonials or proof |
+| Conditional rules | A selected blueprint transfers structure, hierarchy, spacing and composition only; external layout pixels, people, branding, exact copy, prices, claims and proof remain excluded |
 
 Enrich the existing cache with angle summaries, mechanisms and missing composition detail. Do not rebuild layout analysis or attach competing layout images. Reference claims remain unapproved; human/document assets retain separate roles.
 
@@ -77,8 +79,8 @@ Implementation checkpoint: Video Studio now supports exact-frame preview, explic
 | Responsibility | Decision |
 |---|---|
 | Astra | Compare human and graphic treatments; select a human-led concept and approved frame IDs when they strengthen its proposition. It cannot approve a frame or substitute an invented person |
-| Application | Retrieve approved candidates, deduplicate/rank the shortlist, validate approval and source binding again before rendering, and use existing selected-frame PNG extraction. Initially retain one source video and the existing bounded 1–3 frames per concept; choose different sources across concepts |
-| Sunburst | Receive only the chosen approved human PNGs and that concept's identity/execution instructions, alongside its separately selected layout/document assets |
+| Application | Retrieve candidates and validate approval/source binding before rendering through existing selected-frame PNG extraction. Current runtime retains bounded selection; integration step C owns the full selected pool and exact per-ad subsets |
+| Sunburst | Receive only the chosen approved human PNGs and that concept's identity/execution instructions, alongside its selected layout blueprint and conditional document assets |
 | Persistence | Reusable approval catalog and annotations; per-creative frame selection and exact source/PNG provenance; revision lineage and revocation state |
 | Conditional rules | Identity preservation for human concepts; photographic realism for photographic humans, not all artwork. No fixed human/graphic ratio |
 
@@ -131,9 +133,9 @@ First pass excludes human corrections; log automatic fallbacks separately. Track
 
 For an asset-rich human-forward test brief, the opportunity range should exceed the historical human share if that count can be recovered. Otherwise report the achieved share and fulfilled human opportunities without claiming a quantified historical improvement. Also exercise no-approved-human and intentionally graphic briefs; neither should force humans.
 
-## Future Proof Library boundary (deferred)
+## Proof Library boundary (integration pending)
 
-Exact customer reviews and verified case studies will extend, not replace, the existing Company proof/customer-insight context. Keep future evidence selection separate from angle/layout provenance and human/document asset roles. Planner contracts must admit a separately validated stable proof-record ID when the catalog exists; do not encode proof identity as an angle source or copy text. This workstream does not implement proof records, retrieval, approval or selectable placeholder IDs. Future resolution must hydrate the selected verified record before claim use; an ID alone is not proof.
+The existing Proof Library extends Company proof/customer-insight context. Integration step D owns retrieval, exact wording/attribution/restriction checks and evidence provenance, reusing the records specified by [PR #222](https://github.com/celleree/tra-ai-marketing/pull/222). A1 references record ID/type/updatedAt separately from angle/layout and asset provenance. Resolve advertising-use approval before enabling claim use; neither an ID, ACTIVE status, model observation nor human-identity approval is sufficient. No duplicate evidence store or inferred historical proof choices.
 
 ## 7. Small implementation checkpoints
 
@@ -144,7 +146,7 @@ Each row is a bounded deliverable; estimate substantive lines before coding, tar
 | 1 | Extend concept fields and backward-compatible planning/render persistence; introduce typed sources alongside validated candidate catalogs | Legacy records remain readable; no invented historical provenance |
 | 2 | Enrich cached reference metadata and shortlist selection | Reuse unchanged analyses; uploaded references included; no one-reference-per-output requirement |
 | 3 | Wire independent Astra choices and deterministic relationship/ID resolution | Matched/mixed/original cases resolve correctly; no positional source association |
-| 4 | Attach selected layout with role-specific restrictions and provenance across generation/revisions | Only chosen layout pixels; angle-only sources excluded; human/document roles preserved |
+| 4 | Carry the selected validated layout blueprint and provenance across generation/revisions | External layout pixels excluded; human/document roles preserved |
 | 5 | Add portfolio hypotheses/audit and replace the restrictive diversity gate coherently | Paraphrased “next steps” duplicates flagged; genuinely different same-category ideas accepted |
 | 6 | Add curated frame approval records and source validation over existing video jobs | Unapproved, stale and revoked selections cannot reach rendering |
 | 7 | Extend existing video UI with review, deduplication and reusable human catalog | Approve/search/reopen/revoke; alternatives retained without duplicate analysis |
