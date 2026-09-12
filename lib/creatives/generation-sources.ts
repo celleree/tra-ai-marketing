@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { getMediaStorage } from '@/lib/media/local-storage';
+import type { MediaStorage } from '@/lib/media/storage';
 import { findEligibleProviderImageSource, hydrateCreativeSourceSelections } from '@/lib/media/source-hydration';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
@@ -22,6 +23,16 @@ export function assertGenerationAvailable(request: Pick<SourceRequest, 'videoFra
   if (!process.env.OPENAI_API_KEY) throw new CreativeGenerationPreparationError('OpenAI generation is not configured yet.', 503);
 }
 const sha256 = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
+
+/** Planning-only inventory. Does not choose render attachments or extract/approve human frames. */
+export async function hydratePlanningSourceInventory(sourceAssets: SourceRequest['sourceAssets'], storage: MediaStorage = getMediaStorage()) {
+  if (new Set(sourceAssets.map(source => source.mediaId)).size !== sourceAssets.length) {
+    throw new CreativeGenerationPreparationError('Planning sources contain duplicate media IDs.', 400);
+  }
+  return (await hydrateCreativeSourceSelections(storage, sourceAssets)).map(source => ({
+    source, identity: { role: source.role, mediaId: source.media.id, sha256: sha256(source.stored.buffer) },
+  }));
+}
 
 /** Reuse canonical source hydration and existing video extraction for planning or rendering. */
 export async function hydrateGenerationSources(request: SourceRequest) {
