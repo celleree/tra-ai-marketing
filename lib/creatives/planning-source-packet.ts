@@ -1,0 +1,75 @@
+import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
+import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import type { ProofRecord } from '@/lib/proof/types';
+import type { ReferencePlanningCandidate } from '@/lib/references/planning';
+import type { ApprovedHumanFrame } from '@/lib/video/approved-human';
+import type { VideoFrameLibrary } from '@/lib/video/frame-library';
+import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import type { VideoIntelligenceJob } from '@/lib/video/intelligence-job';
+import type { VideoIntelligenceJobLocator } from '@/lib/video/intelligence-service';
+
+type SourceIdentity = CreativeGenerationProvenance['requestedSources'][number];
+type SourceOfRole<Role extends SourceIdentity['role']> = Omit<SourceIdentity, 'role'> & { role: Role };
+
+/** Data availability only. READY never grants evidence, identity or provider permission. */
+export type PlanningSourceReadiness<T> =
+  | { status: 'PENDING' }
+  | { status: 'READY'; value: T }
+  | { status: 'UNAVAILABLE' | 'RETRY_REQUIRED'; reason: string };
+
+/** NOT_REQUESTED differs from a successfully retrieved empty catalog. */
+type PlanningCatalog<T> = { status: 'NOT_REQUESTED' } | PlanningSourceReadiness<T[]>;
+
+type VideoPlanningContext = {
+  locator: VideoIntelligenceJobLocator;
+  jobId: VideoIntelligenceJob['id'];
+  artifact: NonNullable<VideoIntelligenceJob['result']>;
+  library: Pick<VideoFrameLibrary,
+    'id' | 'version' | 'durationMs' | 'analysisModels' | 'providerEligible' | 'evidenceStatus'>;
+  // B retrieves bounded excerpts, retaining timestamps and frame identity; never thumbnails.
+  transcriptExcerpts: VideoFrameLibrary['transcript']['segments'];
+  observations: Array<Pick<VideoFrameLibrary['representativeFrames'][number],
+    'id' | 'timestampMs' | 'frameSha256' | 'evidenceStatus' | 'observation' | 'transcriptSegments'>>;
+};
+
+type TraReferencePlanningAnalysis = {
+  analysis: CreativeReferenceAnalysis;
+  // Capture at analysis time. Null means unknown historical metadata, not a cache hit.
+  analyzer: { model: string; schemaVersion: number; contextSha256: string } | null;
+  evidenceStatus: 'CREATIVE_INSPIRATION_ONLY';
+};
+
+/** Candidate identities only; C revalidates approval/source binding before selecting or rendering. */
+type HumanPlanningCandidate =
+  | { kind: 'APPROVED_HUMAN_RECORD'; record: Pick<ApprovedHumanFrame,
+      'id' | 'version' | 'updatedAt' | 'sourceName' | 'description' | 'source' | 'extractionVersion'
+      | 'approvedBy' | 'approvedAt' | 'active'> }
+  | { kind: 'SELECTED_VIDEO_FRAMES'; source: GeneratedVideoFrameSelection }
+  | { kind: 'TRA_REFERENCE_IMAGE'; source: SourceOfRole<'TRA_REFERENCE'> };
+
+/** D resolves exact wording and permissions from this revision; ACTIVE alone is not use approval. */
+type PlanningProofReference = Pick<ProofRecord, 'id' | 'type' | 'updatedAt'>;
+
+/**
+ * A1 contract only: no runtime producer, parser, persistence migration or provider consumer.
+ * JSON data/projections over existing stores, not a new source/approval database.
+ * Existing job state owns scheduling/retry; readiness describes an inventory snapshot.
+ * Future consumers validate IDs, hashes, versions and roles using the owning domains.
+ */
+export type PlanningSourcePacketV1 = {
+  version: 1;
+  requestedSources: CreativeGenerationProvenance['requestedSources'];
+  // Empty source arrays mean no source of that role was supplied, never failed preparation.
+  videoIntelligence: Array<{
+    source: SourceOfRole<'TRA_VIDEO'>;
+    readiness: PlanningSourceReadiness<VideoPlanningContext>;
+  }>;
+  traReferenceAnalyses: Array<{
+    source: SourceOfRole<'TRA_REFERENCE'>;
+    readiness: PlanningSourceReadiness<TraReferencePlanningAnalysis>;
+  }>;
+  // Blueprint carries its schema version; angle descriptions are inspiration, not proof.
+  referenceCatalog: PlanningCatalog<ReferencePlanningCandidate>;
+  humanCandidates: PlanningCatalog<HumanPlanningCandidate>;
+  proofReferences: PlanningCatalog<PlanningProofReference>;
+};

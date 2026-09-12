@@ -16,6 +16,8 @@ Do not reopen or restore older architecture merely because it still appears in a
 
 Current Stage 1 scope: static-image creative generation and editing. Do not implement Claude ad-account management, autonomous Meta decisions, budget optimization, automatic pause/scale behavior, performance dashboards, or autonomous publishing unless explicitly reactivated.
 
+The [Create integration plan](tra-create-integration-plan.md) records newer target decisions: automatic Video Intelligence and Proof use from Create, the full selected human pool, and separate image/Meta copy. These supersede the earlier deferred/separate-step/three-frame target direction, not the description of current runtime behavior. Its A1 source packet is a type-only contract; integration and final staging verification remain pending.
+
 The active target creative pipeline is:
 
 `User/Kinetiq inputs -> GPT-6 Astra (medium reasoning) creative planning/prompting -> GPT Image 2.5 Sunburst generation/editing -> user review/select -> save to TRA Creatives`
@@ -107,6 +109,8 @@ The video preprocessing/selection path uses resumable persisted jobs, cached sou
 Current implemented flow:
 
 `TRA_VIDEO -> validation/hydration -> candidate extraction -> technical grouping + transcript + visual observations -> source-bound frame library -> user selects 1-3 known representative frames -> fresh approved PNG extraction from original video -> Astra/image generation -> provenance saved with creative`
+
+The three-frame bound and separate Video Intelligence step above describe current implementation. The integration plan's B/C steps own automatic reuse and full-pool selection; A1 does not remove those limits or change paid-work retry behavior. Source readiness never approves evidence or human identity use.
 
 Current invariants:
 
@@ -246,7 +250,7 @@ The current image workflow is ready when these work end-to-end:
 
 The approved [image productionization checkpoint](image-gen-improvement.md) defines the proposition-first planner, independent angle/layout, portfolio diversity, approved-human library and resumable generation. Prefer approved TRA humans when strategically useful, without fixed human/graphic quotas; fictional adults remain a later product decision. Use tax documents only when they materially help the concept. Historical manual-test exceptions do not change these implementation boundaries.
 
-The separately owned Proof Library of exact customer reviews and verified case studies extends Company proof/customer-insight context. Keep future stable proof-record selection separate from angle/layout and asset provenance; planner/render integration is deferred from this workstream.
+The separately owned Proof Library of exact customer reviews and verified case studies extends Company proof/customer-insight context. Stable proof-record selection stays separate from angle/layout and asset provenance. The [Create integration plan](tra-create-integration-plan.md) now owns planner/render integration, with detailed human/Proof requirements in [PR #222](https://github.com/celleree/tra-ai-marketing/pull/222). Proof use-approval semantics and runtime integration remain pending under D; record readiness or ACTIVE status alone is not advertising-use approval.
 
 This is the active Stage 1 implementation order. Astra must verify current `staging` and relevant code/tests before treating any item as incomplete.
 
