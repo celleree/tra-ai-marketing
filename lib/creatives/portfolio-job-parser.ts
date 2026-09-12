@@ -8,33 +8,18 @@ import { parsePortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { MAX_PORTFOLIO_CREATIVES, type CreativePortfolioJob, type PortfolioPlanningCheckpoint } from '@/lib/creatives/portfolio-job';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
 import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
-import { parseLayoutBlueprint } from '@/lib/layouts/blueprint';
+import { parsePlanningSourceAnalysis, validAnalysis, validSourceLayout } from '@/lib/creatives/planning-source-parser';
 import { parseReferenceCatalog } from '@/lib/references/planning';
 import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS } from '@/lib/video/approved-human';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
-const string = (value: unknown) => typeof value === 'string';
 const time = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0;
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-const textArray = (value: unknown) => Array.isArray(value) && value.every(item => typeof item === 'string');
 
 class UnsupportedSourceCompositionVersionError extends Error {
   constructor() { super('Unsupported portfolio source composition version. A compatible app version is required.'); }
 }
-
-/** Match the provider analysis schema: required strings may legitimately be empty. */
-const validAnalysis = (value: unknown) => record(value)
-  && string(value.summary) && textArray(value.visibleText) && string(value.visualStructure) && string(value.hookOrAngle)
-  && string(value.offerOrCta) && string(value.styleNotes) && textArray(value.preserve) && textArray(value.avoid)
-  && textArray(value.unknowns) && typeof value.dominantCategory === 'string'
-  && CREATIVE_CATEGORIES.includes(value.dominantCategory as (typeof CREATIVE_CATEGORIES)[number]);
-
-const validSourceLayout = (value: unknown) => {
-  if (!record(value) || typeof value.contentHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.contentHash)
-    || !text(value.analyzerModel) || typeof value.cacheHit !== 'boolean') return false;
-  try { parseLayoutBlueprint(value.blueprint); return true; } catch { return false; }
-};
 
 const validSelectedReferences = (value: unknown) => Array.isArray(value) && value.every(selection => {
   if (!record(selection) || !text(selection.imageUrl) || !text(selection.selectionReason) || !record(selection.item)) return false;
@@ -49,8 +34,9 @@ const validSelectedReferences = (value: unknown) => Array.isArray(value) && valu
     && ['ai', 'manual', 'legacy', 'fallback'].includes(String(item.angleSource));
 });
 
-const validPreparation = (value: unknown): value is PortfolioPreparationState => {
+const validPreparation = (value: unknown, job: CreativePortfolioJob): value is PortfolioPreparationState => {
   if (!record(value) || typeof value.quotaReserved !== 'boolean') return false;
+  if (value.sourceAnalysis !== undefined) parsePlanningSourceAnalysis(value.sourceAnalysis, job.request.sourceAssets);
   if (value.analysis !== undefined && !validAnalysis(value.analysis)) return false;
   if (value.sourceLayout !== undefined && !validSourceLayout(value.sourceLayout)) return false;
   if (value.selectedReferences !== undefined && !validSelectedReferences(value.selectedReferences)) return false;
@@ -65,6 +51,10 @@ const validSnapshot = (
   requireDiverse: boolean,
 ) => {
   try {
+    if (snapshot.sourceAnalysis !== undefined) {
+      parsePlanningSourceAnalysis(snapshot.sourceAnalysis, job.request.sourceAssets, true);
+      parsePlanningSourceAnalysis(snapshot.sourceAnalysis, snapshot.requestedSources, true);
+    }
     const plan = snapshot.batchPlan;
     const audit = plan.portfolioAudit === undefined ? undefined : parsePortfolioAudit(plan.portfolioAudit);
     if (snapshot.version !== 1 || !isDeepStrictEqual(snapshot.request, job.request)
@@ -89,7 +79,8 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
   const checkpoint = value as unknown as PortfolioPlanningCheckpoint, args = checkpoint.plannerArgs;
   if (args.count !== job.slots.length || !text(args.context) || !validAnalysis(args.analysis)
     || typeof args.hasApprovedHumanSource !== 'boolean'
-    || !isDeepStrictEqual(args.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)) return false;
+    || !isDeepStrictEqual(args.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)
+    || !isDeepStrictEqual(args.sourceAnalysis, checkpoint.snapshot.sourceAnalysis)) return false;
   if (args.approvedHumanOptions !== undefined && (!Array.isArray(args.approvedHumanOptions)
     || args.approvedHumanOptions.length > MAX_APPROVED_HUMAN_OPTIONS
     || new Set(args.approvedHumanOptions.map(option => option?.id)).size !== args.approvedHumanOptions.length
@@ -126,7 +117,7 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
     } else {
       if (job.snapshot !== null || job.slots.some(slot => slot.status !== 'PENDING')) throw new Error();
       if (job.planning.phase === 'INITIAL_PLAN') {
-        if (!validPreparation(job.planning.preparation)) throw new Error();
+        if (!validPreparation(job.planning.preparation, job)) throw new Error();
       } else if (job.planning.phase === 'TARGETED_REPAIR') {
         if (!validCheckpoint(job.planning.checkpoint, job, 'required')
           || !getCreativeDiversityIssue(job.planning.checkpoint.snapshot.batchPlan.creatives,

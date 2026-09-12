@@ -16,6 +16,7 @@ import type { ReferenceLibraryItem } from '@/lib/references/types';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 
 export type PortfolioPreparationState = {
+  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState;
   quotaReserved: boolean;
   analysis?: CreativeReferenceAnalysis;
   sourceLayout?: ResolvedLayoutBlueprint;

@@ -20,6 +20,14 @@ describe('resumable creative portfolio snapshot', () => {
 
   it('round-trips plan and audit without runtime buffers, functions or aliasing', async () => {
     const context = prepared();
+    const source = { role: 'TRA_VIDEO' as const, mediaId: `media_${'d'.repeat(32)}`, sha256: hash };
+    context.requestedSources = [source];
+    context.request.sourceAssets = [{ role: source.role, mediaId: source.mediaId }];
+    context.sourceAnalysis = { version: 1, entries: [{ source,
+      analyzer: { kind: 'REPRESENTATIVE_VIDEO_FRAMES', model: 'analysis-model', schemaVersion: 1, contextSha256: hash },
+      evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'REPRESENTATIVE_VIDEO_FRAMES',
+        analyzedFrames: [{ timestampMs: 1200, frameSha256: hash }], analysis: { summary: 'VIDEO_SENTINEL', visibleText: [],
+          visualStructure: '', hookOrAngle: '', offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'educational' } } }] };
     const snapshot = snapshotCreativePortfolio(context);
     expect(snapshot).not.toHaveProperty('storage');
     expect(snapshot).not.toHaveProperty('providerImageSource');
@@ -27,10 +35,13 @@ describe('resumable creative portfolio snapshot', () => {
     expect(snapshot.request.context).toBe('Frozen company direction');
     const reloaded = JSON.parse(JSON.stringify(snapshot));
     const current = prepared();
+    current.requestedSources = [source];
     hydrate.mockResolvedValue(current);
     const restored = await restoreCreativePortfolio(reloaded);
     expect(hydrate).toHaveBeenCalledWith(snapshot.request);
     expect(restored.batchPlan).toEqual(snapshot.batchPlan);
+    expect(restored.sourceAnalysis).toEqual(context.sourceAnalysis);
+    expect(restored.sourceAnalysis).not.toBe(snapshot.sourceAnalysis);
     expect(restored.storage).toBe(current.storage);
     restored.batchPlan.plannerModel = 'changed';
     expect(snapshot.batchPlan.plannerModel).toBe('gpt-6-astra');

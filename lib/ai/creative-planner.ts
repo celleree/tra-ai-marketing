@@ -1,4 +1,6 @@
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
+import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
+import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
@@ -122,12 +124,14 @@ export type CreativeBatchPlannerArgs = {
   count: number;
   context: string;
   analysis: CreativeReferenceAnalysis;
+  sourceAnalysis?: PlanningSourceAnalysisState;
   hasApprovedHumanSource: boolean;
   referenceCatalog?: ReferencePlanningCandidate[];
   approvedHumanOptions?: ApprovedHumanOption[];
 };
 
 export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Promise<CreativeBatchPlan> {
+  const sourceAnalysis = args.sourceAnalysis === undefined ? undefined : parsePlanningSourceAnalysis(args.sourceAnalysis, undefined, true);
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
     throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
   }
@@ -152,6 +156,7 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
           requestedCount: args.count,
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           referenceAnalysis: args.analysis,
+          ...(sourceAnalysis ? { sourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. All entries are unverified observations or design inspiration, never evidence, claims, human approval or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
           // Hashes/analyzer versions stay in the persisted catalog, not Astra's decisions.
           ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog.map(({ referenceId, priority, angleDescription, blueprint }) =>
             ({ referenceId, priority, angleDescription, blueprint })) } : {}),
