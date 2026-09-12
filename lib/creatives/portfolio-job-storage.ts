@@ -34,6 +34,10 @@ export async function updateCreativePortfolio(
     const current = await read(id, storage);
     if (!current) throw new Error('Creative portfolio was not found.');
     const next = change(structuredClone(current.job));
+    // Preserve the stored marker exactly, including its absence on historical portfolios.
+    if (next.sourceCompositionVersion !== current.job.sourceCompositionVersion) {
+      throw new Error('Portfolio source composition version is immutable.');
+    }
     if (next.id !== id || next.createdAtMs !== current.job.createdAtMs || next.updatedAtMs < current.job.updatedAtMs
       || !isDeepStrictEqual(next.request, current.job.request)
       || !isDeepStrictEqual(next.slots.map(slot => [slot.index, slot.creativeId]), current.job.slots.map(slot => [slot.index, slot.creativeId]))

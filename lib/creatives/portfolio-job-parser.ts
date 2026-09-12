@@ -19,6 +19,10 @@ const time = (value: unknown) => Number.isSafeInteger(value) && Number(value) >=
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const textArray = (value: unknown) => Array.isArray(value) && value.every(item => typeof item === 'string');
 
+class UnsupportedSourceCompositionVersionError extends Error {
+  constructor() { super('Unsupported portfolio source composition version. A compatible app version is required.'); }
+}
+
 /** Match the provider analysis schema: required strings may legitimately be empty. */
 const validAnalysis = (value: unknown) => record(value)
   && string(value.summary) && textArray(value.visibleText) && string(value.visualStructure) && string(value.hookOrAngle)
@@ -99,6 +103,9 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
   try {
     if (bytes.length > 2 * 1024 * 1024 || !isPortfolioId(expectedId)) throw new Error();
     const raw = JSON.parse(bytes.toString('utf8')) as CreativePortfolioJob & { planning?: unknown };
+    if (raw.sourceCompositionVersion !== undefined && raw.sourceCompositionVersion !== 1) {
+      throw new UnsupportedSourceCompositionVersionError();
+    }
     let planning: unknown = raw.planning ?? { phase: raw.snapshot ? 'READY_TO_RENDER' : 'INITIAL_PLAN' };
     if (record(planning) && planning.phase === 'INITIAL_PLAN' && !('preparation' in planning)) {
       planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } };
@@ -138,5 +145,8 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
       || (job.lease.slotIndex === null ? job.snapshot !== null
         : !job.snapshot || job.slots.find(slot => slot.index === job.lease!.slotIndex)?.status !== 'PENDING'))) throw new Error();
     return job;
-  } catch { throw new Error('Saved creative portfolio is invalid.'); }
+  } catch (error) {
+    if (error instanceof UnsupportedSourceCompositionVersionError) throw error;
+    throw new Error('Saved creative portfolio is invalid.');
+  }
 }
