@@ -66,6 +66,7 @@ export async function advanceCreativePortfolio(
           requestUrl,
           job.planning.preparation,
           () => { providerWorkStarted = true; },
+          job.sourceCompositionVersion,
         );
         if (result.state) {
           return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, result.state), storage) };

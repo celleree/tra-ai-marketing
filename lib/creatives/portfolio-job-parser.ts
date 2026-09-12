@@ -94,7 +94,7 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
   try {
     if (bytes.length > 2 * 1024 * 1024 || !isPortfolioId(expectedId)) throw new Error();
     const raw = JSON.parse(bytes.toString('utf8')) as CreativePortfolioJob & { planning?: unknown };
-    if (raw.sourceCompositionVersion !== undefined && raw.sourceCompositionVersion !== 1) {
+    if (raw.sourceCompositionVersion !== undefined && raw.sourceCompositionVersion !== 1 && raw.sourceCompositionVersion !== 2) {
       throw new UnsupportedSourceCompositionVersionError();
     }
     let planning: unknown = raw.planning ?? { phase: raw.snapshot ? 'READY_TO_RENDER' : 'INITIAL_PLAN' };

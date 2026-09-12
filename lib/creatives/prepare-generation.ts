@@ -4,18 +4,18 @@ import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-requ
 import type { CreativeBatchPlan } from '@/lib/creatives/planned';
 import { buildReferencePlanningCatalog } from '@/lib/references/planning.server';
 import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
-import { analyzeTraSourceCreative, analyzeReferenceCreative, type CreativeReferenceAnalysis } from '@/lib/ai/openai';
+import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import { planCreativeBatch, requestCreativeBatch, type CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
-import { analyzeApprovedTraVideoFrames } from '@/lib/ai/video-frame-generation';
 import { selectBestReferenceCreatives, type ReferenceSelectionCandidate, type SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { formatLayoutBlueprintForPlanning, LAYOUT_BLUEPRINT_SCHEMA_VERSION, type LayoutBlueprint } from '@/lib/layouts/blueprint';
-import { getOrAnalyzeLayoutBlueprint, type ResolvedLayoutBlueprint } from '@/lib/layouts/service';
 import { isUsableApprovedHumanSource } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
+import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
+import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 
 const buildPromptOnlyAnalysis = (
   context: string
@@ -86,26 +86,18 @@ export async function prepareCreativeGeneration(
   const { storage, generationSourceAsset, requestedSources, source, providerImageSource, videoFrameSet,
     generatedVideoFrameSelection, brandLogo, reserveLogoArea, logoOverlaySource } = await hydrateGenerationSources(data);
 
-  let analysis: CreativeReferenceAnalysis;
-  let layoutBlueprint: ResolvedLayoutBlueprint | null = null;
+  // Legacy HTTP requests remain single-shot: no hidden durable job or automatic source-analysis retry.
+  let next = await advancePlanningSourceAnalysis(data, undefined, () => {});
+  while (!next.complete) next = await advancePlanningSourceAnalysis(data, next.state, () => {});
+  const sourceAnalysis = parsePlanningSourceAnalysis(next.state, requestedSources, true);
+  const primaryId = generationSourceAsset?.media.id ?? videoFrameSet?.source.media.id;
+  const primary = sourceAnalysis.entries.filter(entry => entry.source.mediaId === primaryId).map(entry => entry.result!);
+  const layoutBlueprint = primary.find(result => result.kind === 'LAYOUT_BLUEPRINT')?.layout ?? null;
+  const observation = primary.find(result => result.kind === 'TRA_REFERENCE' || result.kind === 'REPRESENTATIVE_VIDEO_FRAMES');
+  const angle = primary.find(result => result.kind === 'LAYOUT_ANGLE');
+  const analysis = observation?.analysis ?? (layoutBlueprint ? { ...buildLayoutReferenceAnalysis(layoutBlueprint.blueprint),
+    hookOrAngle: angle?.angleDescription ?? '' } : buildPromptOnlyAnalysis(data.context));
   let selectedReferences: SelectedReferenceCreative[] = [];
-
-  if (source && generationSourceAsset?.role === 'LAYOUT_REFERENCE') {
-    layoutBlueprint = await getOrAnalyzeLayoutBlueprint(source);
-    analysis = buildLayoutReferenceAnalysis(layoutBlueprint.blueprint);
-    // Strategy analysis is planner-only; the renderer still receives controlled geometry.
-    analysis.hookOrAngle = (await analyzeReferenceCreative(source, data.context)).hookOrAngle;
-  } else if (source && generationSourceAsset?.role === 'TRA_REFERENCE') {
-    analysis = await analyzeTraSourceCreative(source, data.context);
-
-  } else if (videoFrameSet) {
-    analysis = await analyzeApprovedTraVideoFrames({
-      frames: videoFrameSet.frames,
-      context: data.context,
-    });
-  } else {
-    analysis = buildPromptOnlyAnalysis(data.context);
-  }
 
   const library = (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
   const requestedReferenceCount = Math.min(8, data.variationCount, library.length);
@@ -113,10 +105,10 @@ export async function prepareCreativeGeneration(
     candidates: buildReferenceCandidates(library, requestUrl), requestedCount: requestedReferenceCount,
     userContext: data.context, traSummary: analysis.summary, traPreserve: analysis.preserve,
   });
-  const referenceCatalog = await buildReferencePlanningCatalog({ storage, selections: selectedReferences,
-    ...(source && generationSourceAsset ? { uploaded: { referenceId: generationSourceAsset.media.id, source,
-      angleDescription: analysis.hookOrAngle, ...(layoutBlueprint ? { layout: layoutBlueprint } : {}) } } : {}),
-  });
+  const uploadedCatalog = composedSourceCatalog(sourceAnalysis);
+  const referenceCatalog = [...uploadedCatalog, ...await buildReferencePlanningCatalog({ storage,
+    selections: selectedReferences.filter(selection => !uploadedCatalog.some(item => item.referenceId === selection.item.id)),
+  })];
   const referenceDirections = selectedReferences.length
     ? selectedReferences
         .map((selection) =>
@@ -172,7 +164,7 @@ export async function prepareCreativeGeneration(
   const plannerArgs: CreativeBatchPlannerArgs = {
     count: data.variationCount,
     context: generationContext,
-    analysis,
+    analysis, sourceAnalysis,
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
     referenceCatalog,
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
@@ -190,7 +182,7 @@ export async function prepareCreativeGeneration(
   }
 
   const analysisSources: CreativeGenerationProvenance['analysisSources'] = [
-    ...(layoutBlueprint && generationSourceAsset
+    ...(layoutBlueprint && generationSourceAsset?.role === 'LAYOUT_REFERENCE'
       ? [
           {
             type: 'LAYOUT_REFERENCE' as const,
@@ -211,7 +203,7 @@ export async function prepareCreativeGeneration(
   ];
 
   return {
-    request: data, batchPlan, plannerArgs, referenceCatalog, selectedReferences, requestedSources, analysisSources,
+    request: data, batchPlan, plannerArgs, sourceAnalysis, referenceCatalog, selectedReferences, requestedSources, analysisSources,
     logoOverlaySource, reserveLogoArea, brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage,
   };
 }

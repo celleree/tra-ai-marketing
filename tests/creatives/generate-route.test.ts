@@ -64,7 +64,8 @@ vi.mock('@/lib/ai/creative-planner', () => ({
   planCreativeBatch: mocks.planCreativeBatch,
 }));
 
-vi.mock('@/lib/ai/video-frame-generation', () => ({
+vi.mock('@/lib/ai/video-frame-generation', async original => ({
+  ...await original<typeof import('@/lib/ai/video-frame-generation')>(),
   analyzeApprovedTraVideoFrames: mocks.analyzeApprovedTraVideoFrames,
   generateApprovedTraVideoFrameCreativeImage:
     mocks.generateApprovedTraVideoFrameCreativeImage,
@@ -100,7 +101,7 @@ import {
   POST,
 } from '@/app/api/creatives/generate/route';
 
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const imageResultFor = (operationType: 'PROMPT_GENERATION' | 'TRA_REFERENCE_GENERATION' | 'TRA_VIDEO_FRAME_GENERATION') => ({
   buffer: PNG, prompt: 'Mock final image prompt', model: 'gpt-image-2.5-sunburst',
   routing: { operationType, preferredModel: 'gpt-image-2.5-sunburst' as const, actualModel: 'gpt-image-2.5-sunburst' as const, fallbackUsed: false, fallbackFromModel: null, fallbackReason: null },
@@ -513,7 +514,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
-    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-5.6-terra' });
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
     for (const { data } of events.filter(({ event }) => event === 'creative')) {
       const provenance = parseCreativeGenerationProvenance(
@@ -584,7 +585,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.getOrAnalyzeLayoutBlueprint).not.toHaveBeenCalled();
-    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
+    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(2);
     expect(mocks.analyzeApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
@@ -619,7 +620,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     }
   });
 
-  it('regenerates only selected library frames for analysis and image generation and streams their provenance', async () => {
+  it('retains selected render frames separately from representative-frame analysis and streams their provenance', async () => {
     const videoId = mediaId('9');
     storedById[videoId] = video('9');
     const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
@@ -674,7 +675,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
-    expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
     expect(mocks.loadVideoSelectionContext).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'TRA_VIDEO', media: expect.objectContaining({ id: videoId }) })
     );
@@ -684,7 +685,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
       [LIBRARY_FRAME_ID]
     );
     expect(mocks.analyzeApprovedTraVideoFrames).toHaveBeenCalledWith(
-      expect.objectContaining({ frames: selectedFrames })
+      expect.objectContaining({ frames: expect.arrayContaining([expect.objectContaining({ timestampMs: 500 })]) })
     );
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     for (const [call] of mocks.generateApprovedTraVideoFrameCreativeImage.mock.calls) {
@@ -811,10 +812,10 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
-    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
-    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-5.6-terra' });
+    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(2);
     expect(mocks.getApprovedTraVideoFrames.mock.calls[0][0].stored).toBe(storedById[videoId]);
-    expect(mocks.analyzeApprovedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.analyzeApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
     expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     for (const [call] of mocks.generateApprovedTraVideoFrameCreativeImage.mock.calls) {
@@ -851,10 +852,10 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
-    expect(readMediaById).toHaveBeenCalledTimes(3);
-    expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
-    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId]);
-    expect(mocks.analyzeTraSourceCreative).not.toHaveBeenCalled();
+    expect(readMediaById).toHaveBeenCalledTimes(21);
+    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-5.6-terra' });
+    expect(mocks.analyzeTraSourceCreative).toHaveBeenCalledTimes(1);
     expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
     for (const [call] of mocks.generateApprovedTraReferenceCreativeImage.mock.calls) {
@@ -926,7 +927,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
-    expect(readMediaById).toHaveBeenCalledTimes(1);
+    expect(readMediaById).toHaveBeenCalledTimes(4);
     expect(readMediaById).toHaveBeenCalledWith(traId);
     expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledTimes(3);
     expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();

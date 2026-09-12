@@ -14,6 +14,8 @@ import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
+import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
+import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 
 export type PortfolioPreparationState = {
   sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState;
@@ -98,8 +100,16 @@ export async function advancePortfolioPreparation(
   requestUrl: string,
   current: PortfolioPreparationState,
   onProviderOperationStart: () => void,
+  sourceCompositionVersion: 1 | 2 = 1,
 ): Promise<PortfolioPreparationResult> {
   const state = structuredClone(current);
+  if (sourceCompositionVersion === 2) {
+    const wasComplete = state.sourceAnalysis?.entries.every(entry => entry.result !== undefined);
+    const next = await advancePlanningSourceAnalysis(data, state.sourceAnalysis, onProviderOperationStart);
+    state.sourceAnalysis = next.state;
+    // Even the last analysis result must be saved before reference selection or Astra starts.
+    if (!wasComplete) return { state };
+  }
   const {
     storage,
     generationSourceAsset,
@@ -112,6 +122,20 @@ export async function advancePortfolioPreparation(
     reserveLogoArea,
     logoOverlaySource,
   } = await hydrateGenerationSources(data);
+  if (sourceCompositionVersion === 2) parsePlanningSourceAnalysis(state.sourceAnalysis, requestedSources, true);
+
+  if (sourceCompositionVersion === 2 && !state.analysis) {
+    const entries = state.sourceAnalysis!.entries;
+    const primaryId = generationSourceAsset?.media.id ?? videoFrameSet?.source.media.id;
+    const primary = entries.filter(entry => entry.source.mediaId === primaryId).map(entry => entry.result!);
+    const layout = primary.find(result => result.kind === 'LAYOUT_BLUEPRINT');
+    state.sourceLayout = layout?.layout;
+    const observation = primary.find(result => result.kind === 'TRA_REFERENCE' || result.kind === 'REPRESENTATIVE_VIDEO_FRAMES');
+    const angle = primary.find(result => result.kind === 'LAYOUT_ANGLE');
+    state.analysis = observation?.analysis ?? (layout ? { ...buildLayoutReferenceAnalysis(layout.layout.blueprint),
+      hookOrAngle: angle?.angleDescription ?? '' } : buildPromptOnlyAnalysis(data.context));
+    state.referenceCatalog = composedSourceCatalog(state.sourceAnalysis!);
+  }
 
   if (source && generationSourceAsset?.role === 'LAYOUT_REFERENCE' && !state.sourceLayout) {
     onProviderOperationStart();
@@ -229,6 +253,7 @@ export async function advancePortfolioPreparation(
     count: data.variationCount,
     context: generationContext,
     analysis: state.analysis,
+    ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
     referenceCatalog: state.referenceCatalog,
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
@@ -257,6 +282,7 @@ export async function advancePortfolioPreparation(
       request: data,
       batchPlan,
       plannerArgs,
+      ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
       referenceCatalog: state.referenceCatalog,
       selectedReferences: state.selectedReferences,
       requestedSources,

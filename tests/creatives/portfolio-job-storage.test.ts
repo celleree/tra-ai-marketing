@@ -9,14 +9,14 @@ import { MemoryPortfolioStorage as MemoryStorage, portfolioRequest as request, p
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value));
 
 describe('durable creative portfolio storage', () => {
-  it('creates an explicitly legacy portfolio without enabling composed preparation', async () => {
+  it('creates a composed portfolio while retaining explicit saved versions', async () => {
     const storage = new MemoryStorage(), job = await createCreativePortfolio(request(), storage, 1000);
-    expect(job.sourceCompositionVersion).toBe(1);
+    expect(job.sourceCompositionVersion).toBe(2);
     expect(job.planning).toEqual({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } });
     expect(await readCreativePortfolio(job.id, storage)).toEqual(job);
   });
 
-  it.each([0, 2, -1, 1.5, '1', null, {}, []])('rejects unsupported composition marker %j without rewriting saved data', async marker => {
+  it.each([0, 3, -1, 1.5, '1', null, {}, []])('rejects unsupported composition marker %j without rewriting saved data', async marker => {
     const storage = new MemoryStorage(), job = newCreativePortfolio(request(), 1000);
     const key = `creative-portfolios/v1/${job.id}.json`, original = encode({ ...job, sourceCompositionVersion: marker });
     await storage.write(key, original, null);
