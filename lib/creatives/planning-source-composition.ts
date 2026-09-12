@@ -81,6 +81,6 @@ export function composedSourceCatalog(state: PlanningSourceAnalysisState): Refer
     const layout = entry.result.layout;
     return [{ referenceId: entry.source.mediaId, priority: 'user', sourceSha256: entry.source.sha256,
       analyzerModel: layout.analyzerModel, blueprint: layout.blueprint, angleDescription:
-        (cue?.kind === 'LAYOUT_ANGLE' ? cue.angleDescription : cue?.kind === 'TRA_REFERENCE' ? cue.analysis.hookOrAngle : '').slice(0, 2000) || 'No angle observed. Layout guidance only.' }];
+        (cue?.kind === 'LAYOUT_ANGLE' ? cue.angleDescription : cue?.kind === 'TRA_REFERENCE' ? cue.analysis.hookOrAngle : '').slice(0, 2000).trim() || 'No angle observed. Layout guidance only.' }];
   });
 }

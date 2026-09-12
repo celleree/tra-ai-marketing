@@ -115,7 +115,7 @@ describe('real preparation to Astra with composed sources', () => {
     expect(mocks.image).toHaveBeenCalledTimes(3); expect(outbound).toHaveLength(0);
   });
 
-  it('stops changed sources before more provider work and supports an explicitly empty angle', async () => {
+  it.each(['', '   '])('stops changed sources and supports an empty angle %j', async angle => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(request(), storage);
     for (let i = 0; i < 3; i++) await step(job, storage);
     const saved = (await readCreativePortfolio(job.id, storage))!.planning;
@@ -124,7 +124,7 @@ describe('real preparation to Astra with composed sources', () => {
     expect((await step(job, storage)).error).toContain('changed');
     expect((await readCreativePortfolio(job.id, storage))!.planning).toEqual(saved);
     expect(mocks.image).not.toHaveBeenCalled(); expect(outbound).toHaveLength(0);
-    mocks.angle.mockResolvedValueOnce(analysis(''));
+    mocks.angle.mockResolvedValueOnce(analysis(angle));
     const prepared = await prepareCreativeGeneration(request(), 'http://localhost');
     expect(prepared.referenceCatalog.some(item => item.angleDescription === 'No angle observed. Layout guidance only.')).toBe(true);
   });
