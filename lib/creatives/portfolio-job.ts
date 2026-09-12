@@ -20,6 +20,8 @@ export type PortfolioPlanningState =
   | { phase: 'READY_TO_RENDER' };
 export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;
+  // Version 1 and an absent marker both use legacy composition. New composition is not enabled.
+  readonly sourceCompositionVersion?: 1;
   request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
   planning: PortfolioPlanningState; planningError?: string;
   lease: { id: string; slotIndex: number | null; expiresAtMs: number } | null;
@@ -31,7 +33,7 @@ export function newCreativePortfolio(request: ValidGenerateCreativeRequest, now 
   if (!Number.isInteger(request.variationCount) || request.variationCount < 2 || request.variationCount > MAX_PORTFOLIO_CREATIVES) {
     throw new Error('A portfolio requires 2 to 36 creatives.');
   }
-  return { version: 1, id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
+  return { version: 1, sourceCompositionVersion: 1, id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
     snapshot: null, planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } }, lease: null,
     slots: Array.from({ length: request.variationCount }, (_, index) => ({
       index: index + 1, creativeId: id('creative_'), status: 'PENDING',

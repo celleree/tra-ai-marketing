@@ -30,7 +30,7 @@ This plan is the single umbrella for this integration completion work. Keep impl
 - [PR #222](https://github.com/celleree/tra-ai-marketing/pull/222) / `docs/human-reference-pool.md` owns the detailed human-pool and Proof requirements. Reuse and reconcile it; do not build a second competing implementation.
 - [Issue #224](https://github.com/celleree/tra-ai-marketing/issues/224) owns planning speed/resumability. A/B are present; targeted repair C and optional auditor evaluation D remain separate. Fix source/copy quality first, then reassess C; D remains optional. Do not duplicate or silently close [Issue #224](https://github.com/celleree/tra-ai-marketing/issues/224).
 - Coordinate with any active planning-system cleanup before editing `portfolio-preparation`, `prepare-generation`, planner schemas or persisted jobs. Do not combine unrelated cleanup into these PRs.
-- Cleanup ownership remains **unconfirmed**. No identified cleanup PR is not proof that no cleanup exists; confirm the branch/worktree and owner before overlapping runtime edits.
+- Cleanup ownership remains **unconfirmed**. No identified cleanup PR is not proof that no cleanup exists. Recheck published changes before each checkpoint; stop for a concrete conflict, not merely an unanswered ownership question.
 - `docs/image-workflow.md` remains the architecture authority except for the explicitly newer decisions below. The attached historical roadmap's Claude/Sol/Image-2 chain must not override current Astra/Sunburst behavior.
 - Recheck live staging and active branches before each PR; this SHA is an audit baseline, not a frozen future base.
 
@@ -65,7 +65,7 @@ Each listed checkpoint is a proposed smallest coherent PR, not permission to bun
 
 #### A1 contract checkpoint
 
-`PlanningSourcePacketV1` in `lib/creatives/planning-source-packet.ts` defines the shared inventory using existing domain types. This is a type/documentation checkpoint, not runtime integration or final staging verification. A1 acceptance remains pending PR review/merge; all final inventory checks remain pending.
+`PlanningSourcePacketV1` in `lib/creatives/planning-source-packet.ts` defines the shared inventory using existing domain types. A1 merged in PR #228. This is a type/documentation checkpoint, not runtime integration or final staging verification; all final inventory checks remain pending.
 
 | Packet field | Existing authority and boundary |
 |---|---|
@@ -80,9 +80,25 @@ Readiness is `PENDING`, `READY`, `UNAVAILABLE` or `RETRY_REQUIRED`; catalogs als
 
 Keep packet data JSON-serializable and compact: no buffers, thumbnails, hydrated eligibility objects or complete video libraries. Preserve the portfolio parser's current 2 MiB bound. Company/brand context stays in its existing planner path; the separate customer-insights file is not assumed loaded. Video observations, reference inspiration and human approval do not establish factual evidence.
 
-Compatibility decisions remain pending for implementation: A2/B must define legacy partially prepared job transitions before adopting the packet. Do not invent missing analyses, analyzer versions or historical source choices; keep existing completed/uncertain-work retry behavior. D must resolve Proof advertising-use approval semantics; `ACTIVE`, CSV import or record presence alone does not confer permission. C owns full-pool eligibility/selection. A1 changes no request, planner response, parser, persisted job or provider behavior.
+Do not invent missing analyses, analyzer versions or historical source choices; keep existing completed/uncertain-work retry behavior. D must resolve Proof advertising-use approval semantics; `ACTIVE`, CSV import or record presence alone does not confer permission. C owns full-pool eligibility/selection. A1 changes no request, planner response, parser, persisted job or provider behavior.
 
-**Next bounded A2 task:** confirm cleanup ownership, then assess and implement the smallest coherent independent-source composition slice across `generation-sources.ts`, `portfolio-preparation.ts` and `prepare-generation.ts`, including required planner/parser/snapshot compatibility and focused tests. Preserve one provider-capable operation per persisted advance. Existing mixed-source tests encode suppression and must be revised; the explicit-frame request currently requires exactly one TRA video. Resolve that request boundary deliberately. Do not fold B's automatic Video Intelligence, C/D selection, A3 metadata enrichment or #224 targeted repair into A2. If the connected change exceeds the size target, split only at a valid intermediate boundary or justify it.
+#### A2 compatibility and bounded checkpoints
+
+Accepted compatibility: grandfather existing portfolios under their saved composition behavior, including partially prepared jobs. Preserve completed analyses, plans/audits, quota reservations, leases, frame identities and saved slots. No automatic upgrade or inferred source provenance; composed-source behavior will require a deliberate new portfolio after activation. Explicit Retry retains the existing mode and uncertain-paid-work semantics.
+
+A2.1 adds immutable `sourceCompositionVersion` to the portfolio record. `1` names today's legacy composition; an absent marker means legacy and stays absent through reads/updates. New portfolios explicitly record `1`; other values fail with an unsupported-version error. This marker is independent of the job/snapshot/packet schema versions. New composition remains disabled; no preparation, provider or retry implementation changes.
+
+Accepted request boundary: A2.5 may allow explicitly selected video frames alongside layouts, retaining current frame bounds and validation. Selected frames plus TRA images stay gated until C resolves human-source selection. Ordinary uploaded video + TRA image + layout composition remains in A2 scope. Render attachments and identity permissions must not expand merely because another source was analyzed.
+
+| Checkpoint | Coherent boundary | Estimate including focused tests |
+|---|---|---:|
+| A2.1 | Immutable version/read/update compatibility and these decisions; new composition disabled. | 100–200 lines |
+| A2.2 | Shared incremental source analysis and a distinct representative-frame analysis projection; account for all supplied roles. Existing callers remain unchanged. | 220–320 lines |
+| A2.3 | Planner and snapshot/parser support for the compact A2 projection; new producers remain disabled. | 160–240 lines |
+| A2.4 | Activate composition for new portfolios and the legacy request entry together; preserve per-operation checkpoints and grandfathered jobs. | 260–380 lines |
+| A2.5 | Permit selected frames + layouts at the request boundary, with focused validation/integration tests. | 60–110 lines |
+
+Each checkpoint needs focused checks and fresh independent review of its final HEAD when required. Reassess size and published overlap after each merge; keep valid intermediate behavior. A2.2–A2.5 have not begun. B owns automatic Video Intelligence, C/D own human/Proof selection, A3 owns metadata enrichment and #224 owns planning optimization. Full source integration and all final staging verification remain pending.
 
 **Verify:** actual portfolio entry plus legacy entry with video-only, layout-only, TRA-image-only, video+layout, and video+TRA-image+layout fixtures. Assert both video and layout facts reach the real Astra request and survive checkpoint/reload. Missing required sources produce a visible, specific state.
 
