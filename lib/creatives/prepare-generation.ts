@@ -74,6 +74,7 @@ const buildReferenceCandidates = (
   }));
 
 export type PreparedCreativeGeneration = CreativeRenderContext & {
+  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState;
   batchPlan: CreativeBatchPlan;
   plannerArgs?: CreativeBatchPlannerArgs;
 };

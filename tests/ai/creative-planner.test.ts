@@ -8,6 +8,12 @@ import { CREATIVE_STRATEGY_JSON_SCHEMA } from '@/lib/creatives/strategy';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 import { referenceCandidate } from '../fixtures/reference-catalog';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
+import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
+import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
+import { snapshotCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
+import type { PreparedCreativeGeneration } from '@/lib/creatives/prepare-generation';
+import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
+import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: vi.fn(async (concepts: unknown[]) => portfolioAudit(concepts.length)) }));
 
@@ -34,9 +40,101 @@ const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human
 const payload = (value: unknown) => ({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
 const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value)), { status: 200 });
 
+const sourceProjection = (): PlanningSourceAnalysisState => ({ version: 1, entries:
+  (['TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE', 'TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE'] as const).flatMap((role, i) => {
+    const hex = String(i + 1), source = { role, mediaId: `media_${hex.repeat(32)}`, sha256: hex.repeat(64) };
+    const observation = { ...analysis, summary: `SENTINEL_${role}_${hex}`, hookOrAngle: `ANGLE_${hex}` };
+    const result = role === 'TRA_VIDEO'
+      ? { kind: 'REPRESENTATIVE_VIDEO_FRAMES' as const, analysis: observation, analyzedFrames: [{ timestampMs: i * 1000, frameSha256: hex.repeat(64) }] }
+      : role === 'TRA_REFERENCE' ? { kind: 'TRA_REFERENCE' as const, analysis: observation }
+        : { kind: 'LAYOUT_ANGLE' as const, angleDescription: `SENTINEL_${role}_${hex}` };
+    const results = role === 'TRA_VIDEO' ? [result] : [result, { kind: 'LAYOUT_BLUEPRINT' as const,
+      layout: { blueprint: referenceCandidate().blueprint, contentHash: source.sha256, analyzerModel: 'analysis-model', cacheHit: true } }];
+    return results.map(result => ({ source, analyzer: { kind: result.kind, model: 'analysis-model', schemaVersion: 1 as const,
+      contextSha256: result.kind === 'LAYOUT_BLUEPRINT' ? null : 'a'.repeat(64) }, evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION' as const, result }));
+  }) });
+
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); });
 
 describe('creative batch planner', () => {
+  it('sends every source-labelled sentinel to Astra and retains initial/audit/repair arguments and snapshots on save/reload', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives: [concept(1), concept(2)] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const sourceAnalysis = sourceProjection(), storage = new MemoryPortfolioStorage();
+    const requestedSources = [...new Map(sourceAnalysis.entries.map(e => [e.source.mediaId, e.source])).values()];
+    const job = await createCreativePortfolio({ ...portfolioRequest(), sourceAssets: requestedSources.map(({ role, mediaId }) => ({ role, mediaId })) }, storage);
+    const partial = structuredClone(sourceAnalysis); delete partial.entries[1].result;
+    const initial = await updateCreativePortfolio(job.id, current => ({ ...current,
+      planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis, sourceAnalysis: partial } } }), storage);
+    expect(await readCreativePortfolio(job.id, storage)).toEqual(initial);
+    const oversized = structuredClone(sourceAnalysis);
+    const result = oversized.entries[0].result!;
+    if (result.kind === 'REPRESENTATIVE_VIDEO_FRAMES') result.analysis.summary = 'x'.repeat(2 * 1024 * 1024);
+    const before = [...storage.data.values()][0].bytes;
+    await expect(updateCreativePortfolio(initial.id, () => ({ ...initial,
+      planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, sourceAnalysis: oversized } } }), storage)).rejects.toThrow();
+    expect([...storage.data.values()][0].bytes).toEqual(before);
+    expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify({ ...initial,
+      planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, sourceAnalysis: oversized } } })), job.id)).toThrow('Saved creative portfolio is invalid');
+    const plannerArgs = { count: 2, context: job.request.context, analysis, hasApprovedHumanSource: false, sourceAnalysis };
+    const batchPlan = await requestCreativeBatch(plannerArgs);
+    const snapshot = snapshotCreativePortfolio({ ...portfolioSnapshot(job), batchPlan, requestedSources, sourceAnalysis } as unknown as PreparedCreativeGeneration);
+    const saved = await updateCreativePortfolio(job.id, current => ({ ...current,
+      planning: { phase: 'DIVERSITY_AUDIT', repairAttempted: false, checkpoint: { plannerArgs, snapshot } } }), storage);
+    const loaded = (await readCreativePortfolio(job.id, storage))!;
+    expect(loaded).toEqual(saved);
+    if (loaded.planning.phase !== 'DIVERSITY_AUDIT') throw new Error('Missing audit checkpoint');
+    const mismatched = structuredClone(loaded);
+    if (mismatched.planning.phase === 'DIVERSITY_AUDIT') delete mismatched.planning.checkpoint.plannerArgs.sourceAnalysis;
+    expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify(mismatched)), job.id)).toThrow('Saved creative portfolio is invalid');
+    expect(loaded.planning.checkpoint.plannerArgs).toEqual(plannerArgs);
+    expect(loaded.planning.checkpoint.snapshot.sourceAnalysis).toEqual(sourceAnalysis);
+    const repeated = { ...portfolioAudit(2), groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] };
+    const repair = await updateCreativePortfolio(job.id, current => ({ ...current, planning: { phase: 'TARGETED_REPAIR',
+      checkpoint: { plannerArgs, snapshot: { ...snapshot, batchPlan: { ...batchPlan, portfolioAudit: repeated } } } } }), storage);
+    expect(await readCreativePortfolio(job.id, storage)).toEqual(repair);
+    await requestCreativeBatch({ ...loaded.planning.checkpoint.plannerArgs, context: `${plannerArgs.context}\nRepair feedback` });
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(url).toBe('https://api.openai.com/v1/responses');
+      const body = JSON.parse(String(init?.body)), input = JSON.parse(body.input[1].content[0].text);
+      expect(body.model).toBe('gpt-6-astra');
+      expect(input.sourceAnalysis).toEqual(sourceAnalysis);
+      for (let i = 1; i <= 6; i++) expect(JSON.stringify(input.sourceAnalysis)).toContain(`SENTINEL_${requestedSources[i - 1].role}_${i}`);
+      expect(input.sourceAnalysisGuidance).toContain('not full Video Intelligence');
+      expect(input.hasApprovedHumanSource).toBe(false);
+    }
+    const ready = await updateCreativePortfolio(job.id, current => ({ ...current, planning: { phase: 'READY_TO_RENDER' },
+      snapshot: { ...snapshot, batchPlan: { ...batchPlan, portfolioAudit: portfolioAudit(2) } } }), storage);
+    expect(await readCreativePortfolio(job.id, storage)).toEqual(ready);
+
+  });
+
+  it.each(['missing', 'duplicate', 'role', 'hash', 'model', 'version', 'result', 'frames', 'raw-bytes'])(
+    'rejects invalid projection %s without dropping sources or making a provider call', async mutation => {
+      const projection = sourceProjection(), expected = structuredClone([...new Map(projection.entries.map(e => [e.source.mediaId, e.source])).values()]);
+      const entry = projection.entries[1];
+      if (mutation === 'missing') projection.entries.splice(1, 2);
+      if (mutation === 'duplicate') projection.entries.push(structuredClone(entry));
+      if (mutation === 'role') entry.source.role = 'LAYOUT_REFERENCE';
+      if (mutation === 'hash') entry.source.sha256 = 'f'.repeat(64);
+      if (mutation === 'model') projection.entries[2].analyzer.model = 'changed';
+      if (mutation === 'version') Object.assign(projection, { version: 2 });
+      if (mutation === 'result') delete entry.result;
+      if (mutation === 'frames') Object.assign(projection.entries[0].result!, { analyzedFrames: [] });
+      if (mutation === 'raw-bytes') Object.assign(entry.result!, { buffer: { type: 'Buffer', data: [1] } });
+      expect(() => parsePlanningSourceAnalysis(projection, expected, true)).toThrow();
+      const job = newCreativePortfolio({ ...portfolioRequest(), sourceAssets: expected.map(({ role, mediaId }) => ({ role, mediaId })) });
+      job.planning = { phase: 'READY_TO_RENDER' };
+      job.snapshot = { ...portfolioSnapshot(job), requestedSources: expected, sourceAnalysis: projection };
+      expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id)).toThrow('Saved creative portfolio is invalid');
+      const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+      // Missing an entire source needs the owner's requested inventory to detect; internal completion has no such inventory.
+      if (mutation !== 'missing' && mutation !== 'hash') await expect(requestCreativeBatch({ count: 2, context: 'TRA', analysis,
+        hasApprovedHumanSource: false, sourceAnalysis: projection })).rejects.toThrow();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
   it('keeps the developer prefix stable and sends compact decision inputs without mutating provenance', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives: [concept(1), concept(2)] }));
