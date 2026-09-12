@@ -7,9 +7,30 @@ import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { VideoIntelligenceJob } from '@/lib/video/intelligence-job';
 import type { VideoIntelligenceJobLocator } from '@/lib/video/intelligence-service';
+import type { ResolvedLayoutBlueprint } from '@/lib/layouts/service';
+import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 
 type SourceIdentity = CreativeGenerationProvenance['requestedSources'][number];
 type SourceOfRole<Role extends SourceIdentity['role']> = Omit<SourceIdentity, 'role'> & { role: Role };
+
+/** A2 preparation projection; representative stills do not constitute full Video Intelligence. */
+export type PlanningSourceAnalysisResult =
+  | { kind: 'LAYOUT_BLUEPRINT'; layout: ResolvedLayoutBlueprint }
+  | { kind: 'LAYOUT_ANGLE'; angleDescription: string }
+  | { kind: 'TRA_REFERENCE'; analysis: CreativeReferenceAnalysis }
+  | { kind: 'REPRESENTATIVE_VIDEO_FRAMES'; analysis: CreativeReferenceAnalysis;
+      analyzedFrames: Array<Pick<ApprovedTraVideoFrame, 'timestampMs' | 'frameSha256'>> };
+
+export type PlanningSourceAnalysisState = {
+  version: 1;
+  // Serializes identities and results only; owning jobs must handle leases and uncertain paid work.
+  entries: Array<{
+    source: SourceIdentity;
+    analyzer: { kind: PlanningSourceAnalysisResult['kind']; model: string; schemaVersion: 1; contextSha256: string | null };
+    evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION';
+    result?: PlanningSourceAnalysisResult;
+  }>;
+};
 
 /** Data availability only. READY never grants evidence, identity or provider permission. */
 export type PlanningSourceReadiness<T> =
