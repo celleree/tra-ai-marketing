@@ -194,6 +194,27 @@ describe.each(['local', 'r2'])('semantic cache in existing %s backend', backend 
       expect(analyze).not.toHaveBeenCalled();
       expect(await read(blueprintKey)).toBe(original);
       const angleRaw = await read(angleKey);
+      const contextHash = 'c'.repeat(64);
+      await cache.writeContextualAngle(hash, contextHash, 'context-model', '');
+      expect(await cache.readContextualAngle(hash, contextHash, 'context-model')).toBe('');
+      expect(await cache.readContextualAngle(hash, 'd'.repeat(64), 'context-model')).toBeNull();
+      expect(await cache.readContextualAngle(hash, contextHash, 'other-model')).toBeNull();
+      expect(await cache.readContextualAngle('b'.repeat(64), contextHash, 'context-model')).toBeNull();
+      const contextualKey = (await keys()).find(key => key.includes('contextual-v1-'))!;
+      const valid = JSON.parse(await read(contextualKey));
+      for (const corrupt of ['{', 'null', ...[
+        { version: 2 }, { sourceSha256: 'b'.repeat(64) }, { contextSha256: 'd'.repeat(64) },
+        { analyzerModel: 'other' }, { hook: 12 }, { hook: 'x'.repeat(2001) },
+      ].map(change => JSON.stringify({ ...valid, ...change }))]) {
+        await write(contextualKey, corrupt);
+        expect(await cache.readContextualAngle(hash, contextHash, 'context-model')).toBeNull();
+      }
+      await expect(cache.writeContextualAngle(hash, contextHash, 'context-model', 'x'.repeat(2001))).rejects.toThrow('Invalid');
+      await cache.writeContextualAngle(hash, contextHash, 'context-model', 'Contextual hook');
+      expect(await cache.readContextualAngle(hash, contextHash, 'context-model')).toBe('Contextual hook');
+      expect(await read(angleKey)).toBe(angleRaw);
+      expect(await read(blueprintKey)).toBe(original);
+
       await cache.write(hash, 'other-layout-model', blueprint());
       expect(await read(angleKey)).toBe(angleRaw);
       expect(await read(blueprintKey)).toBe(original);

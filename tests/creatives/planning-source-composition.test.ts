@@ -11,7 +11,11 @@ import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 import { referenceCandidate } from '@/tests/fixtures/reference-catalog';
 
 vi.mock('@/lib/ai/openai', () => ({ analyzeReferenceCreative: vi.fn(), analyzeTraSourceCreative: vi.fn() }));
-vi.mock('@/lib/layouts/service', () => ({ getOrAnalyzeLayoutBlueprint: vi.fn() }));
+vi.mock('@/lib/layouts/service', () => ({
+  getOrAnalyzeContextualLayoutAngle: async (source: import('@/lib/media/types').StoredMediaFile, context: string, start: () => void) => {
+    start();
+    return (await (await import('@/lib/ai/openai')).analyzeReferenceCreative(source, context)).hookOrAngle.slice(0, 2000);
+  }, getOrAnalyzeLayoutBlueprint: vi.fn() }));
 vi.mock('@/lib/video/tra-video-frames', () => ({ getApprovedTraVideoFrames: vi.fn() }));
 vi.mock('@/lib/ai/video-frame-generation', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/ai/video-frame-generation')>(), analyzeApprovedTraVideoFrames: vi.fn(),

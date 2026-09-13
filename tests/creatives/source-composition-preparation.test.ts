@@ -17,7 +17,11 @@ vi.mock('@/lib/ai/openai', () => ({ analyzeTraSourceCreative: mocks.image, analy
 vi.mock('@/lib/ai/video-frame-generation', async original => ({
   ...await original<typeof import('@/lib/ai/video-frame-generation')>(), analyzeApprovedTraVideoFrames: mocks.video,
 }));
-vi.mock('@/lib/layouts/service', () => ({ getOrAnalyzeLayoutBlueprint: mocks.layout, getLayoutBlueprintCache: () => ({
+vi.mock('@/lib/layouts/service', () => ({
+  getOrAnalyzeContextualLayoutAngle: async (source: import('@/lib/media/types').StoredMediaFile, context: string, start: () => void) => {
+    start();
+    return (await (await import('@/lib/ai/openai')).analyzeReferenceCreative(source, context)).hookOrAngle.slice(0, 2000);
+  }, getOrAnalyzeLayoutBlueprint: mocks.layout, getLayoutBlueprintCache: () => ({
   readAngle: async (sourceSha256: string, analyzerModel: string) => ({ version: 1, sourceSha256, analyzerModel, angleSummary: 'Cached reusable angle' }),
 }) }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: mocks.media }));

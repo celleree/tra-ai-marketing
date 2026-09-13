@@ -85,6 +85,10 @@ vi.mock('@/lib/ai/reference-selector', () => ({
 }));
 
 vi.mock('@/lib/layouts/service', () => ({
+  getOrAnalyzeContextualLayoutAngle: async (source: import('@/lib/media/types').StoredMediaFile, context: string, start: () => void) => {
+    start();
+    return (await (await import('@/lib/ai/openai')).analyzeReferenceCreative(source, context)).hookOrAngle.slice(0, 2000);
+  },
   getOrAnalyzeLayoutBlueprint: mocks.getOrAnalyzeLayoutBlueprint,
   getLayoutBlueprintCache: () => ({ readAngle: async (sourceSha256: string, analyzerModel: string) =>
     ({ version: 1, sourceSha256, analyzerModel, angleSummary: 'Cached reusable angle' }) }),

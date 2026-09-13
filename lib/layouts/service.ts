@@ -1,3 +1,5 @@
+import { analyzeReferenceCreative } from '@/lib/ai/openai';
+import { validAnalysis } from '@/lib/creatives/planning-source-parser';
 import { createHash } from 'crypto';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { resolve } from 'path';
@@ -71,14 +73,41 @@ export interface ReusableAngleCache {
   writeAngle(value: ReusableReferenceAngle): Promise<void>;
 }
 
+export const CONTEXTUAL_ANGLE_SCHEMA_VERSION = 1;
+export interface ContextualAngleCache {
+  readContextualAngle(hash: string, contextHash: string, model: string): Promise<string | null>;
+  writeContextualAngle(hash: string, contextHash: string, model: string, hook: string): Promise<void>;
+}
+const contextualFileName = (hash: string, contextHash: string, model: string) => {
+  if (!/^[a-f0-9]{64}$/.test(hash) || !/^[a-f0-9]{64}$/.test(contextHash) || !model.trim() || model.length > 200) throw new Error('Invalid contextual cache identity.');
+  return `contextual-v${CONTEXTUAL_ANGLE_SCHEMA_VERSION}-${contextHash}-${createHash('sha256').update(model).digest('hex')}-${hash}.json`;
+};
+const validHook = (hook: unknown): hook is string => typeof hook === 'string' && hook.length <= 2000;
+
 // Separate objects in the same backend avoid read/modify/write loss of blueprint or future fields.
 const angleFileName = (hash: string, model: string) => {
   if (!/^[a-f0-9]{64}$/.test(hash) || !model.trim() || model.length > 200) throw new Error('Invalid angle cache identity.');
   return `angle-v${REUSABLE_ANGLE_SCHEMA_VERSION}-${createHash('sha256').update(model).digest('hex')}-${hash}.json`;
 };
-abstract class ReferenceCache implements LayoutBlueprintCache, ReusableAngleCache {
+abstract class ReferenceCache implements LayoutBlueprintCache, ReusableAngleCache, ContextualAngleCache {
   protected abstract readPayload(fileName: string): Promise<string | null>;
   protected abstract writePayload(fileName: string, payload: string): Promise<void>;
+  async readContextualAngle(hash: string, contextHash: string, model: string) {
+    const raw = await this.readPayload(contextualFileName(hash, contextHash, model));
+    if (raw === null) return null;
+    try {
+      const value = JSON.parse(raw);
+      return value?.version === CONTEXTUAL_ANGLE_SCHEMA_VERSION && value.sourceSha256 === hash
+        && value.contextSha256 === contextHash && value.analyzerModel === model && validHook(value.hook)
+        ? value.hook : null;
+    } catch { return null; }
+  }
+  async writeContextualAngle(hash: string, contextHash: string, model: string, hook: string) {
+    if (!validHook(hook)) throw new Error('Invalid contextual hook.');
+    await this.writePayload(contextualFileName(hash, contextHash, model), JSON.stringify({
+      version: CONTEXTUAL_ANGLE_SCHEMA_VERSION, sourceSha256: hash, contextSha256: contextHash, analyzerModel: model, hook,
+    }));
+  }
   async read(hash: string, model: string) {
     const raw = await this.readPayload(cacheFileName(hash, model));
     return raw === null ? null : parseCachePayload(raw);
@@ -209,7 +238,7 @@ class R2LayoutBlueprintCache extends ReferenceCache {
 
 let cache: ReferenceCache | undefined;
 
-export const getLayoutBlueprintCache = (): LayoutBlueprintCache & ReusableAngleCache => {
+export const getLayoutBlueprintCache = (): LayoutBlueprintCache & ReusableAngleCache & ContextualAngleCache => {
   if (cache) return cache;
   cache =
     process.env.NODE_ENV === 'production'
@@ -238,4 +267,25 @@ export async function getOrAnalyzeLayoutBlueprint(
   await activeCache.write(contentHash, analyzerModel, blueprint);
 
   return { blueprint, contentHash, analyzerModel, cacheHit: false };
+}
+
+/** Only new pending work consults this cache; saved results remain authoritative. */
+export async function getOrAnalyzeContextualLayoutAngle(
+  source: StoredMediaFile, context: string, onProviderOperationStart: () => void,
+): Promise<string> {
+  validateStoredMediaImage(source);
+  const hash = createHash('sha256').update(source.buffer).digest('hex');
+  // Hash the exact string passed to the unchanged analyzer, including whitespace.
+  const contextHash = createHash('sha256').update(context).digest('hex');
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const activeCache = getLayoutBlueprintCache();
+  const cached = await activeCache.readContextualAngle(hash, contextHash, model);
+  if (cached !== null) return cached;
+  onProviderOperationStart();
+  const analysis = await analyzeReferenceCreative(source, context);
+  if (!validAnalysis(analysis)) throw new Error('Invalid contextual analysis.');
+  const hook = analysis.hookOrAngle.slice(0, 2000);
+  // Propagate write failure to the caller's explicit Retry gate; never replay here.
+  await activeCache.writeContextualAngle(hash, contextHash, model, hook);
+  return hook;
 }
