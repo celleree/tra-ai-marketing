@@ -22,6 +22,8 @@ export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;
   // Missing/1 retain legacy behavior; 2 composes all supplied sources. Immutable after creation.
   readonly sourceCompositionVersion?: 1 | 2;
+  // Inactive contract: constructors never set this marker; absence preserves existing behavior.
+  readonly videoPreparationVersion?: 1;
   request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
   planning: PortfolioPlanningState; planningError?: string;
   lease: { id: string; slotIndex: number | null; expiresAtMs: number } | null;

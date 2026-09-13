@@ -19,6 +19,7 @@ import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/crea
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 
 export type PortfolioPreparationState = {
+  videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
   sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState;
   quotaReserved: boolean;
   analysis?: CreativeReferenceAnalysis;

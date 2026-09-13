@@ -1,3 +1,4 @@
+import { preservesVideoDependencies } from '@/lib/creatives/portfolio-video-dependency';
 import { isDeepStrictEqual } from 'node:util';
 import { newCreativePortfolio, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { isPortfolioId, parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
@@ -37,6 +38,13 @@ export async function updateCreativePortfolio(
     // Preserve the stored marker exactly, including its absence on historical portfolios.
     if (next.sourceCompositionVersion !== current.job.sourceCompositionVersion) {
       throw new Error('Portfolio source composition version is immutable.');
+    }
+    if (next.videoPreparationVersion !== current.job.videoPreparationVersion) {
+      throw new Error('Portfolio video preparation version is immutable.');
+    }
+    const dependencies = (job: CreativePortfolioJob) => job.planning.phase === 'INITIAL_PLAN' ? job.planning.preparation.videoDependencies ?? [] : [];
+    if (!preservesVideoDependencies(dependencies(current.job), dependencies(next))) {
+      throw new Error('Portfolio video dependency bindings and completed references are immutable.');
     }
     if (next.id !== id || next.createdAtMs !== current.job.createdAtMs || next.updatedAtMs < current.job.updatedAtMs
       || !isDeepStrictEqual(next.request, current.job.request)
