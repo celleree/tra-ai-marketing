@@ -10,15 +10,16 @@ import { LAYOUT_BLUEPRINT_SCHEMA_VERSION } from '@/lib/layouts/blueprint';
 import { getOrAnalyzeLayoutBlueprint } from '@/lib/layouts/service';
 import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
+import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
 
 type SourceRequest = Pick<ValidGenerateCreativeRequest, 'sourceAssets' | 'context'>;
 const changed = () => new CreativeGenerationPreparationError('Planning source inventory or analysis identity changed. Start fresh preparation.', 409);
 
 /**
- * Unwired A2 step: initialize with zero provider operations, then perform at most one per advance.
- * Caller checkpoints each returned state and owns leases/explicit retry after uncertain work.
- * Inputs are typed internal state; persisted-state parsing belongs to A2.3.
+ * Initialize with zero provider operations, then perform at most one per advance.
+ * Durable callers checkpoint each state and own leases/explicit retry after uncertain work.
+ * The single-request caller retains explicit resubmission and never retries inside this step.
  */
 export async function advancePlanningSourceAnalysis(
   request: SourceRequest,
@@ -71,4 +72,15 @@ export async function advancePlanningSourceAnalysis(
   }
   pending.result = result;
   return { state, complete: state.entries.every(entry => entry.result !== undefined) };
+}
+
+export function composedSourceCatalog(state: PlanningSourceAnalysisState): ReferencePlanningCandidate[] {
+  return state.entries.flatMap(entry => {
+    if (entry.result?.kind !== 'LAYOUT_BLUEPRINT') return [];
+    const cue = state.entries.find(other => other.source.mediaId === entry.source.mediaId && other.analyzer.kind !== 'LAYOUT_BLUEPRINT')?.result;
+    const layout = entry.result.layout;
+    return [{ referenceId: entry.source.mediaId, priority: 'user', sourceSha256: entry.source.sha256,
+      analyzerModel: layout.analyzerModel, blueprint: layout.blueprint, angleDescription:
+        (cue?.kind === 'LAYOUT_ANGLE' ? cue.angleDescription : cue?.kind === 'TRA_REFERENCE' ? cue.analysis.hookOrAngle : '').slice(0, 2000).trim() || 'No angle observed. Layout guidance only.' }];
+  });
 }

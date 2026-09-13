@@ -20,8 +20,8 @@ export type PortfolioPlanningState =
   | { phase: 'READY_TO_RENDER' };
 export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;
-  // Version 1 and an absent marker both use legacy composition. New composition is not enabled.
-  readonly sourceCompositionVersion?: 1;
+  // Missing/1 retain legacy behavior; 2 composes all supplied sources. Immutable after creation.
+  readonly sourceCompositionVersion?: 1 | 2;
   request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
   planning: PortfolioPlanningState; planningError?: string;
   lease: { id: string; slotIndex: number | null; expiresAtMs: number } | null;
@@ -33,7 +33,7 @@ export function newCreativePortfolio(request: ValidGenerateCreativeRequest, now 
   if (!Number.isInteger(request.variationCount) || request.variationCount < 2 || request.variationCount > MAX_PORTFOLIO_CREATIVES) {
     throw new Error('A portfolio requires 2 to 36 creatives.');
   }
-  return { version: 1, sourceCompositionVersion: 1, id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
+  return { version: 1, sourceCompositionVersion: 2, id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
     snapshot: null, planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } }, lease: null,
     slots: Array.from({ length: request.variationCount }, (_, index) => ({
       index: index + 1, creativeId: id('creative_'), status: 'PENDING',
@@ -188,7 +188,13 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
     // A completed second audit is a known quality failure. Restart planning explicitly without re-reserving portfolio quota.
     if (job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
       && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) {
-      job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true } };
+      const { plannerArgs, snapshot } = job.planning.checkpoint;
+      job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true,
+        ...(job.sourceCompositionVersion === 2 && plannerArgs.sourceAnalysis ? {
+          sourceAnalysis: plannerArgs.sourceAnalysis, selectedReferences: snapshot.selectedReferences,
+          referenceCatalog: snapshot.referenceCatalog,
+        } : {}),
+      } };
     }
   } else {
     const slot = job.slots.find(slot => slot.index === slotIndex);
