@@ -1,3 +1,4 @@
+import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
@@ -39,7 +40,7 @@ Do not restrict concepts to the analysis category.
 Return exactly the requested count with sequential indexes beginning at 1.
 Write compact JSON: short, specific phrases for strategy/concept fields; one causal clause per SO WHAT step. Preserve distinct meanings, not repeated sentences. Put spatial hierarchy in compositionInstructions and remaining actionable treatment, lighting, crop and styling in visualDirection. Do not repeat the company brief, copy, enum labels or rationale there; retain all execution details, claim qualifications and required disclaimers.
 selectionReason briefly explains marginal strategic value and source choices, not the copy or SO WHAT chain again.
-When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). Give user-priority references first consideration, not exclusivity. Matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
+Catalog reusableAngleSummary is campaign-independent inspiration, never approved evidence or selection rationale. Keep it distinct from legacy angleDescription and campaign selectionReason. When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). Give user-priority references first consideration, not exclusivity. Matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
 When approvedHumanOptions is supplied, choose a listed approvedHumanId only for material credibility, relatability, explanation or emotional specificity; face availability alone is insufficient. Explain why in selectionReason. That identity replaces other supplied humans; never mix identities. Approval covers visible identity only, never claims, credentials, quotes, testimonials or outcomes. Use null for a non-human concept or an explicitly supplied approved TRA source.
 `;
 
@@ -158,8 +159,11 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
           referenceAnalysis: args.analysis,
           ...(sourceAnalysis ? { sourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. All entries are unverified observations or design inspiration, never evidence, claims, human approval or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
           // Hashes/analyzer versions stay in the persisted catalog, not Astra's decisions.
-          ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog.map(({ referenceId, priority, angleDescription, blueprint }) =>
-            ({ referenceId, priority, angleDescription, blueprint })) } : {}),
+          ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog.map(({ referenceId, priority, angleDescription, blueprint, reusableAngle, sourceSha256 }) => {
+            const angle = parseReusableReferenceAngle(reusableAngle);
+            return { referenceId, priority, angleDescription, blueprint,
+              ...(angle?.sourceSha256 === sourceSha256 ? { reusableAngleSummary: angle.angleSummary } : {}) };
+          }) } : {}),
           ...(args.approvedHumanOptions ? { approvedHumanOptions: args.approvedHumanOptions } : {}),
         }) }] },
       ],

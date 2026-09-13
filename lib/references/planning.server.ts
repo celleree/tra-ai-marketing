@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
+import { analyzeReusableReferenceAngle } from '@/lib/ai/openai';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
-import { getOrAnalyzeLayoutBlueprint, type ResolvedLayoutBlueprint } from '@/lib/layouts/service';
+import { getLayoutBlueprintCache, getOrAnalyzeLayoutBlueprint, type ResolvedLayoutBlueprint } from '@/lib/layouts/service';
 import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { MediaStorage } from '@/lib/media/storage';
-import type { ReferencePlanningCandidate } from '@/lib/references/planning';
+import { parseReusableReferenceAngle, REUSABLE_ANGLE_SCHEMA_VERSION, type ReferencePlanningCandidate } from '@/lib/references/planning';
 
 /** Reuse the layout cache; uploading a reference never makes it an approved content source. */
 export async function buildReferencePlanningCatalog(args: {
@@ -28,4 +30,31 @@ export async function buildReferencePlanningCatalog(args: {
       await getOrAnalyzeLayoutBlueprint(stored));
   }
   return catalog;
+}
+
+/** Enrich one catalog entry per advance; callers checkpoint before any subsequent provider work. */
+export async function advanceReferenceAngles(
+  catalog: ReferencePlanningCandidate[], storage: MediaStorage, onProviderOperationStart: () => void,
+): Promise<ReferencePlanningCandidate[] | null> {
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const pending = catalog.find(item => {
+    const value = parseReusableReferenceAngle(item.reusableAngle);
+    return !value || value.sourceSha256 !== item.sourceSha256 || value.analyzerModel !== model;
+  });
+  if (!pending) return null;
+  const source = await storage.readImageById(pending.referenceId);
+  if (!source || createHash('sha256').update(source.buffer).digest('hex') !== pending.sourceSha256) {
+    throw new Error(`Reference ${pending.referenceId} is unavailable or changed. Start fresh preparation.`);
+  }
+  const cache = getLayoutBlueprintCache();
+  let reusableAngle = await cache.readAngle(pending.sourceSha256, model);
+  if (!reusableAngle) {
+    onProviderOperationStart();
+    const analysis = await analyzeReusableReferenceAngle(source);
+    reusableAngle = parseReusableReferenceAngle({ version: REUSABLE_ANGLE_SCHEMA_VERSION,
+      sourceSha256: pending.sourceSha256, analyzerModel: model, angleSummary: analysis.hookOrAngle });
+    if (!reusableAngle) throw new Error('Invalid reusable angle analysis. Explicit retry required.');
+    await cache.writeAngle(reusableAngle);
+  }
+  return catalog.map(item => item === pending ? { ...item, reusableAngle } : item);
 }

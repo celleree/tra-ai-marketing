@@ -1,3 +1,4 @@
+import { advanceReferenceAngles } from '@/lib/references/planning.server';
 import { analyzeReferenceCreative, analyzeTraSourceCreative, type CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { analyzeApprovedTraVideoFrames } from '@/lib/ai/video-frame-generation';
@@ -207,6 +208,12 @@ export async function advancePortfolioPreparation(
       `${CREATIVE_CATEGORY_LABELS[pendingReference.item.angle]}: ${pendingReference.selectionReason}`,
       layout,
     ));
+    return { state };
+  }
+
+  const enrichedCatalog = await advanceReferenceAngles(state.referenceCatalog, storage, onProviderOperationStart);
+  if (enrichedCatalog) {
+    state.referenceCatalog = enrichedCatalog;
     return { state };
   }
 
