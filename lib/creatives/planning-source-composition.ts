@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { analyzeReferenceCreative, analyzeTraSourceCreative } from '@/lib/ai/openai';
+import { analyzeTraSourceCreative } from '@/lib/ai/openai';
 import { getLayoutAnalysisModel } from '@/lib/ai/layout-analyzer';
 import { analyzeApprovedTraVideoFrames, selectProviderVideoFrames } from '@/lib/ai/video-frame-generation';
 import { CreativeGenerationPreparationError, hydratePlanningSourceInventory } from '@/lib/creatives/generation-sources';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { PlanningSourceAnalysisResult, PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { LAYOUT_BLUEPRINT_SCHEMA_VERSION } from '@/lib/layouts/blueprint';
-import { getOrAnalyzeLayoutBlueprint } from '@/lib/layouts/service';
+import { getOrAnalyzeContextualLayoutAngle, getOrAnalyzeLayoutBlueprint } from '@/lib/layouts/service';
 import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
@@ -59,14 +59,15 @@ export async function advancePlanningSourceAnalysis(
   } else {
     // Canonical hydration has already checked image/role compatibility.
     const image = hydrated.stored as StoredMediaFile;
-    onProviderOperationStart();
     if (kind === 'LAYOUT_BLUEPRINT') {
+      onProviderOperationStart();
       const layout = await getOrAnalyzeLayoutBlueprint(image, { analyzerModel: pending.analyzer.model });
       if (layout.contentHash !== pending.source.sha256 || layout.analyzerModel !== pending.analyzer.model) throw changed();
       result = { kind, layout };
     } else if (kind === 'LAYOUT_ANGLE') {
-      result = { kind, angleDescription: (await analyzeReferenceCreative(image, request.context)).hookOrAngle.slice(0, 2000) };
+      result = { kind, angleDescription: await getOrAnalyzeContextualLayoutAngle(image, request.context, onProviderOperationStart) };
     } else {
+      onProviderOperationStart();
       result = { kind, analysis: await analyzeTraSourceCreative(image, request.context) };
     }
   }

@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getLayoutBlueprintCache } from '@/lib/layouts/service';
+import { getLayoutBlueprintCache, getOrAnalyzeContextualLayoutAngle } from '@/lib/layouts/service';
 import { advanceReferenceAngles } from '@/lib/references/planning.server';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
@@ -28,9 +28,9 @@ const item = { id: candidate.referenceId, fileName: `${candidate.referenceId}.pn
   notes: 'CURATED_NOTE', tags: ['CURATED_TAG'], referenceType: 'layout', angle: 'educational', angleSource: 'manual' };
 const source = { fileName: item.fileName, mimeType: 'image/png' as const, mediaType: 'IMAGE' as const, buffer: png };
 const storage = { readImageById: vi.fn(async (_id: string) => source), readMediaById: vi.fn(async () => source) };
-let semanticCalls: number, astra: any[], fail: boolean;
+let semanticCalls: number, contextualCalls: number, astra: any[], fail: boolean, failContext: boolean;
 beforeEach(async () => {
-  vi.clearAllMocks(); semanticCalls = 0; astra = []; fail = false;
+  vi.clearAllMocks(); semanticCalls = 0; contextualCalls = 0; astra = []; fail = false; failContext = false;
   vi.stubEnv('LAYOUT_BLUEPRINT_CACHE_DIR', dir); vi.stubEnv('NODE_ENV', 'test');
   vi.stubEnv('OPENAI_API_KEY', 'mock'); vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'semantic-model');
   vi.stubEnv('OPENAI_LAYOUT_ANALYSIS_MODEL', 'semantic-model');
@@ -54,13 +54,14 @@ beforeEach(async () => {
       expect(JSON.stringify(body)).not.toContain('CAMPAIGN_SELECTION'); expect(JSON.stringify(body)).not.toContain('PRIVATE_CAMPAIGN');
       if (fail) throw new Error('Uncertain semantic provider outcome');
     }
+    if (!reusable) { contextualCalls++; if (failContext) throw new Error('Uncertain contextual outcome'); }
     expect(['tra_reference_analysis', 'reusable_reference_angle']).toContain(body.text.format.name); // Never a blueprint or render call.
     return Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ summary: 'Observation',
       hookOrAngle: reusable ? 'REUSABLE_SENTINEL' : 'CONTEXTUAL_OBSERVATION', visibleText: [], visualStructure: '',
       offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'educational' }) }] }] });
   }));
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 afterAll(async () => rm(dir, { recursive: true, force: true }));
 
 it.each([false, true])('connects real preparation, cache, reload and outbound Astra; uploaded=%s', async uploaded => {
@@ -91,9 +92,14 @@ it.each([false, true])('connects real preparation, cache, reload and outbound As
   expect(astra[0].referenceCatalog[0].reusableAngleSummary).toBe('REUSABLE_SENTINEL');
   expect(astra[0].referenceCatalog[0].curated).toEqual({ notes: 'CURATED_NOTE', tags: ['CURATED_TAG'] });
   expect(astra[0].creativeContext).toContain('CAMPAIGN_SELECTION');
+  expect(contextualCalls).toBe(uploaded ? 1 : 0);
+  if (uploaded) expect(astra[0].referenceCatalog.some((entry: any) => entry.angleDescription === 'CONTEXTUAL_OBSERVATION')).toBe(true);
+  await prepareCreativeGeneration(data, 'http://localhost', { initialPlanOnly: true });
+  expect(contextualCalls).toBe(uploaded ? 1 : 0); // Identical effective context reuses the contextual result.
   const direct = await prepareCreativeGeneration({ ...data, context: 'OTHER_CAMPAIGN' }, 'http://localhost', { initialPlanOnly: true });
-  expect(semanticCalls).toBe(1); expect(astra[1].referenceCatalog[0].reusableAngleSummary).toBe('REUSABLE_SENTINEL');
-  expect(astra[1].referenceCatalog[0].curated).toEqual(astra[0].referenceCatalog[0].curated);
+  expect(contextualCalls).toBe(uploaded ? 2 : 0);
+  expect(semanticCalls).toBe(1); expect(astra[2].referenceCatalog[0].reusableAngleSummary).toBe('REUSABLE_SENTINEL');
+  expect(astra[2].referenceCatalog[0].curated).toEqual(astra[0].referenceCatalog[0].curated);
   expect(direct.referenceCatalog[0].blueprint).toEqual(candidate.blueprint);
   expect(direct.providerImageSource).toBeUndefined(); expect(direct.videoFrameSet).toBeNull();
   expect(await getLayoutBlueprintCache().read(sha(png), 'semantic-model')).toEqual(candidate.blueprint);
@@ -137,4 +143,88 @@ it('holds uncertain semantic work until explicit Retry; legacy failure requires 
   expect(retry.error).toBeUndefined(); expect(semanticCalls).toBe(3); expect(astra).toHaveLength(0);
   expect((await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', jobs)).error).toBeUndefined();
   expect(semanticCalls).toBe(3); expect(astra).toHaveLength(1);
+});
+
+it('binds contextual hooks to exact context, image, model and schema; rejects malformed metadata', async () => {
+  const start = vi.fn(), cache = getLayoutBlueprintCache();
+  await getOrAnalyzeContextualLayoutAngle(source, 'context', start);
+  await getOrAnalyzeContextualLayoutAngle(source, 'context', start);
+  expect(contextualCalls).toBe(1); expect(start).toHaveBeenCalledTimes(1);
+  await getOrAnalyzeContextualLayoutAngle(source, 'context ', start);
+  expect(contextualCalls).toBe(2);
+  const contextHash = createHash('sha256').update('context').digest('hex');
+  const file = (await readdir(dir)).find(name => name.startsWith('contextual-v1-' + contextHash))!;
+  for (const invalid of ['{', 'null', JSON.stringify({ version: 2 }), JSON.stringify({
+    version: 1, sourceSha256: sha(png), contextSha256: contextHash, analyzerModel: 'semantic-model', hook: 12,
+  })]) {
+    await writeFile(join(dir, file), invalid);
+    await getOrAnalyzeContextualLayoutAngle(source, 'context', start);
+  }
+  expect(contextualCalls).toBe(6);
+  vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'new-model');
+  await getOrAnalyzeContextualLayoutAngle(source, 'context', start);
+  await getOrAnalyzeContextualLayoutAngle({ ...source, buffer: Buffer.concat([png, Buffer.from('changed')]) }, 'context', start);
+  expect(contextualCalls).toBe(8);
+  await cache.writeContextualAngle(sha(png), contextHash, 'new-model', '');
+  expect(await getOrAnalyzeContextualLayoutAngle(source, 'context', start)).toBe('');
+  expect(contextualCalls).toBe(8);
+  expect(await cache.read(sha(png), 'semantic-model')).toEqual(candidate.blueprint);
+});
+
+it.each(['provider', 'cache-write'])('holds uncertain contextual %s failure until explicit Retry and reloads completed results', async failure => {
+  const cache = getLayoutBlueprintCache();
+  const write = vi.spyOn(cache, 'writeContextualAngle');
+  if (failure === 'provider') failContext = true;
+  else write.mockRejectedValueOnce(new Error('Contextual cache write failed'));
+  const jobs = new MemoryPortfolioStorage();
+  const job = await createCreativePortfolio({ ...portfolioRequest(), sourceAssets: [{ role: 'LAYOUT_REFERENCE', mediaId: item.id }] }, jobs);
+  let current = job;
+  for (let i = 0; i < 10 && !current.planningError; i++) current = (await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', jobs)).job;
+  expect(current.planningError).toBeTruthy(); expect(contextualCalls).toBe(1);
+  expect(await readCreativePortfolio(job.id, jobs)).toEqual(current);
+  expect((await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', jobs)).job).toEqual(current);
+  expect(contextualCalls).toBe(1);
+  expect((await readdir(dir)).filter(name => name.startsWith('contextual-'))).toEqual([]);
+  failContext = false;
+  await updateCreativePortfolio(job.id, value => retryPortfolioWork(value, null), jobs);
+  expect((await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', jobs)).error).toBeUndefined();
+  expect(contextualCalls).toBe(2);
+  // Once checkpointed, cache availability is irrelevant to resumed work.
+  vi.spyOn(cache, 'readContextualAngle').mockRejectedValue(new Error('Must not read completed hook'));
+  for (let i = 0; i < 12; i++) {
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', jobs);
+    expect(result.error).toBeUndefined();
+    expect(await readCreativePortfolio(job.id, jobs)).toEqual(result.job);
+    if (result.job.planning.phase === 'DIVERSITY_AUDIT') break;
+  }
+  expect(astra).toHaveLength(1); expect(JSON.stringify(astra[0])).toContain('CONTEXTUAL_OBSERVATION');
+  expect(contextualCalls).toBe(2);
+});
+
+it('rejects malformed provider success without caching or internally repeating it', async () => {
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ status: 'completed', output: [{ content: [
+    { type: 'output_text', text: JSON.stringify({ hookOrAngle: 'Incomplete response' }) },
+  ] }] }));
+  await expect(getOrAnalyzeContextualLayoutAngle(source, 'context', vi.fn())).rejects.toThrow('Invalid contextual analysis');
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect((await readdir(dir)).filter(name => name.startsWith('contextual-'))).toEqual([]);
+});
+
+it('reuses persisted contextual success after lost checkpoint on explicit Retry only', async () => {
+  const jobs = new MemoryPortfolioStorage();
+  const job = await createCreativePortfolio({ ...portfolioRequest(), sourceAssets: [{ role: 'LAYOUT_REFERENCE', mediaId: item.id }] }, jobs);
+  const cache = getLayoutBlueprintCache(), write = cache.writeContextualAngle.bind(cache);
+  vi.spyOn(cache, 'writeContextualAngle').mockImplementationOnce(async (...args) => {
+    await write(...args);
+    // Provider/cache completed, but the worker lost its lease before the job checkpoint.
+    await updateCreativePortfolio(job.id, current => ({ ...current, lease: { ...current.lease!, expiresAtMs: Date.now() - 1 } }), jobs);
+  });
+  let current = job;
+  for (let i = 0; i < 10 && !current.planningError; i++) current = (await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', jobs)).job;
+  expect(current.planningError).toBeTruthy(); expect(contextualCalls).toBe(1);
+  expect((await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', jobs)).job).toEqual(current);
+  expect(await readCreativePortfolio(job.id, jobs)).toEqual(current);
+  await updateCreativePortfolio(job.id, value => retryPortfolioWork(value, null), jobs);
+  expect((await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', jobs)).error).toBeUndefined();
+  expect(contextualCalls).toBe(1);
 });
