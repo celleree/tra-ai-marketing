@@ -116,8 +116,10 @@ describe('multi-source creative generation request', () => {
     });
   });
 
-  it('accepts a strict selected-frame contract for exactly one TRA video', () => {
-    const sourceAssets = [makeSource('TRA_VIDEO', 'a')];
+  it.each([false, true])('accepts selected frames with one video and optional layouts, layouts=%s', layouts => {
+    const sourceAssets = layouts
+      ? [makeSource('LAYOUT_REFERENCE', 'b'), makeSource('TRA_VIDEO', 'a'), makeSource('LAYOUT_REFERENCE', 'c')]
+      : [makeSource('TRA_VIDEO', 'a')];
     const result = validateGenerateCreativeRequest({
       ...baseRequest,
       sourceAssets,
@@ -127,6 +129,7 @@ describe('multi-source creative generation request', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.videoFrameSelection).toEqual(videoFrameSelection);
+    expect(result.data.sourceAssets).toEqual(sourceAssets);
   });
 
   it.each([
@@ -140,7 +143,7 @@ describe('multi-source creative generation request', () => {
   ])('rejects malformed selected-frame metadata %#', (selection) => {
     const result = validateGenerateCreativeRequest({
       ...baseRequest,
-      sourceAssets: [makeSource('TRA_VIDEO', 'a')],
+      sourceAssets: [makeSource('TRA_VIDEO', 'a'), makeSource('LAYOUT_REFERENCE', 'b')],
       videoFrameSelection: selection,
     });
 
@@ -154,10 +157,14 @@ describe('multi-source creative generation request', () => {
   it.each([
     { sourceAssets: [] },
     { sourceAssets: [makeSource('TRA_REFERENCE', 'a')] },
+    { sourceAssets: [makeSource('LAYOUT_REFERENCE', 'a')] },
+    { sourceAssets: [makeSource('TRA_VIDEO', 'a'), makeSource('TRA_VIDEO', 'b')] },
+    { sourceAssets: [makeSource('TRA_VIDEO', 'a'), makeSource('TRA_REFERENCE', 'b')] },
     {
       sourceAssets: [
         makeSource('TRA_VIDEO', 'a'),
         makeSource('LAYOUT_REFERENCE', 'b'),
+        makeSource('TRA_REFERENCE', 'c'),
       ],
     },
   ])('rejects selected frames without exactly one TRA video source %#', ({ sourceAssets }) => {
@@ -169,7 +176,7 @@ describe('multi-source creative generation request', () => {
       })
     ).toEqual({
       success: false,
-      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset',
+      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset with optional LAYOUT_REFERENCE assets only',
     });
   });
 
