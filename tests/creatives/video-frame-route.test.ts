@@ -54,7 +54,8 @@ vi.mock('@/lib/ai/openai', () => ({
 vi.mock('@/lib/ai/creative-planner', () => ({
   planCreativeBatch: planCreativeBatchMock,
 }));
-vi.mock('@/lib/ai/video-frame-generation', () => ({
+vi.mock('@/lib/ai/video-frame-generation', async original => ({
+  ...await original<typeof import('@/lib/ai/video-frame-generation')>(),
   analyzeApprovedTraVideoFrames: analyzeApprovedTraVideoFramesMock,
   generateApprovedTraVideoFrameCreativeImage: generateApprovedTraVideoFrameCreativeImageMock,
 }));
@@ -157,7 +158,7 @@ describe('creative generation TRA video integration', () => {
         };
       });
     expect(response.status).toBe(200);
-    expect(getApprovedTraVideoFramesMock).toHaveBeenCalledTimes(1);
+    expect(getApprovedTraVideoFramesMock).toHaveBeenCalledTimes(2);
     expect(analyzeApprovedTraVideoFramesMock).toHaveBeenCalledWith(expect.objectContaining({ context: expect.stringContaining('USER CREATIVE DIRECTION') }));
     expect(planCreativeBatchMock).toHaveBeenCalledWith(
       expect.objectContaining({ hasApprovedHumanSource: true })
