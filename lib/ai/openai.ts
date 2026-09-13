@@ -224,6 +224,13 @@ export async function analyzeReferenceCreative(
   );
 }
 
+/** No campaign/user context is accepted by this reusable producer. */
+export async function analyzeReusableReferenceAngle(source: StoredMediaFile): Promise<CreativeReferenceAnalysis> {
+  return analyzeCreative(source, '',
+    'Describe only campaign-independent creative inspiration visibly grounded in the image. Do not adapt to a company, audience or campaign, or infer performance. No exact copy, identities, brands, claims or proof. Use abstract mechanisms; never selection rationale. In hookOrAngle give a concise summary of at most 2000 characters. If unclear, say no reusable angle is observable.',
+    'Analyze the reusable angle of this image independently of any intended campaign.', 'reusable_reference_angle');
+}
+
 export async function analyzeTraSourceCreative(
   source: StoredMediaFile,
   context: string

@@ -17,7 +17,9 @@ vi.mock('@/lib/ai/openai', () => ({ analyzeTraSourceCreative: mocks.image, analy
 vi.mock('@/lib/ai/video-frame-generation', async original => ({
   ...await original<typeof import('@/lib/ai/video-frame-generation')>(), analyzeApprovedTraVideoFrames: mocks.video,
 }));
-vi.mock('@/lib/layouts/service', () => ({ getOrAnalyzeLayoutBlueprint: mocks.layout }));
+vi.mock('@/lib/layouts/service', () => ({ getOrAnalyzeLayoutBlueprint: mocks.layout, getLayoutBlueprintCache: () => ({
+  readAngle: async (sourceSha256: string, analyzerModel: string) => ({ version: 1, sourceSha256, analyzerModel, angleSummary: 'Cached reusable angle' }),
+}) }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: mocks.media }));
 vi.mock('@/lib/video/tra-video-frames', () => ({ getApprovedTraVideoFrames: mocks.frames }));
 vi.mock('@/lib/references/storage', () => ({ listReferenceLibrary: mocks.library }));
@@ -68,7 +70,7 @@ describe('real preparation to Astra with composed sources', () => {
     const data = request(); if (reversed) data.sourceAssets.reverse();
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(data, storage);
     let current = job;
-    for (let i = 0; i < 20 && current.planning.phase === 'INITIAL_PLAN'; i++) {
+    for (let i = 0; i < 30 && current.planning.phase === 'INITIAL_PLAN'; i++) {
       const before = operations.length, result = await step(current, storage);
       expect(result.error).toBeUndefined(); current = result.job;
       expect(operations.length - before).toBeLessThanOrEqual(1);
@@ -107,7 +109,7 @@ describe('real preparation to Astra with composed sources', () => {
       return [{ item, imageUrl: `http://localhost${item.url}`, selectionReason: 'Useful geometry' }]; });
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(request(), storage);
     let current = job;
-    for (let i = 0; i < 20 && current.planning.phase === 'INITIAL_PLAN'; i++) current = (await step(current, storage)).job;
+    for (let i = 0; i < 30 && current.planning.phase === 'INITIAL_PLAN'; i++) current = (await step(current, storage)).job;
     if (current.planning.phase !== 'DIVERSITY_AUDIT') throw new Error('Missing initial plan');
     const checkpoint = structuredClone(current.planning.checkpoint);
     expect(checkpoint.snapshot.referenceCatalog).toHaveLength(5); expect(checkpoint.snapshot.selectedReferences).toHaveLength(1);

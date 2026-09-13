@@ -86,6 +86,8 @@ vi.mock('@/lib/ai/reference-selector', () => ({
 
 vi.mock('@/lib/layouts/service', () => ({
   getOrAnalyzeLayoutBlueprint: mocks.getOrAnalyzeLayoutBlueprint,
+  getLayoutBlueprintCache: () => ({ readAngle: async (sourceSha256: string, analyzerModel: string) =>
+    ({ version: 1, sourceSha256, analyzerModel, angleSummary: 'Cached reusable angle' }) }),
 }));
 
 vi.mock('@/lib/media/local-storage', () => ({
@@ -428,7 +430,7 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   storedById = {};
   readMediaById = vi.fn(async (id: string) => storedById[id] || null);
-  readImageById = vi.fn(async () => null);
+  readImageById = vi.fn(async (id: string) => storedById[id] || null);
   saveImage = vi.fn(async (_file: File) => {
     const id = mediaId(String(saveImage.mock.calls.length));
     return {

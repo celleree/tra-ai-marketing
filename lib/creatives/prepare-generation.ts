@@ -2,7 +2,7 @@ import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/
 import type { CreativeRenderContext } from '@/lib/creatives/render-planned';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeBatchPlan } from '@/lib/creatives/planned';
-import { buildReferencePlanningCatalog } from '@/lib/references/planning.server';
+import { advanceReferenceAngles, buildReferencePlanningCatalog } from '@/lib/references/planning.server';
 import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import { planCreativeBatch, requestCreativeBatch, type CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
@@ -106,9 +106,12 @@ export async function prepareCreativeGeneration(
     userContext: data.context, traSummary: analysis.summary, traPreserve: analysis.preserve,
   });
   const uploadedCatalog = composedSourceCatalog(sourceAnalysis);
-  const referenceCatalog = [...uploadedCatalog, ...await buildReferencePlanningCatalog({ storage,
+  let referenceCatalog = [...uploadedCatalog, ...await buildReferencePlanningCatalog({ storage,
     selections: selectedReferences.filter(selection => !uploadedCatalog.some(item => item.referenceId === selection.item.id)),
   })];
+  // Explicit resubmission only: a failed enrichment escapes this single request without retry.
+  let enrichedCatalog;
+  while ((enrichedCatalog = await advanceReferenceAngles(referenceCatalog, storage, () => {}))) referenceCatalog = enrichedCatalog;
   const referenceDirections = selectedReferences.length
     ? selectedReferences
         .map((selection) =>
