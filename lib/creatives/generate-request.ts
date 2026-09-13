@@ -166,11 +166,12 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
 
   if (
     videoFrameSelection &&
-    (sourceAssets.length !== 1 || sourceAssets[0].role !== 'TRA_VIDEO')
+    (sourceAssets.filter(source => source.role === 'TRA_VIDEO').length !== 1 ||
+      sourceAssets.some(source => source.role === 'TRA_REFERENCE'))
   ) {
     return {
       success: false,
-      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset',
+      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset with optional LAYOUT_REFERENCE assets only',
     };
   }
 

@@ -620,9 +620,34 @@ describe('layout blueprint and final image-provider boundaries', () => {
     }
   });
 
-  it('retains selected render frames separately from representative-frame analysis and streams their provenance', async () => {
+  it.each([false, true])('retains selected render frames through real planning/rendering, layout=%s', async withLayout => {
     const videoId = mediaId('9');
     storedById[videoId] = video('9');
+    const layoutId = mediaId('8');
+    storedById[layoutId] = { ...image('8'), buffer: Buffer.concat([PNG, Buffer.from('EXTERNAL_LAYOUT_PIXELS')]) };
+    mocks.getOrAnalyzeLayoutBlueprint.mockResolvedValue({ ...layoutResolution, contentHash: contentHash(storedById[layoutId].buffer) });
+    const sourceAssets = [{ mediaId: videoId, role: 'TRA_VIDEO' as const },
+      ...(withLayout ? [{ mediaId: layoutId, role: 'LAYOUT_REFERENCE' as const }] : [])];
+    const { conceptDetails } = await import('../fixtures/creative-concept-details');
+    const planner = await vi.importActual<typeof import('@/lib/ai/creative-planner')>('@/lib/ai/creative-planner');
+    const renderer = await vi.importActual<typeof import('@/lib/ai/video-frame-generation')>('@/lib/ai/video-frame-generation');
+    mocks.planCreativeBatch.mockImplementation(planner.planCreativeBatch);
+    mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(renderer.generateApprovedTraVideoFrameCreativeImage);
+    mocks.analyzeApprovedTraVideoFrames.mockResolvedValue({ ...analysis, summary: 'VIDEO_SENTINEL' });
+    mocks.analyzeReferenceCreative.mockResolvedValue({ ...analysis, hookOrAngle: 'LAYOUT_SENTINEL' });
+    const requests: Array<{ url: string; body: string | FormData }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      requests.push({ url, body: init.body as string | FormData });
+      const plan = { creatives: [1, 2].map(index => ({ ...plannedCreative(index, 'approved-tra-human'),
+        strategy: { ...plannedCreative(index, 'approved-tra-human').strategy,
+          conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${index}` } },
+        referenceChoices: { angleSource: null, layoutSource: withLayout ? layoutId : null } })) };
+      const output = url.endsWith('/responses') && JSON.parse(String(init.body)).text.format.name === 'tra_portfolio_audit'
+        ? portfolioAudit(2) : plan;
+      return url.endsWith('/responses')
+        ? Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(output) }] }] })
+        : Response.json({ data: [{ b64_json: PNG.toString('base64') }] });
+    }));
     const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
     const selectedFrames = [
       {
@@ -666,15 +691,29 @@ describe('layout blueprint and final image-provider boundaries', () => {
 
     const response = await POST(
       generationRequest(
-        [{ mediaId: videoId, role: 'TRA_VIDEO' }],
+        sourceAssets,
         undefined,
         2,
         selectionFor(sourceVideoContentHash)
       )
     );
+    expect(response.status, response.status === 200 ? '' : await response.clone().text()).toBe(200);
     const events = await readStreamEvents(response);
-
-    expect(response.status).toBe(200);
+    expect(events.filter(event => event.event === 'creative')).toHaveLength(2);
+    const input = JSON.parse(requests.find(request => request.url.endsWith('/responses'))!.body as string).input[1].content[0].text;
+    expect(input).toContain('VIDEO_SENTINEL');
+    expect(input).toContain('not full Video Intelligence');
+    if (withLayout) {
+      expect(input).toContain('LAYOUT_SENTINEL');
+      expect(input).toContain(JSON.stringify(layoutBlueprint));
+    }
+    const edits = requests.filter(request => request.url.endsWith('/images/edits'));
+    expect(edits).toHaveLength(2);
+    for (const { body } of edits) {
+      const attachments = (body as FormData).getAll('image[]') as File[];
+      expect(await Promise.all(attachments.map(async file => Buffer.from(await file.arrayBuffer())))).toEqual([PNG]);
+      if (withLayout) expect(String((body as FormData).get('prompt'))).toContain('"layoutBlueprint"');
+    }
     expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
     expect(mocks.loadVideoSelectionContext).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'TRA_VIDEO', media: expect.objectContaining({ id: videoId }) })
@@ -719,14 +758,17 @@ describe('layout blueprint and final image-provider boundaries', () => {
     }
   });
 
-  it('rejects stale or missing selected-frame state before paid generation calls', async () => {
+  it.each([false, true])('rejects stale or missing selected-frame state before providers, layout=%s', async withLayout => {
     const videoId = mediaId('9');
     storedById[videoId] = video('9');
+    const layoutId = mediaId('8'); storedById[layoutId] = image('8');
+    const sourceAssets = [{ mediaId: videoId, role: 'TRA_VIDEO' as const },
+      ...(withLayout ? [{ mediaId: layoutId, role: 'LAYOUT_REFERENCE' as const }] : [])];
     const selection = selectionFor(contentHash(storedById[videoId].buffer));
 
     const stale = await POST(
       generationRequest(
-        [{ mediaId: videoId, role: 'TRA_VIDEO' }],
+        sourceAssets,
         undefined,
         2,
         selectionFor('f'.repeat(64))
@@ -739,7 +781,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
 
     const missing = await POST(
       generationRequest(
-        [{ mediaId: videoId, role: 'TRA_VIDEO' }],
+        sourceAssets,
         undefined,
         2,
         selection
@@ -755,7 +797,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     });
     const mismatchedLibrary = await POST(
       generationRequest(
-        [{ mediaId: videoId, role: 'TRA_VIDEO' }],
+        sourceAssets,
         undefined,
         2,
         selection
@@ -771,6 +813,30 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects explicit frames with TRA images before hydration or providers', async () => {
+    const response = await POST(generationRequest([
+      { mediaId: mediaId('9'), role: 'TRA_VIDEO' }, { mediaId: mediaId('8'), role: 'LAYOUT_REFERENCE' },
+      { mediaId: mediaId('7'), role: 'TRA_REFERENCE' },
+    ], undefined, 2, selectionFor('b'.repeat(64))));
+    expect(response.status).toBe(400);
+    expect(readMediaById).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('propagates rejected frame extraction with a layout before analysis or planning', async () => {
+    const videoId = mediaId('9'), layoutId = mediaId('8');
+    storedById[videoId] = video('9'); storedById[layoutId] = image('8');
+    mocks.loadVideoSelectionContext.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: null });
+    mocks.extractVideoSelectionFrames.mockRejectedValueOnce(new Error('Unknown TRA video representative frame ID'));
+    const response = await POST(generationRequest([
+      { mediaId: layoutId, role: 'LAYOUT_REFERENCE' }, { mediaId: videoId, role: 'TRA_VIDEO' },
+    ], undefined, 2, selectionFor(contentHash(storedById[videoId].buffer))));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: 'Unknown TRA video representative frame ID' });
+    expect(mocks.analyzeApprovedTraVideoFrames).not.toHaveBeenCalled();
+    expect(mocks.getOrAnalyzeLayoutBlueprint).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
   });
 
   it('returns production 404 for selected-frame generation before storage or providers', async () => {
