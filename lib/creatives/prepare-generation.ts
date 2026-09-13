@@ -2,7 +2,7 @@ import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/
 import type { CreativeRenderContext } from '@/lib/creatives/render-planned';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeBatchPlan } from '@/lib/creatives/planned';
-import { advanceReferenceAngles, buildReferencePlanningCatalog } from '@/lib/references/planning.server';
+import { withCuratedReferenceMetadata, advanceReferenceAngles, buildReferencePlanningCatalog } from '@/lib/references/planning.server';
 import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import { planCreativeBatch, requestCreativeBatch, type CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
@@ -164,6 +164,7 @@ export async function prepareCreativeGeneration(
       : '';
 
   const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
+  referenceCatalog = await withCuratedReferenceMetadata(referenceCatalog);
   const plannerArgs: CreativeBatchPlannerArgs = {
     count: data.variationCount,
     context: generationContext,

@@ -15,7 +15,7 @@ import { conceptDetails } from '../fixtures/creative-concept-details';
 
 const mocks = vi.hoisted(() => ({ media: vi.fn(), library: vi.fn(), select: vi.fn() }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: mocks.media }));
-vi.mock('@/lib/references/storage', () => ({ listReferenceLibrary: mocks.library }));
+vi.mock('@/lib/references/storage', () => ({ listAllReferenceLibrary: mocks.library, listReferenceLibrary: mocks.library }));
 vi.mock('@/lib/ai/reference-selector', () => ({ selectBestReferenceCreatives: mocks.select }));
 vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: async () => [] }));
 vi.mock('@/lib/creatives/storage', () => ({ listCreatives: async () => [] }));
@@ -25,7 +25,7 @@ const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 const candidate = { ...referenceCandidate(), sourceSha256: sha(png) };
 const item = { id: candidate.referenceId, fileName: `${candidate.referenceId}.png`, originalName: 'Library',
   mimeType: 'image/png', size: png.length, url: '/library.png', addedAt: '2026-09-13T00:00:00Z',
-  referenceType: 'layout', angle: 'educational', angleSource: 'manual' };
+  notes: 'CURATED_NOTE', tags: ['CURATED_TAG'], referenceType: 'layout', angle: 'educational', angleSource: 'manual' };
 const source = { fileName: item.fileName, mimeType: 'image/png' as const, mediaType: 'IMAGE' as const, buffer: png };
 const storage = { readImageById: vi.fn(async (_id: string) => source), readMediaById: vi.fn(async () => source) };
 let semanticCalls: number, astra: any[], fail: boolean;
@@ -64,7 +64,7 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 afterAll(async () => rm(dir, { recursive: true, force: true }));
 
 it.each([false, true])('connects real preparation, cache, reload and outbound Astra; uploaded=%s', async uploaded => {
-  if (!uploaded) mocks.library.mockResolvedValue(Array.from({ length: 50 }, (_, i) => ({ ...item, id: `media_${i.toString(16).padStart(32, '0')}` })));
+  if (!uploaded) mocks.library.mockResolvedValue([item, ...Array.from({ length: 49 }, (_, i) => ({ ...item, id: `media_${i.toString(16).padStart(32, '0')}` }))]);
   const data = { ...portfolioRequest(), context: 'PRIVATE_CAMPAIGN',
     sourceAssets: uploaded ? [{ role: 'LAYOUT_REFERENCE' as const, mediaId: item.id }] : [] };
   const jobs = new MemoryPortfolioStorage(), job = await createCreativePortfolio(data, jobs);
@@ -89,9 +89,11 @@ it.each([false, true])('connects real preparation, cache, reload and outbound As
   expect(checkpoint.snapshot.referenceCatalog).toEqual(checkpoint.plannerArgs.referenceCatalog);
   expect(checkpoint.snapshot.referenceCatalog[0].reusableAngle?.angleSummary).toBe('REUSABLE_SENTINEL');
   expect(astra[0].referenceCatalog[0].reusableAngleSummary).toBe('REUSABLE_SENTINEL');
+  expect(astra[0].referenceCatalog[0].curated).toEqual({ notes: 'CURATED_NOTE', tags: ['CURATED_TAG'] });
   expect(astra[0].creativeContext).toContain('CAMPAIGN_SELECTION');
   const direct = await prepareCreativeGeneration({ ...data, context: 'OTHER_CAMPAIGN' }, 'http://localhost', { initialPlanOnly: true });
   expect(semanticCalls).toBe(1); expect(astra[1].referenceCatalog[0].reusableAngleSummary).toBe('REUSABLE_SENTINEL');
+  expect(astra[1].referenceCatalog[0].curated).toEqual(astra[0].referenceCatalog[0].curated);
   expect(direct.referenceCatalog[0].blueprint).toEqual(candidate.blueprint);
   expect(direct.providerImageSource).toBeUndefined(); expect(direct.videoFrameSet).toBeNull();
   expect(await getLayoutBlueprintCache().read(sha(png), 'semantic-model')).toEqual(candidate.blueprint);

@@ -1,3 +1,5 @@
+import { listAllReferenceLibrary } from '@/lib/references/storage';
+import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { createHash } from 'node:crypto';
 import { analyzeReusableReferenceAngle } from '@/lib/ai/openai';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
@@ -57,4 +59,14 @@ export async function advanceReferenceAngles(
     await cache.writeAngle(reusableAngle);
   }
   return catalog.map(item => item === pending ? { ...item, reusableAngle } : item);
+}
+
+/** Freeze editorial guidance for the new plan, independently of image-analysis identities. */
+export async function withCuratedReferenceMetadata(catalog: ReferencePlanningCandidate[]): Promise<ReferencePlanningCandidate[]> {
+  if (!catalog.length) return catalog;
+  const records = await listAllReferenceLibrary();
+  return catalog.map(({ curated: _previous, ...item }) => {
+    const curated = parseReferenceCuratedMetadata(records.find(record => record.id === item.referenceId));
+    return { ...item, ...(curated && Object.keys(curated).length ? { curated } : {}) };
+  });
 }

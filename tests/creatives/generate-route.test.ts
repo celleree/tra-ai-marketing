@@ -95,6 +95,7 @@ vi.mock('@/lib/media/local-storage', () => ({
 }));
 
 vi.mock('@/lib/references/storage', () => ({
+  listAllReferenceLibrary: mocks.listReferenceLibrary,
   listReferenceLibrary: mocks.listReferenceLibrary,
 }));
 

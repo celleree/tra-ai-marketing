@@ -1,3 +1,4 @@
+import { parseReferenceCuratedMetadata, type ReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseLayoutBlueprint, type LayoutBlueprint } from '@/lib/layouts/blueprint';
 
 export type ReferenceSelection = {
@@ -13,6 +14,7 @@ export type ReferencePlanningCandidate = {
   analyzerModel: string;
   blueprint: LayoutBlueprint;
   reusableAngle?: ReusableReferenceAngle;
+  curated?: ReferenceCuratedMetadata;
 };
 const isId = (value: unknown): value is string => typeof value === 'string' && /^media_[a-f0-9]{32}$/.test(value);
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -66,11 +68,12 @@ export function parseReferenceCatalog(value: unknown): ReferencePlanningCandidat
   if (!Array.isArray(value) || value.length > 40) return null;
   try {
     const catalog = value.map(item => {
-      if (!record(item) || !exact(item, [...('reusableAngle' in item ? ['reusableAngle'] : []), 'referenceId', 'priority', 'angleDescription', 'sourceSha256', 'analyzerModel', 'blueprint'])
+      if (!record(item) || !exact(item, [...('reusableAngle' in item ? ['reusableAngle'] : []), ...('curated' in item ? ['curated'] : []), 'referenceId', 'priority', 'angleDescription', 'sourceSha256', 'analyzerModel', 'blueprint'])
         || !isId(item.referenceId) || !['user', 'library'].includes(String(item.priority))
         || typeof item.angleDescription !== 'string' || !item.angleDescription.trim() || item.angleDescription.length > 2000
         || typeof item.sourceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sourceSha256)
         || typeof item.analyzerModel !== 'string' || !item.analyzerModel.trim() || item.analyzerModel.length > 200) throw new Error('Invalid reference catalog.');
+      if ('curated' in item && !parseReferenceCuratedMetadata(item.curated)) throw new Error('Invalid curated reference metadata.');
       const { reusableAngle: rawAngle, ...legacy } = item;
       const reusableAngle = parseReusableReferenceAngle(rawAngle);
       return { ...legacy, blueprint: parseLayoutBlueprint(item.blueprint),
