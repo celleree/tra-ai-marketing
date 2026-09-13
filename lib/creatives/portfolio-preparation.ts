@@ -1,4 +1,4 @@
-import { advanceReferenceAngles } from '@/lib/references/planning.server';
+import { withCuratedReferenceMetadata, advanceReferenceAngles } from '@/lib/references/planning.server';
 import { analyzeReferenceCreative, analyzeTraSourceCreative, type CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { analyzeApprovedTraVideoFrames } from '@/lib/ai/video-frame-generation';
@@ -256,6 +256,7 @@ export async function advancePortfolioPreparation(
       ? 'referenceAnalysis describes the approved TRA video-frame source; preserve approved TRA cues and obey its avoid guidance.'
       : '';
   const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
+  state.referenceCatalog = await withCuratedReferenceMetadata(state.referenceCatalog);
   const plannerArgs = {
     count: data.variationCount,
     context: generationContext,

@@ -22,7 +22,7 @@ vi.mock('@/lib/layouts/service', () => ({ getOrAnalyzeLayoutBlueprint: mocks.lay
 }) }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: mocks.media }));
 vi.mock('@/lib/video/tra-video-frames', () => ({ getApprovedTraVideoFrames: mocks.frames }));
-vi.mock('@/lib/references/storage', () => ({ listReferenceLibrary: mocks.library }));
+vi.mock('@/lib/references/storage', () => ({ listAllReferenceLibrary: mocks.library, listReferenceLibrary: mocks.library }));
 vi.mock('@/lib/ai/reference-selector', () => ({ selectBestReferenceCreatives: mocks.select }));
 vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: async () => [] }));
 vi.mock('@/lib/creatives/storage', () => ({ listCreatives: async () => [] }));
