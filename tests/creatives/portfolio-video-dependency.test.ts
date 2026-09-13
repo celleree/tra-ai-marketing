@@ -96,11 +96,12 @@ it('enforces the saved-job size limit and requires a marker for dependencies', (
   expect(() => parseCreativePortfolioJob(encode(job), job.id)).toThrow('invalid');
   const enabled = { ...job, videoPreparationVersion: 1 };
   expect(parseCreativePortfolioJob(encode(enabled), job.id)).toEqual(enabled);
+  const preparation = job.planning.preparation;
   const sourceAnalysis = { version: 1, entries: [{ source: { ...video, sha256: 'd'.repeat(64) },
     analyzer: { kind: 'REPRESENTATIVE_VIDEO_FRAMES', model: 'saved', schemaVersion: 1, contextSha256: 'e'.repeat(64) },
     evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION' }] };
   expect(() => parseCreativePortfolioJob(encode({ ...enabled, planning: { phase: 'INITIAL_PLAN',
-    preparation: { ...job.planning.preparation, sourceAnalysis } } }), job.id)).toThrow('invalid');
+    preparation: { ...preparation, sourceAnalysis } } }), job.id)).toThrow('invalid');
   expect(() => parseCreativePortfolioJob(encode({ ...enabled, padding: 'x'.repeat(2 * 1024 * 1024) }), job.id)).toThrow('invalid');
   for (const version of [0, 2, '1', null]) {
     expect(() => parseCreativePortfolioJob(encode({ ...job, videoPreparationVersion: version }), job.id)).toThrow('Unsupported');
