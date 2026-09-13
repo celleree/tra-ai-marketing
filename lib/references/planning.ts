@@ -12,10 +12,28 @@ export type ReferencePlanningCandidate = {
   sourceSha256: string;
   analyzerModel: string;
   blueprint: LayoutBlueprint;
+  reusableAngle?: ReusableReferenceAngle;
 };
 const isId = (value: unknown): value is string => typeof value === 'string' && /^media_[a-f0-9]{32}$/.test(value);
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => key in value);
+/** Context-independent inspiration only; never approved evidence or selection rationale. */
+export const REUSABLE_ANGLE_SCHEMA_VERSION = 1 as const;
+export type ReusableReferenceAngle = {
+  version: typeof REUSABLE_ANGLE_SCHEMA_VERSION;
+  sourceSha256: string;
+  analyzerModel: string;
+  angleSummary: string;
+};
+export function parseReusableReferenceAngle(value: unknown): ReusableReferenceAngle | null {
+  if (!record(value) || !exact(value, ['version', 'sourceSha256', 'analyzerModel', 'angleSummary'])
+    || value.version !== REUSABLE_ANGLE_SCHEMA_VERSION
+    || typeof value.sourceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.sourceSha256)
+    || typeof value.analyzerModel !== 'string' || !value.analyzerModel.trim() || value.analyzerModel.length > 200
+    || typeof value.angleSummary !== 'string' || !value.angleSummary.trim() || value.angleSummary.length > 2000) return null;
+  return { ...value } as ReusableReferenceAngle;
+}
+
 export const referenceRelationship = (angle: string | null, layout: string | null): ReferenceSelection['referenceRelationship'] =>
   angle === null && layout === null ? 'original' : angle !== null && angle === layout ? 'matched' : 'mixed';
 
@@ -48,12 +66,16 @@ export function parseReferenceCatalog(value: unknown): ReferencePlanningCandidat
   if (!Array.isArray(value) || value.length > 40) return null;
   try {
     const catalog = value.map(item => {
-      if (!record(item) || !exact(item, ['referenceId', 'priority', 'angleDescription', 'sourceSha256', 'analyzerModel', 'blueprint'])
+      if (!record(item) || !exact(item, [...('reusableAngle' in item ? ['reusableAngle'] : []), 'referenceId', 'priority', 'angleDescription', 'sourceSha256', 'analyzerModel', 'blueprint'])
         || !isId(item.referenceId) || !['user', 'library'].includes(String(item.priority))
         || typeof item.angleDescription !== 'string' || !item.angleDescription.trim() || item.angleDescription.length > 2000
         || typeof item.sourceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sourceSha256)
         || typeof item.analyzerModel !== 'string' || !item.analyzerModel.trim() || item.analyzerModel.length > 200) throw new Error('Invalid reference catalog.');
-      return { ...item, blueprint: parseLayoutBlueprint(item.blueprint) } as ReferencePlanningCandidate;
+      const { reusableAngle: rawAngle, ...legacy } = item;
+      const reusableAngle = parseReusableReferenceAngle(rawAngle);
+      return { ...legacy, blueprint: parseLayoutBlueprint(item.blueprint),
+        ...(reusableAngle?.sourceSha256 === item.sourceSha256 ? { reusableAngle } : {}),
+      } as ReferencePlanningCandidate;
     });
     return new Set(catalog.map(item => item.referenceId)).size === catalog.length ? catalog : null;
   } catch { return null; }

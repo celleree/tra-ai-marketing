@@ -16,6 +16,7 @@ import {
   parseLayoutBlueprint,
   type LayoutBlueprint,
 } from '@/lib/layouts/blueprint';
+import { REUSABLE_ANGLE_SCHEMA_VERSION, parseReusableReferenceAngle, type ReusableReferenceAngle } from '@/lib/references/planning';
 import { validateStoredMediaImage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
 
@@ -65,7 +66,42 @@ const serializeCachePayload = (blueprint: LayoutBlueprint) =>
     blueprint,
   });
 
-class LocalLayoutBlueprintCache implements LayoutBlueprintCache {
+export interface ReusableAngleCache {
+  readAngle(contentHash: string, analyzerModel: string): Promise<ReusableReferenceAngle | null>;
+  writeAngle(value: ReusableReferenceAngle): Promise<void>;
+}
+
+// Separate objects in the same backend avoid read/modify/write loss of blueprint or future fields.
+const angleFileName = (hash: string, model: string) => {
+  if (!/^[a-f0-9]{64}$/.test(hash) || !model.trim() || model.length > 200) throw new Error('Invalid angle cache identity.');
+  return `angle-v${REUSABLE_ANGLE_SCHEMA_VERSION}-${createHash('sha256').update(model).digest('hex')}-${hash}.json`;
+};
+abstract class ReferenceCache implements LayoutBlueprintCache, ReusableAngleCache {
+  protected abstract readPayload(fileName: string): Promise<string | null>;
+  protected abstract writePayload(fileName: string, payload: string): Promise<void>;
+  async read(hash: string, model: string) {
+    const raw = await this.readPayload(cacheFileName(hash, model));
+    return raw === null ? null : parseCachePayload(raw);
+  }
+  async write(hash: string, model: string, blueprint: LayoutBlueprint) {
+    await this.writePayload(cacheFileName(hash, model), serializeCachePayload(blueprint));
+  }
+  async readAngle(hash: string, model: string) {
+    const raw = await this.readPayload(angleFileName(hash, model));
+    if (raw === null) return null;
+    try {
+      const value = parseReusableReferenceAngle(JSON.parse(raw));
+      return value?.sourceSha256 === hash && value.analyzerModel === model ? value : null;
+    } catch { return null; }
+  }
+  async writeAngle(input: ReusableReferenceAngle) {
+    const value = parseReusableReferenceAngle(input);
+    if (!value) throw new Error('Invalid reusable angle metadata.');
+    await this.writePayload(angleFileName(value.sourceSha256, value.analyzerModel), JSON.stringify(value));
+  }
+}
+
+class LocalLayoutBlueprintCache extends ReferenceCache {
   private readonly root = (() => {
     const configured = process.env.LAYOUT_BLUEPRINT_CACHE_DIR;
     return configured
@@ -73,25 +109,19 @@ class LocalLayoutBlueprintCache implements LayoutBlueprintCache {
       : resolve(process.cwd(), 'data', 'layout-blueprints');
   })();
 
-  async read(contentHash: string, analyzerModel: string) {
+  protected async readPayload(fileName: string) {
     try {
-      return parseCachePayload(
-        await readFile(resolve(this.root, cacheFileName(contentHash, analyzerModel)), 'utf-8')
-      );
+      return await readFile(resolve(this.root, fileName), 'utf-8');
     } catch {
       return null;
     }
   }
 
-  async write(
-    contentHash: string,
-    analyzerModel: string,
-    blueprint: LayoutBlueprint
-  ) {
+  protected async writePayload(fileName: string, payload: string) {
     await mkdir(this.root, { recursive: true });
     await writeFile(
-      resolve(this.root, cacheFileName(contentHash, analyzerModel)),
-      serializeCachePayload(blueprint),
+      resolve(this.root, fileName),
+      payload,
       'utf-8'
     );
   }
@@ -127,11 +157,12 @@ const getR2Config = () => {
   };
 };
 
-class R2LayoutBlueprintCache implements LayoutBlueprintCache {
+class R2LayoutBlueprintCache extends ReferenceCache {
   private readonly client: S3Client;
   private readonly bucketName: string;
 
   constructor() {
+    super();
     const config = getR2Config();
     this.bucketName = config.bucketName;
     this.client = new S3Client({
@@ -144,45 +175,41 @@ class R2LayoutBlueprintCache implements LayoutBlueprintCache {
     });
   }
 
-  private key(contentHash: string, analyzerModel: string) {
-    return `_metadata/layout-blueprints/${cacheFileName(contentHash, analyzerModel)}`;
+  private key(fileName: string) {
+    return `_metadata/layout-blueprints/${fileName}`;
   }
 
-  async read(contentHash: string, analyzerModel: string) {
+  protected async readPayload(fileName: string) {
     try {
       const response = await this.client.send(
         new GetObjectCommand({
           Bucket: this.bucketName,
-          Key: this.key(contentHash, analyzerModel),
+          Key: this.key(fileName),
         })
       );
       if (!response.Body) return null;
-      return parseCachePayload(await response.Body.transformToString());
+      return response.Body.transformToString();
     } catch (error) {
       if (isMissingObjectError(error)) return null;
       throw error;
     }
   }
 
-  async write(
-    contentHash: string,
-    analyzerModel: string,
-    blueprint: LayoutBlueprint
-  ) {
+  protected async writePayload(fileName: string, payload: string) {
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucketName,
-        Key: this.key(contentHash, analyzerModel),
-        Body: serializeCachePayload(blueprint),
+        Key: this.key(fileName),
+        Body: payload,
         ContentType: 'application/json',
       })
     );
   }
 }
 
-let cache: LayoutBlueprintCache | undefined;
+let cache: ReferenceCache | undefined;
 
-export const getLayoutBlueprintCache = (): LayoutBlueprintCache => {
+export const getLayoutBlueprintCache = (): LayoutBlueprintCache & ReusableAngleCache => {
   if (cache) return cache;
   cache =
     process.env.NODE_ENV === 'production'

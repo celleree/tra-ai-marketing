@@ -24,3 +24,20 @@ describe('independent reference choices', () => {
     expect(parseReferenceCatalog([{ ...catalog[0], sourceSha256: 'changed' }])).toBeNull();
   });
 });
+
+describe('optional reusable angle snapshots', () => {
+  const reusableAngle = { version: 1, sourceSha256: catalog[0].sourceSha256,
+    analyzerModel: 'semantic-model', angleSummary: 'Reduce uncertainty with a clear next step.' };
+  it('round trips enrichment separately from historical campaign rationale', () => {
+    const enriched = [{ ...catalog[0], reusableAngle }];
+    expect(parseReferenceCatalog(JSON.parse(JSON.stringify(enriched)))).toEqual(enriched);
+    expect(parseReferenceCatalog(catalog)).toEqual(catalog);
+    expect(parseReferenceCatalog(catalog)![0]).not.toHaveProperty('reusableAngle');
+  });
+  it.each([null, {}, { ...reusableAngle, version: 2 }, { ...reusableAngle, angleSummary: ' ' },
+    { ...reusableAngle, angleSummary: 'x'.repeat(2001) }, { ...reusableAngle, analyzerModel: '' },
+    { ...reusableAngle, sourceSha256: 'f'.repeat(64) }, { ...reusableAngle, selectionReason: 'campaign' }])(
+    'drops malformed enrichment while preserving the saved catalog: %j', value => {
+      expect(parseReferenceCatalog([{ ...catalog[0], reusableAngle: value }])).toEqual([catalog[0]]);
+    });
+});
