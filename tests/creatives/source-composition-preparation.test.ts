@@ -12,7 +12,7 @@ import { conceptDetails } from '../fixtures/creative-concept-details';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 
-const mocks = vi.hoisted(() => ({ image: vi.fn(), angle: vi.fn(), video: vi.fn(), layout: vi.fn(), media: vi.fn(), frames: vi.fn() }));
+const mocks = vi.hoisted(() => ({ image: vi.fn(), angle: vi.fn(), video: vi.fn(), layout: vi.fn(), media: vi.fn(), frames: vi.fn(), audit: vi.fn(), library: vi.fn(), select: vi.fn() }));
 vi.mock('@/lib/ai/openai', () => ({ analyzeTraSourceCreative: mocks.image, analyzeReferenceCreative: mocks.angle }));
 vi.mock('@/lib/ai/video-frame-generation', async original => ({
   ...await original<typeof import('@/lib/ai/video-frame-generation')>(), analyzeApprovedTraVideoFrames: mocks.video,
@@ -20,10 +20,11 @@ vi.mock('@/lib/ai/video-frame-generation', async original => ({
 vi.mock('@/lib/layouts/service', () => ({ getOrAnalyzeLayoutBlueprint: mocks.layout }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: mocks.media }));
 vi.mock('@/lib/video/tra-video-frames', () => ({ getApprovedTraVideoFrames: mocks.frames }));
-vi.mock('@/lib/references/storage', () => ({ listReferenceLibrary: async () => [] }));
+vi.mock('@/lib/references/storage', () => ({ listReferenceLibrary: mocks.library }));
+vi.mock('@/lib/ai/reference-selector', () => ({ selectBestReferenceCreatives: mocks.select }));
 vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: async () => [] }));
 vi.mock('@/lib/creatives/storage', () => ({ listCreatives: async () => [] }));
-vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: async () => portfolioAudit(2) }));
+vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: mocks.audit }));
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 const analysis = (sentinel: string) => ({ summary: sentinel, visibleText: [], visualStructure: '', hookOrAngle: sentinel,
@@ -34,6 +35,8 @@ const request = () => ({ ...portfolioRequest(), sourceAssets:
 let operations: string[], outbound: Record<string, any>[], media: Record<string, StoredCreativeSourceMediaFile>;
 beforeEach(() => {
   vi.clearAllMocks(); operations = []; outbound = []; media = {};
+  mocks.audit.mockResolvedValue(portfolioAudit(2));
+  mocks.library.mockResolvedValue([]); mocks.select.mockResolvedValue([]);
   vi.stubEnv('OPENAI_API_KEY', 'mock-key'); vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'analysis-model');
   for (const { role, mediaId } of request().sourceAssets) media[mediaId] = role === 'TRA_VIDEO'
     ? { fileName: `${mediaId}.mp4`, mediaType: 'VIDEO', mimeType: 'video/mp4', buffer: Buffer.from(REAL_ENCODED_MP4) }
@@ -92,6 +95,37 @@ describe('real preparation to Astra with composed sources', () => {
     expect(direct.sourceAnalysis).toEqual(restored.sourceAnalysis);
     expect(direct.providerImageSource?.media.id).toBe(restored.providerImageSource?.media.id);
     expect(direct.videoFrameSet).toBeNull(); expect(outbound).toHaveLength(2);
+  });
+
+  it('reuses completed source and reference preparation after explicit retry of a failed second audit', async () => {
+    const id = `media_${'a'.repeat(32)}`;
+    const item = { id, fileName: `${id}.png`, originalName: 'Library layout', mimeType: 'image/png', size: png.length,
+      url: `/api/media/files/${id}.png`, addedAt: '2026-09-12T00:00:00.000Z', referenceType: 'layout', angle: 'educational', angleSource: 'manual' };
+    media[id] = { fileName: item.fileName, mimeType: 'image/png', mediaType: 'IMAGE', buffer: png };
+    mocks.library.mockResolvedValue([item]);
+    mocks.select.mockImplementation(async () => { operations.push('reference-selection');
+      return [{ item, imageUrl: `http://localhost${item.url}`, selectionReason: 'Useful geometry' }]; });
+    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(request(), storage);
+    let current = job;
+    for (let i = 0; i < 20 && current.planning.phase === 'INITIAL_PLAN'; i++) current = (await step(current, storage)).job;
+    if (current.planning.phase !== 'DIVERSITY_AUDIT') throw new Error('Missing initial plan');
+    const checkpoint = structuredClone(current.planning.checkpoint);
+    expect(checkpoint.snapshot.referenceCatalog).toHaveLength(5); expect(checkpoint.snapshot.selectedReferences).toHaveLength(1);
+    mocks.audit.mockResolvedValue({ ...portfolioAudit(2), groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] });
+    for (let i = 0; i < 3; i++) current = (await step(current, storage)).job; // audit, repair, second audit
+    expect(current.planningError).toBeTruthy(); expect(outbound).toHaveLength(2);
+    expect((await step(current, storage)).job).toEqual(current);
+    const retried = await updateCreativePortfolio(job.id, value => retryPortfolioWork(value, null), storage);
+    expect(await readCreativePortfolio(job.id, storage)).toEqual(retried);
+    expect(retried.planning).toMatchObject({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: true,
+      sourceAnalysis: checkpoint.plannerArgs.sourceAnalysis, referenceCatalog: checkpoint.snapshot.referenceCatalog,
+      selectedReferences: checkpoint.snapshot.selectedReferences } });
+    const before = operations.length, planned = await step(retried, storage);
+    expect(planned.error).toBeUndefined(); expect(planned.job.planning.phase).toBe('DIVERSITY_AUDIT');
+    expect(operations.slice(before)).toEqual(['Astra']); expect(outbound).toHaveLength(3);
+    expect(outbound[2].sourceAnalysis).toEqual(outbound[0].sourceAnalysis);
+    expect(outbound[2].referenceCatalog).toEqual(outbound[0].referenceCatalog);
+    expect(planned.job.slots).toEqual(job.slots);
   });
 
   it.each(['provider', 'expired-lease', 'oversized-save'])('preserves completed work after %s until explicit retry', async failure => {

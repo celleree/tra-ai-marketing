@@ -134,7 +134,7 @@ export async function advancePortfolioPreparation(
     const angle = primary.find(result => result.kind === 'LAYOUT_ANGLE');
     state.analysis = observation?.analysis ?? (layout ? { ...buildLayoutReferenceAnalysis(layout.layout.blueprint),
       hookOrAngle: angle?.angleDescription ?? '' } : buildPromptOnlyAnalysis(data.context));
-    state.referenceCatalog = composedSourceCatalog(state.sourceAnalysis!);
+    state.referenceCatalog ??= composedSourceCatalog(state.sourceAnalysis!);
   }
 
   if (source && generationSourceAsset?.role === 'LAYOUT_REFERENCE' && !state.sourceLayout) {

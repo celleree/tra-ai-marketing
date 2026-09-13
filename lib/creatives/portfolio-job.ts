@@ -188,7 +188,13 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
     // A completed second audit is a known quality failure. Restart planning explicitly without re-reserving portfolio quota.
     if (job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
       && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) {
-      job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true } };
+      const { plannerArgs, snapshot } = job.planning.checkpoint;
+      job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true,
+        ...(job.sourceCompositionVersion === 2 && plannerArgs.sourceAnalysis ? {
+          sourceAnalysis: plannerArgs.sourceAnalysis, selectedReferences: snapshot.selectedReferences,
+          referenceCatalog: snapshot.referenceCatalog,
+        } : {}),
+      } };
     }
   } else {
     const slot = job.slots.find(slot => slot.index === slotIndex);
