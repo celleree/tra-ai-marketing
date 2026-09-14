@@ -6,13 +6,15 @@ import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-reques
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parsePortfolioAudit } from '@/lib/creatives/portfolio-audit';
-import { MAX_PORTFOLIO_CREATIVES, type CreativePortfolioJob, type PortfolioPlanningCheckpoint } from '@/lib/creatives/portfolio-job';
+import { MAX_PORTFOLIO_CREATIVES, MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH,
+  type CreativePortfolioJob, type PortfolioPlanningCheckpoint } from '@/lib/creatives/portfolio-job';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
 import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
 import { parsePlanningSourceAnalysis, validAnalysis, validSourceLayout } from '@/lib/creatives/planning-source-parser';
 import { videoPlanningSelectorBinding } from '@/lib/creatives/video-intelligence-planning';
 import { parseReferenceCatalog } from '@/lib/references/planning';
 import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS } from '@/lib/video/approved-human';
+import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
@@ -42,6 +44,21 @@ const validVideoRetry = (value: unknown) => {
     && (retry.candidateIndexes === undefined || (Array.isArray(retry.candidateIndexes)
       && retry.candidateIndexes.length >= 1 && retry.candidateIndexes.length <= 2
       && retry.candidateIndexes.every(index => Number.isSafeInteger(index) && index >= 0)));
+};
+
+const validSlotVideoSelection = (value: unknown, slotStatus: string, job: CreativePortfolioJob) => {
+  if (!record(value) || value.version !== 1 || typeof value.selectionModel !== 'string'
+    || value.selectionModel.trim().length < 1 || value.selectionModel.length > MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH
+    || job.videoPreparationVersion !== 1 || job.planning.phase !== 'READY_TO_RENDER' || !job.snapshot
+    || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO')) return false;
+  const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value;
+  if (!exact(value, ['version', 'selectionModel', ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : [])])
+    || (hasSelection && !parseGenerateVideoFrameSelection(value.selection)) || (hasSelection && hasRetry)) return false;
+  if (hasRetry) {
+    if (slotStatus !== 'PENDING' || !record(value.retryAuthorization) || !exact(value.retryAuthorization, ['version'])
+      || value.retryAuthorization.version !== 1) return false;
+  }
+  return true;
 };
 
 class UnsupportedSourceCompositionVersionError extends Error {
@@ -170,7 +187,8 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
       || new Set(job.slots.map(slot => slot.creativeId)).size !== job.slots.length
       || job.slots.some((slot, index) => slot.index !== index + 1 || !/^creative_[a-f0-9]{32}$/.test(slot.creativeId)
         || !['PENDING', 'SAVED', 'RETRY_REQUIRED'].includes(slot.status)
-        || (slot.status === 'RETRY_REQUIRED' ? !text(slot.error) : slot.error !== undefined))
+        || (slot.status === 'RETRY_REQUIRED' ? !text(slot.error) : slot.error !== undefined)
+        || (slot.videoSelection !== undefined && !validSlotVideoSelection(slot.videoSelection, slot.status, job)))
       || !record(job.planning) || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planning.phase)) throw new Error();
 
     if (job.planning.phase === 'READY_TO_RENDER') {
