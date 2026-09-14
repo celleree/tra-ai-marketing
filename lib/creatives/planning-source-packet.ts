@@ -64,7 +64,9 @@ export type VideoPlanningContext = {
     coverage: 'COMPLETE' | 'UNIFORM_TIMELINE_V1';
   };
   observations: Array<Pick<VideoFrameLibrary['representativeFrames'][number],
-    'id' | 'timestampMs' | 'frameSha256' | 'evidenceStatus' | 'observation' | 'transcriptSegments'>>;
+    'id' | 'timestampMs' | 'frameSha256' | 'evidenceStatus' | 'observation' | 'transcriptSegments'> & {
+      representativeOrdinal: number;
+    }>;
 };
 
 type TraReferencePlanningAnalysis = {

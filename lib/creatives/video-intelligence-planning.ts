@@ -26,10 +26,8 @@ const validSegment = (segment: unknown, durationMs: number, total: number) => {
     && endMs > startMs && endMs <= durationMs && boundedText(text, 4000);
 };
 
-const uniformlyBound = <T>(values: readonly T[], limit: number) => {
-  if (values.length <= limit) return [...values];
-  return Array.from({ length: limit }, (_, index) => values[Math.round(index * (values.length - 1) / (limit - 1))]);
-};
+const uniformIndexes = (total: number, limit: number) => Array.from({ length: Math.min(total, limit) }, (_, index) =>
+  total <= limit ? index : Math.round(index * (total - 1) / (limit - 1)));
 
 export function parseVideoPlanningContext(value: unknown, source: { mediaId: string; sha256: string }): VideoPlanningContext {
   if (!record(value) || !exact(value, ['identity', 'locator', 'jobId', 'artifact', 'library', 'transcript', 'observationCoverage', 'observations'])
@@ -54,28 +52,32 @@ export function parseVideoPlanningContext(value: unknown, source: { mediaId: str
   const transcript = context.transcript;
   if (!exact(value.transcript, ['status', 'model', 'language', 'totalSegmentCount', 'coverage', 'excerpts'])
     || !safe(transcript.totalSegmentCount) || !Array.isArray(transcript.excerpts)
-    || transcript.excerpts.length > MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS || transcript.excerpts.length > transcript.totalSegmentCount
+    || transcript.excerpts.length !== Math.min(transcript.totalSegmentCount, MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS)
     || transcript.coverage !== (transcript.excerpts.length === transcript.totalSegmentCount ? 'COMPLETE' : 'UNIFORM_TIMELINE_V1')
     || (transcript.status === 'NO_AUDIO_TRACK'
       ? transcript.model !== null || transcript.language !== null || transcript.totalSegmentCount !== 0
         || context.library.analysisModels.transcription !== null
       : transcript.status !== 'AVAILABLE' || transcript.model !== 'whisper-1'
         || context.library.analysisModels.transcription !== transcript.model || !boundedText(transcript.language, 100))) return fail();
-  let previousSegment = -1;
-  for (const segment of transcript.excerpts) {
+  let previousSegment = -1, previousStart = -1;
+  const transcriptIndexes = uniformIndexes(transcript.totalSegmentCount, MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS);
+  for (const [index, segment] of transcript.excerpts.entries()) {
     if (!validSegment(segment, context.library.durationMs, transcript.totalSegmentCount)
-      || segment.segmentIndex <= previousSegment) return fail();
-    previousSegment = segment.segmentIndex;
+      || segment.segmentIndex !== transcriptIndexes[index] || segment.segmentIndex <= previousSegment
+      || segment.startMs < previousStart) return fail();
+    previousSegment = segment.segmentIndex; previousStart = segment.startMs;
   }
   const coverage = context.observationCoverage;
   if (!exact(value.observationCoverage, ['totalRepresentativeCount', 'coverage']) || !safe(coverage.totalRepresentativeCount)
-    || context.observations.length > MAX_PLANNING_VIDEO_OBSERVATIONS || context.observations.length > coverage.totalRepresentativeCount
+    || context.observations.length !== Math.min(coverage.totalRepresentativeCount, MAX_PLANNING_VIDEO_OBSERVATIONS)
     || coverage.coverage !== (context.observations.length === coverage.totalRepresentativeCount ? 'COMPLETE' : 'UNIFORM_TIMELINE_V1')) return fail();
   if (coverage.totalRepresentativeCount < 1 || context.observations.length < 1) return fail();
   let previousTimestamp = -1;
   const observationIds = new Set<string>();
-  for (const observation of context.observations) {
-    if (!record(observation) || !exact(observation, ['id', 'timestampMs', 'frameSha256', 'evidenceStatus', 'observation', 'transcriptSegments'])
+  const observationIndexes = uniformIndexes(coverage.totalRepresentativeCount, MAX_PLANNING_VIDEO_OBSERVATIONS);
+  for (const [index, observation] of context.observations.entries()) {
+    if (!record(observation) || !exact(observation, ['representativeOrdinal', 'id', 'timestampMs', 'frameSha256', 'evidenceStatus', 'observation', 'transcriptSegments'])
+      || observation.representativeOrdinal !== observationIndexes[index]
       || typeof observation.id !== 'string' || !FRAME.test(observation.id) || !safe(observation.timestampMs)
       || observation.timestampMs > context.library.durationMs || observation.timestampMs < previousTimestamp
       || typeof observation.frameSha256 !== 'string' || !SHA.test(observation.frameSha256)
@@ -110,10 +112,13 @@ export function projectCompletedVideoIntelligence(
     if (!library || library.analysisModels.vision.length !== 1
       || library.analysisModels.vision[0] !== saved.identity.analyzerFingerprint.visionModel
       || !isDeepStrictEqual(saved.completed!.library, { id: library.id, version: library.version })) return fail();
-    const excerpts = uniformlyBound(library.transcript.segments, MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS);
-    const observations = uniformlyBound(library.representativeFrames, MAX_PLANNING_VIDEO_OBSERVATIONS)
-      .map(({ id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments }) =>
-        ({ id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments }));
+    const excerpts = uniformIndexes(library.transcript.segments.length, MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS)
+      .map(index => library.transcript.segments[index]);
+    const observations = uniformIndexes(library.representativeFrames.length, MAX_PLANNING_VIDEO_OBSERVATIONS)
+      .map(representativeOrdinal => {
+        const { id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments } = library.representativeFrames[representativeOrdinal];
+        return { representativeOrdinal, id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments };
+      });
     const intelligence: VideoPlanningContext = {
       identity: saved.identity,
       locator: { version: 1, sourceVideoMediaId: saved.identity.sourceVideoMediaId,

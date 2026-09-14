@@ -85,6 +85,7 @@ it('projects multiple completed libraries with explicit bounded timeline coverag
   expect(intelligence[0].transcript.excerpts).toHaveLength(MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS);
   expect(intelligence[0].transcript.excerpts.at(-1)).toMatchObject({ startMs: 29000, text: 'DISTINCTIVE_LATE_TRANSCRIPT' });
   expect(intelligence[0].observations).toHaveLength(MAX_PLANNING_VIDEO_OBSERVATIONS);
+  expect(intelligence[0].observations.map(item => item.representativeOrdinal)).toEqual([0, 2, 4, 6, 8, 10, 12, 14, 15, 17, 19, 21, 23, 25, 27, 29]);
   expect(intelligence[0].observations.at(-1)).toMatchObject({ timestampMs: 29100, observation: { summary: 'DISTINCTIVE_LATE_OBSERVATION' } });
   expect(intelligence[1].transcript).toMatchObject({ status: 'NO_AUDIO_TRACK', totalSegmentCount: 0, coverage: 'COMPLETE' });
   expect(JSON.stringify(projected)).not.toContain('thumbnailDataUrl');
@@ -114,6 +115,23 @@ it('rejects incomplete, mismatched, malformed and oversized completed projection
     { ...context, library: { ...context.library, analysisModels: { ...context.library.analysisModels, transcription: null } } },
   ];
   for (const value of invalid) expect(() => parseVideoPlanningContext(value, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const prefixTranscript = structuredClone(context);
+  prefixTranscript.transcript.excerpts = full.transcript.segments.slice(0, MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS);
+  expect(() => parseVideoPlanningContext(prefixTranscript, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const reorderedTranscript = structuredClone(context), [firstSegment, secondSegment] = reorderedTranscript.transcript.excerpts;
+  reorderedTranscript.transcript.excerpts[0] = { ...firstSegment, startMs: secondSegment.startMs, endMs: secondSegment.endMs };
+  reorderedTranscript.transcript.excerpts[1] = { ...secondSegment, startMs: firstSegment.startMs, endMs: firstSegment.endMs };
+  expect(() => parseVideoPlanningContext(reorderedTranscript, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const prefixObservations = structuredClone(context);
+  prefixObservations.observations = full.representativeFrames.slice(0, MAX_PLANNING_VIDEO_OBSERVATIONS).map((frame, representativeOrdinal) => {
+    const { id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments } = frame;
+    return { representativeOrdinal, id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments };
+  });
+  expect(() => parseVideoPlanningContext(prefixObservations, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const reorderedObservations = structuredClone(context), [firstObservation, secondObservation] = reorderedObservations.observations;
+  reorderedObservations.observations[0] = { ...secondObservation, representativeOrdinal: firstObservation.representativeOrdinal };
+  reorderedObservations.observations[1] = { ...firstObservation, representativeOrdinal: secondObservation.representativeOrdinal };
+  expect(() => parseVideoPlanningContext(reorderedObservations, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
   const oversized = structuredClone(context);
   oversized.transcript = { ...oversized.transcript, totalSegmentCount: 24, coverage: 'COMPLETE',
     excerpts: Array.from({ length: 24 }, (_, segmentIndex) => ({ segmentIndex, startMs: segmentIndex * 1000,
