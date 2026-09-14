@@ -15,6 +15,7 @@ const planned = (headline = 'Resolve the tax problem', fill = '') => ({ copy: { 
   conceptDetails: { mainMessage: fill || 'Understand the next step', proposition: fill || 'Get a clear resolution path',
     visualMechanism: fill || 'Notice to calm transition', subject: fill || 'Taxpayer reviewing a notice', environment: fill || 'Home kitchen' },
 } }) as unknown as PlannedCreativeConcept;
+const fullIdentity = (value: string) => value.match(/fullConceptSha256:([a-f0-9]{64})/)?.[1];
 const row = (index: number) => {
   const buffer = Buffer.from(`video-${index}`), sourceVideoContentHash = sha(buffer), mediaId = `media_${index.toString(16).padStart(32, '0')}`;
   const libraryId = `video-library:${sha(`${mediaId}:${sourceVideoContentHash}`)}`, artifactSha = sha(`artifact-${index}`);
@@ -66,10 +67,22 @@ describe('portfolio video selection adapter', () => {
       finalConcept: planned(), cache: single.cache })).status).toBe('COMPLETE');
   });
 
-  it('builds a deterministic bounded identity only from required final concept fields', () => {
-    expect(createPortfolioVideoSelectionConcept(planned())).toBe(createPortfolioVideoSelectionConcept(planned()));
-    expect(createPortfolioVideoSelectionConcept(planned('Changed headline'))).not.toBe(createPortfolioVideoSelectionConcept(planned()));
-    expect(createPortfolioVideoSelectionConcept(planned('x', '"\\'.repeat(800))).length).toBeLessThanOrEqual(2_000);
+  it('builds a deterministic bounded readable identity from the full final concept', () => {
+    const baseline = createPortfolioVideoSelectionConcept(planned());
+    expect(baseline).toBe(createPortfolioVideoSelectionConcept(planned()));
+    expect(baseline).toContain('portfolio-video-selection:v2');
+    expect(baseline).toContain('headline: Resolve the tax problem');
+    const common = 'a'.repeat(120), afterBoundaryA = createPortfolioVideoSelectionConcept(planned('x', `${common} first ending`));
+    const afterBoundaryB = createPortfolioVideoSelectionConcept(planned('x', `${common} second ending`));
+    expect(afterBoundaryA).not.toBe(afterBoundaryB);
+    expect(fullIdentity(afterBoundaryA)).not.toBe(fullIdentity(afterBoundaryB));
+    const lateA = planned(), lateB = structuredClone(lateA);
+    lateA.strategy.conceptDetails!.environment = `${'shared environment '.repeat(20)}late alpha`;
+    lateB.strategy.conceptDetails!.environment = `${'shared environment '.repeat(20)}late beta`;
+    const lateIdentityA = createPortfolioVideoSelectionConcept(lateA), lateIdentityB = createPortfolioVideoSelectionConcept(lateB);
+    expect(fullIdentity(lateIdentityA)).not.toBe(fullIdentity(lateIdentityB));
+    const bounded = createPortfolioVideoSelectionConcept(planned('x', 'long useful context '.repeat(80)));
+    expect(bounded.length).toBeLessThanOrEqual(2_000); expect(bounded).toContain('long useful context'); expect(bounded).toContain('…');
     expect(() => createPortfolioVideoSelectionConcept({ copy: { headline: 'x' }, strategy: { hook: 'x', painPoint: 'x', desiredOutcome: 'x' } } as unknown as PlannedCreativeConcept)).toThrow('missing frame-selection details');
   });
 
