@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
-import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
+import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioPlan, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
@@ -134,8 +134,9 @@ describe('durable portfolio B3 selection activation', () => {
     ['non-video portfolio', portfolioRequest(), {}],
   ])('preserves %s behavior outside automatic B3 selection', async (_name, request, mode) => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage, request as any);
-    const context = contextFor(job, mode.providerImageSource ? { providerImageSource: mode.providerImageSource } : {});
-    if (mode.approvedHuman) context.batchPlan.creatives[0].strategy.approvedHumanId = 'approved-human-test';
+    const flags = mode as { providerImageSource?: unknown; approvedHuman?: boolean };
+    const context = contextFor(job, flags.providerImageSource ? { providerImageSource: flags.providerImageSource } : {});
+    if (flags.approvedHuman) context.batchPlan.creatives[0].strategy.approvedHumanId = 'approved-human-test';
     mocks.restore.mockResolvedValue(context);
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.slots[0].status).toBe('SAVED'); expect(mocks.select).not.toHaveBeenCalled();
