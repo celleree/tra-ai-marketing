@@ -16,7 +16,8 @@ const source = { role: 'TRA_VIDEO', media: { id: `media_${'a'.repeat(32)}` }, st
 const hash = createHash('sha256').update(source.stored.buffer).digest('hex');
 const library = { id: 'library' }; const manifest = { sourceVideoContentHash: hash };
 const preparation = { manifestKey: 'manifest-key', manifestSha256: 'b'.repeat(64) };
-const result = { key: 'library-key', sha256: 'c'.repeat(64), byteLength: 20 };
+const resultSha = 'c'.repeat(64);
+const result = { key: `libraries/sha256/${resultSha}.json`, sha256: resultSha, byteLength: 20 };
 const savedFingerprint = createVideoIntelligenceAnalyzerFingerprint(DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY, 'saved-model');
 const savedIdentity = { sourceVideoMediaId: source.media.id, sourceVideoContentHash: hash, analyzerFingerprint: savedFingerprint };
 const savedDependency = { identity: savedIdentity, artifact: result };
@@ -64,7 +65,7 @@ it('requires the exact saved job to be complete', async () => {
 });
 
 it.each([
-  ['key', { ...result, key: 'libraries/sha256/stale.json' }],
+  ['key', { ...result, key: `libraries/sha256/${'d'.repeat(64)}.json` }],
   ['sha256', { ...result, sha256: 'd'.repeat(64) }],
   ['byteLength', { ...result, byteLength: result.byteLength + 1 }],
 ])('fails closed when the frozen result artifact %s is stale', async (_field, artifact) => {
@@ -80,10 +81,14 @@ it('fails closed when preparation validation rejects the saved analyzer binding'
   expect(mocks.legacy).not.toHaveBeenCalled();
 });
 
-it('hydrates one to three known saved frame IDs through the existing extraction path', async () => {
+it.each([
+  [['frame-1']],
+  [['frame-1', 'frame-2']],
+  [['frame-1', 'frame-2', 'frame-3']],
+])('hydrates requested known saved frame IDs through the existing extraction path', async (frameIds) => {
   complete(); const context = await loadSavedVideoSelectionContext(source, savedDependency);
-  const frameIds = ['frame-1', 'frame-2', 'frame-3']; mocks.preparedFrames.mockResolvedValue({ frames: ['one', 'two', 'three'] });
-  expect(await extractVideoSelectionFrames(source, context, frameIds)).toEqual({ frames: ['one', 'two', 'three'] });
+  mocks.preparedFrames.mockResolvedValue({ frames: frameIds });
+  expect(await extractVideoSelectionFrames(source, context, frameIds)).toEqual({ frames: frameIds });
   expect(mocks.preparedFrames).toHaveBeenCalledWith(source, library, frameIds, manifest);
   expect(mocks.legacyFrames).not.toHaveBeenCalled();
 });
