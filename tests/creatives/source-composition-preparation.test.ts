@@ -12,6 +12,10 @@ import { conceptDetails } from '../fixtures/creative-concept-details';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 
+// B1.2 remains disconnected from production preparation, including the legacy entry.
+const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
+vi.mock('@/lib/video/intelligence-service', () => ({ executeVideoIntelligenceStep: disabledVideo, readVideoIntelligenceSource: disabledVideo }));
+afterEach(() => expect(disabledVideo).not.toHaveBeenCalled());
 const mocks = vi.hoisted(() => ({ image: vi.fn(), angle: vi.fn(), video: vi.fn(), layout: vi.fn(), media: vi.fn(), frames: vi.fn(), audit: vi.fn(), library: vi.fn(), select: vi.fn() }));
 vi.mock('@/lib/ai/openai', () => ({ analyzeTraSourceCreative: mocks.image, analyzeReferenceCreative: mocks.angle }));
 vi.mock('@/lib/ai/video-frame-generation', async original => ({

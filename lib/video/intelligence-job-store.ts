@@ -128,10 +128,11 @@ export const claimVideoIntelligenceJob = async (identity: VideoIntelligenceJobId
   throw new Error('Video intelligence job contention while claiming work.');
 };
 
-export const retryVideoIntelligenceJob = async (identity: VideoIntelligenceJobIdentity, value: VideoIntelligenceJobStoreDependencies = {}): Promise<VideoIntelligenceJobClaim> => {
+export const retryVideoIntelligenceJob = async (identity: VideoIntelligenceJobIdentity, value: VideoIntelligenceJobStoreDependencies & { expectedEtag?: string } = {}): Promise<VideoIntelligenceJobClaim> => {
   const deps = dependencies(value); videoIntelligenceJobKey(identity);
   for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt += 1) {
     const current = requireJob(await read(identity, deps.storage));
+    if (value.expectedEtag !== undefined && current.etag !== value.expectedEtag) throw new Error('Video Retry state changed. Review and explicitly retry again.');
     if (current.job.phase !== 'RETRY_REQUIRED') {
       return current.job.phase === 'COMPLETE' || current.job.phase === 'FAILED'
         ? result(current.job) : { status: 'BUSY', job: current.job };
