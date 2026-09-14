@@ -3,10 +3,17 @@ import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { parseCreative } from '@/lib/creatives/parse-generation-response';
 import { parsePortfolioProgress, type PortfolioProgress } from '@/lib/creatives/portfolio-progress';
 
-export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string };
+export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number };
 type Command = { action: 'create'; request: GenerateCreativeRequest } | { action: 'load' | 'advance'; id: string }
   | { action: 'retry'; id: string; slotIndex: number | null };
 const endpoint = '/api/creatives/portfolios';
+const POLL_DELAY_MS = 2000;
+const MAX_BUSY_RETRY_AFTER_MS = 30000;
+const parseBusyRetryAfterMs = (value: string | null) => {
+  const trimmed = value?.trim() ?? '';
+  const seconds = /^\d+$/.test(trimmed) ? Number(trimmed) : NaN;
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, MAX_BUSY_RETRY_AFTER_MS) : POLL_DELAY_MS;
+};
 
 export async function requestPortfolio(command: Command): Promise<PortfolioResponse> {
   const response = await fetch(command.action === 'load' ? endpoint + '?id=' + encodeURIComponent(command.id) : endpoint, {
@@ -26,7 +33,8 @@ export async function requestPortfolio(command: Command): Promise<PortfolioRespo
     throw new Error('Invalid saved portfolio creatives. Reload saved progress.');
   }
   const error = typeof value.error === 'string' ? value.error : !response.ok ? 'Portfolio request failed. Reload saved progress.' : undefined;
-  return { job, creatives: creatives as GeneratedCreative[], ...(error ? { error } : {}) };
+  const retryAfterMs = response.status === 202 ? parseBusyRetryAfterMs(response.headers.get('Retry-After')) : undefined;
+  return { job, creatives: creatives as GeneratedCreative[], ...(error ? { error } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
 }
 export const portfolioCanAdvance = (job: PortfolioProgress) =>
   Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING')
@@ -35,17 +43,23 @@ export const portfolioCanAdvance = (job: PortfolioProgress) =>
 /** Called only after Generate/Resume. Poll active work with GET; never retry a failed slot automatically. */
 export async function runPortfolio(
   initial: PortfolioResponse, onUpdate: (value: PortfolioResponse) => void, shouldStop: () => boolean,
-  wait: () => Promise<void> = () => new Promise(resolve => setTimeout(resolve, 2000)),
+  wait: (delayMs: number) => Promise<void> = delayMs => new Promise(resolve => setTimeout(resolve, delayMs)),
 ) {
   if (initial.error) throw new Error(initial.error);
   let current = initial;
   while (!shouldStop() && portfolioCanAdvance(current.job)) {
     const parentBusy = Boolean(current.job.lease && current.job.lease.expiresAtMs > Date.now());
     const polling = parentBusy || current.job.videoPreparation?.busy === true;
-    if (polling) { await wait(); if (shouldStop()) break; }
+    if (polling) { await wait(POLL_DELAY_MS); if (shouldStop()) break; }
     const next = await requestPortfolio({ action: parentBusy ? 'load' : 'advance', id: current.job.id });
     if (next.job.requestedCount !== current.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
     onUpdate(next);
+    if (next.retryAfterMs !== undefined) {
+      current = next;
+      await wait(next.retryAfterMs);
+      if (shouldStop()) break;
+      continue;
+    }
     const newFailedSlot = next.job.slots.some((slot, index) => slot.status === 'RETRY_REQUIRED' && current.job.slots[index].status !== 'RETRY_REQUIRED');
     if (next.error && !(newFailedSlot && next.job.planReady && !next.job.lease && portfolioCanAdvance(next.job))) throw new Error(next.error);
     if (!polling && !next.job.lease && JSON.stringify(next.job) === JSON.stringify(current.job) && portfolioCanAdvance(next.job)) {
