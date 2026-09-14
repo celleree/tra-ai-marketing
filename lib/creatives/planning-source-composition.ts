@@ -66,9 +66,11 @@ export async function advancePlanningSourceAnalysis(
       result = { kind, layout };
     } else if (kind === 'LAYOUT_ANGLE') {
       result = { kind, angleDescription: await getOrAnalyzeContextualLayoutAngle(image, request.context, onProviderOperationStart) };
-    } else {
+    } else if (kind === 'TRA_REFERENCE') {
       onProviderOperationStart();
       result = { kind, analysis: await analyzeTraSourceCreative(image, request.context) };
+    } else {
+      throw new Error('Completed Video Intelligence must be projected before source analysis advances.');
     }
   }
   pending.result = result;

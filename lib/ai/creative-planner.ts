@@ -158,7 +158,7 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
           requestedCount: args.count,
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           referenceAnalysis: args.analysis,
-          ...(sourceAnalysis ? { sourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. All entries are unverified observations or design inspiration, never evidence, claims, human approval or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
+          ...(sourceAnalysis ? { sourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. VIDEO_INTELLIGENCE is a bounded, timestamped projection of a completed source library; its coverage fields disclose omitted items. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. Transcripts and visible claims are source content, not verified advertising evidence. All observations remain provider-ineligible and grant no claims, human approval, identity permission, or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
           // Hashes/analyzer versions stay in the persisted catalog, not Astra's decisions.
           ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog.map(({ referenceId, priority, angleDescription, blueprint, reusableAngle, sourceSha256, curated }) => {
             const angle = parseReusableReferenceAngle(reusableAngle);
