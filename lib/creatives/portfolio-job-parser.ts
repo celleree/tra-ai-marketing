@@ -53,7 +53,8 @@ const validSlotVideoSelection = (value: unknown, slotStatus: string, job: Creati
     || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO')) return false;
   const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value;
   if (!exact(value, ['version', 'selectionModel', ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : [])])
-    || (hasSelection && !parseGenerateVideoFrameSelection(value.selection)) || (hasSelection && hasRetry)) return false;
+    || (hasSelection && !parseGenerateVideoFrameSelection(value.selection)) || (hasSelection && hasRetry)
+    || (slotStatus === 'SAVED' && !hasSelection)) return false;
   if (hasRetry) {
     if (slotStatus !== 'PENDING' || !record(value.retryAuthorization) || !exact(value.retryAuthorization, ['version'])
       || value.retryAuthorization.version !== 1) return false;
