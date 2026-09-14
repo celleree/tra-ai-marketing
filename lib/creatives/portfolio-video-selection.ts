@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
@@ -7,8 +8,10 @@ import { videoSourceHash } from '@/lib/video/library-service';
 import { selectVideoFramesFromPoolWithCache, type VideoSelectionCacheDependencies } from '@/lib/video/selection-cache';
 import { extractVideoSelectionFrames, loadSavedVideoSelectionContext, type VideoSelectionContext } from '@/lib/video/selection-context';
 
-const MAX_CONCEPT_FIELD = 100;
-const text = (value: unknown) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, MAX_CONCEPT_FIELD) : '';
+const MAX_CONCEPT_EXCERPT = 160;
+const normalizeText = (value: unknown) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+const excerpt = (value: string) => value.length <= MAX_CONCEPT_EXCERPT ? value
+  : `${value.slice(0, MAX_CONCEPT_EXCERPT / 2)}…${value.slice(-(MAX_CONCEPT_EXCERPT / 2 - 1))}`;
 
 type Restored = { source: HydratedTraVideoSource; context: VideoSelectionContext; librarySha256: string };
 export type PortfolioVideoSelectionResult =
@@ -20,15 +23,17 @@ export type PortfolioVideoSelectionResult =
 export function createPortfolioVideoSelectionConcept(concept: PlannedCreativeConcept) {
   const details = concept.strategy.conceptDetails;
   if (!details) throw new Error('Final creative concept is missing frame-selection details.');
-  const value = {
-    headline: text(concept.copy.headline), hook: text(concept.strategy.hook), mainMessage: text(details.mainMessage),
-    proposition: text(details.proposition), visualMechanism: text(details.visualMechanism), subject: text(details.subject),
-    environment: text(details.environment), painPoint: text(concept.strategy.painPoint), desiredOutcome: text(concept.strategy.desiredOutcome),
+  const full = {
+    headline: normalizeText(concept.copy.headline), hook: normalizeText(concept.strategy.hook), mainMessage: normalizeText(details.mainMessage),
+    proposition: normalizeText(details.proposition), visualMechanism: normalizeText(details.visualMechanism), subject: normalizeText(details.subject),
+    environment: normalizeText(details.environment), painPoint: normalizeText(concept.strategy.painPoint), desiredOutcome: normalizeText(concept.strategy.desiredOutcome),
   };
-  if (Object.values(value).some((entry) => !entry)) throw new Error('Final creative concept cannot produce a valid frame-selection identity.');
-  const canonical = JSON.stringify(value);
-  if (canonical.length > 2_000) throw new Error('Frame-selection concept exceeds its bounded identity limit.');
-  return canonical;
+  if (Object.values(full).some((entry) => !entry)) throw new Error('Final creative concept cannot produce a valid frame-selection identity.');
+  const fullConceptSha256 = createHash('sha256').update(JSON.stringify(full)).digest('hex');
+  const readable = Object.entries(full).map(([key, value]) => `${key}: ${excerpt(value)}`).join('\n');
+  const bounded = `portfolio-video-selection:v2\nfullConceptSha256:${fullConceptSha256}\n${readable}`;
+  if (bounded.length > 2_000) throw new Error('Frame-selection concept exceeds its bounded identity limit.');
+  return bounded;
 }
 
 const completedDependencies = (sourceAnalysis: PlanningSourceAnalysisState) => {
