@@ -12,6 +12,7 @@ import { checkpointVideoIntelligenceJob } from '@/lib/video/intelligence-job-sto
 import { createVideoIntelligenceAnalyzerFingerprint, type VideoIntelligencePreparationManifest } from '@/lib/video/intelligence-preparation';
 import { MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 import { conceptDetails } from '../fixtures/creative-concept-details';
+import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { referenceCandidate } from '../fixtures/reference-catalog';
 
 const boundary = vi.hoisted(() => ({ inventory: vi.fn(), hydration: vi.fn(), references: vi.fn(), humans: vi.fn(), representative: vi.fn(),
@@ -101,7 +102,7 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text',
     text: JSON.stringify({ creatives: [planned(1), planned(2)] }) }] }] }), { status: 200 }));
   vi.stubGlobal('fetch', fetchMock);
-  const request = { ...portfolioRequest(), sourceAssets: sources.map(({ sha256: _hash, ...source }) => source) };
+  const baseRequest = { ...portfolioRequest(), sourceAssets: sources.map(({ sha256: _hash, ...source }) => source) };
   const fixtureFor = (id: typeof videos[number]['identity']) => videos.find(fixture => fixture.mediaId === id.sourceVideoMediaId)!;
   const video = {
     now, hydrateSource: vi.fn(async (id: string) => videos.find(fixture => fixture.mediaId === id)!.hydrated),
@@ -116,11 +117,14 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
         representatives: [{ candidateIndex: 0, frameSha256: fixtureFor(id).candidate.frameSha256,
           thumbnail: fixtureFor(id).thumbnail, observation: fixtureFor(id).observation }] }), { storage, now })),
   };
+  let firstCompleted: Awaited<ReturnType<typeof createCreativePortfolio>> | undefined;
   for (let portfolio = 0; portfolio < 2; portfolio++) {
+    const request = { ...baseRequest, context: `Campaign ${portfolio === 0 ? 'b' : 'c'}` };
     const job = await createCreativePortfolio(request, storage); let current = job;
     for (let step = 0; step < 25 && current.planning.phase === 'INITIAL_PLAN'; step++) current = (await advanceCreativePortfolio(
       job.id, 'operator', 'http://localhost', storage, { deadlineAtMs: 2_000_000, video })).job;
     expect(current.planning.phase).toBe('DIVERSITY_AUDIT');
+    if (portfolio === 0) firstCompleted = current;
   }
   expect(video.preparation).toHaveBeenCalledTimes(2); expect(video.transcription).toHaveBeenCalledTimes(2);
   expect(video.observation).toHaveBeenCalledTimes(2); expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -128,13 +132,44 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   const outbound = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).input[1].content[0].text);
   const videoEntries = outbound.sourceAnalysis.entries.filter((entry: any) => entry.result?.kind === 'VIDEO_INTELLIGENCE');
   expect(videoEntries).toHaveLength(2);
-  expect(videoEntries.every((entry: any) => entry.result.intelligence.projectionVersion === 2)).toBe(true);
+  expect(videoEntries.every((entry: any) => entry.result.intelligence.projectionVersion === 3)).toBe(true);
+  expect(videoEntries.every((entry: any) => entry.result.intelligence.selector.contextSha256 === sha('Campaign b'))).toBe(true);
+  expect(videoEntries.every((entry: any) => entry.result.intelligence.transcript.includedSegmentCount <= 24
+    && entry.result.intelligence.observations.length <= 16
+    && Buffer.byteLength(JSON.stringify(entry.result.intelligence)) <= 64 * 1024)).toBe(true);
   expect(videoEntries.every((entry: any) => Array.isArray(entry.result.intelligence.observationCoverage.buckets))).toBe(true);
   expect(videoEntries.map((entry: any) => entry.result.intelligence.observations[0].observation.summary)).toEqual(['LATE_OBSERVATION_b', 'LATE_OBSERVATION_c']);
   expect(outbound.sourceAnalysis.entries.some((entry: any) => entry.result?.kind === 'LAYOUT_BLUEPRINT')).toBe(true);
-  expect(outbound.sourceAnalysisGuidance).toContain('do not claim semantic or campaign relevance');
+  expect(outbound.sourceAnalysisGuidance).toContain('deterministic exact-term lexical campaign matching');
+  expect(outbound.sourceAnalysisGuidance).toContain('do not prove semantic relevance');
   expect(outbound.sourceAnalysisGuidance).toContain('not verified advertising evidence');
   expect(JSON.stringify(outbound)).not.toContain('thumbnailDataUrl');
+  const byMedia = new Map<string, any>(videoEntries.map((entry: any) => [entry.source.mediaId, entry.result.intelligence]));
+  expect(byMedia.get(videos[0].mediaId).transcript.lexicalCoverage.includedPositiveCandidateCount).toBe(1);
+  expect(byMedia.get(videos[0].mediaId).observations[0].selectionReasons).toContain('CAMPAIGN_LEXICAL_MATCH');
+  expect(byMedia.get(videos[1].mediaId).transcript.lexicalCoverage.includedPositiveCandidateCount).toBe(0);
+  const secondOutbound = JSON.parse(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).input[1].content[0].text);
+  expect(secondOutbound.sourceAnalysis.entries.find((entry: any) => entry.source.mediaId === videos[1].mediaId)
+    .result.intelligence.observations[0].selectionReasons).toContain('CAMPAIGN_LEXICAL_MATCH');
+
+  if (!firstCompleted || firstCompleted.planning.phase !== 'DIVERSITY_AUDIT') throw new Error('Expected saved first plan.');
+  const savedAnalysis = structuredClone(firstCompleted.planning.checkpoint.plannerArgs.sourceAnalysis);
+  const retryReads = vi.spyOn(storage, 'read');
+  await updateCreativePortfolio(firstCompleted.id, saved => {
+    if (saved.planning.phase !== 'DIVERSITY_AUDIT') throw new Error();
+    saved.planning.repairAttempted = true; saved.planningError = 'Explicit retry';
+    saved.planning.checkpoint.snapshot.batchPlan.portfolioAudit = portfolioAudit(2); return saved;
+  }, storage);
+  let retried = await updateCreativePortfolio(firstCompleted.id, saved => retryPortfolioWork(saved, null), storage);
+  for (let step = 0; step < 4 && retried.planning.phase === 'INITIAL_PLAN'; step++) retried = (await advanceCreativePortfolio(
+    firstCompleted.id, 'operator', 'http://localhost', storage, { deadlineAtMs: 2_000_000, video })).job;
+  expect(retried.planning.phase).toBe('DIVERSITY_AUDIT');
+  if (retried.planning.phase !== 'DIVERSITY_AUDIT') throw new Error();
+  expect(retried.planning.checkpoint.plannerArgs.sourceAnalysis).toEqual(savedAnalysis);
+  expect(retried.planning.checkpoint.snapshot.sourceAnalysis).toEqual(savedAnalysis);
+  expect(retryReads.mock.calls.some(([key]) => key.startsWith('libraries/'))).toBe(false);
+  expect(video.preparation).toHaveBeenCalledTimes(2); expect(video.transcription).toHaveBeenCalledTimes(2);
+  expect(video.observation).toHaveBeenCalledTimes(2); expect(fetchMock).toHaveBeenCalledTimes(3);
 });
 
 it('refreshes the child retry state immediately when its ETag changes after parent authorization consumption', async () => {

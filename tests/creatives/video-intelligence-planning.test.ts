@@ -4,13 +4,13 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { projectCompletedVideoIntelligence, parseVideoPlanningContext,
   MAX_PLANNING_VIDEO_CONTEXT_BYTES, MAX_PLANNING_VIDEO_OBSERVATIONS,
-  MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS } from '@/lib/creatives/video-intelligence-planning';
+  MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS, videoPlanningSelectorBinding } from '@/lib/creatives/video-intelligence-planning';
 import { claimCreativePortfolio, finishPortfolioInitialPlan, newCreativePortfolio, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import type { PlanningSourceAnalysisState, VideoPlanningContextV1,
-  VideoPlanningContextV2 } from '@/lib/creatives/planning-source-packet';
+  VideoPlanningContextV2, VideoPlanningContextV3 } from '@/lib/creatives/planning-source-packet';
 import type { PortfolioVideoDependency } from '@/lib/creatives/portfolio-video-dependency';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
@@ -114,10 +114,10 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 it('projects multiple completed libraries with explicit bounded timeline coverage and sends them beside layout data to Astra', async () => {
   const sources = [videoSource('a'), videoSource('b')], dependencies = sources.map(dependency);
   const projected = projectCompletedVideoIntelligence(baseState(sources), [
-    { dependency: dependencies[0], library: spreadLibrary(sources[0]) }, { dependency: dependencies[1], library: library(sources[1], 1, true) }]);
+    { dependency: dependencies[0], library: spreadLibrary(sources[0]) }, { dependency: dependencies[1], library: library(sources[1], 1, true) }], 'customer outcome');
   expect(parsePlanningSourceAnalysis(projected, [...sources, projected.entries[2].source], true)).toEqual(projected);
-  const intelligence = projected.entries.flatMap(entry => entry.result?.kind === 'VIDEO_INTELLIGENCE' ? [entry.result.intelligence as VideoPlanningContextV2] : []);
-  expect(intelligence[0]).toMatchObject({ projectionVersion: 2, transcript: { totalSegmentCount: 30, coverage: 'BOUNDED_WINDOWS_V2' },
+  const intelligence = projected.entries.flatMap(entry => entry.result?.kind === 'VIDEO_INTELLIGENCE' ? [entry.result.intelligence as VideoPlanningContextV3] : []);
+  expect(intelligence[0]).toMatchObject({ projectionVersion: 3, transcript: { totalSegmentCount: 30, coverage: 'BOUNDED_WINDOWS_V2' },
     observationCoverage: { totalRepresentativeCount: 30, coverage: 'ELAPSED_TIME_BUCKETS_V2', buckets: [
       { bucket: 'EARLY', availableCount: 1, includedCount: 1 }, { bucket: 'MIDDLE', availableCount: 1, includedCount: 1 },
       { bucket: 'LATE', availableCount: 28, includedCount: 14 }] } });
@@ -144,12 +144,79 @@ it('projects multiple completed libraries with explicit bounded timeline coverag
   expect(outbound.sourceAnalysisGuidance).toContain('grant no claims, human approval');
 });
 
+it('selects different bounded lexical passages and observations for contrasting original briefs', () => {
+  const source = videoSource('e'), value = library(source, 40);
+  value.transcript.segments.forEach((segment, index) => { segment.text = `neutral passage ${index}`; });
+  ['customer', 'story', 'setup', 'relief', 'process', 'outcome', 'qualification', 'limits'].forEach((term, offset) => {
+    value.transcript.segments[14 + offset].text = `${term} detail`;
+  });
+  ['irs', 'document', 'notice', 'filing', 'deadline', 'review', 'response', 'process'].forEach((term, offset) => {
+    value.transcript.segments[28 + offset].text = `${term} detail`;
+  });
+  value.representativeFrames[15].observation.summary = 'Customer relief story';
+  value.representativeFrames[30].observation.summary = 'IRS document filing deadline';
+  const project = (brief: string) => (projectCompletedVideoIntelligence(baseState([source]),
+    [{ dependency: dependency(source), library: value }], brief).entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 }).intelligence;
+  const story = project('Customer story relief outcome qualification'), irs = project('IRS document filing deadline response');
+  const lexicalIndexes = (context: VideoPlanningContextV3) => context.transcript.lexicalCoverage.passages
+    .flatMap(passage => Array.from({ length: passage.lastIncludedSegmentIndex - passage.firstIncludedSegmentIndex + 1 }, (_, i) => passage.firstIncludedSegmentIndex + i));
+  expect(lexicalIndexes(story)).toContain(14); expect(lexicalIndexes(story)).toContain(21);
+  expect(lexicalIndexes(irs)).toContain(28); expect(lexicalIndexes(irs)).toContain(35);
+  expect(lexicalIndexes(story)).not.toEqual(lexicalIndexes(irs));
+  expect(story.observations.find(item => item.representativeOrdinal === 15)?.selectionReasons).toContain('CAMPAIGN_LEXICAL_MATCH');
+  expect(irs.observations.find(item => item.representativeOrdinal === 30)?.selectionReasons).toContain('CAMPAIGN_LEXICAL_MATCH');
+  for (const context of [story, irs]) {
+    expect(context.transcript.includedSegmentCount).toBeLessThanOrEqual(24);
+    expect(context.observations.length).toBeLessThanOrEqual(16);
+    expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(MAX_PLANNING_VIDEO_CONTEXT_BYTES);
+    for (const passage of context.transcript.lexicalCoverage.passages) {
+      expect(passage.lastCoreSegmentIndex - passage.firstCoreSegmentIndex + 1).toBeLessThanOrEqual(8);
+      expect(passage.firstIncludedSegmentIndex).toBe(Math.max(0, passage.firstCoreSegmentIndex - 1));
+      expect(passage.lastIncludedSegmentIndex).toBe(Math.min(39, passage.lastCoreSegmentIndex + 1));
+    }
+  }
+});
+
+it('records lexical query and retrieval limits for empty, missed, synonym-only and truncated briefs', () => {
+  const source = videoSource('f'), value = library(source, 30), project = (brief: string) =>
+    (projectCompletedVideoIntelligence(baseState([source]), [{ dependency: dependency(source), library: value }], brief)
+      .entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 }).intelligence;
+  for (const brief of ['', 'the and of', 'offtopic', 'unique belated utterance']) {
+    const context = project(brief);
+    expect(context.transcript.lexicalCoverage).toMatchObject({ availablePositiveCandidateCount: 0, includedPositiveCandidateCount: 0,
+      omittedPositiveCandidateCount: 0, truncated: false, passages: [] });
+    expect(context.observationCoverage.lexicalCoverage).toMatchObject({ availablePositiveCandidateCount: 0, includedPositiveCandidateCount: 0 });
+    expect(context.transcript.windows.some(window => window.selectionReasons.includes('EARLY'))).toBe(true);
+  }
+  const brief = Array.from({ length: 70 }, (_, index) => `term${index}`).join(' '), selector = project(brief).selector;
+  expect(selector).toEqual(videoPlanningSelectorBinding(brief));
+  expect(selector).toMatchObject({ eligibleTermCount: 70, includedTermCount: 64, omittedTermCount: 6 });
+  expect(selector.queryTerms).toEqual(Array.from({ length: 64 }, (_, index) => `term${index}`));
+  expect(videoPlanningSelectorBinding('CAFÉ cafe\u0301 税金')).toMatchObject({ queryTerms: ['café', '税金'], eligibleTermCount: 2 });
+});
+
+it('rolls back a ranked core and both guards as one unit when the byte budget cannot hold it', () => {
+  const source = videoSource('9'), value = library(source, 60);
+  for (const index of [9, 10, 11, 29, 30, 31, 49, 50, 51]) value.transcript.segments[index].text = 't'.repeat(4000);
+  const terms = ['customer', 'story', 'setup', 'process', 'outcome', 'qualification', 'restriction', 'disclaimer'];
+  terms.forEach((term, offset) => { value.transcript.segments[18 + offset].text = `${term} ${'x'.repeat(3980)}`; });
+  const context = (projectCompletedVideoIntelligence(baseState([source]), [{ dependency: dependency(source), library: value }], terms.join(' '))
+    .entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 }).intelligence;
+  expect(context.transcript.lexicalCoverage.availablePositiveCandidateCount).toBeGreaterThan(0);
+  expect(context.transcript.lexicalCoverage.omittedPositiveCandidateCount).toBeGreaterThan(0);
+  expect(context.transcript.lexicalCoverage.passages).not.toContainEqual(expect.objectContaining({ firstCoreSegmentIndex: 18, lastCoreSegmentIndex: 25 }));
+  for (const passage of context.transcript.lexicalCoverage.passages) {
+    const indexes = new Set(context.transcript.windows.flatMap(window => window.segments.map(segment => segment.segmentIndex)));
+    for (let index = passage.firstIncludedSegmentIndex; index <= passage.lastIncludedSegmentIndex; index++) expect(indexes.has(index)).toBe(true);
+  }
+});
+
 it('rejects incomplete, mismatched, malformed and oversized completed projections without provider work', () => {
   const source = videoSource('a'), complete = dependency(source), full = library(source, 30);
-  expect(() => projectCompletedVideoIntelligence(baseState([source]), [{ dependency: { ...complete, completed: undefined }, library: full }])).toThrow();
-  expect(() => projectCompletedVideoIntelligence(baseState([{ ...source, sha256: 'f'.repeat(64) }]), [{ dependency: complete, library: full }])).toThrow();
-  const projected = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: complete, library: full }]);
-  const context = (projected.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
+  expect(() => projectCompletedVideoIntelligence(baseState([source]), [{ dependency: { ...complete, completed: undefined }, library: full }], 'brief')).toThrow();
+  expect(() => projectCompletedVideoIntelligence(baseState([{ ...source, sha256: 'f'.repeat(64) }]), [{ dependency: complete, library: full }], 'brief')).toThrow();
+  const projected = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: complete, library: full }], 'brief');
+  const context = (projected.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 }).intelligence;
   const invalid = [
     { ...context, observations: [{ ...context.observations[0], transcriptSegments: [{}] }, ...context.observations.slice(1)] },
     { ...context, observations: [{ ...context.observations[0], id: `video-frame:${'f'.repeat(64)}` }, ...context.observations.slice(1)] },
@@ -157,11 +224,19 @@ it('rejects incomplete, mismatched, malformed and oversized completed projection
     { ...context, observationCoverage: { ...context.observationCoverage, buckets: context.observationCoverage.buckets.map((bucket, index) =>
       index === 0 ? { ...bucket, availableCount: bucket.availableCount + 1 } : bucket) } },
     { ...context, library: { ...context.library, analysisModels: { ...context.library.analysisModels, transcription: null } } },
+    { ...context, selector: { ...context.selector, queryTerms: [12] } },
+    { ...context, transcript: { ...context.transcript, lexicalCoverage: {
+      ...context.transcript.lexicalCoverage, includedPositiveCandidateCount: context.transcript.lexicalCoverage.includedPositiveCandidateCount + 1 } } },
   ];
   for (const value of invalid) expect(() => parseVideoPlanningContext(value, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
   const malformedWindow = structuredClone(context);
   malformedWindow.transcript.windows[0].lastSegmentIndex++;
   expect(() => parseVideoPlanningContext(malformedWindow, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  if (context.transcript.lexicalCoverage.passages[0]) {
+    const nonAtomic = structuredClone(context);
+    nonAtomic.transcript.lexicalCoverage.passages[0].firstIncludedSegmentIndex++;
+    expect(() => parseVideoPlanningContext(nonAtomic, source)).toThrow();
+  }
   const duplicateSegment = structuredClone(context);
   duplicateSegment.transcript.windows[0].segments.push(duplicateSegment.transcript.windows[0].segments[0]);
   expect(() => parseVideoPlanningContext(duplicateSegment, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
@@ -192,14 +267,14 @@ it('rejects incomplete, mismatched, malformed and oversized completed projection
     segments: window.segments.map(segment => ({ ...segment, text: 'x'.repeat(4000) })) }));
   expect(Buffer.byteLength(JSON.stringify(oversized))).toBeGreaterThan(MAX_PLANNING_VIDEO_CONTEXT_BYTES);
   expect(() => parseVideoPlanningContext(oversized, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
-  const boundary = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: complete, library: library(source, 1) }]);
+  const boundary = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: complete, library: library(source, 1) }], 'brief');
   const boundaryContext = (boundary.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
   expect(parseVideoPlanningContext(boundaryContext, source)).toEqual(boundaryContext);
   const noSpeech = structuredClone(projectCompletedVideoIntelligence(baseState([source]), [
-    { dependency: complete, library: library(source, 1, true) }]).entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
+    { dependency: complete, library: library(source, 1, true) }], 'brief').entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 }).intelligence;
   noSpeech.library.analysisModels.transcription = 'whisper-1';
   noSpeech.transcript = { status: 'AVAILABLE', model: 'whisper-1', language: 'en', totalSegmentCount: 0,
-    includedSegmentCount: 0, coverage: 'COMPLETE', windows: [] };
+    includedSegmentCount: 0, coverage: 'COMPLETE', windows: [], lexicalCoverage: noSpeech.transcript.lexicalCoverage };
   expect(parseVideoPlanningContext(noSpeech, source)).toEqual(noSpeech);
 });
 
@@ -208,14 +283,14 @@ it('keeps mandatory elapsed-time coverage while dropping whole optional observat
   for (const frame of value.representativeFrames) {
     frame.observation.summary = 's'.repeat(3500); frame.observation.composition = 'c'.repeat(3500);
   }
-  const projected = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: dependency(source), library: value }]);
-  const context = (projected.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
+  const projected = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: dependency(source), library: value }], 'brief');
+  const context = (projected.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 }).intelligence;
   expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(MAX_PLANNING_VIDEO_CONTEXT_BYTES);
   expect(context.observations.length).toBeLessThan(MAX_PLANNING_VIDEO_OBSERVATIONS);
   expect(context.observationCoverage.buckets.every(bucket => bucket.availableCount === 0 || bucket.includedCount > 0)).toBe(true);
   const impossible = spreadLibrary(source);
   for (const frame of impossible.representativeFrames) frame.observation.visibleText = Array(20).fill('x'.repeat(4000));
-  expect(() => projectCompletedVideoIntelligence(baseState([source]), [{ dependency: dependency(source), library: impossible }])).toThrow();
+  expect(() => projectCompletedVideoIntelligence(baseState([source]), [{ dependency: dependency(source), library: impossible }], 'brief')).toThrow();
 });
 
 it('dispatches legacy v1 exactly and preserves completed v1 and v2 projections during mixed repeated projection', () => {
@@ -223,27 +298,42 @@ it('dispatches legacy v1 exactly and preserves completed v1 and v2 projections d
   const legacy = legacyContext(oldSource, oldLibrary);
   expect(parseVideoPlanningContext(legacy, oldSource)).toEqual(legacy);
   expect('projectionVersion' in parseVideoPlanningContext(legacy, oldSource)).toBe(false);
+  const generatedV3 = (projectCompletedVideoIntelligence(baseState([newSource]), [{ dependency: dependency(newSource), library: library(newSource, 3) }], '')
+    .entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 }).intelligence;
+  const savedV2 = structuredClone(generatedV3) as any;
+  savedV2.projectionVersion = 2; delete savedV2.selector; delete savedV2.transcript.lexicalCoverage; delete savedV2.observationCoverage.lexicalCoverage;
+  expect(parseVideoPlanningContext(savedV2, newSource)).toEqual(savedV2);
+  const invalidV2 = structuredClone(savedV2);
+  invalidV2.observations[0].selectionReasons.push('CAMPAIGN_LEXICAL_MATCH');
+  expect(() => parseVideoPlanningContext(invalidV2, newSource)).toThrow();
   const state = baseState([oldSource, newSource]);
   state.entries[0] = { source: oldSource, analyzer: { kind: 'VIDEO_INTELLIGENCE', model: 'vision-model', schemaVersion: 1, contextSha256: null },
     evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'VIDEO_INTELLIGENCE', intelligence: legacy } };
   const mixed = projectCompletedVideoIntelligence(state, [
-    { dependency: dependency(oldSource), library: oldLibrary }, { dependency: dependency(newSource), library: library(newSource, 3) }]);
+    { dependency: dependency(oldSource), library: oldLibrary }, { dependency: dependency(newSource), library: library(newSource, 3) }], 'brief');
   expect(mixed.entries[0]).toEqual(state.entries[0]);
+  mixed.entries[1] = { ...mixed.entries[1], result: { kind: 'VIDEO_INTELLIGENCE', intelligence: savedV2 } };
   expect((mixed.entries[1].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence.projectionVersion).toBe(2);
   const repeated = projectCompletedVideoIntelligence(mixed, [
-    { dependency: dependency(oldSource), library: oldLibrary }, { dependency: dependency(newSource), library: library(newSource, 3) }]);
+    { dependency: dependency(oldSource), library: oldLibrary }, { dependency: dependency(newSource), library: library(newSource, 3) }], 'changed brief');
   expect(repeated).toEqual(mixed);
   expect(JSON.stringify(repeated)).toBe(JSON.stringify(mixed));
 });
 
 it('preserves exact completed dependencies through the real initial-plan checkpoint and parser reload', async () => {
   const source = videoSource('a'), savedDependency = dependency(source);
-  const projected = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: savedDependency, library: library(source, 2) }]);
+  const projected = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: savedDependency, library: library(source, 2) }], 'TRA');
   const request = { context: 'TRA', placement: 'SQUARE_1_1' as const, variationCount: 2,
     sourceAssets: [...new Map(projected.entries.map(entry => [entry.source.mediaId, { role: entry.source.role, mediaId: entry.source.mediaId }])).values()] };
   const created = { ...newCreativePortfolio(request, 1000), videoPreparationVersion: 1 as const };
   if (created.planning.phase !== 'INITIAL_PLAN') throw new Error();
   created.planning.preparation = { quotaReserved: true, videoDependencies: [savedDependency] };
+  const badPreparation = structuredClone(created);
+  if (badPreparation.planning.phase !== 'INITIAL_PLAN') throw new Error();
+  badPreparation.planning.preparation.sourceAnalysis = structuredClone(projected);
+  const preparationContext = badPreparation.planning.preparation.sourceAnalysis.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 };
+  preparationContext.intelligence.selector = videoPlanningSelectorBinding('different direction');
+  expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify(badPreparation)), badPreparation.id)).toThrow('Saved creative portfolio is invalid');
   const storage = new MemoryPortfolioStorage();
   await storage.write(`creative-portfolios/v1/${created.id}.json`, Buffer.from(JSON.stringify(created)), null);
   await updateCreativePortfolio(created.id, job => claimCreativePortfolio(job, 2000, 'plan').job, storage);
@@ -265,4 +355,11 @@ it('preserves exact completed dependencies through the real initial-plan checkpo
   if (mismatch.planning.phase !== 'DIVERSITY_AUDIT') throw new Error();
   delete mismatch.planning.checkpoint.snapshot.sourceAnalysis;
   expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify(mismatch)), mismatch.id)).toThrow('Saved creative portfolio is invalid');
+  const selectorMismatch = structuredClone(loaded!);
+  if (selectorMismatch.planning.phase !== 'DIVERSITY_AUDIT') throw new Error();
+  for (const state of [selectorMismatch.planning.checkpoint.plannerArgs.sourceAnalysis!, selectorMismatch.planning.checkpoint.snapshot.sourceAnalysis!]) {
+    const result = state.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV3 };
+    result.intelligence.selector = videoPlanningSelectorBinding('different direction');
+  }
+  expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify(selectorMismatch)), selectorMismatch.id)).toThrow('Saved creative portfolio is invalid');
 });

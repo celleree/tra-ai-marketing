@@ -10,6 +10,7 @@ import { MAX_PORTFOLIO_CREATIVES, type CreativePortfolioJob, type PortfolioPlann
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
 import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
 import { parsePlanningSourceAnalysis, validAnalysis, validSourceLayout } from '@/lib/creatives/planning-source-parser';
+import { videoPlanningSelectorBinding } from '@/lib/creatives/video-intelligence-planning';
 import { parseReferenceCatalog } from '@/lib/references/planning';
 import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS } from '@/lib/video/approved-human';
 
@@ -19,6 +20,13 @@ const time = (value: unknown) => Number.isSafeInteger(value) && Number(value) >=
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const exact = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every(key => key in value);
+const validVideoSelectorBindings = (value: unknown, context: string) => {
+  if (!record(value) || !Array.isArray(value.entries)) return false;
+  const expected = videoPlanningSelectorBinding(context);
+  return value.entries.every(entry => !record(entry) || !record(entry.result) || entry.result.kind !== 'VIDEO_INTELLIGENCE'
+    || !record(entry.result.intelligence) || entry.result.intelligence.projectionVersion !== 3
+    || isDeepStrictEqual(entry.result.intelligence.selector, expected));
+};
 
 const validVideoRetry = (value: unknown) => {
   if (!record(value) || !exact(value, ['jobId', 'updatedAtMs', 'retry', 'etag'])
@@ -83,7 +91,10 @@ const validPreparation = (value: unknown, job: CreativePortfolioJob): value is P
   if (value.videoRetryAuthorization !== undefined
     && (!validVideoRetry(value.videoRetryAuthorization) || !record(value.videoProgress)
       || !isDeepStrictEqual(value.videoRetryAuthorization, value.videoProgress.retryState))) return false;
-  if (value.sourceAnalysis !== undefined) parsePlanningSourceAnalysis(value.sourceAnalysis, job.request.sourceAssets);
+  if (value.sourceAnalysis !== undefined) {
+    parsePlanningSourceAnalysis(value.sourceAnalysis, job.request.sourceAssets);
+    if (!validVideoSelectorBindings(value.sourceAnalysis, job.request.context)) return false;
+  }
   if (value.analysis !== undefined && !validAnalysis(value.analysis)) return false;
   if (value.sourceLayout !== undefined && !validSourceLayout(value.sourceLayout)) return false;
   if (value.selectedReferences !== undefined && !validSelectedReferences(value.selectedReferences)) return false;
@@ -101,6 +112,7 @@ const validSnapshot = (
     if (snapshot.sourceAnalysis !== undefined) {
       parsePlanningSourceAnalysis(snapshot.sourceAnalysis, job.request.sourceAssets, true);
       parsePlanningSourceAnalysis(snapshot.sourceAnalysis, snapshot.requestedSources, true);
+      if (!validVideoSelectorBindings(snapshot.sourceAnalysis, job.request.context)) return false;
     }
     const plan = snapshot.batchPlan;
     const audit = plan.portfolioAudit === undefined ? undefined : parsePortfolioAudit(plan.portfolioAudit);
@@ -127,7 +139,8 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
   if (args.count !== job.slots.length || !text(args.context) || !validAnalysis(args.analysis)
     || typeof args.hasApprovedHumanSource !== 'boolean'
     || !isDeepStrictEqual(args.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)
-    || !isDeepStrictEqual(args.sourceAnalysis, checkpoint.snapshot.sourceAnalysis)) return false;
+    || !isDeepStrictEqual(args.sourceAnalysis, checkpoint.snapshot.sourceAnalysis)
+    || (args.sourceAnalysis !== undefined && !validVideoSelectorBindings(args.sourceAnalysis, job.request.context))) return false;
   if (args.approvedHumanOptions !== undefined && (!Array.isArray(args.approvedHumanOptions)
     || args.approvedHumanOptions.length > MAX_APPROVED_HUMAN_OPTIONS
     || new Set(args.approvedHumanOptions.map(option => option?.id)).size !== args.approvedHumanOptions.length

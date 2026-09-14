@@ -132,7 +132,7 @@ export async function advanceCreativePortfolio(
             const completed = await Promise.all((state.videoDependencies ?? []).map(async dependency => ({ dependency,
               library: await loadVideoIntelligenceLibrary(dependency.identity, dependency.completed!.artifact,
                 { storage }) })));
-            state.sourceAnalysis = projectCompletedVideoIntelligence(state.sourceAnalysis, completed);
+            state.sourceAnalysis = projectCompletedVideoIntelligence(state.sourceAnalysis, completed, job.request.context);
             delete state.videoProgress; delete state.videoRetryAuthorization;
             return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, state), storage) };
           }

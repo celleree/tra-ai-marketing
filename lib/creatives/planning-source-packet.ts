@@ -77,7 +77,7 @@ export type VideoPlanningContextV1 = VideoPlanningContextBase & {
 };
 
 export type VideoPlanningTimeBucket = 'EARLY' | 'MIDDLE' | 'LATE';
-export type VideoPlanningSelectionReason = VideoPlanningTimeBucket | 'OBSERVATION_CONTEXT';
+export type VideoPlanningSelectionReason = VideoPlanningTimeBucket | 'OBSERVATION_CONTEXT' | 'CAMPAIGN_LEXICAL_MATCH';
 
 export type VideoPlanningContextV2 = VideoPlanningContextBase & {
   projectionVersion: 2;
@@ -109,7 +109,42 @@ export type VideoPlanningContextV2 = VideoPlanningContextBase & {
   observations: Array<VideoPlanningObservation & { selectionReasons: [VideoPlanningTimeBucket] }>;
 };
 
-export type VideoPlanningContext = VideoPlanningContextV1 | VideoPlanningContextV2;
+type VideoPlanningLexicalCoverage = {
+  method: 'LEXICAL_V1';
+  bounded: true;
+  availablePositiveCandidateCount: number;
+  includedPositiveCandidateCount: number;
+  omittedPositiveCandidateCount: number;
+  truncated: boolean;
+};
+
+export type VideoPlanningContextV3 = Omit<VideoPlanningContextV2, 'projectionVersion' | 'transcript' | 'observationCoverage' | 'observations'> & {
+  projectionVersion: 3;
+  selector: {
+    version: 1;
+    contextSha256: string;
+    queryTerms: string[];
+    eligibleTermCount: number;
+    includedTermCount: number;
+    omittedTermCount: number;
+  };
+  transcript: VideoPlanningContextV2['transcript'] & {
+    lexicalCoverage: VideoPlanningLexicalCoverage & { passages: Array<{
+      firstCoreSegmentIndex: number;
+      lastCoreSegmentIndex: number;
+      firstIncludedSegmentIndex: number;
+      lastIncludedSegmentIndex: number;
+    }> };
+  };
+  observationCoverage: VideoPlanningContextV2['observationCoverage'] & {
+    lexicalCoverage: VideoPlanningLexicalCoverage;
+  };
+  observations: Array<Omit<VideoPlanningObservation, 'selectionReasons'> & {
+    selectionReasons: VideoPlanningSelectionReason[];
+  }>;
+};
+
+export type VideoPlanningContext = VideoPlanningContextV1 | VideoPlanningContextV2 | VideoPlanningContextV3;
 
 type TraReferencePlanningAnalysis = {
   analysis: CreativeReferenceAnalysis;
