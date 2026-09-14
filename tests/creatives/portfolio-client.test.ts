@@ -43,13 +43,15 @@ describe('resumable portfolio browser controller', () => {
       Response.json(progressed),
     ];
     const events: string[] = [];
-    const fetchMock = vi.fn(async () => { events.push('fetch'); return responses.shift()!; });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _options?: RequestInit) => {
+      events.push('fetch'); return responses.shift()!;
+    });
     vi.stubGlobal('fetch', fetchMock);
     const wait = vi.fn(async (delay: number) => { events.push('wait:' + delay); }); let updates = 0;
     const completed = await runPortfolio(value, () => { updates += 1; }, () => updates === 3, wait);
     expect(completed.job.planningCheckpoint).toBe(progressed.job.planningCheckpoint);
     expect(events).toEqual(['fetch', 'wait:1000', 'fetch', 'wait:2000', 'fetch']);
-    expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance', 'advance']);
+    expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(String(options?.body)).action)).toEqual(['advance', 'advance', 'advance']);
   });
   it('does not issue another request when paused while a BUSY wait resolves', async () => {
     const value = initial(); let paused = false;
