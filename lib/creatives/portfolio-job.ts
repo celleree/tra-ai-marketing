@@ -23,7 +23,7 @@ export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;
   // Missing/1 retain legacy behavior; 2 composes all supplied sources. Immutable after creation.
   readonly sourceCompositionVersion?: 1 | 2;
-  // Inactive contract: constructors never set this marker; absence preserves existing behavior.
+  // Present only on durable portfolios created with a video; absence preserves existing behavior.
   readonly videoPreparationVersion?: 1;
   request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
   planning: PortfolioPlanningState; planningError?: string;
@@ -36,7 +36,9 @@ export function newCreativePortfolio(request: ValidGenerateCreativeRequest, now 
   if (!Number.isInteger(request.variationCount) || request.variationCount < 2 || request.variationCount > MAX_PORTFOLIO_CREATIVES) {
     throw new Error('A portfolio requires 2 to 36 creatives.');
   }
-  return { version: 1, sourceCompositionVersion: 2, id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
+  return { version: 1, sourceCompositionVersion: 2,
+    ...(request.sourceAssets.some(source => source.role === 'TRA_VIDEO') ? { videoPreparationVersion: 1 as const } : {}),
+    id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
     snapshot: null, planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } }, lease: null,
     slots: Array.from({ length: request.variationCount }, (_, index) => ({
       index: index + 1, creativeId: id('creative_'), status: 'PENDING',
@@ -85,6 +87,25 @@ export function finishPortfolioPreparation(
   }
   return { ...structuredClone(current), planning: { phase: 'INITIAL_PLAN' as const, preparation: structuredClone(preparation) },
     lease: null, updatedAtMs: now };
+}
+
+/** Save child dependency progress while retaining the current parent lease. */
+export function checkpointPortfolioPreparation(
+  current: CreativePortfolioJob, leaseId: string, preparation: PortfolioPreparationState, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'INITIAL_PLAN') {
+    throw new Error('Portfolio preparation does not match the reserved planning work.');
+  }
+  return { ...structuredClone(current), planning: { phase: 'INITIAL_PLAN' as const, preparation: structuredClone(preparation) },
+    updatedAtMs: now };
+}
+
+export function finishPortfolioPreparationFailure(
+  current: CreativePortfolioJob, leaseId: string, preparation: PortfolioPreparationState, message: string, now = Date.now(),
+) {
+  const job = finishPortfolioPreparation(current, leaseId, preparation, now);
+  return { ...job, planningError: message.slice(0, 1000) || 'Video preparation requires review.' };
 }
 
 export function finishPortfolioInitialPlan(
@@ -188,6 +209,9 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
   if (slotIndex === null) {
     if (job.snapshot || !job.planningError) throw new Error('Portfolio planning does not require a retry.');
     delete job.planningError;
+    if (job.planning.phase === 'INITIAL_PLAN' && job.planning.preparation.videoProgress?.retryState) {
+      job.planning.preparation.videoRetryAuthorization = structuredClone(job.planning.preparation.videoProgress.retryState);
+    }
     // A completed second audit is a known quality failure. Restart planning explicitly without re-reserving portfolio quota.
     if (job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
       && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) {

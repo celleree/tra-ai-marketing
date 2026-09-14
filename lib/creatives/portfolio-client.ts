@@ -29,7 +29,8 @@ export async function requestPortfolio(command: Command): Promise<PortfolioRespo
   return { job, creatives: creatives as GeneratedCreative[], ...(error ? { error } : {}) };
 }
 export const portfolioCanAdvance = (job: PortfolioProgress) =>
-  Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING') : !job.planningError);
+  Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING')
+    : !job.planningError && job.videoPreparation?.phase !== 'FAILED');
 
 /** Called only after Generate/Resume. Poll active work with GET; never retry a failed slot automatically. */
 export async function runPortfolio(
@@ -39,9 +40,10 @@ export async function runPortfolio(
   if (initial.error) throw new Error(initial.error);
   let current = initial;
   while (!shouldStop() && portfolioCanAdvance(current.job)) {
-    const polling = Boolean(current.job.lease && current.job.lease.expiresAtMs > Date.now());
+    const parentBusy = Boolean(current.job.lease && current.job.lease.expiresAtMs > Date.now());
+    const polling = parentBusy || current.job.videoPreparation?.busy === true;
     if (polling) { await wait(); if (shouldStop()) break; }
-    const next = await requestPortfolio({ action: polling ? 'load' : 'advance', id: current.job.id });
+    const next = await requestPortfolio({ action: parentBusy ? 'load' : 'advance', id: current.job.id });
     if (next.job.requestedCount !== current.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
     onUpdate(next);
     const newFailedSlot = next.job.slots.some((slot, index) => slot.status === 'RETRY_REQUIRED' && current.job.slots[index].status !== 'RETRY_REQUIRED');

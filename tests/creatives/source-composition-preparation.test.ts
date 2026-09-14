@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
-import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
+import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { newCreativePortfolio, retryPortfolioWork, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
@@ -12,7 +12,7 @@ import { conceptDetails } from '../fixtures/creative-concept-details';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 
-// B1.2 remains disconnected from production preparation, including the legacy entry.
+// The non-durable preparation helper stays disconnected from durable portfolio Video Intelligence.
 const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
 vi.mock('@/lib/video/intelligence-service', () => ({ executeVideoIntelligenceStep: disabledVideo, readVideoIntelligenceSource: disabledVideo }));
 afterEach(() => expect(disabledVideo).not.toHaveBeenCalled());
@@ -72,11 +72,16 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 const step = (job: CreativePortfolioJob, storage: MemoryPortfolioStorage) => advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+const createHistoricalPortfolio = async (data: ReturnType<typeof request>, storage: MemoryPortfolioStorage) => {
+  const { videoPreparationVersion: _marker, ...job } = newCreativePortfolio(data);
+  await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
+  return job;
+};
 
 describe('real preparation to Astra with composed sources', () => {
   it.each([false, true])('checkpoints mixed/repeated sources before Astra, ordering=%s and stop/resume', async reversed => {
     const data = request(); if (reversed) data.sourceAssets.reverse();
-    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(data, storage);
+    const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(data, storage);
     let current = job;
     for (let i = 0; i < 30 && current.planning.phase === 'INITIAL_PLAN'; i++) {
       const before = operations.length, result = await step(current, storage);
@@ -115,7 +120,7 @@ describe('real preparation to Astra with composed sources', () => {
     mocks.library.mockResolvedValue([item]);
     mocks.select.mockImplementation(async () => { operations.push('reference-selection');
       return [{ item, imageUrl: `http://localhost${item.url}`, selectionReason: 'Useful geometry' }]; });
-    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(request(), storage);
+    const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(request(), storage);
     let current = job;
     for (let i = 0; i < 30 && current.planning.phase === 'INITIAL_PLAN'; i++) current = (await step(current, storage)).job;
     if (current.planning.phase !== 'DIVERSITY_AUDIT') throw new Error('Missing initial plan');
@@ -139,7 +144,7 @@ describe('real preparation to Astra with composed sources', () => {
   });
 
   it.each(['provider', 'expired-lease', 'oversized-save'])('preserves completed work after %s until explicit retry', async failure => {
-    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(request(), storage);
+    const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(request(), storage);
     for (let i = 0; i < 3; i++) await step(job, storage); // quota, inventory, first video observation
     const checkpoint = await readCreativePortfolio(job.id, storage);
     mocks.image.mockImplementationOnce(async () => {
@@ -160,7 +165,7 @@ describe('real preparation to Astra with composed sources', () => {
   });
 
   it.each(['', '   '])('stops changed sources and supports an empty angle %j', async angle => {
-    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(request(), storage);
+    const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(request(), storage);
     for (let i = 0; i < 3; i++) await step(job, storage);
     const saved = (await readCreativePortfolio(job.id, storage))!.planning;
     const id = request().sourceAssets[1].mediaId;
@@ -185,7 +190,8 @@ describe('real preparation to Astra with composed sources', () => {
   });
 
   it.each([undefined, 1] as const)('resumes legacy partial/rendered jobs with marker %s without composing', async marker => {
-    const job = { ...newCreativePortfolio(request()), sourceCompositionVersion: marker };
+    const { videoPreparationVersion: _videoMarker, ...created } = newCreativePortfolio(request());
+    const job = { ...created, sourceCompositionVersion: marker };
     job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis: analysis('SAVED_LEGACY'),
       sourceLayout: { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true },
       referenceCatalog: [], selectedReferences: [] } };

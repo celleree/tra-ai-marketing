@@ -56,7 +56,8 @@ describe('resumable portfolio API', () => {
     mocks.advance.mockResolvedValue({ job, status: 429, error: 'Quota reached', retryAfterSeconds: 90 });
     const response = await PATCH(request({ id: job.id, action: 'advance', operatorId: 'client-value' }));
     expect(response.status).toBe(429); expect(response.headers.get('retry-after')).toBe('90');
-    expect(mocks.advance).toHaveBeenCalledExactlyOnceWith(job.id, 'signed-in-operator', 'http://localhost/api/creatives/portfolios');
+    expect(mocks.advance).toHaveBeenCalledExactlyOnceWith(job.id, 'signed-in-operator',
+      'http://localhost/api/creatives/portfolios', undefined, { deadlineAtMs: expect.any(Number) });
     expect((await response.json()).job.id).toBe(job.id);
   });
   it('only clears explicit retryable work; retry alone never starts provider work', async () => {

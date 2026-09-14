@@ -48,6 +48,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const deadlineAtMs = Date.now() + 290_000;
   const access = await getOperatorAccess();
   if (!access.allowed) return operatorAccessDeniedResponse(access);
   try {
@@ -67,7 +68,7 @@ export async function PATCH(request: Request) {
       if (job.lease || !retryable) return json({ error: 'This work cannot be retried in its current state. Reload its progress.' }, 409);
       return await result(await updateCreativePortfolio(body.id, current => retryPortfolioWork(current, body.slotIndex)));
     }
-    const step = await advanceCreativePortfolio(body.id, access.userId, request.url);
+    const step = await advanceCreativePortfolio(body.id, access.userId, request.url, undefined, { deadlineAtMs });
     return await result(step.job, step.status, step.error, step.retryAfterSeconds);
   } catch (error) { return failure(error); }
 }

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
@@ -6,9 +7,23 @@ import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
+import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
+import { createVideoIntelligenceAnalyzerFingerprint } from '@/lib/video/intelligence-preparation';
+import { videoIntelligenceJobId } from '@/lib/video/intelligence-job';
 
-const mocks = vi.hoisted(() => ({ prepareStep: vi.fn(), plan: vi.fn(), audit: vi.fn(), restore: vi.fn(), render: vi.fn(), list: vi.fn() }));
+const mocks = vi.hoisted(() => ({ prepareStep: vi.fn(), plan: vi.fn(), audit: vi.fn(), restore: vi.fn(), render: vi.fn(), list: vi.fn(),
+  videoStep: vi.fn(), sourceAnalysisStep: vi.fn(), projectVideo: vi.fn(), loadVideo: vi.fn() }));
 vi.mock('@/lib/creatives/portfolio-preparation', () => ({ advancePortfolioPreparation: mocks.prepareStep }));
+vi.mock('@/lib/creatives/portfolio-video-adapter', () => ({ stepPortfolioVideoDependency: mocks.videoStep }));
+vi.mock('@/lib/creatives/planning-source-composition', async original => ({
+  ...await original<typeof import('@/lib/creatives/planning-source-composition')>(), advancePlanningSourceAnalysis: mocks.sourceAnalysisStep,
+}));
+vi.mock('@/lib/creatives/video-intelligence-planning', async original => ({
+  ...await original<typeof import('@/lib/creatives/video-intelligence-planning')>(), projectCompletedVideoIntelligence: mocks.projectVideo,
+}));
+vi.mock('@/lib/video/intelligence-finalization-runner', async original => ({
+  ...await original<typeof import('@/lib/video/intelligence-finalization-runner')>(), loadVideoIntelligenceLibrary: mocks.loadVideo,
+}));
 vi.mock('@/lib/ai/creative-planner', () => ({
   requestCreativeBatch: mocks.plan,
   creativeRepairFeedback: (issue: string, audit: unknown) => `\nrepair:${issue}\n${JSON.stringify(audit)}`,
@@ -27,10 +42,25 @@ const unAuditedPlan = (request: ReturnType<typeof portfolioRequest>) => {
   return plan;
 };
 const repeatedAudit = () => ({ ...portfolioAudit(2), groups: [{ conceptIndexes: [1, 2], proposition: 'Same reason to act', distinction: 'Paraphrases' }] });
+const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+const videoRequest = (count = 1) => ({ ...portfolioRequest(), sourceAssets: [
+  ...Array.from({ length: count }, (_, index) => ({ role: 'TRA_VIDEO' as const, mediaId: `media_${String(index + 1).repeat(32)}` })),
+  { role: 'LAYOUT_REFERENCE' as const, mediaId: `media_${'a'.repeat(32)}` },
+] });
+const videoDependency = (mediaId: string, complete = false) => {
+  const sourceVideoContentHash = hash(mediaId), identity = { sourceVideoMediaId: mediaId, sourceVideoContentHash,
+    analyzerFingerprint: createVideoIntelligenceAnalyzerFingerprint(DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY, 'vision-model') };
+  const artifactHash = hash('artifact-' + mediaId);
+  return { version: 1 as const, identity, jobId: videoIntelligenceJobId(identity), ...(complete ? { completed: {
+    artifact: { key: `libraries/sha256/${artifactHash}.json`, sha256: artifactHash, byteLength: 100 },
+    library: { id: `video-library:${hash(`${mediaId}:${sourceVideoContentHash}`)}`, version: 1 as const },
+  } } : {}) };
+};
 
 beforeEach(() => {
   records = []; mocks.prepareStep.mockReset(); mocks.plan.mockReset(); mocks.audit.mockReset(); mocks.restore.mockReset(); mocks.render.mockReset();
   mocks.list.mockReset().mockImplementation(async () => records);
+  mocks.videoStep.mockReset(); mocks.sourceAnalysisStep.mockReset(); mocks.projectVideo.mockReset(); mocks.loadVideo.mockReset();
   mocks.plan.mockImplementation(async args => unAuditedPlan(portfolioRequest(args.count)));
   mocks.audit.mockImplementation(async concepts => portfolioAudit(concepts.length));
   mocks.prepareStep.mockImplementation(async (request, _url, _state, onProviderStart) => {
@@ -54,6 +84,92 @@ beforeEach(() => {
 });
 
 describe('bounded resumable portfolio execution', () => {
+  it('prepares multiple marked videos durably before layout/source analysis and never calls representative preparation early', async () => {
+    const storage = new MemoryPortfolioStorage(), request = videoRequest(2);
+    const job = await createCreativePortfolio(request, storage);
+    expect(job.videoPreparationVersion).toBe(1);
+    const calls = new Map<string, number>();
+    mocks.videoStep.mockImplementation(async input => {
+      const count = (calls.get(input.mediaId) ?? 0) + 1; calls.set(input.mediaId, count);
+      const dependency = videoDependency(input.mediaId, count > 1);
+      await input.checkpoint(dependency);
+      return { dependency, status: count > 1 ? { jobId: dependency.jobId, phase: 'COMPLETE', busy: false,
+        completedRepresentatives: 1, totalRepresentatives: 1, updatedAtMs: count, locator: {} } : null };
+    });
+    mocks.sourceAnalysisStep.mockResolvedValue({ state: { version: 1, entries: request.sourceAssets.map(source => ({ source })) } });
+    mocks.loadVideo.mockResolvedValue({ id: 'library' });
+    mocks.projectVideo.mockImplementation(() => { throw new Error('projection reached'); });
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage); // planning quota
+    for (let index = 0; index < 4; index++) await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    const reloaded = await readCreativePortfolio(job.id, storage);
+    expect(reloaded?.planning).toMatchObject({ phase: 'INITIAL_PLAN', preparation: {
+      videoDependencies: [{ completed: expect.any(Object) }, { completed: expect.any(Object) }],
+    } });
+    expect(mocks.prepareStep).not.toHaveBeenCalled();
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(mocks.sourceAnalysisStep).toHaveBeenCalledOnce(); expect(mocks.loadVideo).toHaveBeenCalledTimes(2);
+    expect(mocks.projectVideo).toHaveBeenCalledOnce(); expect(mocks.prepareStep).not.toHaveBeenCalled();
+  });
+
+  it('persists exact child retry state and consumes it only after explicit portfolio Retry', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(videoRequest(), storage);
+    const mediaId = job.request.sourceAssets[0].mediaId, dependency = videoDependency(mediaId);
+    const retryState = { jobId: dependency.jobId, updatedAtMs: 42,
+      retry: { phase: 'TRANSCRIBING' as const, reason: 'PAID_WORK_FAILED' as const }, etag: 'child-etag' };
+    mocks.videoStep.mockImplementationOnce(async input => { await input.checkpoint(dependency); return { dependency, status: null }; })
+      .mockResolvedValueOnce({ dependency, status: { jobId: dependency.jobId, phase: 'RETRY_REQUIRED', busy: false,
+        completedRepresentatives: 0, totalRepresentatives: 1, updatedAtMs: 42, retry: retryState.retry, locator: {} },
+        retryAuthorization: retryState })
+      .mockImplementationOnce(async input => {
+        expect(input.action).toBe('RETRY'); expect(input.retryAuthorization).toEqual(retryState);
+        await input.consumeRetryAuthorization(retryState);
+        return { dependency: videoDependency(mediaId, true), status: { jobId: dependency.jobId, phase: 'COMPLETE', busy: false,
+          completedRepresentatives: 1, totalRepresentatives: 1, updatedAtMs: 43, locator: {} } };
+      });
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    const blocked = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(blocked.job).toMatchObject({ planningError: expect.stringContaining('Explicit Retry'), planning: { preparation: {
+      videoProgress: { phase: 'RETRY_REQUIRED', retryState },
+    } } });
+    expect(mocks.videoStep).toHaveBeenCalledTimes(2);
+    await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+    const completed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(completed.job.planning).toMatchObject({ preparation: { videoDependencies: [{ completed: expect.any(Object) }] } });
+    expect(completed.job.planning.phase === 'INITIAL_PLAN'
+      && completed.job.planning.preparation.videoRetryAuthorization).toBeUndefined();
+  });
+
+  it('refreshes a changed child retry revision read-only and requires another explicit Retry', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(videoRequest(), storage);
+    const mediaId = job.request.sourceAssets[0].mediaId, dependency = videoDependency(mediaId);
+    const first = { jobId: dependency.jobId, updatedAtMs: 42,
+      retry: { phase: 'TRANSCRIBING' as const, reason: 'PAID_WORK_FAILED' as const }, etag: 'first' };
+    const second = { ...first, updatedAtMs: 43, etag: 'second' };
+    mocks.videoStep.mockImplementationOnce(async input => { await input.checkpoint(dependency); return { dependency, status: null }; })
+      .mockResolvedValueOnce({ dependency, status: { jobId: dependency.jobId, phase: 'RETRY_REQUIRED', busy: false,
+        completedRepresentatives: 0, totalRepresentatives: 1, updatedAtMs: 42, retry: first.retry, locator: {} }, retryAuthorization: first })
+      .mockImplementationOnce(async input => { await input.consumeRetryAuthorization(first); throw new Error('Video Retry state changed.'); })
+      .mockResolvedValueOnce({ dependency, status: { jobId: dependency.jobId, phase: 'RETRY_REQUIRED', busy: false,
+        completedRepresentatives: 0, totalRepresentatives: 1, updatedAtMs: 43, retry: second.retry, locator: {} }, retryAuthorization: second })
+      .mockImplementationOnce(async input => { await input.consumeRetryAuthorization(second); return {
+        dependency: videoDependency(mediaId, true), status: { jobId: dependency.jobId, phase: 'COMPLETE', busy: false,
+          completedRepresentatives: 1, totalRepresentatives: 1, updatedAtMs: 44, locator: {} } }; });
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+    const refreshed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(refreshed.job).toMatchObject({ planningError: expect.stringContaining('Explicit Retry'), planning: { preparation: {
+      videoProgress: { retryState: second },
+    } } });
+    expect(refreshed.job.planning.phase === 'INITIAL_PLAN'
+      && refreshed.job.planning.preparation.videoRetryAuthorization).toBeUndefined();
+    await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+    const completed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(completed.job.planning.phase === 'INITIAL_PLAN'
+      && completed.job.planning.preparation.videoDependencies?.[0].completed).toBeDefined();
+  });
   it('persists planning before completing 36 single-image steps without double-charging quotas', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(36), storage);
     let result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);

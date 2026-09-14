@@ -136,7 +136,8 @@ it('requires explicit retry after expired paid work and guards the consumed auth
   const snapshot = JSON.stringify([...s.storage.data]);
   await stepPortfolioVideoDependency({ mediaId, dependency: await s.saved(), action: 'STATUS' }, s.deps);
   expect(JSON.stringify([...s.storage.data])).toBe(snapshot);
-  expect((await s.advance()).status?.phase).toBe('RETRY_REQUIRED');
+  const retry = await s.advance();
+  expect(retry.status?.phase).toBe('RETRY_REQUIRED');
   await s.advance(); expect(s.deps.transcription).not.toHaveBeenCalled();
   const consume = vi.fn(async () => {
     // Concurrent writer changes the child revision after authorization was consumed.
@@ -144,13 +145,16 @@ it('requires explicit retry after expired paid work and guards the consumed auth
     await s.storage.write(videoIntelligenceJobKey(identity), stored!.bytes, stored!.etag);
   });
   await expect(stepPortfolioVideoDependency({ mediaId, dependency: await s.saved(), action: 'RETRY',
-    ...s.owner, consumeRetryAuthorization: consume }, s.deps)).rejects.toThrow('Retry state changed');
+    ...s.owner, retryAuthorization: retry.retryAuthorization!, consumeRetryAuthorization: consume }, s.deps)).rejects.toThrow('Retry state changed');
   expect(consume).toHaveBeenCalledTimes(1); expect(s.deps.transcription).not.toHaveBeenCalled();
+  const refreshed = (await s.advance()).retryAuthorization!;
   consume.mockRejectedValueOnce(new Error('Authorization already consumed'));
   await expect(stepPortfolioVideoDependency({ mediaId, dependency: await s.saved(), action: 'RETRY',
-    ...s.owner, consumeRetryAuthorization: consume }, s.deps)).rejects.toThrow('already consumed');
+    ...s.owner, retryAuthorization: refreshed, consumeRetryAuthorization: consume }, s.deps)).rejects.toThrow('already consumed');
+  const authorized = (await s.advance()).retryAuthorization!;
   expect((await stepPortfolioVideoDependency({ mediaId, dependency: await s.saved(), action: 'RETRY',
-    ...s.owner, consumeRetryAuthorization: async expected => { expect(expected.retry?.phase).toBe('TRANSCRIBING'); } }, s.deps)).status?.phase).toBe('OBSERVING');
+    ...s.owner, retryAuthorization: authorized,
+    consumeRetryAuthorization: async expected => { expect(expected.retry?.phase).toBe('TRANSCRIBING'); } }, s.deps)).status?.phase).toBe('OBSERVING');
   expect(s.deps.transcription).toHaveBeenCalledTimes(1);
 });
 

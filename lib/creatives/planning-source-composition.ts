@@ -12,6 +12,7 @@ import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
+import { parseVideoPlanningContext } from '@/lib/creatives/video-intelligence-planning';
 
 type SourceRequest = Pick<ValidGenerateCreativeRequest, 'sourceAssets' | 'context'>;
 const changed = () => new CreativeGenerationPreparationError('Planning source inventory or analysis identity changed. Start fresh preparation.', 409);
@@ -32,6 +33,14 @@ export async function advancePlanningSourceAnalysis(
   const contextSha256 = createHash('sha256').update(request.context).digest('hex');
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
   const entries = [...inventory].sort((a, b) => a.identity.mediaId.localeCompare(b.identity.mediaId)).flatMap(({ identity: source }) => {
+    const savedVideo = source.role === 'TRA_VIDEO' ? current?.entries.find(entry => entry.source.mediaId === source.mediaId
+      && entry.result?.kind === 'VIDEO_INTELLIGENCE' && entry.analyzer.kind === 'VIDEO_INTELLIGENCE') : undefined;
+    if (savedVideo?.result?.kind === 'VIDEO_INTELLIGENCE') {
+      const intelligence = parseVideoPlanningContext(savedVideo.result.intelligence, source);
+      return [{ source, analyzer: { kind: 'VIDEO_INTELLIGENCE' as const,
+        model: intelligence.identity.analyzerFingerprint.visionModel, schemaVersion: 1 as const, contextSha256: null },
+        evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION' as const }];
+    }
     const kinds: PlanningSourceAnalysisResult['kind'][] = source.role === 'TRA_VIDEO'
       ? ['REPRESENTATIVE_VIDEO_FRAMES']
       : [source.role === 'TRA_REFERENCE' ? 'TRA_REFERENCE' : 'LAYOUT_ANGLE', 'LAYOUT_BLUEPRINT'];
