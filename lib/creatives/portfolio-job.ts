@@ -7,6 +7,7 @@ import type { CreativeBatchPlan } from '@/lib/creatives/planned';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
 import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
 export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 export const PORTFOLIO_LEASE_MS = 10 * 60 * 1000;
@@ -195,6 +196,9 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
         ...(job.sourceCompositionVersion === 2 && plannerArgs.sourceAnalysis ? {
           sourceAnalysis: plannerArgs.sourceAnalysis, selectedReferences: snapshot.selectedReferences,
           referenceCatalog: snapshot.referenceCatalog,
+          ...(job.videoPreparationVersion === 1 ? {
+            videoDependencies: videoDependenciesFromPlanningSourceAnalysis(plannerArgs.sourceAnalysis),
+          } : {}),
         } : {}),
       } };
     }

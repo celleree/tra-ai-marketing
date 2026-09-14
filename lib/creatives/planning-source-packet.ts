@@ -6,6 +6,7 @@ import type { ApprovedHumanFrame } from '@/lib/video/approved-human';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { VideoIntelligenceJob } from '@/lib/video/intelligence-job';
+import type { VideoIntelligenceJobIdentity } from '@/lib/video/intelligence-job';
 import type { VideoIntelligenceJobLocator } from '@/lib/video/intelligence-service';
 import type { ResolvedLayoutBlueprint } from '@/lib/layouts/service';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
@@ -18,6 +19,7 @@ export type PlanningSourceAnalysisResult =
   | { kind: 'LAYOUT_BLUEPRINT'; layout: ResolvedLayoutBlueprint }
   | { kind: 'LAYOUT_ANGLE'; angleDescription: string }
   | { kind: 'TRA_REFERENCE'; analysis: CreativeReferenceAnalysis }
+  | { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContext }
   | { kind: 'REPRESENTATIVE_VIDEO_FRAMES'; analysis: CreativeReferenceAnalysis;
       analyzedFrames: Array<Pick<ApprovedTraVideoFrame, 'timestampMs' | 'frameSha256'>> };
 
@@ -41,14 +43,26 @@ export type PlanningSourceReadiness<T> =
 /** NOT_REQUESTED differs from a successfully retrieved empty catalog. */
 type PlanningCatalog<T> = { status: 'NOT_REQUESTED' } | PlanningSourceReadiness<T[]>;
 
-type VideoPlanningContext = {
+export type VideoPlanningContext = {
+  identity: VideoIntelligenceJobIdentity;
   locator: VideoIntelligenceJobLocator;
   jobId: VideoIntelligenceJob['id'];
   artifact: NonNullable<VideoIntelligenceJob['result']>;
   library: Pick<VideoFrameLibrary,
     'id' | 'version' | 'durationMs' | 'analysisModels' | 'providerEligible' | 'evidenceStatus'>;
   // B retrieves bounded excerpts, retaining timestamps and frame identity; never thumbnails.
-  transcriptExcerpts: VideoFrameLibrary['transcript']['segments'];
+  transcript: {
+    status: 'AVAILABLE' | 'NO_AUDIO_TRACK';
+    model: VideoFrameLibrary['transcript']['model'];
+    language: VideoFrameLibrary['transcript']['language'];
+    totalSegmentCount: number;
+    coverage: 'COMPLETE' | 'UNIFORM_TIMELINE_V1';
+    excerpts: VideoFrameLibrary['transcript']['segments'];
+  };
+  observationCoverage: {
+    totalRepresentativeCount: number;
+    coverage: 'COMPLETE' | 'UNIFORM_TIMELINE_V1';
+  };
   observations: Array<Pick<VideoFrameLibrary['representativeFrames'][number],
     'id' | 'timestampMs' | 'frameSha256' | 'evidenceStatus' | 'observation' | 'transcriptSegments'>>;
 };

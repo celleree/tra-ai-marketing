@@ -4,6 +4,7 @@ import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-sourc
 import { parseLayoutBlueprint } from '@/lib/layouts/blueprint';
 import { MAX_CREATIVE_SOURCE_ASSETS } from '@/lib/media/source-limits';
 import type { CreativeSourceSelection } from '@/lib/media/types';
+import { parseVideoPlanningContext } from '@/lib/creatives/video-intelligence-planning';
 
 const record = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown) => typeof v === 'string' && v.trim().length > 0;
@@ -35,8 +36,8 @@ export function parsePlanningSourceAnalysis(value: unknown,
     if (!keys(s, ['role', 'mediaId', 'sha256']) || typeof s.mediaId !== 'string' || !/^media_[a-f0-9]{32}$/.test(s.mediaId)
       || !hash(s.sha256) || !['TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE'].includes(String(s.role))
       || !keys(a, ['kind', 'model', 'schemaVersion', 'contextSha256']) || !text(a.model) || a.schemaVersion !== 1
-      || (a.kind === 'LAYOUT_BLUEPRINT' ? a.contextSha256 !== null : !hash(a.contextSha256))) return invalid();
-    const kinds = s.role === 'TRA_VIDEO' ? ['REPRESENTATIVE_VIDEO_FRAMES']
+      || (a.kind === 'LAYOUT_BLUEPRINT' || a.kind === 'VIDEO_INTELLIGENCE' ? a.contextSha256 !== null : !hash(a.contextSha256))) return invalid();
+    const kinds = s.role === 'TRA_VIDEO' ? ['REPRESENTATIVE_VIDEO_FRAMES', 'VIDEO_INTELLIGENCE']
       : [s.role === 'TRA_REFERENCE' ? 'TRA_REFERENCE' : 'LAYOUT_ANGLE', 'LAYOUT_BLUEPRINT'];
     if (typeof a.kind !== 'string' || !kinds.includes(a.kind)) return invalid();
     const binding = sources.get(s.mediaId) ?? { role: String(s.role), sha256: String(s.sha256), kinds: new Set<string>() };
@@ -52,6 +53,9 @@ export function parsePlanningSourceAnalysis(value: unknown,
         || !isDeepStrictEqual(parseLayoutBlueprint(r.layout.blueprint), r.layout.blueprint)) return invalid();
     } else if (r.kind === 'LAYOUT_ANGLE') {
       if (!keys(r, ['kind', 'angleDescription']) || typeof r.angleDescription !== 'string' || r.angleDescription.length > 2000) return invalid();
+    } else if (r.kind === 'VIDEO_INTELLIGENCE') {
+      if (!keys(r, ['kind', 'intelligence'])) return invalid();
+      try { parseVideoPlanningContext(r.intelligence, { mediaId: String(s.mediaId), sha256: String(s.sha256) }); } catch { return invalid(); }
     } else {
       if (!keys(r, ['kind', 'analysis', ...(r.kind === 'REPRESENTATIVE_VIDEO_FRAMES' ? ['analyzedFrames'] : [])])
         || !validAnalysis(r.analysis) || !record(r.analysis)
@@ -62,7 +66,8 @@ export function parsePlanningSourceAnalysis(value: unknown,
           || !Number.isSafeInteger(frame.timestampMs) || Number(frame.timestampMs) < 0 || !hash(frame.frameSha256)))) return invalid();
     }
   }
-  if (sources.size > MAX_CREATIVE_SOURCE_ASSETS || [...sources.values()].some(s => s.kinds.size !== (s.role === 'TRA_VIDEO' ? 1 : 2))) return invalid();
+  if (sources.size > MAX_CREATIVE_SOURCE_ASSETS || [...sources.values()].some(s => s.role === 'TRA_VIDEO'
+    ? s.kinds.size !== 1 : s.kinds.size !== 2)) return invalid();
   if (expected && (expected.length !== sources.size || new Set(expected.map(s => s.mediaId)).size !== expected.length
     || expected.some(s => { const actual = sources.get(s.mediaId);
       return !actual || actual.role !== s.role || (s.sha256 !== undefined && actual.sha256 !== s.sha256); }))) return invalid();

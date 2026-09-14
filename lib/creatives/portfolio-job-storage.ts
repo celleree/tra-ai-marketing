@@ -4,6 +4,7 @@ import { newCreativePortfolio, type CreativePortfolioJob } from '@/lib/creatives
 import { isPortfolioId, parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
+import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
 
 const key = (id: string) => {
   if (!isPortfolioId(id)) throw new Error('Invalid creative portfolio ID.');
@@ -42,7 +43,11 @@ export async function updateCreativePortfolio(
     if (next.videoPreparationVersion !== current.job.videoPreparationVersion) {
       throw new Error('Portfolio video preparation version is immutable.');
     }
-    const dependencies = (job: CreativePortfolioJob) => job.planning.phase === 'INITIAL_PLAN' ? job.planning.preparation.videoDependencies ?? [] : [];
+    const dependencies = (job: CreativePortfolioJob) => job.planning.phase === 'INITIAL_PLAN'
+      ? job.planning.preparation.videoDependencies ?? []
+      : job.planning.phase === 'READY_TO_RENDER'
+        ? videoDependenciesFromPlanningSourceAnalysis(job.snapshot?.sourceAnalysis)
+        : videoDependenciesFromPlanningSourceAnalysis(job.planning.checkpoint.plannerArgs.sourceAnalysis);
     if (!preservesVideoDependencies(dependencies(current.job), dependencies(next))) {
       throw new Error('Portfolio video dependency bindings and completed references are immutable.');
     }
