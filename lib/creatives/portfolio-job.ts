@@ -8,10 +8,19 @@ import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapsh
 import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
+import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 export const PORTFOLIO_LEASE_MS = 10 * 60 * 1000;
-export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED'; error?: string };
+export const MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH = 200;
+export type PortfolioVideoSelectionState = {
+  version: 1;
+  selectionModel: string;
+  selection?: GenerateVideoFrameSelection;
+  retryAuthorization?: { version: 1 };
+};
+export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED'; error?: string;
+  videoSelection?: PortfolioVideoSelectionState };
 export type PortfolioPlanningPhase = 'INITIAL_PLAN' | 'DIVERSITY_AUDIT' | 'TARGETED_REPAIR' | 'READY_TO_RENDER';
 export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot; plannerArgs: CreativeBatchPlannerArgs };
 export type PortfolioPlanningState =
@@ -31,6 +40,8 @@ export type CreativePortfolioJob = {
 };
 export type PortfolioClaim = { status: 'WORK' | 'BUSY' | 'COMPLETE' | 'RETRY_REQUIRED'; job: CreativePortfolioJob };
 const id = (prefix: string) => prefix + randomUUID().replaceAll('-', '');
+const validVideoSelectionModel = (value: unknown): value is string => typeof value === 'string'
+  && value.trim().length > 0 && value.length <= MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH;
 
 export function newCreativePortfolio(request: ValidGenerateCreativeRequest, now = Date.now()): CreativePortfolioJob {
   if (!Number.isInteger(request.variationCount) || request.variationCount < 2 || request.variationCount > MAX_PORTFOLIO_CREATIVES) {
@@ -48,6 +59,15 @@ const requireLease = (job: CreativePortfolioJob, leaseId: string, now: number) =
   if (!job.lease || job.lease.id !== leaseId || job.lease.expiresAtMs <= now) throw new Error('Portfolio work lease is no longer current.');
   return job.lease;
 };
+const requireVideoSelectionSlot = (job: CreativePortfolioJob, leaseId: string, now: number) => {
+  const lease = requireLease(job, leaseId, now);
+  const slot = job.slots.find(candidate => candidate.index === lease.slotIndex);
+  if (job.videoPreparationVersion !== 1 || !job.snapshot || job.planning.phase !== 'READY_TO_RENDER'
+    || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO') || !slot || slot.status !== 'PENDING') {
+    throw new Error('Video frame selection does not match the reserved creative.');
+  }
+  return { lease, slot };
+};
 const planMatchesSlots = (job: CreativePortfolioJob, snapshot: CreativePortfolioSnapshot) =>
   isDeepStrictEqual(snapshot.request, job.request)
     && snapshot.batchPlan.creatives.length === job.slots.length
@@ -58,6 +78,7 @@ const failed = (job: CreativePortfolioJob, message: string) => {
   else {
     const slot = next.slots.find(slot => slot.index === next.lease!.slotIndex)!;
     slot.status = 'RETRY_REQUIRED'; slot.error = message;
+    if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;
   }
   next.lease = null;
   return next;
@@ -181,6 +202,43 @@ export function finishPortfolioPlan(current: CreativePortfolioJob, leaseId: stri
     lease: null, updatedAtMs: now };
 }
 
+/** Freeze/consume durable selection-attempt state before any B3 provider work. */
+export function checkpointPortfolioVideoSelectionAttempt(
+  current: CreativePortfolioJob, leaseId: string, proposedModel: string, now = Date.now(),
+) {
+  const { slot: currentSlot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (currentSlot.videoSelection?.selection) throw new Error('Video frame selection is already complete.');
+  const savedModel = currentSlot.videoSelection?.selectionModel;
+  if (currentSlot.videoSelection && (currentSlot.videoSelection.version !== 1 || !validVideoSelectionModel(savedModel))) {
+    throw new Error('Saved video frame selection state is invalid.');
+  }
+  if (!savedModel && !validVideoSelectionModel(proposedModel)) throw new Error('Video frame selection model is invalid.');
+  const job = structuredClone(current);
+  const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
+  const retry = slot.videoSelection?.retryAuthorization?.version === 1;
+  slot.videoSelection = { version: 1, selectionModel: savedModel ?? proposedModel };
+  job.updatedAtMs = now;
+  return { job, selectionModel: slot.videoSelection.selectionModel, retry };
+}
+
+/** Persist a completed B3 frame choice, then release the parent lease for generation. */
+export function finishPortfolioVideoFrameSelection(
+  current: CreativePortfolioJob, leaseId: string, selection: GenerateVideoFrameSelection, now = Date.now(),
+) {
+  const { slot: currentSlot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (!currentSlot.videoSelection || currentSlot.videoSelection.version !== 1
+    || !validVideoSelectionModel(currentSlot.videoSelection.selectionModel) || currentSlot.videoSelection.selection) {
+    throw new Error('Frozen video frame selection state is required.');
+  }
+  const parsed = parseGenerateVideoFrameSelection(selection);
+  if (!parsed) throw new Error('Completed video frame selection is invalid.');
+  const job = structuredClone(current);
+  const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
+  slot.videoSelection = { version: 1, selectionModel: currentSlot.videoSelection.selectionModel, selection: parsed };
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
 export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: string, creativeId: string, now = Date.now()) {
   const lease = requireLease(current, leaseId, now);
   const job = structuredClone(current);
@@ -230,6 +288,8 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
     const slot = job.slots.find(slot => slot.index === slotIndex);
     if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');
     slot.status = 'PENDING'; delete slot.error;
+    if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
+    else if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;
   }
   job.updatedAtMs = now;
   return job;
