@@ -73,7 +73,7 @@ export const canonicalizeVideoSelectionPool = (bindings: readonly VideoSelection
   if (!Array.isArray(bindings) || bindings.length < 1 || bindings.length > 10) {
     throw new Error('Video selection pool must contain between 1 and 10 libraries.');
   }
-  const libraryIds = new Set<string>(); const sourceIds = new Set<string>(); const frameIds = new Set<string>();
+  const libraryIds = new Set<string>(); const sourceIds = new Set<string>();
   const checked = bindings.map((binding) => {
     const library = binding?.library; const sha = binding?.librarySha256;
     if (!library || typeof library.id !== 'string' || !library.id || typeof library.sourceVideoMediaId !== 'string' || !library.sourceVideoMediaId
@@ -83,6 +83,7 @@ export const canonicalizeVideoSelectionPool = (bindings: readonly VideoSelection
       throw new Error('Video selection pool binding is invalid or duplicated.');
     }
     libraryIds.add(library.id); sourceIds.add(library.sourceVideoMediaId);
+    const frameIds = new Set<string>();
     for (const frame of library.representativeFrames) {
       if (!frame || typeof frame.id !== 'string' || !frame.id || frameIds.has(frame.id)) {
         throw new Error('Video selection pool binding is invalid or duplicated.');
@@ -174,7 +175,7 @@ export const selectVideoFramesForConceptPool = async (
       { role: 'developer', content: [{ type: 'input_text', text: pooledRules }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ concept: brief, libraries }) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_video_concept_pool_selection', strict: true,
-      schema: pooledSelectionSchema(libraries.map((entry) => entry.libraryId), libraries.flatMap((entry) => entry.frames.map((frame) => frame.id))) } } }),
+      schema: pooledSelectionSchema(libraries.map((entry) => entry.libraryId), [...new Set(libraries.flatMap((entry) => entry.frames.map((frame) => frame.id)))]) } } }),
   });
   if (!response.ok) throw new Error(`Video concept selection failed (HTTP ${response.status}).`);
   const payload = await response.json() as { status?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
