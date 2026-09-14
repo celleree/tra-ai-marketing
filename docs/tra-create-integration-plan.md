@@ -339,6 +339,13 @@ V3 first reserves B2.1 temporal transcript neighborhoods and observations. It th
 
 **B2 assessment verification:** this assessment reran 5 focused mocked tests in `video-intelligence-planning.test.ts` and `portfolio-video-integration.test.ts`, covering current projection parsing/persistence, actual outbound Astra delivery, completed-job reuse and retry-state handling. Deterministic local probes demonstrated the omitted-middle-scene and adjacent-qualifier cases above. `git diff --check` passed. Only this document changed on `docs/b2-assessment`; no runtime/test edits, provider calls, paid generation or final staging verification were performed. The passing current tests establish the implemented B1 handoff and expose the missing B2 assertions; they do not make the partial B2 rows complete.
 
+#### B3.1 pooled cached selection foundation checkpoint (2026-09-14)
+
+PR #244 adds an additive pooled cached concept-selection foundation over 1–10 completed, validated video libraries, each bound to its immutable artifact SHA-256. One selection request receives every eligible representative-frame metadata record across the canonical pool and must return exactly one source library plus 1–3 unique frames owned by that library. Unknown libraries/frames, cross-library selections, duplicate selections and invalid/duplicate pool bindings fail closed.
+
+The pooled v2 cache identity binds the complete canonical library/source/content pool, every artifact SHA-256, the concept and model. Existing BUSY, lease expiry, `RETRY_REQUIRED`, deadline/insufficient-time admission and uncertain-provider checkpoint protections remain intact, including no automatic replay after provider work. Selections remain `UNVERIFIED_MODEL_SELECTION` and `providerEligible: false`; legacy single-library APIs remain unchanged.
+
+This is foundation only: no Create/render attachment wiring, UI changes, source-permission expansion, paid generation or Production promotion is included. B3 remains incomplete after B3.1; later work must activate this foundation through the existing B1 lifecycle/progress contracts without duplicating them.
 
 ### C — Full human pool, selected separately for each creative
 
