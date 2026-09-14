@@ -22,6 +22,10 @@ const secondLibrary = (): VideoFrameLibrary => {
     observation: { ...frame.observation, summary: index ? 'Second CTA.' : 'Second proof.' } }));
   return value;
 };
+const sameContentSecondLibrary = (): VideoFrameLibrary => {
+  const value = structuredClone(library()); value.id = 'library-same-content-second'; value.sourceVideoMediaId = 'media-same-content-second';
+  return value;
+};
 const completed = (frames: unknown) => Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ frames }) }] }] });
 const pooledCompleted = (libraryId: string, frames: unknown) => Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ libraryId, frames }) }] }] });
 afterEach(() => vi.unstubAllEnvs());
@@ -70,6 +74,25 @@ it('sends every pooled library and representative frame in one request and allow
   ]);
 });
 
+it('accepts distinct media libraries with the same content hash and deterministic frame IDs', async () => {
+  vi.stubEnv('OPENAI_API_KEY', 'test-key'); const first = library(); const second = sameContentSecondLibrary();
+  const request = vi.fn<typeof fetch>().mockResolvedValue(pooledCompleted(second.id, [
+    { frameId: second.representativeFrames[0]!.id, reason: 'Relevant proof from the selected upload.' },
+  ]));
+  await expect(selectVideoFramesForConceptPool([
+    { library: first, librarySha256: '1'.repeat(64) }, { library: second, librarySha256: '2'.repeat(64) },
+  ], 'Proof', { request })).resolves.toMatchObject({
+    libraryId: second.id, sourceVideoMediaId: second.sourceVideoMediaId, sourceVideoContentHash: first.sourceVideoContentHash,
+    frames: [{ frameId: first.representativeFrames[0]!.id }],
+  });
+  expect(request).toHaveBeenCalledTimes(1);
+  const body = JSON.parse(request.mock.calls[0]![1]!.body as string);
+  expect(body.text.format.schema.properties.frames.items.properties.frameId.enum).toEqual(['opaque-content-hash-a', 'opaque-content-hash-b']);
+  const payload = JSON.parse(body.input[1].content[0].text);
+  expect(payload.libraries).toHaveLength(2);
+  expect(payload.libraries[0].frames.map((frame: { id: string }) => frame.id)).toEqual(payload.libraries[1].frames.map((frame: { id: string }) => frame.id));
+});
+
 const invalidPooledResponses: Array<[string, (first: VideoFrameLibrary, second: VideoFrameLibrary) => Response]> = [
   ['unknown library', (first) => pooledCompleted('missing', [{ frameId: first.representativeFrames[0]!.id, reason: 'x' }])],
   ['cross-library frame', (first, second) => pooledCompleted(first.id, [{ frameId: second.representativeFrames[0]!.id, reason: 'x' }])],
@@ -83,12 +106,13 @@ it.each(invalidPooledResponses)('rejects pooled %s', async (_name, responseFacto
 });
 
 it('rejects duplicate or invalid pool bindings before provider work', async () => {
-  vi.stubEnv('OPENAI_API_KEY', 'test-key'); const first = library(); const duplicateFrame = secondLibrary();
-  duplicateFrame.representativeFrames[0]!.id = first.representativeFrames[0]!.id;
+  vi.stubEnv('OPENAI_API_KEY', 'test-key'); const first = library(); const duplicateFrame = library();
+  duplicateFrame.id = 'library-duplicate-frame'; duplicateFrame.sourceVideoMediaId = 'media-duplicate-frame';
+  duplicateFrame.representativeFrames[1]!.id = duplicateFrame.representativeFrames[0]!.id;
   const request = vi.fn<typeof fetch>();
   await expect(selectVideoFramesForConceptPool([{ library: first, librarySha256: '1'.repeat(64) }, { library: first, librarySha256: '2'.repeat(64) }], 'Concept', { request })).rejects.toThrow('duplicated');
   await expect(selectVideoFramesForConceptPool([{ library: first, librarySha256: 'bad' }], 'Concept', { request })).rejects.toThrow('invalid');
-  await expect(selectVideoFramesForConceptPool([{ library: first, librarySha256: '1'.repeat(64) }, { library: duplicateFrame, librarySha256: '2'.repeat(64) }], 'Concept', { request })).rejects.toThrow('duplicated');
+  await expect(selectVideoFramesForConceptPool([{ library: duplicateFrame, librarySha256: '2'.repeat(64) }], 'Concept', { request })).rejects.toThrow('duplicated');
   expect(request).not.toHaveBeenCalled();
 });
 
