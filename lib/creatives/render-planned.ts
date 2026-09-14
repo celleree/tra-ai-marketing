@@ -129,7 +129,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
             type: 'TRA_VIDEO_FRAMES',
             mediaId: providerFrames[0].sourceVideoMediaId,
             sourceSha256: providerFrames[0].sourceVideoContentHash,
-            selectionMode: itemFrameSelection
+            selectionMode: human || request.videoFrameSelection
               ? 'USER_SELECTED'
               : 'AUTOMATIC',
             frames: providerFrames.map((frame) => ({
