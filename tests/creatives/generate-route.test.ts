@@ -13,6 +13,10 @@ import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 
+// B1.2 remains disconnected from production preparation, including the legacy entry.
+const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
+vi.mock('@/lib/video/intelligence-service', () => ({ executeVideoIntelligenceStep: disabledVideo, readVideoIntelligenceSource: disabledVideo }));
+afterEach(() => expect(disabledVideo).not.toHaveBeenCalled());
 const mocks = vi.hoisted(() => ({
   humanOptions: vi.fn(),
   resolveHuman: vi.fn(),

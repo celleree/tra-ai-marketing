@@ -53,6 +53,7 @@ type Runners = {
 
 export interface VideoIntelligenceServiceDependencies extends Runners {
   deadlineAtMs: number;
+  expectedRetryEtag?: string;
   storage?: VideoIntelligenceStorage;
   now?: () => number;
   hydrateSource?: (mediaId: string) => Promise<HydratedTraVideoSource>;
@@ -214,7 +215,7 @@ export const executeVideoIntelligenceStep = async (
   }
   try {
     const claim = input.action === 'RETRY'
-      ? await retryVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now })
+      ? await retryVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now, expectedEtag: dependencies.expectedRetryEtag })
       : await claimVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now });
     const job = claim.status === 'WORK'
       ? await runClaim(identity, claim.job, claim.leaseId, dependencies)
