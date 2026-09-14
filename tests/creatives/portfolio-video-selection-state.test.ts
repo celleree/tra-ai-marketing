@@ -4,6 +4,7 @@ import {
   claimCreativePortfolio,
   failPortfolioWork,
   finishPortfolioPlan,
+  finishPortfolioSlot,
   finishPortfolioVideoFrameSelection,
   newCreativePortfolio,
   releasePortfolioWork,
@@ -46,6 +47,14 @@ describe('portfolio video selection persistence', () => {
     expect(job.slots[0].videoSelection).toBeUndefined();
   });
 
+  it('keeps legacy SAVED video slots without selection state valid', () => {
+    const current = leased();
+    const saved = finishPortfolioSlot(current, 'slot', current.slots[0].creativeId, 4_100);
+    expect(saved.slots[0].status).toBe('SAVED');
+    expect(saved.slots[0].videoSelection).toBeUndefined();
+    expect(parse(saved)).toEqual(saved);
+  });
+
   it('freezes the first valid selection model, retains the lease, and ignores later model changes', () => {
     const current = leased();
     const first = checkpointPortfolioVideoSelectionAttempt(current, 'slot', 'selection-model-a', 4_100);
@@ -74,6 +83,35 @@ describe('portfolio video selection persistence', () => {
       version: 1, selectionModel: 'selection-model-a', selection,
     });
     expect(parse(job).slots[0].videoSelection).toEqual(job.slots[0].videoSelection);
+  });
+
+  it('cannot save a slot after selection starts until COMPLETE selection is persisted', () => {
+    const frozen = checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', 'selection-model-a', 4_100).job;
+    expect(() => finishPortfolioSlot(frozen, 'slot', frozen.slots[0].creativeId, 4_200))
+      .toThrow('Completed video frame selection is required');
+  });
+
+  it('rejects serialized SAVED slots with incomplete video selection state', () => {
+    const frozen = checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', 'selection-model-a', 4_100).job;
+    const modelOnly = structuredClone(frozen) as any;
+    modelOnly.slots[0].status = 'SAVED';
+    modelOnly.lease = null;
+    expect(() => parse(modelOnly)).toThrow('invalid');
+
+    const retryOnly = structuredClone(modelOnly) as any;
+    retryOnly.slots[0].videoSelection.retryAuthorization = { version: 1 };
+    expect(() => parse(retryOnly)).toThrow('invalid');
+  });
+
+  it('allows generation save after COMPLETE selection and retains it through reload', () => {
+    const selected = completed();
+    const generation = claimCreativePortfolio(selected, 5_000, 'generation').job;
+    const saved = finishPortfolioSlot(generation, 'generation', generation.slots[0].creativeId, 5_100);
+    expect(saved.slots[0].status).toBe('SAVED');
+    expect(saved.slots[0].videoSelection).toEqual({
+      version: 1, selectionModel: 'selection-model-a', selection,
+    });
+    expect(parse(saved).slots[0].videoSelection).toEqual(saved.slots[0].videoSelection);
   });
 
   it('preserves the frozen model on selection failure and grants retry only after explicit operator retry', () => {
