@@ -103,7 +103,7 @@ describe('durable portfolio B3 selection activation', () => {
     expect(mocks.select.mock.calls.map(([arg]) => [arg.cache.model, arg.cache.retry])).toEqual([
       ['selector-model-a', false], ['selector-model-a', true],
     ]);
-    expect(retried.job.slots[0].videoSelection.retryAuthorization).toBeUndefined();
+    expect(retried.job.slots[0].videoSelection?.retryAuthorization).toBeUndefined();
   });
 
   it('retains a completed selection through render failure and explicit Retry reuses it without another selector call', async () => {
