@@ -244,6 +244,10 @@ export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: stri
   const job = structuredClone(current);
   const slot = job.slots.find(slot => slot.index === lease.slotIndex);
   if (!job.snapshot || !slot || slot.creativeId !== creativeId || slot.status !== 'PENDING') throw new Error('Portfolio result does not match the reserved creative.');
+  if (slot.videoSelection && (!slot.videoSelection.selection || slot.videoSelection.retryAuthorization
+    || !parseGenerateVideoFrameSelection(slot.videoSelection.selection))) {
+    throw new Error('Completed video frame selection is required before saving this creative.');
+  }
   slot.status = 'SAVED'; delete slot.error;
   job.lease = null; job.updatedAtMs = now;
   return job;
