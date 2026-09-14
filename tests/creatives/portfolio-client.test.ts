@@ -18,6 +18,48 @@ const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED'
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('resumable portfolio browser controller', () => {
+  it('parses bounded transient BUSY Retry-After timing without treating 429 as BUSY', async () => {
+    const value = initial();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json(value, { status: 202, headers: { 'Retry-After': '3' } }))
+      .mockResolvedValueOnce(Response.json(value, { status: 202 }))
+      .mockResolvedValueOnce(Response.json(value, { status: 202, headers: { 'Retry-After': 'later' } }))
+      .mockResolvedValueOnce(Response.json(value, { status: 202, headers: { 'Retry-After': '999999' } }))
+      .mockResolvedValueOnce(Response.json({ ...value, error: 'Quota reached' }, { status: 429, headers: { 'Retry-After': '60' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await requestPortfolio({ action: 'advance', id: value.job.id })).retryAfterMs).toBe(3000);
+    expect((await requestPortfolio({ action: 'advance', id: value.job.id })).retryAfterMs).toBe(2000);
+    expect((await requestPortfolio({ action: 'advance', id: value.job.id })).retryAfterMs).toBe(2000);
+    expect((await requestPortfolio({ action: 'advance', id: value.job.id })).retryAfterMs).toBe(30000);
+    const quota = await requestPortfolio({ action: 'advance', id: value.job.id });
+    expect(quota.error).toBe('Quota reached'); expect(quota.retryAfterMs).toBeUndefined();
+  });
+  it('accepts repeated unchanged BUSY responses, waits between advances, then resumes real progress', async () => {
+    const value = initial();
+    const progressed = { ...value, job: { ...value.job, planningCheckpoint: value.job.planningCheckpoint + 1 } };
+    const responses = [
+      Response.json(value, { status: 202, headers: { 'Retry-After': '1' } }),
+      Response.json(value, { status: 202, headers: { 'Retry-After': '2' } }),
+      Response.json(progressed),
+    ];
+    const events: string[] = [];
+    const fetchMock = vi.fn(async () => { events.push('fetch'); return responses.shift()!; });
+    vi.stubGlobal('fetch', fetchMock);
+    const wait = vi.fn(async (delay: number) => { events.push('wait:' + delay); }); let updates = 0;
+    const completed = await runPortfolio(value, () => { updates += 1; }, () => updates === 3, wait);
+    expect(completed.job.planningCheckpoint).toBe(progressed.job.planningCheckpoint);
+    expect(events).toEqual(['fetch', 'wait:1000', 'fetch', 'wait:2000', 'fetch']);
+    expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance', 'advance']);
+  });
+  it('does not issue another request when paused while a BUSY wait resolves', async () => {
+    const value = initial(); let paused = false;
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(value, { status: 202, headers: { 'Retry-After': '4' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const wait = vi.fn(async () => { paused = true; }), update = vi.fn();
+    const completed = await runPortfolio(value, update, () => paused, wait);
+    expect(completed.retryAfterMs).toBe(4000);
+    expect(wait).toHaveBeenCalledWith(4000); expect(update).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledOnce();
+  });
   it('surfaces expired planning work without automatically retrying the uncertain call', async () => {
     const value = initial();
     value.job.lease = { slotIndex: null, expiresAtMs: Date.now() - 1 };
@@ -48,7 +90,7 @@ describe('resumable portfolio browser controller', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(ready)); vi.stubGlobal('fetch', fetchMock);
     const wait = vi.fn(async () => {}), update = vi.fn();
     await runPortfolio(value, update, () => update.mock.calls.length === 1, wait);
-    expect(wait).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledOnce();
+    expect(wait).toHaveBeenCalledOnce(); expect(wait).toHaveBeenCalledWith(2000); expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).action).toBe('advance');
   });
@@ -64,7 +106,7 @@ describe('resumable portfolio browser controller', () => {
     expect((await runPortfolio(loaded, updates, () => false, wait)).creatives).toHaveLength(2);
     expect(fetchMock.mock.calls.map(([, options]) => options.method)).toEqual(['GET', 'GET', 'PATCH']);
     expect(JSON.parse(fetchMock.mock.calls[2][1].body).action).toBe('advance');
-    expect(wait).toHaveBeenCalledOnce();
+    expect(wait).toHaveBeenCalledOnce(); expect(wait).toHaveBeenCalledWith(2000);
   });
   it('continues a different pending slot after failure but never issues an automatic retry', async () => {
     const value = withSlots(initial(), ['PENDING', 'PENDING']);
