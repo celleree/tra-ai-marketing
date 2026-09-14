@@ -21,6 +21,7 @@ import { reserveOperatorQuota, OperatorQuotaUnavailableError } from '@/lib/quota
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import type { VideoIntelligenceServiceDependencies } from '@/lib/video/intelligence-service';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
+import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
 
@@ -105,7 +106,7 @@ export async function advanceCreativePortfolio(
               try {
                 stepped = await stepPortfolioVideoDependency({ mediaId: pending.mediaId, dependency, ...action }, service);
               } catch (error) {
-                if (!authorization || !(error instanceof Error) || error.message !== 'Video Retry state changed.') throw error;
+                if (!authorization || !(error instanceof VideoRetryStateChangedError)) throw error;
                 // The authorized child revision changed before RETRY. Refresh read-only and require another explicit Retry.
                 delete state.videoRetryAuthorization;
                 stepped = await stepPortfolioVideoDependency({ mediaId: pending.mediaId, dependency, action: 'STATUS' }, service);

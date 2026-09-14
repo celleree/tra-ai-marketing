@@ -6,7 +6,8 @@ import { analyzeFrameTechnicalQuality } from '@/lib/video/frame-technical-analys
 import { createVideoFrameThumbnailFromBytes } from '@/lib/video/frame-thumbnail';
 import { createVideoIntelligenceAnalyzerFingerprint, type VideoIntelligencePreparationManifest } from '@/lib/video/intelligence-preparation';
 import { videoIntelligenceJobKey } from '@/lib/video/intelligence-job';
-import { checkpointVideoIntelligenceJob, claimVideoIntelligenceJob, readVideoIntelligenceJob } from '@/lib/video/intelligence-job-store';
+import { checkpointVideoIntelligenceJob, claimVideoIntelligenceJob, readVideoIntelligenceJob,
+  VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 
 const sha = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 const mediaId = `media_${'a'.repeat(32)}`;
@@ -145,7 +146,8 @@ it('requires explicit retry after expired paid work and guards the consumed auth
     await s.storage.write(videoIntelligenceJobKey(identity), stored!.bytes, stored!.etag);
   });
   await expect(stepPortfolioVideoDependency({ mediaId, dependency: await s.saved(), action: 'RETRY',
-    ...s.owner, retryAuthorization: retry.retryAuthorization!, consumeRetryAuthorization: consume }, s.deps)).rejects.toThrow('Retry state changed');
+    ...s.owner, retryAuthorization: retry.retryAuthorization!, consumeRetryAuthorization: consume }, s.deps))
+    .rejects.toBeInstanceOf(VideoRetryStateChangedError);
   expect(consume).toHaveBeenCalledTimes(1); expect(s.deps.transcription).not.toHaveBeenCalled();
   const refreshed = (await s.advance()).retryAuthorization!;
   consume.mockRejectedValueOnce(new Error('Authorization already consumed'));

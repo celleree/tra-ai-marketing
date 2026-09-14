@@ -11,6 +11,7 @@ import { assertDurableVideoIntelligenceAvailable } from '@/lib/video/preview-ava
 import { executeVideoIntelligenceStep, readVideoIntelligenceSource, resolveVideoIntelligenceJobLocator,
   type CompactVideoIntelligenceJobStatus, type VideoIntelligenceServiceDependencies } from '@/lib/video/intelligence-service';
 import { reserveOperatorQuota } from '@/lib/quotas/operator-quota';
+import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 
 type Owner = {
   operatorId: string;
@@ -65,7 +66,7 @@ export async function stepPortfolioVideoDependency(
   const retryAuthorization = async (status: CompactVideoIntelligenceJobStatus) => {
     const observed = await readVideoIntelligenceJob(identity, dependencies);
     if (!observed || observed.job.updatedAtMs !== status.updatedAtMs
-      || !isDeepStrictEqual(observed.job.retry, status.retry)) throw new Error('Video Retry state changed.');
+      || !isDeepStrictEqual(observed.job.retry, status.retry)) throw new VideoRetryStateChangedError();
     return { jobId: status.jobId, updatedAtMs: status.updatedAtMs, retry: status.retry, etag: observed.etag };
   };
   const complete = async () => {
@@ -102,7 +103,7 @@ export async function stepPortfolioVideoDependency(
       || observed.job.updatedAtMs !== input.retryAuthorization.updatedAtMs
       || !isDeepStrictEqual(observed.job.retry, input.retryAuthorization.retry)
       || observed.job.updatedAtMs !== current.status!.updatedAtMs || !isDeepStrictEqual(observed.job.retry, current.status!.retry)) {
-      throw new Error('Video Retry state changed.');
+      throw new VideoRetryStateChangedError();
     }
     service.expectedRetryEtag = observed.etag;
     await input.consumeRetryAuthorization(input.retryAuthorization);

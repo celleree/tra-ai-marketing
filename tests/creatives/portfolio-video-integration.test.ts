@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { afterEach, expect, it, vi } from 'vitest';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
-import { createCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
+import { retryPortfolioWork } from '@/lib/creatives/portfolio-job';
+import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY, getEffectiveIntervalFps } from '@/lib/video/candidate-policy';
 import { analyzeFrameTechnicalQuality } from '@/lib/video/frame-technical-analysis';
 import { createVideoFrameThumbnailFromBytes } from '@/lib/video/frame-thumbnail';
+import { videoIntelligenceJobKey } from '@/lib/video/intelligence-job';
 import { checkpointVideoIntelligenceJob } from '@/lib/video/intelligence-job-store';
 import { createVideoIntelligenceAnalyzerFingerprint, type VideoIntelligencePreparationManifest } from '@/lib/video/intelligence-preparation';
 import { MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
@@ -72,7 +74,7 @@ const planned = (index: number) => ({ index, format: 'educational', copy: { prim
     execution: { taxDocumentReference: 'none', subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic',
       textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'Simple graphic' } });
 
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 it('sends two cold completed video libraries beside a layout to Astra and reuses child jobs for a second new portfolio', async () => {
   vi.stubEnv('NODE_ENV', 'test'); vi.stubEnv('VERCEL_ENV', 'development'); vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'vision-model');
@@ -129,4 +131,48 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   expect(videoEntries.map((entry: any) => entry.result.intelligence.observations[0].observation.summary)).toEqual(['LATE_OBSERVATION_b', 'LATE_OBSERVATION_c']);
   expect(outbound.sourceAnalysis.entries.some((entry: any) => entry.result?.kind === 'LAYOUT_BLUEPRINT')).toBe(true);
   expect(JSON.stringify(outbound)).not.toContain('thumbnailDataUrl');
+});
+
+it('refreshes the child retry state immediately when its ETag changes after parent authorization consumption', async () => {
+  vi.stubEnv('NODE_ENV', 'test'); vi.stubEnv('VERCEL_ENV', 'development'); vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'vision-model');
+  class RetryConflictStorage extends MemoryPortfolioStorage {
+    armed = false; parentWrites = 0;
+    async write(key: string, bytes: Buffer, expected: string | null) {
+      const written = await super.write(key, bytes, expected);
+      if (written && this.armed && key.startsWith('creative-portfolios/v1/') && ++this.parentWrites === 2) {
+        const childKey = videoIntelligenceJobKey(videos[0].identity), child = await this.read(childKey);
+        if (!child || !await super.write(childKey, child.bytes, child.etag)) throw new Error('Failed to create child Retry conflict.');
+      }
+      return written;
+    }
+  }
+  const storage = new RetryConflictStorage(), fixture = videos[0];
+  const request = { ...portfolioRequest(), sourceAssets: [{ mediaId: fixture.mediaId, role: 'TRA_VIDEO' as const }] };
+  const video = {
+    hydrateSource: vi.fn(async () => fixture.hydrated),
+    preparation: vi.fn(async (id: typeof fixture.identity, lease: string) => checkpointVideoIntelligenceJob(id, lease,
+      current => ({ ...current, phase: 'TRANSCRIBING', preparation: fixture.preparation, lease: null }), { storage })),
+    transcription: vi.fn(async (id: typeof fixture.identity, lease: string) => checkpointVideoIntelligenceJob(id, lease,
+      current => ({ ...current, phase: 'RETRY_REQUIRED', lease: null, retry: {
+        phase: 'TRANSCRIBING', reason: 'PAID_WORK_FAILED', message: 'Controlled failure',
+      } }), { storage })),
+  };
+  const job = await createCreativePortfolio(request, storage); let current = job;
+  for (let step = 0; step < 4; step++) current = (await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage,
+    { deadlineAtMs: Date.now() + 300_000, video })).job;
+  if (current.planning.phase !== 'INITIAL_PLAN') throw new Error('Expected video preparation.');
+  const first = current.planning.preparation.videoProgress?.retryState;
+  expect(current.planningError).toContain('Explicit Retry'); expect(first).toBeDefined();
+  await updateCreativePortfolio(job.id, saved => retryPortfolioWork(saved, null), storage);
+  storage.armed = true;
+  const refreshed = (await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage,
+    { deadlineAtMs: Date.now() + 300_000, video })).job;
+  expect(storage.parentWrites).toBeGreaterThanOrEqual(2); expect(video.transcription).toHaveBeenCalledOnce();
+  expect(refreshed.planningError).toContain('Explicit Retry');
+  if (refreshed.planning.phase !== 'INITIAL_PLAN') throw new Error('Expected video preparation.');
+  expect(refreshed.planning.preparation.videoRetryAuthorization).toBeUndefined();
+  expect(refreshed.planning.preparation.videoProgress?.retryState).toMatchObject({
+    jobId: first!.jobId, updatedAtMs: first!.updatedAtMs, retry: first!.retry,
+  });
+  expect(refreshed.planning.preparation.videoProgress?.retryState?.etag).not.toBe(first!.etag);
 });

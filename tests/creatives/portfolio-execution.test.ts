@@ -10,6 +10,7 @@ import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import { createVideoIntelligenceAnalyzerFingerprint } from '@/lib/video/intelligence-preparation';
 import { videoIntelligenceJobId } from '@/lib/video/intelligence-job';
+import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 
 const mocks = vi.hoisted(() => ({ prepareStep: vi.fn(), plan: vi.fn(), audit: vi.fn(), restore: vi.fn(), render: vi.fn(), list: vi.fn(),
   videoStep: vi.fn(), sourceAnalysisStep: vi.fn(), projectVideo: vi.fn(), loadVideo: vi.fn() }));
@@ -149,7 +150,7 @@ describe('bounded resumable portfolio execution', () => {
     mocks.videoStep.mockImplementationOnce(async input => { await input.checkpoint(dependency); return { dependency, status: null }; })
       .mockResolvedValueOnce({ dependency, status: { jobId: dependency.jobId, phase: 'RETRY_REQUIRED', busy: false,
         completedRepresentatives: 0, totalRepresentatives: 1, updatedAtMs: 42, retry: first.retry, locator: {} }, retryAuthorization: first })
-      .mockImplementationOnce(async input => { await input.consumeRetryAuthorization(first); throw new Error('Video Retry state changed.'); })
+      .mockImplementationOnce(async input => { await input.consumeRetryAuthorization(first); throw new VideoRetryStateChangedError(); })
       .mockResolvedValueOnce({ dependency, status: { jobId: dependency.jobId, phase: 'RETRY_REQUIRED', busy: false,
         completedRepresentatives: 0, totalRepresentatives: 1, updatedAtMs: 43, retry: second.retry, locator: {} }, retryAuthorization: second })
       .mockImplementationOnce(async input => { await input.consumeRetryAuthorization(second); return {
