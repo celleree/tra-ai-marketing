@@ -39,11 +39,12 @@ const automaticRequest = (extra: Record<string, unknown> = {}) => ({ ...portfoli
   sourceAssets: [{ role: 'TRA_VIDEO' as const, mediaId }], ...extra }) as any;
 
 async function ready(storage: MemoryPortfolioStorage, request = automaticRequest()) {
-  const created = await createCreativePortfolio(request, storage);
+  const now = Date.now() - 1000;
+  const created = await createCreativePortfolio(request, storage, now);
   return updateCreativePortfolio(created.id, current => {
     const token = 'planning-lease';
-    const claimed = claimCreativePortfolio(current, Date.now() + 10, token).job;
-    return finishPortfolioPlan(claimed, token, portfolioSnapshot(current), Date.now() + 20);
+    const claimed = claimCreativePortfolio(current, now + 10, token).job;
+    return finishPortfolioPlan(claimed, token, portfolioSnapshot(current), now + 20);
   }, storage);
 }
 const contextFor = (job: Awaited<ReturnType<typeof ready>>, overrides: Record<string, unknown> = {}) => ({
