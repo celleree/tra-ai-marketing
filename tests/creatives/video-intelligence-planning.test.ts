@@ -3,12 +3,14 @@ import sharp from 'sharp';
 import { afterEach, expect, it, vi } from 'vitest';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { projectCompletedVideoIntelligence, parseVideoPlanningContext,
-  MAX_PLANNING_VIDEO_OBSERVATIONS, MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS } from '@/lib/creatives/video-intelligence-planning';
+  MAX_PLANNING_VIDEO_CONTEXT_BYTES, MAX_PLANNING_VIDEO_OBSERVATIONS,
+  MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS } from '@/lib/creatives/video-intelligence-planning';
 import { claimCreativePortfolio, finishPortfolioInitialPlan, newCreativePortfolio, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
-import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
+import type { PlanningSourceAnalysisState, VideoPlanningContextV1,
+  VideoPlanningContextV2 } from '@/lib/creatives/planning-source-packet';
 import type { PortfolioVideoDependency } from '@/lib/creatives/portfolio-video-dependency';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
@@ -54,6 +56,23 @@ const library = (source: ReturnType<typeof videoSource>, count: number, silent =
       : { version: 1, model: 'whisper-1', language: 'en', segments },
     candidates, representativeFrames, semanticGroups: { sceneTypes: [], topics: [] } };
 };
+const spreadLibrary = (source: ReturnType<typeof videoSource>) => {
+  const value = library(source, 30);
+  value.durationMs = 100_000;
+  value.transcript.segments.forEach((segment, index) => {
+    segment.startMs = index === 0 ? 0 : index === 1 ? 50_000 : 85_000 + (index - 2) * 500;
+    segment.endMs = segment.startMs + 400;
+    if (index === 1) segment.text = 'Outcome statement';
+    if (index === 2) segment.text = 'Qualification that must stay adjacent';
+  });
+  value.representativeFrames.forEach((frame, index) => {
+    frame.timestampMs = index === 0 ? 100 : index === 1 ? 50_100 : 85_100 + (index - 2) * 500;
+    value.candidates[index].timestampMs = frame.timestampMs;
+    frame.id = `video-frame:${hash(`${source.sha256}:${frame.timestampMs}:${frame.frameSha256}`)}`;
+  });
+  value.representativeFrames[1].transcriptSegments = [value.transcript.segments[1]];
+  return value;
+};
 const baseState = (sources: ReturnType<typeof videoSource>[]): PlanningSourceAnalysisState => {
   const layout = { role: 'LAYOUT_REFERENCE' as const, mediaId: `media_${'c'.repeat(32)}`, sha256: 'c'.repeat(64) };
   return { version: 1, entries: [...sources.map(source => ({ source, analyzer: { kind: 'REPRESENTATIVE_VIDEO_FRAMES' as const,
@@ -72,22 +91,45 @@ const plannedConcept = (index: number) => ({ index, format: 'educational', copy:
     execution: { taxDocumentReference: 'none', subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low',
       ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'Simple graphic' } });
 const ok = () => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ creatives: [plannedConcept(1), plannedConcept(2)] }) }] }] }), { status: 200 });
+const legacyContext = (source: ReturnType<typeof videoSource>, value = library(source, 30)): VideoPlanningContextV1 => {
+  const saved = dependency(source), indexes = (total: number, limit: number) => Array.from({ length: Math.min(total, limit) }, (_, index) =>
+    total <= limit ? index : Math.round(index * (total - 1) / (limit - 1)));
+  const excerpts = indexes(value.transcript.segments.length, MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS).map(index => value.transcript.segments[index]);
+  const observations = indexes(value.representativeFrames.length, MAX_PLANNING_VIDEO_OBSERVATIONS).map(representativeOrdinal => {
+    const { id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments } = value.representativeFrames[representativeOrdinal];
+    return { representativeOrdinal, id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments };
+  });
+  return { identity: saved.identity, locator: { version: 1, sourceVideoMediaId: source.mediaId, sourceVideoContentHash: source.sha256,
+    analyzerFingerprintSha256: saved.identity.analyzerFingerprint.sha256 }, jobId: saved.jobId, artifact: saved.completed!.artifact,
+    library: { id: value.id, version: value.version, durationMs: value.durationMs, analysisModels: value.analysisModels,
+      providerEligible: false, evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION' },
+    transcript: { status: 'AVAILABLE', model: 'whisper-1', language: 'en', totalSegmentCount: value.transcript.segments.length,
+      coverage: excerpts.length === value.transcript.segments.length ? 'COMPLETE' : 'UNIFORM_TIMELINE_V1', excerpts },
+    observationCoverage: { totalRepresentativeCount: value.representativeFrames.length,
+      coverage: observations.length === value.representativeFrames.length ? 'COMPLETE' : 'UNIFORM_TIMELINE_V1' }, observations };
+};
 
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 it('projects multiple completed libraries with explicit bounded timeline coverage and sends them beside layout data to Astra', async () => {
   const sources = [videoSource('a'), videoSource('b')], dependencies = sources.map(dependency);
   const projected = projectCompletedVideoIntelligence(baseState(sources), [
-    { dependency: dependencies[0], library: library(sources[0], 30) }, { dependency: dependencies[1], library: library(sources[1], 1, true) }]);
+    { dependency: dependencies[0], library: spreadLibrary(sources[0]) }, { dependency: dependencies[1], library: library(sources[1], 1, true) }]);
   expect(parsePlanningSourceAnalysis(projected, [...sources, projected.entries[2].source], true)).toEqual(projected);
-  const intelligence = projected.entries.flatMap(entry => entry.result?.kind === 'VIDEO_INTELLIGENCE' ? [entry.result.intelligence] : []);
-  expect(intelligence[0].transcript).toMatchObject({ totalSegmentCount: 30, coverage: 'UNIFORM_TIMELINE_V1' });
-  expect(intelligence[0].transcript.excerpts).toHaveLength(MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS);
-  expect(intelligence[0].transcript.excerpts.at(-1)).toMatchObject({ startMs: 29000, text: 'DISTINCTIVE_LATE_TRANSCRIPT' });
+  const intelligence = projected.entries.flatMap(entry => entry.result?.kind === 'VIDEO_INTELLIGENCE' ? [entry.result.intelligence as VideoPlanningContextV2] : []);
+  expect(intelligence[0]).toMatchObject({ projectionVersion: 2, transcript: { totalSegmentCount: 30, coverage: 'BOUNDED_WINDOWS_V2' },
+    observationCoverage: { totalRepresentativeCount: 30, coverage: 'ELAPSED_TIME_BUCKETS_V2', buckets: [
+      { bucket: 'EARLY', availableCount: 1, includedCount: 1 }, { bucket: 'MIDDLE', availableCount: 1, includedCount: 1 },
+      { bucket: 'LATE', availableCount: 28, includedCount: 14 }] } });
+  expect(intelligence[0].transcript.includedSegmentCount).toBeLessThanOrEqual(MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS);
   expect(intelligence[0].observations).toHaveLength(MAX_PLANNING_VIDEO_OBSERVATIONS);
-  expect(intelligence[0].observations.map(item => item.representativeOrdinal)).toEqual([0, 2, 4, 6, 8, 10, 12, 14, 15, 17, 19, 21, 23, 25, 27, 29]);
-  expect(intelligence[0].observations.at(-1)).toMatchObject({ timestampMs: 29100, observation: { summary: 'DISTINCTIVE_LATE_OBSERVATION' } });
-  expect(intelligence[1].transcript).toMatchObject({ status: 'NO_AUDIO_TRACK', totalSegmentCount: 0, coverage: 'COMPLETE' });
+  expect(intelligence[0].observations.find(item => item.representativeOrdinal === 1)).toMatchObject({
+    timestampMs: 50100, selectionReasons: ['MIDDLE'] });
+  const segments = intelligence[0].transcript.windows.flatMap(window => window.segments);
+  expect(segments.find(segment => segment.segmentIndex === 1)?.text).toBe('Outcome statement');
+  expect(segments.find(segment => segment.segmentIndex === 2)?.text).toBe('Qualification that must stay adjacent');
+  expect(intelligence[0].transcript.windows.some(window => window.selectionReasons.includes('OBSERVATION_CONTEXT'))).toBe(true);
+  expect(intelligence[1].transcript).toMatchObject({ status: 'NO_AUDIO_TRACK', totalSegmentCount: 0, includedSegmentCount: 0, coverage: 'COMPLETE', windows: [] });
   expect(JSON.stringify(projected)).not.toContain('thumbnailDataUrl');
   expect(projected.entries.slice(-2)).toEqual(baseState(sources).entries.slice(-2));
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
@@ -97,6 +139,7 @@ it('projects multiple completed libraries with explicit bounded timeline coverag
   const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
   const outbound = JSON.parse(request.input[1].content[0].text);
   expect(outbound.sourceAnalysis).toEqual(projected);
+  expect(JSON.stringify(outbound)).not.toContain('thumbnailDataUrl');
   expect(outbound.sourceAnalysisGuidance).toContain('not verified advertising evidence');
   expect(outbound.sourceAnalysisGuidance).toContain('grant no claims, human approval');
 });
@@ -106,37 +149,91 @@ it('rejects incomplete, mismatched, malformed and oversized completed projection
   expect(() => projectCompletedVideoIntelligence(baseState([source]), [{ dependency: { ...complete, completed: undefined }, library: full }])).toThrow();
   expect(() => projectCompletedVideoIntelligence(baseState([{ ...source, sha256: 'f'.repeat(64) }]), [{ dependency: complete, library: full }])).toThrow();
   const projected = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: complete, library: full }]);
-  const context = (projected.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: any }).intelligence;
+  const context = (projected.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
   const invalid = [
     { ...context, observations: [{ ...context.observations[0], transcriptSegments: [{}] }, ...context.observations.slice(1)] },
     { ...context, observations: [{ ...context.observations[0], id: `video-frame:${'f'.repeat(64)}` }, ...context.observations.slice(1)] },
-    { ...context, observations: [context.observations[0], context.observations[0]], observationCoverage: { totalRepresentativeCount: 2, coverage: 'COMPLETE' } },
-    { ...context, observations: [], observationCoverage: { totalRepresentativeCount: 0, coverage: 'COMPLETE' } },
+    { ...context, observations: [context.observations[0], context.observations[0]] },
+    { ...context, observationCoverage: { ...context.observationCoverage, buckets: context.observationCoverage.buckets.map((bucket, index) =>
+      index === 0 ? { ...bucket, availableCount: bucket.availableCount + 1 } : bucket) } },
     { ...context, library: { ...context.library, analysisModels: { ...context.library.analysisModels, transcription: null } } },
   ];
   for (const value of invalid) expect(() => parseVideoPlanningContext(value, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
-  const prefixTranscript = structuredClone(context);
-  prefixTranscript.transcript.excerpts = full.transcript.segments.slice(0, MAX_PLANNING_VIDEO_TRANSCRIPT_EXCERPTS);
-  expect(() => parseVideoPlanningContext(prefixTranscript, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
-  const reorderedTranscript = structuredClone(context), [firstSegment, secondSegment] = reorderedTranscript.transcript.excerpts;
-  reorderedTranscript.transcript.excerpts[0] = { ...firstSegment, startMs: secondSegment.startMs, endMs: secondSegment.endMs };
-  reorderedTranscript.transcript.excerpts[1] = { ...secondSegment, startMs: firstSegment.startMs, endMs: firstSegment.endMs };
-  expect(() => parseVideoPlanningContext(reorderedTranscript, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
-  const prefixObservations = structuredClone(context);
-  prefixObservations.observations = full.representativeFrames.slice(0, MAX_PLANNING_VIDEO_OBSERVATIONS).map((frame, representativeOrdinal) => {
-    const { id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments } = frame;
-    return { representativeOrdinal, id, timestampMs, frameSha256, evidenceStatus, observation, transcriptSegments };
-  });
-  expect(() => parseVideoPlanningContext(prefixObservations, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
-  const reorderedObservations = structuredClone(context), [firstObservation, secondObservation] = reorderedObservations.observations;
-  reorderedObservations.observations[0] = { ...secondObservation, representativeOrdinal: firstObservation.representativeOrdinal };
-  reorderedObservations.observations[1] = { ...firstObservation, representativeOrdinal: secondObservation.representativeOrdinal };
-  expect(() => parseVideoPlanningContext(reorderedObservations, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const malformedWindow = structuredClone(context);
+  malformedWindow.transcript.windows[0].lastSegmentIndex++;
+  expect(() => parseVideoPlanningContext(malformedWindow, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const duplicateSegment = structuredClone(context);
+  duplicateSegment.transcript.windows[0].segments.push(duplicateSegment.transcript.windows[0].segments[0]);
+  expect(() => parseVideoPlanningContext(duplicateSegment, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const hiddenObservationTranscript = structuredClone(context);
+  hiddenObservationTranscript.observations[0].transcriptSegments = [full.transcript.segments.find(segment =>
+    !context.transcript.windows.some(window => window.segments.some(included => included.segmentIndex === segment.segmentIndex)))!];
+  expect(() => parseVideoPlanningContext(hiddenObservationTranscript, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const erasedAvailableTranscript = structuredClone(context);
+  erasedAvailableTranscript.transcript = { ...erasedAvailableTranscript.transcript,
+    includedSegmentCount: 0, coverage: 'BOUNDED_WINDOWS_V2', windows: [] };
+  erasedAvailableTranscript.observations = erasedAvailableTranscript.observations.map(observation => ({ ...observation, transcriptSegments: [] }));
+  expect(() => parseVideoPlanningContext(erasedAvailableTranscript, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const missingSeedNeighbors = structuredClone(context), isolated = full.transcript.segments[5];
+  missingSeedNeighbors.transcript = { ...missingSeedNeighbors.transcript, includedSegmentCount: 1, coverage: 'BOUNDED_WINDOWS_V2',
+    windows: [{ firstSegmentIndex: 5, lastSegmentIndex: 5, startMs: isolated.startMs, endMs: isolated.endMs,
+      selectionReasons: ['EARLY'], segments: [isolated] }] };
+  missingSeedNeighbors.observations = missingSeedNeighbors.observations.map(observation => ({ ...observation, transcriptSegments: [] }));
+  expect(() => parseVideoPlanningContext(missingSeedNeighbors, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const observationOnly = structuredClone(context), first = full.transcript.segments[0];
+  observationOnly.transcript = { ...observationOnly.transcript, includedSegmentCount: 1, coverage: 'BOUNDED_WINDOWS_V2',
+    windows: [{ firstSegmentIndex: 0, lastSegmentIndex: 0, startMs: first.startMs, endMs: first.endMs,
+      selectionReasons: ['OBSERVATION_CONTEXT'], segments: [first] }] };
+  observationOnly.observations = observationOnly.observations.map((observation, index) => ({ ...observation,
+    transcriptSegments: index === 0 ? [first] : [] }));
+  expect(() => parseVideoPlanningContext(observationOnly, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
   const oversized = structuredClone(context);
-  oversized.transcript = { ...oversized.transcript, totalSegmentCount: 24, coverage: 'COMPLETE',
-    excerpts: Array.from({ length: 24 }, (_, segmentIndex) => ({ segmentIndex, startMs: segmentIndex * 1000,
-      endMs: segmentIndex * 1000 + 900, text: 'x'.repeat(3000) })) };
+  oversized.transcript.windows = oversized.transcript.windows.map(window => ({ ...window,
+    segments: window.segments.map(segment => ({ ...segment, text: 'x'.repeat(4000) })) }));
+  expect(Buffer.byteLength(JSON.stringify(oversized))).toBeGreaterThan(MAX_PLANNING_VIDEO_CONTEXT_BYTES);
   expect(() => parseVideoPlanningContext(oversized, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const boundary = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: complete, library: library(source, 1) }]);
+  const boundaryContext = (boundary.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
+  expect(parseVideoPlanningContext(boundaryContext, source)).toEqual(boundaryContext);
+  const noSpeech = structuredClone(projectCompletedVideoIntelligence(baseState([source]), [
+    { dependency: complete, library: library(source, 1, true) }]).entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
+  noSpeech.library.analysisModels.transcription = 'whisper-1';
+  noSpeech.transcript = { status: 'AVAILABLE', model: 'whisper-1', language: 'en', totalSegmentCount: 0,
+    includedSegmentCount: 0, coverage: 'COMPLETE', windows: [] };
+  expect(parseVideoPlanningContext(noSpeech, source)).toEqual(noSpeech);
+});
+
+it('keeps mandatory elapsed-time coverage while dropping whole optional observations to fit the byte budget', () => {
+  const source = videoSource('d'), value = spreadLibrary(source);
+  for (const frame of value.representativeFrames) {
+    frame.observation.summary = 's'.repeat(3500); frame.observation.composition = 'c'.repeat(3500);
+  }
+  const projected = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: dependency(source), library: value }]);
+  const context = (projected.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
+  expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(MAX_PLANNING_VIDEO_CONTEXT_BYTES);
+  expect(context.observations.length).toBeLessThan(MAX_PLANNING_VIDEO_OBSERVATIONS);
+  expect(context.observationCoverage.buckets.every(bucket => bucket.availableCount === 0 || bucket.includedCount > 0)).toBe(true);
+  const impossible = spreadLibrary(source);
+  for (const frame of impossible.representativeFrames) frame.observation.visibleText = Array(20).fill('x'.repeat(4000));
+  expect(() => projectCompletedVideoIntelligence(baseState([source]), [{ dependency: dependency(source), library: impossible }])).toThrow();
+});
+
+it('dispatches legacy v1 exactly and preserves completed v1 and v2 projections during mixed repeated projection', () => {
+  const oldSource = videoSource('a'), newSource = videoSource('b'), oldLibrary = library(oldSource, 30);
+  const legacy = legacyContext(oldSource, oldLibrary);
+  expect(parseVideoPlanningContext(legacy, oldSource)).toEqual(legacy);
+  expect('projectionVersion' in parseVideoPlanningContext(legacy, oldSource)).toBe(false);
+  const state = baseState([oldSource, newSource]);
+  state.entries[0] = { source: oldSource, analyzer: { kind: 'VIDEO_INTELLIGENCE', model: 'vision-model', schemaVersion: 1, contextSha256: null },
+    evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'VIDEO_INTELLIGENCE', intelligence: legacy } };
+  const mixed = projectCompletedVideoIntelligence(state, [
+    { dependency: dependency(oldSource), library: oldLibrary }, { dependency: dependency(newSource), library: library(newSource, 3) }]);
+  expect(mixed.entries[0]).toEqual(state.entries[0]);
+  expect((mixed.entries[1].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence.projectionVersion).toBe(2);
+  const repeated = projectCompletedVideoIntelligence(mixed, [
+    { dependency: dependency(oldSource), library: oldLibrary }, { dependency: dependency(newSource), library: library(newSource, 3) }]);
+  expect(repeated).toEqual(mixed);
+  expect(JSON.stringify(repeated)).toBe(JSON.stringify(mixed));
 });
 
 it('preserves exact completed dependencies through the real initial-plan checkpoint and parser reload', async () => {
