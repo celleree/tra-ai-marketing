@@ -17,6 +17,24 @@ export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id)
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
 const time = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0;
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const exact = (value: Record<string, unknown>, keys: string[]) =>
+  Object.keys(value).length === keys.length && keys.every(key => key in value);
+
+const validVideoRetry = (value: unknown) => {
+  if (!record(value) || !exact(value, ['jobId', 'updatedAtMs', 'retry', 'etag'])
+    || typeof value.jobId !== 'string' || !/^video-intelligence-job:[a-f0-9]{64}$/.test(value.jobId)
+    || !time(value.updatedAtMs) || typeof value.etag !== 'string' || value.etag.length < 1 || value.etag.length > 500
+    || !record(value.retry)) return false;
+  const retry = value.retry;
+  return exact(retry, ['phase', 'reason', ...('candidateIndexes' in retry ? ['candidateIndexes'] : []),
+    ...('message' in retry ? ['message'] : [])])
+    && ['TRANSCRIBING', 'OBSERVING'].includes(String(retry.phase))
+    && ['LEASE_EXPIRED', 'PAID_WORK_FAILED', 'PAID_COMPLETION_UNCERTAIN'].includes(String(retry.reason))
+    && (retry.message === undefined || (typeof retry.message === 'string' && retry.message.length <= 1000))
+    && (retry.candidateIndexes === undefined || (Array.isArray(retry.candidateIndexes)
+      && retry.candidateIndexes.length >= 1 && retry.candidateIndexes.length <= 2
+      && retry.candidateIndexes.every(index => Number.isSafeInteger(index) && index >= 0)));
+};
 
 class UnsupportedSourceCompositionVersionError extends Error {
   constructor() { super('Unsupported portfolio source composition version. A compatible app version is required.'); }
@@ -47,6 +65,24 @@ const validPreparation = (value: unknown, job: CreativePortfolioJob): value is P
         && entry.source.sha256 !== dependency.identity.sourceVideoContentHash))) return false;
     }
   }
+  if (value.videoProgress !== undefined) {
+    const progress = value.videoProgress;
+    if (job.videoPreparationVersion !== 1 || !record(progress)
+      || !exact(progress, ['mediaId', 'phase', 'busy', 'completedRepresentatives', 'totalRepresentatives',
+        ...('retryState' in progress ? ['retryState'] : [])])
+      || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO' && source.mediaId === progress.mediaId)
+      || !['PREPARING', 'TRANSCRIBING', 'OBSERVING', 'FINALIZING', 'COMPLETE', 'FAILED', 'RETRY_REQUIRED'].includes(String(progress.phase))
+      || typeof progress.busy !== 'boolean' || !time(progress.completedRepresentatives)
+      || (progress.totalRepresentatives !== null && !time(progress.totalRepresentatives))
+      || (typeof progress.totalRepresentatives === 'number' && Number(progress.completedRepresentatives) > progress.totalRepresentatives)
+      || (progress.phase === 'RETRY_REQUIRED' ? !validVideoRetry(progress.retryState) : progress.retryState !== undefined)) return false;
+    if (progress.retryState && (!Array.isArray(value.videoDependencies) || !value.videoDependencies.some(dependency => record(dependency)
+      && dependency.jobId === (progress.retryState as Record<string, unknown>).jobId && record(dependency.identity)
+      && dependency.identity.sourceVideoMediaId === progress.mediaId))) return false;
+  }
+  if (value.videoRetryAuthorization !== undefined
+    && (!validVideoRetry(value.videoRetryAuthorization) || !record(value.videoProgress)
+      || !isDeepStrictEqual(value.videoRetryAuthorization, value.videoProgress.retryState))) return false;
   if (value.sourceAnalysis !== undefined) parsePlanningSourceAnalysis(value.sourceAnalysis, job.request.sourceAssets);
   if (value.analysis !== undefined && !validAnalysis(value.analysis)) return false;
   if (value.sourceLayout !== undefined && !validSourceLayout(value.sourceLayout)) return false;

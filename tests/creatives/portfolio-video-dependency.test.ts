@@ -77,20 +77,20 @@ it('preserves immutable identity/completion, pending completion and explicit lea
   expect(retried.planning).toEqual(finish.planning);
 });
 
-it('keeps activation absent and reads/lease transitions free of video/provider work', async () => {
+it('marks new durable video portfolios while creation, reads and lease transitions remain provider-free', async () => {
   const fetch = vi.fn(() => { throw new Error('Unexpected provider'); }); vi.stubGlobal('fetch', fetch);
   const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(request(), storage, 1000);
-  expect(job).not.toHaveProperty('videoPreparationVersion');
+  expect(job.videoPreparationVersion).toBe(1);
   expect(await readCreativePortfolio(job.id, storage)).toEqual(job);
   await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, 2000, 'lease').job, storage);
   expect([...storage.data.keys()]).toEqual(['creative-portfolios/v1/' + job.id + '.json']);
   expect(fetch).not.toHaveBeenCalled();
   expect(videoWork).not.toHaveBeenCalled();
-  await expect(updateCreativePortfolio(job.id, current => ({ ...current, videoPreparationVersion: 1 }), storage)).rejects.toThrow('immutable');
+  await expect(updateCreativePortfolio(job.id, current => ({ ...current, videoPreparationVersion: undefined }), storage)).rejects.toThrow('immutable');
 });
 
-it('enforces the saved-job size limit and requires a marker for dependencies', () => {
-  const job = newCreativePortfolio(request());
+it('enforces the saved-job size limit and requires a marker for historical dependencies', () => {
+  const { videoPreparationVersion: _marker, ...job } = newCreativePortfolio(request());
   if (job.planning.phase !== 'INITIAL_PLAN') throw new Error();
   job.planning.preparation.videoDependencies = [dependency];
   expect(() => parseCreativePortfolioJob(encode(job), job.id)).toThrow('invalid');

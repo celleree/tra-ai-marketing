@@ -13,7 +13,7 @@ import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 
-// B1.2 remains disconnected from production preparation, including the legacy entry.
+// The legacy single-request route stays disconnected from durable portfolio Video Intelligence.
 const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
 vi.mock('@/lib/video/intelligence-service', () => ({ executeVideoIntelligenceStep: disabledVideo, readVideoIntelligenceSource: disabledVideo }));
 afterEach(() => expect(disabledVideo).not.toHaveBeenCalled());

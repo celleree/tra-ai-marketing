@@ -10,6 +10,10 @@ const planningLabel = {
   TARGETED_REPAIR: 'Planning repair…',
   READY_TO_RENDER: 'Generating…',
 } as const;
+const videoLabel = {
+  PREPARING: 'Preparing source', TRANSCRIBING: 'Transcribing', OBSERVING: 'Analyzing scenes', FINALIZING: 'Saving library',
+  COMPLETE: 'Ready', FAILED: 'Preparation failed', RETRY_REQUIRED: 'Retry required',
+} as const;
 
 export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<typeof useCreativePortfolio> }) {
   const job = portfolio.response?.job;
@@ -18,6 +22,8 @@ export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<ty
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
     <p aria-live="polite"><strong>{job.slots.filter(slot => slot.status === 'SAVED').length} of {job.requestedCount} creatives saved</strong>
       {portfolio.running ? ` · ${planningLabel[job.planningPhase]}` : ''}</p>
+    {job.videoPreparation ? <p aria-live="polite"><strong>Video preparation: {job.videoPreparation.completed} of {job.videoPreparation.total} ready</strong>
+      {' · '}{job.videoPreparation.busy ? 'Current video step in progress' : videoLabel[job.videoPreparation.phase]}</p> : null}
     <p className="muted">Resume uses this portfolio’s saved brief and sources.</p>
     <div className={styles.actions}>
       {portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.pausing} onClick={portfolio.pause}>

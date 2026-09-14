@@ -20,6 +20,15 @@ import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-par
 
 export type PortfolioPreparationState = {
   videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
+  videoProgress?: {
+    mediaId: string;
+    phase: import('@/lib/video/intelligence-job').VideoIntelligenceJob['phase'];
+    busy: boolean;
+    completedRepresentatives: number;
+    totalRepresentatives: number | null;
+    retryState?: import('@/lib/creatives/portfolio-video-adapter').PortfolioVideoRetryAuthorization;
+  };
+  videoRetryAuthorization?: import('@/lib/creatives/portfolio-video-adapter').PortfolioVideoRetryAuthorization;
   sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState;
   quotaReserved: boolean;
   analysis?: CreativeReferenceAnalysis;

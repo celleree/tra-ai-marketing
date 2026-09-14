@@ -40,6 +40,18 @@ describe('resumable portfolio browser controller', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance']);
   });
+  it('waits for shared child video work, then probes it without treating GET as progress', async () => {
+    const value = initial();
+    value.job.videoPreparation = { total: 1, completed: 0, phase: 'TRANSCRIBING', busy: true };
+    const ready = { ...value, job: { ...value.job,
+      videoPreparation: { total: 1, completed: 1, phase: 'COMPLETE' as const, busy: false } } };
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(ready)); vi.stubGlobal('fetch', fetchMock);
+    const wait = vi.fn(async () => {}), update = vi.fn();
+    await runPortfolio(value, update, () => update.mock.calls.length === 1, wait);
+    expect(wait).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).action).toBe('advance');
+  });
   it('reopens without paid work, polls an active lease, then advances only pending work', async () => {
     const value = withSlots(initial(), ['PENDING', 'PENDING']);
     value.job.lease = { slotIndex: 1, expiresAtMs: Date.now() + 60000 };

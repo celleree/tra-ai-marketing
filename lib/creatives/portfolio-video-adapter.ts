@@ -11,6 +11,7 @@ import { assertDurableVideoIntelligenceAvailable } from '@/lib/video/preview-ava
 import { executeVideoIntelligenceStep, readVideoIntelligenceSource, resolveVideoIntelligenceJobLocator,
   type CompactVideoIntelligenceJobStatus, type VideoIntelligenceServiceDependencies } from '@/lib/video/intelligence-service';
 import { reserveOperatorQuota } from '@/lib/quotas/operator-quota';
+import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 
 type Owner = {
   operatorId: string;
@@ -19,18 +20,21 @@ type Owner = {
   onProviderOperationStart: () => void;
 };
 type RetryState = Pick<CompactVideoIntelligenceJobStatus, 'jobId' | 'updatedAtMs' | 'retry'>;
+export type PortfolioVideoRetryAuthorization = RetryState & { etag: string };
 type Action = { action: 'STATUS' } | ({ action: 'ADVANCE' } & Owner)
-  | ({ action: 'RETRY'; consumeRetryAuthorization: (expected: RetryState) => Promise<void> } & Owner);
+  | ({ action: 'RETRY'; retryAuthorization: PortfolioVideoRetryAuthorization;
+    consumeRetryAuthorization: (expected: PortfolioVideoRetryAuthorization) => Promise<void> } & Owner);
 
 /**
- * Inactive adapter: no production caller. Owner callbacks must use durable, lease-checked
+ * Owner callbacks must use durable, lease-checked
  * transactions. RETRY authorization must be consumed once before returning from its callback.
  * Never call this adapter inside a portfolio CAS callback; child jobs own separate leases.
  */
 export async function stepPortfolioVideoDependency(
   input: { mediaId: string; dependency?: PortfolioVideoDependency } & Action,
   dependencies: VideoIntelligenceServiceDependencies,
-): Promise<{ dependency: PortfolioVideoDependency; status: CompactVideoIntelligenceJobStatus | null }> {
+): Promise<{ dependency: PortfolioVideoDependency; status: CompactVideoIntelligenceJobStatus | null;
+  retryAuthorization?: PortfolioVideoRetryAuthorization }> {
   assertDurableVideoIntelligenceAvailable();
   const saved = input.dependency && parsePortfolioVideoDependencies([input.dependency],
     [{ mediaId: input.mediaId, role: 'TRA_VIDEO' }])[0];
@@ -59,6 +63,12 @@ export async function stepPortfolioVideoDependency(
   const identity = resolveVideoIntelligenceJobLocator(current.locator);
   if (saved && !isDeepStrictEqual(saved.identity, identity)) throw new Error('Video dependency analyzer identity changed.');
   let dependency = saved ?? { version: 1 as const, identity, jobId: videoIntelligenceJobId(identity) };
+  const retryAuthorization = async (status: CompactVideoIntelligenceJobStatus) => {
+    const observed = await readVideoIntelligenceJob(identity, dependencies);
+    if (!observed || observed.job.updatedAtMs !== status.updatedAtMs
+      || !isDeepStrictEqual(observed.job.retry, status.retry)) throw new VideoRetryStateChangedError();
+    return { jobId: status.jobId, updatedAtMs: status.updatedAtMs, retry: status.retry, etag: observed.etag };
+  };
   const complete = async () => {
     const stored = await readVideoIntelligenceJob(identity, dependencies);
     if (stored?.job.phase !== 'COMPLETE' || !stored.job.result) throw new Error('Completed video job is unavailable.');
@@ -69,9 +79,13 @@ export async function stepPortfolioVideoDependency(
   };
   if (current.status?.phase === 'COMPLETE') return { dependency: await complete(), status: current.status };
   // Discovery must be saved before any later child operation. STATUS never saves anything.
-  if (!saved || input.action === 'STATUS') return { dependency: await checkpoint(dependency), status: current.status };
-  if (current.status?.busy || current.status?.phase === 'FAILED'
-    || (current.status?.phase === 'RETRY_REQUIRED' && input.action !== 'RETRY')) return { dependency, status: current.status };
+  if (!saved) return { dependency: await checkpoint(dependency), status: current.status };
+  if (input.action === 'STATUS') return { dependency, status: current.status,
+    ...(current.status?.phase === 'RETRY_REQUIRED' ? { retryAuthorization: await retryAuthorization(current.status) } : {}) };
+  if (current.status?.busy || current.status?.phase === 'FAILED') return { dependency, status: current.status };
+  if (current.status?.phase === 'RETRY_REQUIRED' && input.action !== 'RETRY') {
+    return { dependency, status: current.status, retryAuthorization: await retryAuthorization(current.status) };
+  }
   if (input.action === 'RETRY' && current.status?.phase !== 'RETRY_REQUIRED') throw new Error('Video dependency does not require Retry.');
   const action = current.status ? input.action : 'START';
   await input.assertLease();
@@ -84,19 +98,21 @@ export async function stepPortfolioVideoDependency(
   if (!quota.allowed) throw new Error(`Video quota reached. Resume after ${quota.retryAfterSeconds} seconds.`);
   if (input.action === 'RETRY') {
     const observed = await readVideoIntelligenceJob(identity, dependencies);
-    if (!observed || observed.job.phase !== 'RETRY_REQUIRED'
+    if (!observed || observed.job.phase !== 'RETRY_REQUIRED' || observed.etag !== input.retryAuthorization.etag
+      || observed.job.id !== input.retryAuthorization.jobId
+      || observed.job.updatedAtMs !== input.retryAuthorization.updatedAtMs
+      || !isDeepStrictEqual(observed.job.retry, input.retryAuthorization.retry)
       || observed.job.updatedAtMs !== current.status!.updatedAtMs || !isDeepStrictEqual(observed.job.retry, current.status!.retry)) {
-      throw new Error('Video Retry state changed.');
+      throw new VideoRetryStateChangedError();
     }
     service.expectedRetryEtag = observed.etag;
-    await input.consumeRetryAuthorization({
-      jobId: current.status!.jobId, updatedAtMs: current.status!.updatedAtMs, retry: current.status!.retry,
-    });
+    await input.consumeRetryAuthorization(input.retryAuthorization);
   }
   await input.assertLease();
   // Conservatively mark the child operation before entry; persistence failure never loops here.
   input.onProviderOperationStart();
   const status = await executeVideoIntelligenceStep(action === 'START'
     ? { action, mediaId: input.mediaId } : { action, locator: current.locator }, service);
-  return { dependency: status.phase === 'COMPLETE' ? await complete() : await checkpoint(dependency), status };
+  return { dependency: status.phase === 'COMPLETE' ? await complete() : await checkpoint(dependency), status,
+    ...(status.phase === 'RETRY_REQUIRED' ? { retryAuthorization: await retryAuthorization(status) } : {}) };
 }
