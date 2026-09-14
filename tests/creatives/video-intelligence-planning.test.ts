@@ -169,11 +169,38 @@ it('rejects incomplete, mismatched, malformed and oversized completed projection
   hiddenObservationTranscript.observations[0].transcriptSegments = [full.transcript.segments.find(segment =>
     !context.transcript.windows.some(window => window.segments.some(included => included.segmentIndex === segment.segmentIndex)))!];
   expect(() => parseVideoPlanningContext(hiddenObservationTranscript, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const erasedAvailableTranscript = structuredClone(context);
+  erasedAvailableTranscript.transcript = { ...erasedAvailableTranscript.transcript,
+    includedSegmentCount: 0, coverage: 'BOUNDED_WINDOWS_V2', windows: [] };
+  erasedAvailableTranscript.observations = erasedAvailableTranscript.observations.map(observation => ({ ...observation, transcriptSegments: [] }));
+  expect(() => parseVideoPlanningContext(erasedAvailableTranscript, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const missingSeedNeighbors = structuredClone(context), isolated = full.transcript.segments[5];
+  missingSeedNeighbors.transcript = { ...missingSeedNeighbors.transcript, includedSegmentCount: 1, coverage: 'BOUNDED_WINDOWS_V2',
+    windows: [{ firstSegmentIndex: 5, lastSegmentIndex: 5, startMs: isolated.startMs, endMs: isolated.endMs,
+      selectionReasons: ['EARLY'], segments: [isolated] }] };
+  missingSeedNeighbors.observations = missingSeedNeighbors.observations.map(observation => ({ ...observation, transcriptSegments: [] }));
+  expect(() => parseVideoPlanningContext(missingSeedNeighbors, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const observationOnly = structuredClone(context), first = full.transcript.segments[0];
+  observationOnly.transcript = { ...observationOnly.transcript, includedSegmentCount: 1, coverage: 'BOUNDED_WINDOWS_V2',
+    windows: [{ firstSegmentIndex: 0, lastSegmentIndex: 0, startMs: first.startMs, endMs: first.endMs,
+      selectionReasons: ['OBSERVATION_CONTEXT'], segments: [first] }] };
+  observationOnly.observations = observationOnly.observations.map((observation, index) => ({ ...observation,
+    transcriptSegments: index === 0 ? [first] : [] }));
+  expect(() => parseVideoPlanningContext(observationOnly, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
   const oversized = structuredClone(context);
   oversized.transcript.windows = oversized.transcript.windows.map(window => ({ ...window,
     segments: window.segments.map(segment => ({ ...segment, text: 'x'.repeat(4000) })) }));
   expect(Buffer.byteLength(JSON.stringify(oversized))).toBeGreaterThan(MAX_PLANNING_VIDEO_CONTEXT_BYTES);
   expect(() => parseVideoPlanningContext(oversized, { mediaId: source.mediaId, sha256: source.sha256 })).toThrow();
+  const boundary = projectCompletedVideoIntelligence(baseState([source]), [{ dependency: complete, library: library(source, 1) }]);
+  const boundaryContext = (boundary.entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
+  expect(parseVideoPlanningContext(boundaryContext, source)).toEqual(boundaryContext);
+  const noSpeech = structuredClone(projectCompletedVideoIntelligence(baseState([source]), [
+    { dependency: complete, library: library(source, 1, true) }]).entries[0].result as { kind: 'VIDEO_INTELLIGENCE'; intelligence: VideoPlanningContextV2 }).intelligence;
+  noSpeech.library.analysisModels.transcription = 'whisper-1';
+  noSpeech.transcript = { status: 'AVAILABLE', model: 'whisper-1', language: 'en', totalSegmentCount: 0,
+    includedSegmentCount: 0, coverage: 'COMPLETE', windows: [] };
+  expect(parseVideoPlanningContext(noSpeech, source)).toEqual(noSpeech);
 });
 
 it('keeps mandatory elapsed-time coverage while dropping whole optional observations to fit the byte budget', () => {

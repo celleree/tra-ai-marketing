@@ -128,7 +128,7 @@ const parseV2 = (value: Record<string, unknown>, context: VideoPlanningContextV2
     || !Array.isArray(transcript.windows)
     || transcript.coverage !== (transcript.includedSegmentCount === transcript.totalSegmentCount ? 'COMPLETE' : 'BOUNDED_WINDOWS_V2')) return fail();
   validateTranscriptHeader(transcript, context.library);
-  const included = new Map<number, unknown>();
+  const included = new Map<number, VideoTranscriptSegment>();
   const observationContextIndexes = new Set<number>();
   let previousLast = -2, previousStart = -1, previousSegmentStart = -1;
   for (const window of transcript.windows) {
@@ -155,7 +155,16 @@ const parseV2 = (value: Record<string, unknown>, context: VideoPlanningContextV2
     }
     previousLast = window.lastSegmentIndex; previousStart = window.startMs;
   }
-  if (included.size !== transcript.includedSegmentCount || (transcript.status === 'NO_AUDIO_TRACK' && transcript.windows.length !== 0)) return fail();
+  if (included.size !== transcript.includedSegmentCount || (transcript.status === 'NO_AUDIO_TRACK' && transcript.windows.length !== 0)
+    || (transcript.status === 'AVAILABLE' && transcript.totalSegmentCount > 0
+      && (included.size === 0 || !transcript.windows.some(window => window.selectionReasons.some(reason => BUCKETS.includes(reason as VideoPlanningTimeBucket)))))) return fail();
+  for (const window of transcript.windows) for (const reason of window.selectionReasons) {
+    if (reason === 'OBSERVATION_CONTEXT') continue;
+    const hasCompleteSeedNeighborhood = window.segments.some(segment => timeBucket(segment.startMs, context.library.durationMs) === reason
+      && (segment.segmentIndex === 0 || included.has(segment.segmentIndex - 1))
+      && (segment.segmentIndex === transcript.totalSegmentCount - 1 || included.has(segment.segmentIndex + 1)));
+    if (!hasCompleteSeedNeighborhood) return fail();
+  }
   const coverage = context.observationCoverage;
   if (!exact(value.observationCoverage as Record<string, unknown>, ['totalRepresentativeCount', 'coverage', 'buckets'])
     || !safe(coverage.totalRepresentativeCount) || coverage.totalRepresentativeCount < 1 || context.observations.length < 1
@@ -190,7 +199,9 @@ const parseV2 = (value: Record<string, unknown>, context: VideoPlanningContextV2
   }
   if (coverage.buckets.some(bucket => bucket.includedCount !== actualIncluded.get(bucket.bucket))) return fail();
   if (transcript.windows.some(window => window.selectionReasons.includes('OBSERVATION_CONTEXT')
-    && !window.segments.some(segment => observationSegmentIndexes.has(segment.segmentIndex)))) return fail();
+    && !window.segments.some(segment => observationSegmentIndexes.has(segment.segmentIndex)
+      && (segment.segmentIndex === 0 || included.has(segment.segmentIndex - 1))
+      && (segment.segmentIndex === transcript.totalSegmentCount - 1 || included.has(segment.segmentIndex + 1))))) return fail();
 };
 
 export function parseVideoPlanningContext(value: unknown, source: { mediaId: string; sha256: string }): VideoPlanningContext {
