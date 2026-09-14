@@ -1,6 +1,7 @@
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
+import type { VideoIntelligenceArtifactReference, VideoIntelligenceJobIdentity } from '@/lib/video/intelligence-job';
 import { readVideoIntelligenceJob } from '@/lib/video/intelligence-job-store';
 import { loadVideoIntelligencePreparation } from '@/lib/video/intelligence-preparation-loader';
 import type { VideoIntelligencePreparationManifest } from '@/lib/video/intelligence-preparation';
@@ -12,6 +13,11 @@ import { getApprovedSelectedTraVideoFrames } from '@/lib/video/selected-frames';
 export interface VideoSelectionContext {
   library: VideoFrameLibrary;
   manifest: VideoIntelligencePreparationManifest | null;
+}
+
+export interface SavedVideoSelectionDependency {
+  identity: VideoIntelligenceJobIdentity;
+  artifact: VideoIntelligenceArtifactReference;
 }
 
 export const loadVideoSelectionContext = async (source: HydratedTraVideoSource): Promise<VideoSelectionContext | null> => {
@@ -30,6 +36,33 @@ export const loadVideoSelectionContext = async (source: HydratedTraVideoSource):
   if (process.env.NODE_ENV === 'production') return null;
   const library = await loadVideoFrameLibrary(identity.sourceVideoMediaId, identity.sourceVideoContentHash);
   return library ? { library, manifest: null } : null;
+};
+
+/** Strictly restore selection context from the exact completed B1 dependency saved by a portfolio. */
+export const loadSavedVideoSelectionContext = async (
+  source: HydratedTraVideoSource,
+  dependency: SavedVideoSelectionDependency,
+): Promise<VideoSelectionContext> => {
+  const { identity, artifact } = dependency;
+  if (source.media.id !== identity.sourceVideoMediaId || videoSourceHash(source) !== identity.sourceVideoContentHash) {
+    throw new Error('Saved video intelligence dependency does not match the TRA video source.');
+  }
+  const stored = await readVideoIntelligenceJob(identity);
+  if (!stored || stored.job.phase !== 'COMPLETE' || !stored.job.preparation || !stored.job.result) {
+    throw new Error('Saved video intelligence dependency is not a complete persisted job.');
+  }
+  const result = stored.job.result;
+  if (result.key !== artifact.key || result.sha256 !== artifact.sha256 || result.byteLength !== artifact.byteLength) {
+    throw new Error('Saved video intelligence result artifact does not match the frozen dependency.');
+  }
+  const preparation = stored.job.preparation;
+  const [library, loaded] = await Promise.all([
+    loadVideoIntelligenceLibrary(identity, artifact),
+    loadVideoIntelligencePreparation({ manifestKey: preparation.manifestKey, manifestSha256: preparation.manifestSha256,
+      expectedSourceVideoMediaId: identity.sourceVideoMediaId, expectedSourceVideoContentHash: identity.sourceVideoContentHash,
+      expectedAnalyzerFingerprintSha256: identity.analyzerFingerprint.sha256 }),
+  ]);
+  return { library, manifest: loaded.manifest };
 };
 
 export const extractVideoSelectionFrames = (source: HydratedTraVideoSource, context: VideoSelectionContext, frameIds: readonly string[]) =>
