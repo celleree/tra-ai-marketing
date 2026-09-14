@@ -10,6 +10,7 @@ import type { VideoIntelligenceJobIdentity } from '@/lib/video/intelligence-job'
 import type { VideoIntelligenceJobLocator } from '@/lib/video/intelligence-service';
 import type { ResolvedLayoutBlueprint } from '@/lib/layouts/service';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
+import type { VideoTranscriptSegment } from '@/lib/video/transcript';
 
 type SourceIdentity = CreativeGenerationProvenance['requestedSources'][number];
 type SourceOfRole<Role extends SourceIdentity['role']> = Omit<SourceIdentity, 'role'> & { role: Role };
@@ -43,13 +44,22 @@ export type PlanningSourceReadiness<T> =
 /** NOT_REQUESTED differs from a successfully retrieved empty catalog. */
 type PlanningCatalog<T> = { status: 'NOT_REQUESTED' } | PlanningSourceReadiness<T[]>;
 
-export type VideoPlanningContext = {
+type VideoPlanningContextBase = {
   identity: VideoIntelligenceJobIdentity;
   locator: VideoIntelligenceJobLocator;
   jobId: VideoIntelligenceJob['id'];
   artifact: NonNullable<VideoIntelligenceJob['result']>;
   library: Pick<VideoFrameLibrary,
     'id' | 'version' | 'durationMs' | 'analysisModels' | 'providerEligible' | 'evidenceStatus'>;
+};
+
+type VideoPlanningObservation = Pick<VideoFrameLibrary['representativeFrames'][number],
+  'id' | 'timestampMs' | 'frameSha256' | 'evidenceStatus' | 'observation' | 'transcriptSegments'> & {
+    representativeOrdinal: number;
+  };
+
+/** Frozen B1.3 projection. Its absent projectionVersion dispatches as v1. */
+export type VideoPlanningContextV1 = VideoPlanningContextBase & {
   // B retrieves bounded excerpts, retaining timestamps and frame identity; never thumbnails.
   transcript: {
     status: 'AVAILABLE' | 'NO_AUDIO_TRACK';
@@ -63,11 +73,43 @@ export type VideoPlanningContext = {
     totalRepresentativeCount: number;
     coverage: 'COMPLETE' | 'UNIFORM_TIMELINE_V1';
   };
-  observations: Array<Pick<VideoFrameLibrary['representativeFrames'][number],
-    'id' | 'timestampMs' | 'frameSha256' | 'evidenceStatus' | 'observation' | 'transcriptSegments'> & {
-      representativeOrdinal: number;
-    }>;
+  observations: VideoPlanningObservation[];
 };
+
+export type VideoPlanningTimeBucket = 'EARLY' | 'MIDDLE' | 'LATE';
+export type VideoPlanningSelectionReason = VideoPlanningTimeBucket | 'OBSERVATION_CONTEXT';
+
+export type VideoPlanningContextV2 = VideoPlanningContextBase & {
+  projectionVersion: 2;
+  transcript: {
+    status: 'AVAILABLE' | 'NO_AUDIO_TRACK';
+    model: VideoFrameLibrary['transcript']['model'];
+    language: VideoFrameLibrary['transcript']['language'];
+    totalSegmentCount: number;
+    includedSegmentCount: number;
+    coverage: 'COMPLETE' | 'BOUNDED_WINDOWS_V2';
+    windows: Array<{
+      firstSegmentIndex: number;
+      lastSegmentIndex: number;
+      startMs: number;
+      endMs: number;
+      selectionReasons: VideoPlanningSelectionReason[];
+      segments: VideoTranscriptSegment[];
+    }>;
+  };
+  observationCoverage: {
+    totalRepresentativeCount: number;
+    coverage: 'COMPLETE' | 'ELAPSED_TIME_BUCKETS_V2';
+    buckets: Array<{
+      bucket: VideoPlanningTimeBucket;
+      availableCount: number;
+      includedCount: number;
+    }>;
+  };
+  observations: Array<VideoPlanningObservation & { selectionReasons: [VideoPlanningTimeBucket] }>;
+};
+
+export type VideoPlanningContext = VideoPlanningContextV1 | VideoPlanningContextV2;
 
 type TraReferencePlanningAnalysis = {
   analysis: CreativeReferenceAnalysis;

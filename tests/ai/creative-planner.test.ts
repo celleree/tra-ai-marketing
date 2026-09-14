@@ -102,6 +102,8 @@ describe('creative batch planner', () => {
       expect(input.sourceAnalysis).toEqual(sourceAnalysis);
       for (let i = 1; i <= 6; i++) expect(JSON.stringify(input.sourceAnalysis)).toContain(`SENTINEL_${requestedSources[i - 1].role}_${i}`);
       expect(input.sourceAnalysisGuidance).toContain('not full Video Intelligence');
+      expect(input.sourceAnalysisGuidance).toContain('bucket counts disclose omitted observations');
+      expect(input.sourceAnalysisGuidance).toContain('do not claim semantic or campaign relevance');
       expect(input.hasApprovedHumanSource).toBe(false);
     }
     const ready = await updateCreativePortfolio(job.id, current => ({ ...current, planning: { phase: 'READY_TO_RENDER' },

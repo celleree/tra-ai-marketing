@@ -128,8 +128,12 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   const outbound = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).input[1].content[0].text);
   const videoEntries = outbound.sourceAnalysis.entries.filter((entry: any) => entry.result?.kind === 'VIDEO_INTELLIGENCE');
   expect(videoEntries).toHaveLength(2);
+  expect(videoEntries.every((entry: any) => entry.result.intelligence.projectionVersion === 2)).toBe(true);
+  expect(videoEntries.every((entry: any) => Array.isArray(entry.result.intelligence.observationCoverage.buckets))).toBe(true);
   expect(videoEntries.map((entry: any) => entry.result.intelligence.observations[0].observation.summary)).toEqual(['LATE_OBSERVATION_b', 'LATE_OBSERVATION_c']);
   expect(outbound.sourceAnalysis.entries.some((entry: any) => entry.result?.kind === 'LAYOUT_BLUEPRINT')).toBe(true);
+  expect(outbound.sourceAnalysisGuidance).toContain('do not claim semantic or campaign relevance');
+  expect(outbound.sourceAnalysisGuidance).toContain('not verified advertising evidence');
   expect(JSON.stringify(outbound)).not.toContain('thumbnailDataUrl');
 });
 
