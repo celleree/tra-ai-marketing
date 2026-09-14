@@ -12,6 +12,7 @@ describe('durable creative portfolio storage', () => {
   it('creates a composed portfolio while retaining explicit saved versions', async () => {
     const storage = new MemoryStorage(), job = await createCreativePortfolio(request(), storage, 1000);
     expect(job.sourceCompositionVersion).toBe(2);
+    expect(job).not.toHaveProperty('videoPreparationVersion');
     expect(job.planning).toEqual({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } });
     expect(await readCreativePortfolio(job.id, storage)).toEqual(job);
   });
@@ -68,6 +69,7 @@ describe('durable creative portfolio storage', () => {
     expect(saved.slots[1]).toEqual(job.slots[1]);
     expect(saved.request).toEqual(job.request);
     expect(saved.sourceCompositionVersion).toBe(marker);
+    expect(saved).not.toHaveProperty('videoPreparationVersion');
     if (marker === undefined) expect(saved).not.toHaveProperty('sourceCompositionVersion');
     expect(await readCreativePortfolio(job.id, storage)).toEqual(saved);
     const beforeMutation = (await storage.read(key))!.bytes;

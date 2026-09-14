@@ -1,3 +1,4 @@
+import { parsePortfolioVideoDependencies, UnsupportedVideoPreparationVersionError } from '@/lib/creatives/portfolio-video-dependency';
 import { isDeepStrictEqual } from 'node:util';
 import { CREATIVE_CATEGORIES } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
@@ -36,6 +37,16 @@ const validSelectedReferences = (value: unknown) => Array.isArray(value) && valu
 
 const validPreparation = (value: unknown, job: CreativePortfolioJob): value is PortfolioPreparationState => {
   if (!record(value) || typeof value.quotaReserved !== 'boolean') return false;
+  if (value.videoDependencies !== undefined) {
+    if (job.videoPreparationVersion !== 1) return false;
+    const dependencies = parsePortfolioVideoDependencies(value.videoDependencies, job.request.sourceAssets);
+    if (value.sourceAnalysis !== undefined) {
+      const analysis = parsePlanningSourceAnalysis(value.sourceAnalysis, job.request.sourceAssets);
+      if (dependencies.some(dependency => analysis.entries.some(entry =>
+        entry.source.mediaId === dependency.identity.sourceVideoMediaId
+        && entry.source.sha256 !== dependency.identity.sourceVideoContentHash))) return false;
+    }
+  }
   if (value.sourceAnalysis !== undefined) parsePlanningSourceAnalysis(value.sourceAnalysis, job.request.sourceAssets);
   if (value.analysis !== undefined && !validAnalysis(value.analysis)) return false;
   if (value.sourceLayout !== undefined && !validSourceLayout(value.sourceLayout)) return false;
@@ -97,6 +108,7 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
     if (raw.sourceCompositionVersion !== undefined && raw.sourceCompositionVersion !== 1 && raw.sourceCompositionVersion !== 2) {
       throw new UnsupportedSourceCompositionVersionError();
     }
+    if (raw.videoPreparationVersion !== undefined && raw.videoPreparationVersion !== 1) throw new UnsupportedVideoPreparationVersionError();
     let planning: unknown = raw.planning ?? { phase: raw.snapshot ? 'READY_TO_RENDER' : 'INITIAL_PLAN' };
     if (record(planning) && planning.phase === 'INITIAL_PLAN' && !('preparation' in planning)) {
       planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } };
@@ -137,7 +149,7 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
         : !job.snapshot || job.slots.find(slot => slot.index === job.lease!.slotIndex)?.status !== 'PENDING'))) throw new Error();
     return job;
   } catch (error) {
-    if (error instanceof UnsupportedSourceCompositionVersionError) throw error;
+    if (error instanceof UnsupportedSourceCompositionVersionError || error instanceof UnsupportedVideoPreparationVersionError) throw error;
     throw new Error('Saved creative portfolio is invalid.');
   }
 }
