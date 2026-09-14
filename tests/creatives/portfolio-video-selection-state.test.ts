@@ -6,6 +6,7 @@ import {
   finishPortfolioPlan,
   finishPortfolioVideoFrameSelection,
   newCreativePortfolio,
+  releasePortfolioWork,
   retryPortfolioWork,
   type CreativePortfolioJob,
 } from '@/lib/creatives/portfolio-job';
@@ -111,7 +112,13 @@ describe('portfolio video selection persistence', () => {
     const failedAgain = failPortfolioWork(consumed, 'retry-slot', 'Uncertain again', 5_300);
     expect(failedAgain.slots[0].status).toBe('RETRY_REQUIRED');
     expect(failedAgain.slots[0].videoSelection?.retryAuthorization).toBeUndefined();
-    expect(claimCreativePortfolio(failedAgain, 5_400).status).toBe('RETRY_REQUIRED');
+
+    const reload = claimCreativePortfolio(failedAgain, 5_400, 'other-slot');
+    expect(reload.job.slots[0].status).toBe('RETRY_REQUIRED');
+    expect(reload.job.lease?.slotIndex).toBe(2);
+    const released = releasePortfolioWork(reload.job, 'other-slot', 5_500);
+    const retriedAgain = retryPortfolioWork(released, 1, 5_600);
+    expect(retriedAgain.slots[0].videoSelection?.retryAuthorization).toEqual({ version: 1 });
   });
 
   it('preserves completed selection through generation failure and does not authorize re-selection', () => {
