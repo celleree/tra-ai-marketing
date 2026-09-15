@@ -15,6 +15,14 @@ const source: StoredMediaFile = {
   mimeType: 'image/png',
 };
 
+const expectImageCopyOnly = (prompt: string) => {
+  expect(prompt).toContain('Image headline');
+  expect(prompt).toContain('Short support');
+  expect(prompt).toContain('Learn more');
+  expect(prompt).not.toContain('Primary text:');
+  expect(prompt).not.toContain('Description:');
+};
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -25,15 +33,18 @@ describe('approved TRA final image-provider boundary', () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: TRA_SOURCE_BYTES.toString('base64') }] })));
     vi.stubGlobal('fetch', fetchMock);
-    await generateApprovedTraReferenceCreativeImage({
+    const result = await generateApprovedTraReferenceCreativeImage({
       source, primaryFormat: 'direct-response', placement: 'VERTICAL_9_16', context: 'Approved context',
-      copy: { headline: 'Headline', primaryText: 'Primary', description: '' }, reserveLogoArea: true,
+      copy: { headline: 'Image headline', shortSupport: 'Short support', cta: 'Learn more' }, reserveLogoArea: true,
     });
-    const prompt = (fetchMock.mock.calls[0][1].body as FormData).get('prompt');
+    const prompt = String((fetchMock.mock.calls[0][1].body as FormData).get('prompt'));
     expect(prompt).toContain('x=70..1081, y=287..1330');
     expect(prompt).toContain('x=105..401, y=322..546');
     expect(prompt).not.toContain('left 27%');
+    expectImageCopyOnly(prompt);
+    expectImageCopyOnly(result.prompt);
   });
+
   it.each(['none', 'irs-notice-v1'] as const)('keeps TRA identity separate from the selected document: %s', async taxDocumentReference => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const output = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -52,9 +63,9 @@ describe('approved TRA final image-provider boundary', () => {
       placement: 'PORTRAIT_4_5',
       context: 'APPROVED TRA COMPANY CONTEXT\nSTRUCTURED LAYOUT BLUEPRINT',
       copy: {
-        headline: 'Approved headline',
-        primaryText: 'Approved primary text',
-        description: 'Approved description',
+        headline: 'Image headline',
+        shortSupport: 'Short support',
+        cta: 'Learn more',
       },
     });
 
@@ -84,9 +95,10 @@ describe('approved TRA final image-provider boundary', () => {
     expect(String(formData.get('prompt'))).toContain('STRUCTURED LAYOUT BLUEPRINT');
     expect(String(formData.get('prompt'))).toContain('4:5 canvas (1024x1280)');
     expect(String(formData.get('prompt'))).toContain('do not crop or stretch a square design');
+    expectImageCopyOnly(String(formData.get('prompt')));
   });
 
-  it('recomposes approved TRA video frames for the requested vertical placement', async () => {
+  it('recomposes approved TRA video frames for the requested vertical placement using image copy only', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const png = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==',
@@ -121,9 +133,9 @@ describe('approved TRA final image-provider boundary', () => {
       reserveLogoArea: true,
       context: 'Approved company context',
       copy: {
-        headline: 'Get clear next steps',
-        primaryText: 'Talk with TRA.',
-        description: 'No-pressure consultation.',
+        headline: 'Image headline',
+        shortSupport: 'Short support',
+        cta: 'Learn more',
       },
     });
 
@@ -134,6 +146,7 @@ describe('approved TRA final image-provider boundary', () => {
     expect(formData.get('prompt')).toContain('x=70..1081, y=287..1330');
     expect(formData.get('prompt')).toContain('x=105..401, y=322..546');
     expect(String(formData.get('prompt'))).toContain('rather than cropping or stretching a square design');
+    expectImageCopyOnly(String(formData.get('prompt')));
     expect(result.prompt).toBe(formData.get('prompt'));
     expect(result.model).toBe(formData.get('model'));
     expect(result.providerFrames).toEqual([frame]);
