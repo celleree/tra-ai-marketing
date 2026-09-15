@@ -93,7 +93,7 @@ const parseRequiredText = (value: unknown) => {
   return text && text.length <= MAX_TEXT_LENGTH ? text : null;
 };
 const parseOptionalText = (value: unknown) => {
-  if (value === null) return undefined;
+  if (value === null || value === undefined) return undefined;
   if (typeof value !== 'string' || value.length > MAX_TEXT_LENGTH) return null;
   const text = value.trim();
   return text || undefined;
@@ -117,7 +117,8 @@ const parseConcept = (
     if (!isRecord(value.copy) || !hasOnly(value.copy, ['primaryText', 'headline', 'description'])) return null;
     if (value.copy.primaryText !== value.adCopy.primaryText || value.copy.headline !== value.adCopy.headline || value.copy.description !== value.adCopy.description) return null;
   }
-  if (!isRecord(value.imageCopy) || !hasOnly(value.imageCopy, ['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure'])) return null;
+  const imageCopyKeys = ['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure'];
+  if (!isRecord(value.imageCopy) || !('headline' in value.imageCopy) || Object.keys(value.imageCopy).some((key) => !imageCopyKeys.includes(key))) return null;
   const imageHeadline = parseRequiredText(value.imageCopy.headline);
   const shortSupport = parseOptionalText(value.imageCopy.shortSupport);
   const proofAttribution = parseOptionalText(value.imageCopy.proofAttribution);
