@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
-import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/approved-tra-reference-generation';
+import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/openai';
 import { generateApprovedTraVideoFrameCreativeImage } from '@/lib/ai/video-frame-generation';
 import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
