@@ -224,10 +224,8 @@ describe('creative batch planner', () => {
 
   it('parses sparse and complete optional image-copy fields without inventing omitted text', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const first = concept(1);
-    first.imageCopy = { headline: 'Only image headline', shortSupport: null, proofAttribution: null, cta: null, disclosure: null };
-    const second = concept(2);
-    second.imageCopy = { headline: 'Full image headline', shortSupport: 'Support', proofAttribution: 'Approved attribution', cta: 'Learn more', disclosure: 'Applicable disclosure' };
+    const first = { ...concept(1), imageCopy: { headline: 'Only image headline', shortSupport: null, proofAttribution: null, cta: null, disclosure: null } };
+    const second = { ...concept(2), imageCopy: { headline: 'Full image headline', shortSupport: 'Support', proofAttribution: 'Approved attribution', cta: 'Learn more', disclosure: 'Applicable disclosure' } };
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [first, second] })));
     const result = await requestCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
     expect(result.creatives[0].imageCopy).toEqual({ headline: 'Only image headline' });
