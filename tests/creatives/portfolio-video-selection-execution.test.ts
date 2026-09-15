@@ -37,6 +37,7 @@ const selectedFrames = { source: videoSource, sourceVideoContentHash: sourceHash
     sourceVideoContentHash: sourceHash, approvedHumanSource: true, cacheKey: null }], selectionProvenance: provenance };
 const automaticRequest = (extra: Record<string, unknown> = {}) => ({ ...portfolioRequest(),
   sourceAssets: [{ role: 'TRA_VIDEO' as const, mediaId }], ...extra }) as any;
+const quotaGroups = () => mocks.quota.mock.calls.map(([arg]) => arg.group);
 
 async function ready(storage: MemoryPortfolioStorage, request = automaticRequest()) {
   const now = Date.now() - 1000;
@@ -62,17 +63,18 @@ beforeEach(() => {
 });
 
 describe('durable portfolio B3 selection activation', () => {
-  it('persists a cold automatic selection, releases the lease, and does not render in the same advance', async () => {
+  it('persists a cold automatic selection without rendering or consuming render quota', async () => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.slots[0]).toMatchObject({ status: 'PENDING', videoSelection: { version: 1,
       selectionModel: 'selector-model-a', selection } });
     expect(result.job.lease).toBeNull(); expect(mocks.render).not.toHaveBeenCalled();
+    expect(quotaGroups()).toEqual(['VIDEO_SELECTION']);
     expect(mocks.select).toHaveBeenCalledWith(expect.objectContaining({ finalConcept: expect.any(Object),
       cache: expect.objectContaining({ model: 'selector-model-a', retry: false }) }));
   });
 
-  it('hydrates and renders only the persisted selection on the next advance without charging generation quota twice', async () => {
+  it('hydrates and renders only the persisted selection with creative-generation admission', async () => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
@@ -80,7 +82,26 @@ describe('durable portfolio B3 selection activation', () => {
     expect(mocks.hydrate).toHaveBeenCalledWith(expect.objectContaining({ selection }));
     expect(mocks.render.mock.calls[0][1]).toMatchObject({ videoFrameSet: selectedFrames,
       generatedVideoFrameSelection: { libraryId, sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash, frames: provenance } });
-    expect(mocks.quota).toHaveBeenCalledTimes(1);
+    expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'CREATIVE_GENERATION']);
+  });
+
+  it('denies selection quota before selector/provider work and releases the parent lease', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
+    mocks.quota.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 17 });
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result).toMatchObject({ status: 429, retryAfterSeconds: 17, job: { lease: null } });
+    expect(quotaGroups()).toEqual(['VIDEO_SELECTION']); expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.hydrate).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
+  });
+
+  it('denies render quota after persisted selection without image/provider work', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    mocks.quota.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 23 });
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result).toMatchObject({ status: 429, retryAfterSeconds: 23, job: { lease: null } });
+    expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'CREATIVE_GENERATION']);
+    expect(mocks.hydrate).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
   });
 
   it('returns BUSY as transient 202 with the parent lease released and no Retry-required slot', async () => {
@@ -105,9 +126,10 @@ describe('durable portfolio B3 selection activation', () => {
       ['selector-model-a', false], ['selector-model-a', true],
     ]);
     expect(retried.job.slots[0].videoSelection?.retryAuthorization).toBeUndefined();
+    expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'VIDEO_SELECTION']);
   });
 
-  it('retains a completed selection through render failure and explicit Retry reuses it without another selector call', async () => {
+  it('retains a completed selection through render failure and re-admits the explicit render Retry', async () => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     mocks.render.mockRejectedValueOnce(new Error('render failed'));
@@ -117,6 +139,7 @@ describe('durable portfolio B3 selection activation', () => {
     const retried = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(retried.job.slots[0].status).toBe('SAVED'); expect(mocks.select).toHaveBeenCalledTimes(1);
     expect(mocks.hydrate).toHaveBeenCalledTimes(2);
+    expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'CREATIVE_GENERATION', 'CREATIVE_GENERATION']);
   });
 
   it('fails closed when persisted selection hydration is stale instead of rendering generic fallback frames', async () => {
@@ -133,7 +156,7 @@ describe('durable portfolio B3 selection activation', () => {
     ['approved human', automaticRequest(), { approvedHuman: true }],
     ['TRA reference provider image', automaticRequest(), { providerImageSource: {} }],
     ['non-video portfolio', portfolioRequest(), {}],
-  ])('preserves %s behavior outside automatic B3 selection', async (_name, request, mode) => {
+  ])('preserves %s behavior and creative-generation admission outside automatic B3 selection', async (_name, request, mode) => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage, request as any);
     const flags = mode as { providerImageSource?: unknown; approvedHuman?: boolean };
     const context = contextFor(job, flags.providerImageSource ? { providerImageSource: flags.providerImageSource } : {});
@@ -141,6 +164,6 @@ describe('durable portfolio B3 selection activation', () => {
     mocks.restore.mockResolvedValue(context);
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.slots[0].status).toBe('SAVED'); expect(mocks.select).not.toHaveBeenCalled();
-    expect(mocks.render).toHaveBeenCalledOnce();
+    expect(mocks.render).toHaveBeenCalledOnce(); expect(quotaGroups()).toEqual(['CREATIVE_GENERATION']);
   });
 });
