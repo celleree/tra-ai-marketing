@@ -10,6 +10,7 @@ import {
 import { isCreativeCategory } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
+import { parseCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import {
   parseCreativeHumanReview,
   parseCreativeLifecycle,
@@ -87,10 +88,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     record.image && typeof record.image === 'object'
       ? (record.image as Record<string, unknown>)
       : null;
-  const copy =
-    record.copy && typeof record.copy === 'object'
-      ? (record.copy as Record<string, unknown>)
-      : null;
+  const copyContract = parseCreativeCopyContract(record);
 
   const id = typeof record.id === 'string' ? record.id : '';
   const createdAt = typeof record.createdAt === 'string' ? record.createdAt : '';
@@ -102,11 +100,6 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const mimeType = typeof image?.mimeType === 'string' ? image.mimeType : '';
   const size = typeof image?.size === 'number' ? image.size : Number(image?.size);
   const url = typeof image?.url === 'string' ? image.url : '';
-  const primaryText =
-    typeof copy?.primaryText === 'string' ? copy.primaryText : '';
-  const headline = typeof copy?.headline === 'string' ? copy.headline : '';
-  const description =
-    typeof copy?.description === 'string' ? copy.description : '';
   const source = record.source === undefined ? 'generated' : record.source;
   const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
   const planning = parseCreativePlanning(record.planning);
@@ -138,8 +131,9 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     !Number.isFinite(size) ||
     size <= 0 ||
     !url ||
-    !primaryText ||
-    !headline ||
+    !copyContract ||
+    !copyContract.copy.primaryText ||
+    !copyContract.copy.headline ||
     (source !== 'generated' && source !== 'uploaded') ||
     (record.format !== undefined && !format) ||
     (record.placement !== undefined && !placement) ||
@@ -166,7 +160,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
       url: getPrivateMediaUrl(fileName),
     },
     category,
-    copy: { primaryText, headline, description },
+    ...copyContract,
     source,
     ...(format ? { format } : {}),
     ...(placement ? { placement } : {}),
