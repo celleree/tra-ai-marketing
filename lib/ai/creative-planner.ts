@@ -20,7 +20,7 @@ const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const MAX_TEXT_LENGTH = 1000;
 // Compact per-concept allowance: Meta copy, image copy, strategy/concept fields,
 // selection rationale, enums/IDs and JSON; retain batch reasoning headroom.
-const planningOutputTokens = (count: number) => 4096 + 1792 * count;
+const planningOutputTokens = (count: number) => 4096 + 1536 * count;
 
 const PLANNER_RULES = `
 Plan a batch of original static Meta ad concepts for Tax Relief Advocates (TRA).
@@ -106,12 +106,17 @@ const parseConcept = (
   referenceCatalog?: ReferencePlanningCandidate[],
   approvedHumanOptions?: ApprovedHumanOption[]
 ): PlannedCreativeConcept | null => {
-  if (!isRecord(value) || !hasOnly(value, ['index', 'format', 'adCopy', 'imageCopy', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['approvedHumanId'] : [])])) return null;
+  const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['approvedHumanId'] : [])];
+  if (!isRecord(value) || (!hasOnly(value, expectedKeys) && !hasOnly(value, [...expectedKeys, 'copy']))) return null;
   if (value.index !== expectedIndex || typeof value.format !== 'string' || !isCreativeFormat(value.format)) return null;
   if (!isRecord(value.adCopy) || !hasOnly(value.adCopy, ['primaryText', 'headline', 'description'])) return null;
   const primaryText = parseRequiredText(value.adCopy.primaryText);
   const headline = parseRequiredText(value.adCopy.headline);
   if (!primaryText || !headline || typeof value.adCopy.description !== 'string' || value.adCopy.description.length > MAX_TEXT_LENGTH) return null;
+  if ('copy' in value) {
+    if (!isRecord(value.copy) || !hasOnly(value.copy, ['primaryText', 'headline', 'description'])) return null;
+    if (value.copy.primaryText !== value.adCopy.primaryText || value.copy.headline !== value.adCopy.headline || value.copy.description !== value.adCopy.description) return null;
+  }
   if (!isRecord(value.imageCopy) || !hasOnly(value.imageCopy, ['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure'])) return null;
   const imageHeadline = parseRequiredText(value.imageCopy.headline);
   const shortSupport = parseOptionalText(value.imageCopy.shortSupport);
