@@ -18,6 +18,8 @@ export const portfolioSnapshot = (job: CreativePortfolioJob): CreativePortfolioS
   batchPlan: { plannerModel: 'gpt-6-astra', reasoningEffort: 'medium', portfolioAudit: portfolioAudit(job.slots.length),
     creatives: job.slots.map(({ index }) => ({ index, format: 'direct-response', selectionReason: 'Useful distinction',
       copy: { headline: `Headline ${index}`, primaryText: 'Explore options', description: '' },
+      adCopy: { headline: `Headline ${index}`, primaryText: 'Explore options', description: '' },
+      imageCopy: { headline: `Headline ${index}`, cta: 'Talk to TRA' },
       strategy: { category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer',
         painPoint: 'Uncertainty', desiredOutcome: 'Understanding', emotion: 'Relief', hook: 'Explore', cta: 'Talk to TRA', offer: null,
         soWhat: { surfaceMessage: `Distinct proposition ${index}`, functionalConsequence: 'Compare options', meaningfulOutcome: 'Informed decision' },
