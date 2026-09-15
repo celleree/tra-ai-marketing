@@ -3,7 +3,7 @@ import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
-import type { CreativeCopy } from '@/lib/creatives/generated';
+import type { CreativeImageCopy } from '@/lib/creatives/generated';
 import {
   creativeImageHttpError,
   creativeImageMissingOutputError,
@@ -29,12 +29,20 @@ const getOpenAIError = async (response: Response) => {
   }
 };
 
+const formatImageCopy = (copy: CreativeImageCopy) => [
+  `Headline: ${copy.headline}`,
+  copy.shortSupport ? `Short support: ${copy.shortSupport}` : '',
+  copy.proofAttribution ? `Proof attribution: ${copy.proofAttribution}` : '',
+  copy.cta ? `CTA: ${copy.cta}` : '',
+  copy.disclosure ? `Disclosure: ${copy.disclosure}` : '',
+].filter(Boolean).join('\n');
+
 export const generatePromptOnlyCreativeImage = async (args: {
   taxDocumentReference?: TaxDocumentSelection;
   primaryFormat: keyof typeof CREATIVE_FORMAT_LABELS;
   placement: CreativePlacement;
   context: string;
-  copy: CreativeCopy;
+  copy: CreativeImageCopy;
   reserveLogoArea: boolean;
   operationType?: Extract<CreativeImageOperationType, 'PROMPT_GENERATION' | 'LAYOUT_REFERENCE_GENERATION'>;
 }): Promise<ImageGenerationResult> => {
@@ -49,15 +57,13 @@ export const generatePromptOnlyCreativeImage = async (args: {
   const prompt = `
 Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
-Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
+Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}). Recompose the hierarchy, subject, image copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}
 One-ad render brief: ${args.context}
 
-Use this planned ad copy verbatim when rendered:
-Headline: ${args.copy.headline}
-Primary text: ${args.copy.primaryText}
-Description: ${args.copy.description}
+Use only this planned image copy when rendering text inside the creative:
+${formatImageCopy(args.copy)}
 
 ${logoDirection}
 ${formatCreativeSafeZoneRules(args.placement)}
