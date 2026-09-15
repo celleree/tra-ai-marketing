@@ -44,6 +44,16 @@ export async function advanceCreativePortfolio(
     const current = await readCreativePortfolio(id, storage);
     if (current?.lease?.id !== token || current.lease.expiresAtMs <= Date.now()) throw new Error('Portfolio work lease is no longer current.');
   };
+  const reserveWorkQuota = async (group: 'VIDEO_SELECTION' | 'CREATIVE_GENERATION') => {
+    const quota = await reserveOperatorQuota({ operatorId, group, units: 1 }, { storage });
+    if (quota.allowed) return null;
+    return {
+      job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
+      status: 429,
+      error: 'Operator quota reached. Resume after the quota window resets.',
+      retryAfterSeconds: quota.retryAfterSeconds,
+    } satisfies PortfolioStepResult;
+  };
   let providerWorkStarted = false;
   try {
     if (slotIndex === null && job.planning.phase === 'INITIAL_PLAN' && !job.planning.preparation.quotaReserved) {
@@ -60,16 +70,6 @@ export async function advanceCreativePortfolio(
       };
       const preparation = { ...job.planning.preparation, quotaReserved: true };
       return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, preparation), storage) };
-    }
-
-    if (slotIndex !== null && !job.slots[slotIndex - 1].videoSelection) {
-      const quota = await reserveOperatorQuota({ operatorId, group: 'CREATIVE_GENERATION', units: 1 }, { storage });
-      if (!quota.allowed) return {
-        job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
-        status: 429,
-        error: 'Operator quota reached. Resume after the quota window resets.',
-        retryAfterSeconds: quota.retryAfterSeconds,
-      };
     }
 
     await assertCurrentWork();
@@ -197,6 +197,8 @@ export async function advanceCreativePortfolio(
       if (!context.sourceAnalysis) {
         throw new CreativeGenerationPreparationError('Durable automatic video selection is missing its frozen B1 source analysis.', 409);
       }
+      const denied = await reserveWorkQuota(slot.videoSelection?.selection ? 'CREATIVE_GENERATION' : 'VIDEO_SELECTION');
+      if (denied) return denied;
       const inventory = await hydratePlanningSourceInventory(job.request.sourceAssets, context.storage);
       const videoSources = inventory.filter(({ source }) => source.role === 'TRA_VIDEO')
         .map(({ source }) => source as HydratedTraVideoSource);
@@ -250,6 +252,8 @@ export async function advanceCreativePortfolio(
       return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
     }
 
+    const denied = await reserveWorkQuota('CREATIVE_GENERATION');
+    if (denied) return denied;
     providerWorkStarted = true;
     const creative = await renderPlannedCreative(concept, context, {
       creativeId: slot.creativeId,
