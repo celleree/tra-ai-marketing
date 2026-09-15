@@ -17,6 +17,20 @@ export interface CreativeCopy {
   description: string;
 }
 
+export interface CreativeAdCopy {
+  primaryText: string;
+  headline: string;
+  description: string;
+}
+
+export interface CreativeImageCopy {
+  headline: string;
+  shortSupport?: string;
+  proofAttribution?: string;
+  cta?: string;
+  disclosure?: string;
+}
+
 export type CreativeSource = 'generated' | 'uploaded';
 
 export interface GeneratedCreative {
@@ -28,6 +42,8 @@ export interface GeneratedCreative {
   placement?: CreativePlacement;
   image: MediaAsset;
   copy: CreativeCopy;
+  adCopy?: CreativeAdCopy;
+  imageCopy?: CreativeImageCopy;
   source?: CreativeSource;
   referenceImageId?: string;
   referenceImageUrl?: string;
@@ -47,6 +63,8 @@ export interface CreativeRecord {
   image: MediaAsset;
   category: CreativeCategoryId;
   copy: CreativeCopy;
+  adCopy?: CreativeAdCopy;
+  imageCopy?: CreativeImageCopy;
   source?: CreativeSource;
   format?: CreativeFormatId;
   placement?: CreativePlacement;
