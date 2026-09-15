@@ -31,9 +31,20 @@ const strategy = (subjectSource: 'non-human' | 'approved-tra-human' = 'non-human
   execution: { taxDocumentReference: 'none', subjectSource, composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' },
   visualDirection: 'An organized notice leading toward one clear next step',
 });
+const imageCopyFor = (index: number) => ({
+  headline: `Image headline ${index}`,
+  ...(index === 1 ? { shortSupport: 'Short support', cta: 'Talk with TRA' } : {}),
+});
 const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human' = 'non-human') => ({
   index, format: index === 1 ? 'educational' : 'proof',
-  copy: { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' },
+  adCopy: { primaryText: `META_PRIMARY_${index}`, headline: `Meta headline ${index}`, description: `META_DESCRIPTION_${index}` },
+  imageCopy: {
+    headline: `Image headline ${index}`,
+    shortSupport: index === 1 ? 'Short support' : null,
+    proofAttribution: null,
+    cta: index === 1 ? 'Talk with TRA' : null,
+    disclosure: null,
+  },
   strategy: { ...strategy(subjectSource), soWhat: { ...strategy().soWhat, surfaceMessage: `Distinct message ${index}` },
     conceptDetails: { ...conceptDetails, proposition: `Different proposition ${index}` } }, selectionReason: `Distinct reason ${index}`,
 });
@@ -109,7 +120,6 @@ describe('creative batch planner', () => {
     const ready = await updateCreativePortfolio(job.id, current => ({ ...current, planning: { phase: 'READY_TO_RENDER' },
       snapshot: { ...snapshot, batchPlan: { ...batchPlan, portfolioAudit: portfolioAudit(2) } } }), storage);
     expect(await readCreativePortfolio(job.id, storage)).toEqual(ready);
-
   });
 
   it.each(['missing', 'duplicate', 'role', 'hash', 'model', 'version', 'result', 'frames', 'raw-bytes'])(
@@ -131,7 +141,6 @@ describe('creative batch planner', () => {
       job.snapshot = { ...portfolioSnapshot(job), requestedSources: expected, sourceAnalysis: projection };
       expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id)).toThrow('Saved creative portfolio is invalid');
       const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
-      // Missing an entire source needs the owner's requested inventory to detect; internal completion has no such inventory.
       if (mutation !== 'missing' && mutation !== 'hash') await expect(requestCreativeBatch({ count: 2, context: 'TRA', analysis,
         hasApprovedHumanSource: false, sourceAnalysis: projection })).rejects.toThrow();
       expect(fetchMock).not.toHaveBeenCalled();
@@ -162,13 +171,17 @@ describe('creative batch planner', () => {
     expect(inputText.length).toBeLessThan(JSON.stringify({ ...input, referenceCatalog: before }, null, 2).length);
     const properties = second.text.format.schema.properties.creatives.items.properties;
     expect(Object.keys(properties).indexOf('strategy')).toBeLessThan(Object.keys(properties).indexOf('approvedHumanId'));
+    expect(properties).not.toHaveProperty('copy');
+    expect(properties.adCopy.required).toEqual(['primaryText', 'headline', 'description']);
+    expect(properties.imageCopy.required).toEqual(['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure']);
     expect(properties.referenceChoices.properties.layoutSource.anyOf[0].enum).toEqual([before[0].referenceId]);
     expect(properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
     const rules = first.input[0].content[0].text;
     for (const rule of ['SO WHAT', 'Never invent testimonials', 'Without either, every subjectSource must be non-human',
       'third-party identity, branding, exact copy, people, claims, or evidence', 'document structure only',
       'Approval covers visible identity only', 'required disclaimers', 'Strong ideas may share a category or layout',
-      'one causal clause per SO WHAT step', 'retain all execution details']) expect(rules).toContain(rule);
+      'one causal clause per SO WHAT step', 'retain all execution details', 'Write adCopy and imageCopy separately',
+      'Never add supporting copy merely to fill space']) expect(rules).toContain(rule);
   });
 
   it('persists the real initial request result through the PR A checkpoint and retains the complete render/strategy contract', async () => {
@@ -191,18 +204,34 @@ describe('creative batch planner', () => {
     expect(batchPlan).toMatchObject({ plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
     expect(batchPlan).not.toHaveProperty('portfolioAudit');
     batchPlan.creatives.forEach((planned, index) => {
-      expect(planned).toMatchObject({ index: index + 1, format: creatives[index].format, copy: creatives[index].copy,
+      expect(planned).toMatchObject({ index: index + 1, format: creatives[index].format,
+        copy: creatives[index].adCopy, adCopy: creatives[index].adCopy, imageCopy: imageCopyFor(index + 1),
         selectionReason: creatives[index].selectionReason,
         strategy: { ...creatives[index].strategy, approvedHumanId: id,
           referenceSelection: { ...creatives[index].referenceChoices, referenceRelationship: 'matched' } } });
+      expect(planned.copy).toEqual(planned.adCopy);
       const brief = buildCreativeRenderBrief({ concept: planned, referenceCatalog });
-      expect(brief).toMatchObject({ exactCopy: { ...planned.copy, cta: planned.strategy.cta },
+      expect(brief).toMatchObject({ exactCopy: imageCopyFor(index + 1),
         execution: planned.strategy.execution, visualDirection: planned.strategy.visualDirection,
         layoutBlueprint: referenceCatalog[0].blueprint, visualConcept: {
           visualArchetype: conceptDetails.visualArchetype, visualMechanism: conceptDetails.visualMechanism,
           subject: conceptDetails.subject, environment: conceptDetails.environment,
           compositionInstructions: conceptDetails.compositionInstructions } });
+      expect(JSON.stringify(brief)).not.toContain(creatives[index].adCopy.primaryText);
+      expect(JSON.stringify(brief)).not.toContain(creatives[index].adCopy.description);
     });
+  });
+
+  it('parses sparse and complete optional image-copy fields without inventing omitted text', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const first = concept(1);
+    first.imageCopy = { headline: 'Only image headline', shortSupport: null, proofAttribution: null, cta: null, disclosure: null };
+    const second = concept(2);
+    second.imageCopy = { headline: 'Full image headline', shortSupport: 'Support', proofAttribution: 'Approved attribution', cta: 'Learn more', disclosure: 'Applicable disclosure' };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [first, second] })));
+    const result = await requestCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
+    expect(result.creatives[0].imageCopy).toEqual({ headline: 'Only image headline' });
+    expect(result.creatives[1].imageCopy).toEqual(second.imageCopy);
   });
 
   it('selects a known library human independently per concept without a fixed ratio', async () => {
@@ -287,6 +316,8 @@ describe('creative batch planner', () => {
 
     expect(result).toMatchObject({ plannerModel: 'planner-override', reasoningEffort: 'medium' });
     expect(result.creatives.map((creative) => creative.index)).toEqual([1, 2]);
+    expect(result.creatives[0].copy).toEqual(result.creatives[0].adCopy);
+    expect(result.creatives[0].imageCopy).toEqual(imageCopyFor(1));
     expect(result.creatives[0].strategy.soWhat.meaningfulOutcome).toBe('Move forward with confidence');
     expect(result.creatives[0].strategy.conceptDetails).toEqual(concept(1).strategy.conceptDetails);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -340,7 +371,9 @@ describe('creative batch planner', () => {
     ['malformed strategy', { creatives: [{ ...concept(1), strategy: { ...strategy(), hook: '' } }, concept(2)] }, false],
     ['missing concept details', { creatives: [{ ...concept(1), strategy: { ...strategy(), conceptDetails: undefined } }, concept(2)] }, false],
     ['human without approved source', { creatives: [concept(1, 'approved-tra-human'), concept(2)] }, false],
-    ['overlong copy', { creatives: [{ ...concept(1), copy: { ...concept(1).copy, headline: 'x'.repeat(1001) } }, concept(2)] }, false],
+    ['overlong ad copy', { creatives: [{ ...concept(1), adCopy: { ...concept(1).adCopy, headline: 'x'.repeat(1001) } }, concept(2)] }, false],
+    ['missing image copy', { creatives: [{ ...concept(1), imageCopy: undefined }, concept(2)] }, false],
+    ['malformed image copy', { creatives: [{ ...concept(1), imageCopy: { ...concept(1).imageCopy, shortSupport: 42 } }, concept(2)] }, false],
   ])('rejects %s output', async (_name, value, hasApprovedHumanSource) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key'); vi.stubGlobal('fetch', vi.fn(async () => okResponse(value)));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource })).rejects.toThrow(/invalid creative batch plan/i);
