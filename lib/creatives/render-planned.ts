@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
-import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/openai';
+import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/approved-tra-reference-generation';
 import { generateApprovedTraVideoFrameCreativeImage } from '@/lib/ai/video-frame-generation';
 import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
@@ -38,6 +38,12 @@ export type CreativeRenderContext = {
 };
 const sha256 = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
 
+const copyMatchesAdCopy = (item: PlannedCreativeConcept) =>
+  item.adCopy
+  && item.copy.primaryText === item.adCopy.primaryText
+  && item.copy.headline === item.adCopy.headline
+  && item.copy.description === item.adCopy.description;
+
 /** The shared one-ad provider, validation, branding and persistence path. */
 export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   request, batchPlan, referenceCatalog, selectedReferences, requestedSources, analysisSources, logoOverlaySource,
@@ -45,6 +51,9 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
 }: CreativeRenderContext, options: { creativeId?: string; assertCurrentWork?: () => Promise<void> } = {}): Promise<GeneratedCreative> {
   const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
   if (!/^creative_[a-f0-9]{32}$/.test(creativeId)) throw new Error('Invalid reserved creative ID.');
+  if (!item.adCopy || !item.imageCopy || !copyMatchesAdCopy(item)) {
+    throw new Error('Creative plan is missing a valid separated ad/image copy contract and must be replanned.');
+  }
   const human = item.strategy.approvedHumanId ? await resolveApprovedHumanFrame(item.strategy.approvedHumanId) : null;
   const itemVideoFrames = human?.selected ?? videoFrameSet;
   const itemImageSource = human ? null : providerImageSource;
@@ -59,6 +68,8 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     strategy: item.strategy,
   });
   const copy = item.copy;
+  const adCopy = item.adCopy;
+  const imageCopy = item.imageCopy;
   const selectedReference = selectedReferences.find(reference => reference.item.id === item.strategy.referenceSelection?.layoutSource);
   const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
     concept: item, companyProfile: request.companyProfile,
@@ -77,7 +88,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
       primaryFormat: item.format,
       placement: request.placement,
       context: itemContext,
-      copy,
+      copy: imageCopy,
       reserveLogoArea,
     });
   } else if (itemVideoFrames) {
@@ -87,7 +98,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
       primaryFormat: item.format,
       placement: request.placement,
       context: itemContext,
-      copy,
+      copy: imageCopy,
       reserveLogoArea,
     });
     imageResult = videoImageResult;
@@ -98,7 +109,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
       primaryFormat: item.format,
       placement: request.placement,
       context: itemContext,
-      copy,
+      copy: imageCopy,
       reserveLogoArea,
       operationType: item.strategy.referenceSelection?.layoutSource ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
     });
@@ -159,6 +170,8 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     placement: request.placement,
     image,
     copy,
+    adCopy,
+    imageCopy,
     generationProvenance,
     identity,
     planning: {
