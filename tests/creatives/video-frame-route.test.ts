@@ -96,41 +96,46 @@ beforeEach(() => {
   readImageByIdMock.mockResolvedValue(null);
   getApprovedTraVideoFramesMock.mockImplementation(async (source) => makeFrameSet(source));
   analyzeApprovedTraVideoFramesMock.mockResolvedValue(analysis);
-  const concept = (index: number) => ({
-    index,
-    format: 'direct-response',
-    copy: {
+  const concept = (index: number) => {
+    const adCopy = {
       headline: `Clear next step ${index}`,
       primaryText: 'Talk with TRA.',
       description: 'No-pressure consultation.',
-    },
-    strategy: {
-      category: 'customer-problems',
-      awarenessStage: index === 1 ? 'problem-aware' : 'solution-aware',
-      persona: 'Taxpayer',
-      painPoint: 'Unclear options',
-      desiredOutcome: 'Clarity',
-      emotion: 'reassured',
-      hook: `Option ${index}`,
-      cta: 'Talk with TRA',
-      offer: null,
-      soWhat: {
-        surfaceMessage: `Message ${index}`,
-        functionalConsequence: `Consequence ${index}`,
-        meaningfulOutcome: `Outcome ${index}`,
+    };
+    return {
+      index,
+      format: 'direct-response',
+      copy: adCopy,
+      adCopy: { ...adCopy },
+      imageCopy: { headline: `Clear next step ${index}`, cta: 'Talk with TRA' },
+      strategy: {
+        category: 'customer-problems',
+        awarenessStage: index === 1 ? 'problem-aware' : 'solution-aware',
+        persona: 'Taxpayer',
+        painPoint: 'Unclear options',
+        desiredOutcome: 'Clarity',
+        emotion: 'reassured',
+        hook: `Option ${index}`,
+        cta: 'Talk with TRA',
+        offer: null,
+        soWhat: {
+          surfaceMessage: `Message ${index}`,
+          functionalConsequence: `Consequence ${index}`,
+          meaningfulOutcome: `Outcome ${index}`,
+        },
+        execution: {
+          subjectSource: 'approved-tra-human',
+          composition: index === 1 ? 'single-focus' : 'split',
+          imageTreatment: index === 1 ? 'photographic' : 'mixed-media',
+          textDensity: 'medium',
+          ctaTreatment: 'button',
+          typographyHierarchy: 'headline-dominant',
+        },
+        visualDirection: `Source-bound direction ${index}`,
       },
-      execution: {
-        subjectSource: 'approved-tra-human',
-        composition: index === 1 ? 'single-focus' : 'split',
-        imageTreatment: index === 1 ? 'photographic' : 'mixed-media',
-        textDensity: 'medium',
-        ctaTreatment: 'button',
-        typographyHierarchy: 'headline-dominant',
-      },
-      visualDirection: `Source-bound direction ${index}`,
-    },
-    selectionReason: `Distinct fit ${index}`,
-  });
+      selectionReason: `Distinct fit ${index}`,
+    };
+  };
   planCreativeBatchMock.mockResolvedValue({
     creatives: [concept(1), concept(2)],
     plannerModel: 'gpt-6-astra',
@@ -164,6 +169,11 @@ describe('creative generation TRA video integration', () => {
       expect.objectContaining({ hasApprovedHumanSource: true })
     );
     expect(generateApprovedTraVideoFrameCreativeImageMock).toHaveBeenCalledTimes(2);
+    for (const [call] of generateApprovedTraVideoFrameCreativeImageMock.mock.calls) {
+      expect(call.copy).toMatchObject({ headline: expect.stringContaining('Clear next step'), cta: 'Talk with TRA' });
+      expect(call.copy).not.toHaveProperty('primaryText');
+      expect(call.copy).not.toHaveProperty('description');
+    }
     expect(validateGeneratedCreativeImageMock).toHaveBeenCalledTimes(2);
     expect(validateGeneratedCreativeImageMock).toHaveBeenCalledWith(PNG, 'SQUARE_1_1');
     expect(
@@ -175,9 +185,10 @@ describe('creative generation TRA video integration', () => {
     ).toEqual([PNG, PNG]);
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
     for (const { data } of events.filter(({ event }) => event === 'creative')) {
-      const provenance = parseCreativeGenerationProvenance(
-        (data.creative as { generationProvenance?: unknown }).generationProvenance
-      );
+      const creative = data.creative as { copy?: unknown; adCopy?: unknown; imageCopy?: unknown; generationProvenance?: unknown };
+      expect(creative.copy).toEqual(creative.adCopy);
+      expect(creative.imageCopy).toBeDefined();
+      const provenance = parseCreativeGenerationProvenance(creative.generationProvenance);
       expect(provenance).toMatchObject({
         imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
         requestedSources: [
