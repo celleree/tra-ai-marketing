@@ -33,7 +33,8 @@ async function render(explicit = false) {
   return renderPlannedCreative(snapshot.batchPlan.creatives[0], {
     request, batchPlan: snapshot.batchPlan, referenceCatalog: [], selectedReferences: [], requestedSources: [], analysisSources: [],
     reserveLogoArea: false, brandLogo: null, providerImageSource: undefined,
-    videoFrameSet: { source: {} as any, frames: [frame] }, generatedVideoFrameSelection: selection,
+    videoFrameSet: { source: {} as any, sourceVideoContentHash: sourceHash, durationMs: 2000, reused: false, frames: [frame] },
+    generatedVideoFrameSelection: selection,
     storage: { saveImage: vi.fn().mockResolvedValue({ id: `media_${'1'.repeat(32)}`, fileName: 'creative.png', originalName: 'creative.png',
       mimeType: 'image/png', size: 5, url: '/creative.png' }) } as any,
   }, { creativeId: `creative_${'2'.repeat(32)}` });
@@ -42,12 +43,12 @@ async function render(explicit = false) {
 describe('render planned video provenance', () => {
   it('saves automatic B3 provenance with exact selected-frame evidence', async () => {
     const creative = await render(false);
-    expect(creative.generationProvenance.attachedSource).toEqual({ type: 'TRA_VIDEO_FRAMES', mediaId,
+    expect(creative.generationProvenance!.attachedSource).toEqual({ type: 'TRA_VIDEO_FRAMES', mediaId,
       sourceSha256: sourceHash, selectionMode: 'AUTOMATIC', frames: [{ timestampMs: 1200, approvedPngSha256: 'e'.repeat(64) }] });
     expect(creative.videoFrameSelection).toEqual(selection);
   });
 
   it('keeps explicit request video selection USER_SELECTED', async () => {
-    expect((await render(true)).generationProvenance.attachedSource).toMatchObject({ selectionMode: 'USER_SELECTED' });
+    expect((await render(true)).generationProvenance!.attachedSource).toMatchObject({ selectionMode: 'USER_SELECTED' });
   });
 });
