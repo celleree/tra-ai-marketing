@@ -6,18 +6,22 @@ import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { advancePortfolioPreparation } from '@/lib/creatives/portfolio-preparation';
 import { advancePlanningSourceAnalysis } from '@/lib/creatives/planning-source-composition';
 import { stepPortfolioVideoDependency } from '@/lib/creatives/portfolio-video-adapter';
+import { hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelligence-planning';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
-import { checkpointPortfolioPreparation, claimCreativePortfolio, finishPortfolioAuditFailure, finishPortfolioAuditForRepair,
-  finishPortfolioInitialPlan, finishPortfolioPlan, finishPortfolioPreparation, finishPortfolioPreparationFailure,
-  finishPortfolioRepair, finishPortfolioSlot, failPortfolioWork, releasePortfolioWork,
+import { checkpointPortfolioPreparation, checkpointPortfolioVideoSelectionAttempt, claimCreativePortfolio,
+  finishPortfolioAuditFailure, finishPortfolioAuditForRepair, finishPortfolioInitialPlan, finishPortfolioPlan,
+  finishPortfolioPreparation, finishPortfolioPreparationFailure, finishPortfolioRepair, finishPortfolioSlot,
+  finishPortfolioVideoFrameSelection, failPortfolioWork, releasePortfolioWork,
   type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
-import { CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
+import { CreativeGenerationPreparationError, hydratePlanningSourceInventory } from '@/lib/creatives/generation-sources';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
 import { reserveOperatorQuota, OperatorQuotaUnavailableError } from '@/lib/quotas/operator-quota';
+import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
+import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import type { VideoIntelligenceServiceDependencies } from '@/lib/video/intelligence-service';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
@@ -40,6 +44,16 @@ export async function advanceCreativePortfolio(
     const current = await readCreativePortfolio(id, storage);
     if (current?.lease?.id !== token || current.lease.expiresAtMs <= Date.now()) throw new Error('Portfolio work lease is no longer current.');
   };
+  const reserveWorkQuota = async (group: 'VIDEO_SELECTION' | 'CREATIVE_GENERATION') => {
+    const quota = await reserveOperatorQuota({ operatorId, group, units: 1 }, { storage });
+    if (quota.allowed) return null;
+    return {
+      job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
+      status: 429,
+      error: 'Operator quota reached. Resume after the quota window resets.',
+      retryAfterSeconds: quota.retryAfterSeconds,
+    } satisfies PortfolioStepResult;
+  };
   let providerWorkStarted = false;
   try {
     if (slotIndex === null && job.planning.phase === 'INITIAL_PLAN' && !job.planning.preparation.quotaReserved) {
@@ -56,16 +70,6 @@ export async function advanceCreativePortfolio(
       };
       const preparation = { ...job.planning.preparation, quotaReserved: true };
       return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, preparation), storage) };
-    }
-
-    if (slotIndex !== null) {
-      const quota = await reserveOperatorQuota({ operatorId, group: 'CREATIVE_GENERATION', units: 1 }, { storage });
-      if (!quota.allowed) return {
-        job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
-        status: 429,
-        error: 'Operator quota reached. Resume after the quota window resets.',
-        retryAfterSeconds: quota.retryAfterSeconds,
-      };
     }
 
     await assertCurrentWork();
@@ -181,10 +185,77 @@ export async function advanceCreativePortfolio(
       throw new Error('Portfolio planning phase is not executable.');
     }
 
-    providerWorkStarted = true;
     const context = await restoreCreativePortfolio(job.snapshot!);
     const slot = job.slots[slotIndex - 1];
-    const creative = await renderPlannedCreative(context.batchPlan.creatives[slotIndex - 1], context, {
+    const concept = context.batchPlan.creatives[slotIndex - 1];
+    const automaticVideoSelection = job.videoPreparationVersion === 1
+      && !job.request.videoFrameSelection
+      && !concept.strategy.approvedHumanId
+      && !context.providerImageSource
+      && context.videoFrameSet !== null;
+    if (automaticVideoSelection) {
+      if (!context.sourceAnalysis) {
+        throw new CreativeGenerationPreparationError('Durable automatic video selection is missing its frozen B1 source analysis.', 409);
+      }
+      const denied = await reserveWorkQuota(slot.videoSelection?.selection ? 'CREATIVE_GENERATION' : 'VIDEO_SELECTION');
+      if (denied) return denied;
+      const inventory = await hydratePlanningSourceInventory(job.request.sourceAssets, context.storage);
+      const videoSources = inventory.filter(({ source }) => source.role === 'TRA_VIDEO')
+        .map(({ source }) => source as HydratedTraVideoSource);
+      if (!slot.videoSelection?.selection) {
+        let attempt: ReturnType<typeof checkpointPortfolioVideoSelectionAttempt> | undefined;
+        await updateCreativePortfolio(id, current => {
+          attempt = checkpointPortfolioVideoSelectionAttempt(
+            current, token, (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra').trim(),
+          );
+          return attempt.job;
+        }, storage);
+        if (!attempt) throw new Error('Video frame selection attempt was not checkpointed.');
+        await assertCurrentWork();
+        providerWorkStarted = true;
+        const selected = await selectPortfolioVideoFrames({
+          sourceAnalysis: context.sourceAnalysis,
+          sources: videoSources,
+          finalConcept: concept,
+          cache: { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}) },
+        });
+        if (selected.status === 'BUSY') return {
+          job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
+          status: 202,
+          retryAfterSeconds: 2,
+        };
+        if (selected.status === 'RETRY_REQUIRED') {
+          return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token,
+            `Video frame selection requires explicit Retry (${selected.reason}).`), storage) };
+        }
+        return { job: await updateCreativePortfolio(id, current =>
+          finishPortfolioVideoFrameSelection(current, token, selected.selection), storage) };
+      }
+
+      providerWorkStarted = true;
+      const selectedFrames = await hydratePortfolioVideoFrameSelection({
+        sourceAnalysis: context.sourceAnalysis,
+        sources: videoSources,
+        selection: slot.videoSelection.selection,
+      });
+      const generatedVideoFrameSelection: GeneratedVideoFrameSelection = {
+        libraryId: slot.videoSelection.selection.libraryId,
+        sourceVideoMediaId: selectedFrames.source.media.id,
+        sourceVideoContentHash: selectedFrames.sourceVideoContentHash,
+        frames: selectedFrames.selectionProvenance,
+      };
+      const creative = await renderPlannedCreative(concept, {
+        ...context,
+        videoFrameSet: selectedFrames,
+        generatedVideoFrameSelection,
+      }, { creativeId: slot.creativeId, assertCurrentWork });
+      return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
+    }
+
+    const denied = await reserveWorkQuota('CREATIVE_GENERATION');
+    if (denied) return denied;
+    providerWorkStarted = true;
+    const creative = await renderPlannedCreative(concept, context, {
       creativeId: slot.creativeId,
       assertCurrentWork,
     });
