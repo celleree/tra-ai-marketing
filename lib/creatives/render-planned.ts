@@ -2,6 +2,11 @@ import { createHash, randomUUID } from 'crypto';
 import { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
 import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/openai';
 import { generateApprovedTraVideoFrameCreativeImage } from '@/lib/ai/video-frame-generation';
+import {
+  generateLegacyApprovedTraReferenceCreativeImage,
+  generateLegacyApprovedTraVideoFrameCreativeImage,
+  generateLegacyPromptOnlyCreativeImage,
+} from '@/lib/ai/legacy-copy-image-generation';
 import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
@@ -9,7 +14,7 @@ import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
-import type { GeneratedCreative } from '@/lib/creatives/generated';
+import type { CreativeAdCopy, CreativeImageCopy, GeneratedCreative } from '@/lib/creatives/generated';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import type { CreativeBatchPlan, PlannedCreativeConcept } from '@/lib/creatives/planned';
@@ -39,10 +44,24 @@ export type CreativeRenderContext = {
 const sha256 = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
 
 const copyMatchesAdCopy = (item: PlannedCreativeConcept) =>
-  item.adCopy
-  && item.copy.primaryText === item.adCopy.primaryText
-  && item.copy.headline === item.adCopy.headline
-  && item.copy.description === item.adCopy.description;
+  Boolean(item.adCopy)
+  && item.copy.primaryText === item.adCopy!.primaryText
+  && item.copy.headline === item.adCopy!.headline
+  && item.copy.description === item.adCopy!.description;
+
+type PlannedCopyMode =
+  | { kind: 'LEGACY' }
+  | { kind: 'E2'; adCopy: CreativeAdCopy; imageCopy: CreativeImageCopy };
+
+const classifyPlannedCopy = (item: PlannedCreativeConcept): PlannedCopyMode => {
+  const hasAdCopy = item.adCopy !== undefined;
+  const hasImageCopy = item.imageCopy !== undefined;
+  if (!hasAdCopy && !hasImageCopy) return { kind: 'LEGACY' };
+  if (!hasAdCopy || !hasImageCopy || !copyMatchesAdCopy(item)) {
+    throw new Error('Creative plan has an invalid separated ad/image copy contract and cannot be rendered.');
+  }
+  return { kind: 'E2', adCopy: item.adCopy!, imageCopy: item.imageCopy! };
+};
 
 /** The shared one-ad provider, validation, branding and persistence path. */
 export async function renderPlannedCreative(item: PlannedCreativeConcept, {
@@ -51,9 +70,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
 }: CreativeRenderContext, options: { creativeId?: string; assertCurrentWork?: () => Promise<void> } = {}): Promise<GeneratedCreative> {
   const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
   if (!/^creative_[a-f0-9]{32}$/.test(creativeId)) throw new Error('Invalid reserved creative ID.');
-  if (!item.adCopy || !item.imageCopy || !copyMatchesAdCopy(item)) {
-    throw new Error('Creative plan is missing a valid separated ad/image copy contract and must be replanned.');
-  }
+  const copyMode = classifyPlannedCopy(item);
   const human = item.strategy.approvedHumanId ? await resolveApprovedHumanFrame(item.strategy.approvedHumanId) : null;
   const itemVideoFrames = human?.selected ?? videoFrameSet;
   const itemImageSource = human ? null : providerImageSource;
@@ -68,8 +85,6 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     strategy: item.strategy,
   });
   const copy = item.copy;
-  const adCopy = item.adCopy;
-  const imageCopy = item.imageCopy;
   const selectedReference = selectedReferences.find(reference => reference.item.id === item.strategy.referenceSelection?.layoutSource);
   const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
     concept: item, companyProfile: request.companyProfile,
@@ -82,37 +97,67 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   await options.assertCurrentWork?.();
 
   if (itemImageSource) {
-    imageResult = await generateApprovedTraReferenceCreativeImage({
-      taxDocumentReference: item.strategy.execution.taxDocumentReference,
-      source: itemImageSource.stored,
-      primaryFormat: item.format,
-      placement: request.placement,
-      context: itemContext,
-      copy: imageCopy,
-      reserveLogoArea,
-    });
+    imageResult = copyMode.kind === 'LEGACY'
+      ? await generateLegacyApprovedTraReferenceCreativeImage({
+          taxDocumentReference: item.strategy.execution.taxDocumentReference,
+          source: itemImageSource.stored,
+          primaryFormat: item.format,
+          placement: request.placement,
+          context: itemContext,
+          copy,
+          reserveLogoArea,
+        })
+      : await generateApprovedTraReferenceCreativeImage({
+          taxDocumentReference: item.strategy.execution.taxDocumentReference,
+          source: itemImageSource.stored,
+          primaryFormat: item.format,
+          placement: request.placement,
+          context: itemContext,
+          copy: copyMode.imageCopy,
+          reserveLogoArea,
+        });
   } else if (itemVideoFrames) {
-    const videoImageResult = await generateApprovedTraVideoFrameCreativeImage({
-      taxDocumentReference: item.strategy.execution.taxDocumentReference,
-      frames: itemVideoFrames.frames,
-      primaryFormat: item.format,
-      placement: request.placement,
-      context: itemContext,
-      copy: imageCopy,
-      reserveLogoArea,
-    });
+    const videoImageResult = copyMode.kind === 'LEGACY'
+      ? await generateLegacyApprovedTraVideoFrameCreativeImage({
+          taxDocumentReference: item.strategy.execution.taxDocumentReference,
+          frames: itemVideoFrames.frames,
+          primaryFormat: item.format,
+          placement: request.placement,
+          context: itemContext,
+          copy,
+          reserveLogoArea,
+        })
+      : await generateApprovedTraVideoFrameCreativeImage({
+          taxDocumentReference: item.strategy.execution.taxDocumentReference,
+          frames: itemVideoFrames.frames,
+          primaryFormat: item.format,
+          placement: request.placement,
+          context: itemContext,
+          copy: copyMode.imageCopy,
+          reserveLogoArea,
+        });
     imageResult = videoImageResult;
     providerFrames = videoImageResult.providerFrames;
   } else {
-    imageResult = await generatePromptOnlyCreativeImage({
-      taxDocumentReference: item.strategy.execution.taxDocumentReference,
-      primaryFormat: item.format,
-      placement: request.placement,
-      context: itemContext,
-      copy: imageCopy,
-      reserveLogoArea,
-      operationType: item.strategy.referenceSelection?.layoutSource ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
-    });
+    imageResult = copyMode.kind === 'LEGACY'
+      ? await generateLegacyPromptOnlyCreativeImage({
+          taxDocumentReference: item.strategy.execution.taxDocumentReference,
+          primaryFormat: item.format,
+          placement: request.placement,
+          context: itemContext,
+          copy,
+          reserveLogoArea,
+          operationType: item.strategy.referenceSelection?.layoutSource ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
+        })
+      : await generatePromptOnlyCreativeImage({
+          taxDocumentReference: item.strategy.execution.taxDocumentReference,
+          primaryFormat: item.format,
+          placement: request.placement,
+          context: itemContext,
+          copy: copyMode.imageCopy,
+          reserveLogoArea,
+          operationType: item.strategy.referenceSelection?.layoutSource ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
+        });
   }
 
   await validateGeneratedCreativeImage(imageResult.buffer, request.placement);
@@ -170,8 +215,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     placement: request.placement,
     image,
     copy,
-    adCopy,
-    imageCopy,
+    ...(copyMode.kind === 'E2' ? { adCopy: copyMode.adCopy, imageCopy: copyMode.imageCopy } : {}),
     generationProvenance,
     identity,
     planning: {
