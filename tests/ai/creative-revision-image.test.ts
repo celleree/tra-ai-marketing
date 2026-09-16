@@ -59,6 +59,39 @@ describe('revision image provider', () => {
     expect(result.prompt).not.toContain('PRIVATE_COMPANY_SUMMARY');
     expect(result.prompt).not.toContain('Current approved company context');
   });
+  it.each(['EDIT', 'PLACEMENT', 'REGENERATE', 'VARIATION'] as const)('sends only imageCopy to the actual %s provider prompt for E2 revisions', async operation => {
+    const input = args();
+    const adCopy = {
+      primaryText: 'META_PRIMARY_SENTINEL_NEVER_IMAGE',
+      headline: 'META_HEADLINE_SENTINEL_NEVER_IMAGE',
+      description: 'META_DESCRIPTION_SENTINEL_NEVER_IMAGE',
+    };
+    input.operation = operation;
+    input.concept = { ...input.concept, copy: adCopy, adCopy,
+      imageCopy: { headline: 'IMAGE_HEADLINE_SENTINEL', shortSupport: 'IMAGE_SUPPORT_SENTINEL', cta: 'IMAGE_CTA_SENTINEL' } };
+    await generateCreativeRevisionImage(input);
+    const prompt = body().get('prompt') as string;
+    expect(prompt).toContain('IMAGE_HEADLINE_SENTINEL');
+    expect(prompt).toContain('IMAGE_SUPPORT_SENTINEL');
+    expect(prompt).toContain('IMAGE_CTA_SENTINEL');
+    expect(prompt).not.toContain('META_PRIMARY_SENTINEL_NEVER_IMAGE');
+    expect(prompt).not.toContain('META_HEADLINE_SENTINEL_NEVER_IMAGE');
+    expect(prompt).not.toContain('META_DESCRIPTION_SENTINEL_NEVER_IMAGE');
+  });
+  it('rejects invalid separated copy before image-provider work', async () => {
+    const cases = [
+      { adCopy: { primaryText: 'Meta only', headline: 'Meta only', description: '' } },
+      { imageCopy: { headline: 'Image only' } },
+      { adCopy: { primaryText: 'Mismatch', headline: 'Mismatch', description: '' }, imageCopy: { headline: 'Image copy' } },
+    ];
+    for (const separated of cases) {
+      fetchMock.mockClear();
+      const input = args();
+      input.concept = { ...input.concept, ...separated } as Args['concept'];
+      await expect(generateCreativeRevisionImage(input)).rejects.toThrow('invalid separated ad/image copy contract');
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
   it('attaches the original reference separately and leaves original logo for server compositing', async () => {
     const input = args();
     input.sources.originalApprovedSource = { kind: 'TRA_REFERENCE', sha256: 'b'.repeat(64), source: { stored: { buffer: Buffer.from('original'), mimeType: 'image/png', fileName: 'original.png' } } as EligibleProviderImageSource };
