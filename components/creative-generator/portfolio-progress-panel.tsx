@@ -26,9 +26,9 @@ export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<ty
       {' · '}{job.videoPreparation.busy ? 'Current video step in progress' : videoLabel[job.videoPreparation.phase]}</p> : null}
     <p className="muted">Resume uses this portfolio’s saved brief and sources.</p>
     <div className={styles.actions}>
-      {portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.pausing} onClick={portfolio.pause}>
-        {portfolio.pausing ? 'Pausing after current work…' : 'Pause after current work'}
-      </button> : portfolioCanAdvance(job) ? <button type="button" className="button button-primary" onClick={() => void portfolio.resume()}>Resume portfolio</button> : null}
+      {portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.stopped} onClick={portfolio.stop}>
+        {portfolio.stopped ? 'Stopping generation…' : 'Stop generation'}
+      </button> : portfolioCanAdvance(job) ? <button type="button" className="button button-primary" onClick={() => void portfolio.resume()}>Resume generation</button> : null}
       <a href={`?portfolio=${job.id}`} target="_blank" rel="noreferrer">Open saved portfolio</a>
     </div>
     {job.planningError || failed.length ? <div className={styles.failures}>
