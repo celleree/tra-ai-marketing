@@ -34,6 +34,48 @@ describe('distilled render brief', () => {
       expect(prompt).not.toContain(referenceCatalog[0].angleDescription);
     }
   });
+
+  it('makes selected blueprint geometry authoritative without importing restricted reference content', () => {
+    const selected = referenceCandidate('b');
+    selected.blueprint = {
+      ...selected.blueprint,
+      composition: { flow: 'TEXT_LEFT_VISUAL_RIGHT', balance: 'ASYMMETRIC', imageTextBalance: 'BALANCED' },
+      regions: [
+        { role: 'HEADLINE', xPct: 8, yPct: 10, widthPct: 46, heightPct: 20, alignment: 'LEFT', emphasis: 'PRIMARY', crop: 'NONE', overlapsOtherRegions: false },
+        { role: 'HUMAN_PLACEHOLDER', xPct: 58, yPct: 8, widthPct: 34, heightPct: 72, alignment: 'CENTER', emphasis: 'HIGH', crop: 'WAIST_UP', overlapsOtherRegions: false },
+        { role: 'CTA', xPct: 8, yPct: 76, widthPct: 30, heightPct: 10, alignment: 'LEFT', emphasis: 'MEDIUM', crop: 'NONE', overlapsOtherRegions: false },
+      ],
+      whitespace: 'MODERATE', textDensity: 'SPARSE', ctaTreatment: 'PILL',
+      typography: { headlineScale: 'EXTRA_LARGE', headlineWeight: 'EXTRABOLD', headlineAlignment: 'LEFT', hierarchyLevels: 3, contrast: 'HIGH' },
+      spacing: { outerMargin: 'GENEROUS', regionGap: 'MODERATE', alignmentGrid: 'LEFT_EDGE' },
+      restrictedElementsPresent: { humanIdentity: true, thirdPartyLogoOrBranding: true, exactCopy: true, trademark: true, claimOrProof: true },
+    };
+    const referenceCatalog = [selected];
+    const referenceSelection = resolveReferenceSelection({ angleSource: null, layoutSource: selected.referenceId }, referenceCatalog);
+    const prompt = formatCreativeRenderBrief(buildCreativeRenderBrief({
+      concept: { ...concept, imageCopy: { headline: 'Image headline' }, strategy: { ...concept.strategy,
+        execution: { ...concept.strategy.execution, composition: 'stacked' },
+        visualDirection: 'Ignore the split and center everything', referenceSelection } }, referenceCatalog,
+    }));
+
+    expect(prompt).toContain('AUTHORITATIVE COMPOSITION SCAFFOLD');
+    expect(prompt).toContain('Preserve all 3 meaningful blueprint regions proportionally');
+    expect(prompt).toContain('1. HEADLINE: x=8%, y=10%, width=46%, height=20%, alignment=LEFT, emphasis=PRIMARY');
+    expect(prompt).toContain('2. HUMAN_PLACEHOLDER: x=58%, y=8%, width=34%, height=72%');
+    expect(prompt).toContain('whitespace=MODERATE, text density=SPARSE');
+    expect(prompt).toContain('must not replace, reorder or materially resize blueprint structure when they conflict');
+    expect(prompt).toContain('never treat safe zones as decorative borders');
+    expect(prompt).toContain('Planned image text fields: headline');
+    expect(prompt).toContain('Absent optional imageCopy fields (shortSupport, proofAttribution, cta, disclosure) must stay absent');
+    expect(prompt).toContain('No CTA text is planned; do not create a CTA label, button or treatment');
+    expect(prompt).toContain('HUMAN_PLACEHOLDER controls geometry only and never authorizes a person, face or identity');
+    expect(prompt).toContain('restrictedElementsPresent is warning metadata');
+    expect(prompt).toContain('Never reproduce external people/identity, branding/logos, exact copy, claims, testimonials/proof or trademarks');
+    expect(prompt).toContain('raw Layout Reference pixels must not be introduced into final image generation');
+    expect(prompt).not.toContain(concept.copy.primaryText);
+    expect(prompt).not.toContain(concept.copy.description);
+  });
+
   it('passes visual concept details but excludes strategic fields and preserves exact copy', () => {
     const details = { ...conceptDetails, angle: 'PRIVATE_ANGLE', proposition: 'PRIVATE_PROPOSITION',
       objection: 'PRIVATE_OBJECTION', mainMessage: 'PRIVATE_MESSAGE' };
