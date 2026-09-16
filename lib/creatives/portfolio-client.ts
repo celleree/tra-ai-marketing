@@ -51,21 +51,23 @@ export async function runPortfolio(
     const parentBusy = Boolean(current.job.lease && current.job.lease.expiresAtMs > Date.now());
     const polling = parentBusy || current.job.videoPreparation?.busy === true;
     if (polling) { await wait(POLL_DELAY_MS); if (shouldStop()) break; }
-    const next = await requestPortfolio({ action: parentBusy ? 'load' : 'advance', id: current.job.id });
-    if (next.job.requestedCount !== current.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
+    const previous = current;
+    const next = await requestPortfolio({ action: parentBusy ? 'load' : 'advance', id: previous.job.id });
+    if (next.job.requestedCount !== previous.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
     onUpdate(next);
+    current = next;
     if (next.retryAfterMs !== undefined) {
-      current = next;
+      if (shouldStop()) break;
       await wait(next.retryAfterMs);
       if (shouldStop()) break;
       continue;
     }
-    const newFailedSlot = next.job.slots.some((slot, index) => slot.status === 'RETRY_REQUIRED' && current.job.slots[index].status !== 'RETRY_REQUIRED');
+    const newFailedSlot = next.job.slots.some((slot, index) => slot.status === 'RETRY_REQUIRED' && previous.job.slots[index].status !== 'RETRY_REQUIRED');
     if (next.error && !(newFailedSlot && next.job.planReady && !next.job.lease && portfolioCanAdvance(next.job))) throw new Error(next.error);
-    if (!polling && !next.job.lease && JSON.stringify(next.job) === JSON.stringify(current.job) && portfolioCanAdvance(next.job)) {
+    if (!polling && !next.job.lease && JSON.stringify(next.job) === JSON.stringify(previous.job) && portfolioCanAdvance(next.job)) {
       throw new Error('Portfolio progress did not advance. Reload saved progress before resuming.');
     }
-    current = next;
+    if (shouldStop()) break;
   }
   return current;
 }
