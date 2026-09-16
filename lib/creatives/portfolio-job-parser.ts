@@ -13,7 +13,7 @@ import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-prepar
 import { parsePlanningSourceAnalysis, validAnalysis, validSourceLayout } from '@/lib/creatives/planning-source-parser';
 import { videoPlanningSelectorBinding } from '@/lib/creatives/video-intelligence-planning';
 import { parseReferenceCatalog } from '@/lib/references/planning';
-import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS } from '@/lib/video/approved-human';
+import { isApprovedHumanId } from '@/lib/video/approved-human';
 import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
@@ -160,7 +160,6 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
     || !isDeepStrictEqual(args.sourceAnalysis, checkpoint.snapshot.sourceAnalysis)
     || (args.sourceAnalysis !== undefined && !validVideoSelectorBindings(args.sourceAnalysis, job.request.context))) return false;
   if (args.approvedHumanOptions !== undefined && (!Array.isArray(args.approvedHumanOptions)
-    || args.approvedHumanOptions.length > MAX_APPROVED_HUMAN_OPTIONS
     || new Set(args.approvedHumanOptions.map(option => option?.id)).size !== args.approvedHumanOptions.length
     || args.approvedHumanOptions.some(option => !record(option) || !isApprovedHumanId(option.id)
       || !text(option.sourceName) || !text(option.description)))) return false;
