@@ -38,7 +38,8 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 describe('approved-human planner pool', () => {
   it('sends more than eight validated approved-human options to Astra and accepts the last option', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const fetchMock = vi.fn(async () => okResponse({ creatives: [concept(1, options[9].id), concept(2, null)] }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      okResponse({ creatives: [concept(1, options[9].id), concept(2, null)] }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await requestCreativeBatch({
