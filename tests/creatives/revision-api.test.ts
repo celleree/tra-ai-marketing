@@ -90,7 +90,7 @@ describe('saved creative revision API', () => {
     expect(creative.generationProvenance).toMatchObject({ imageGeneration: { prompt: 'actual revision prompt', model: 'gpt-image-2.5-sunburst', routing: { preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false } }, revision: { parentCreativeId: parentId, canvasMediaId: mediaId, canvasSha256: 'c'.repeat(64) } });
     expect(mocks.plan).not.toHaveBeenCalled();
     expect(mocks.save.mock.calls[0][0]).toHaveLength(1);
-    expect(mocks.list.mock.results[0].value).resolves.toEqual([original]);
+    await expect(mocks.list.mock.results[0].value).resolves.toEqual([original]);
   });
   it.each(['REGENERATE', 'PLACEMENT'] as const)('preserves separated E2 copy through saved %s revisions', async operation => {
     const original = e2Parent();
