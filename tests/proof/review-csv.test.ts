@@ -15,6 +15,7 @@ describe('parseReviewCsv', () => {
       rating: 4.5,
       tags: ['service', 'favorite'],
     });
+    expect(review).not.toHaveProperty('advertisingUseApproved');
   });
 
   it('accepts a BOM on the first header while preserving review text exactly', () => {
