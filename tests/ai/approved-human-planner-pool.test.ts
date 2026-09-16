@@ -27,7 +27,7 @@ const concept = (index: number, approvedHumanId: string | null) => ({
 });
 const payload = (value: unknown) => ({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
 const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value)), { status: 200 });
-const options = Array.from({ length: 10 }, (_, index) => ({
+const options = Array.from({ length: 251 }, (_, index) => ({
   id: `human_${(index + 1).toString(16).padStart(64, '0')}`,
   sourceName: `TRA source ${index + 1}`,
   description: `Approved presenter ${index + 1}`,
@@ -36,22 +36,29 @@ const options = Array.from({ length: 10 }, (_, index) => ({
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('approved-human planner pool', () => {
-  it('sends more than eight validated approved-human options to Astra and accepts the last option', async () => {
+  it('sends 251 validated options to Astra without a dynamic schema enum and accepts the final option', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      okResponse({ creatives: [concept(1, options[9].id), concept(2, null)] }));
+      okResponse({ creatives: [concept(1, options[250].id), concept(2, null)] }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await requestCreativeBatch({
       count: 2, context: 'Approved context', analysis, hasApprovedHumanSource: false, approvedHumanOptions: options,
     });
 
-    expect(result.creatives[0].strategy.approvedHumanId).toBe(options[9].id);
+    expect(result.creatives[0].strategy.approvedHumanId).toBe(options[250].id);
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     const input = JSON.parse(body.input[1].content[0].text);
     expect(input.approvedHumanOptions).toEqual(options);
-    expect(body.text.format.schema.properties.creatives.items.properties.approvedHumanId.enum)
-      .toEqual([null, ...options.map(option => option.id)]);
+    expect(input.approvedHumanOptions).toHaveLength(251);
+
+    const itemSchema = body.text.format.schema.properties.creatives.items;
+    expect(itemSchema.required).toContain('approvedHumanId');
+    const approvedHumanIdSchema = itemSchema.properties.approvedHumanId;
+    expect(approvedHumanIdSchema).toMatchObject({ type: ['string', 'null'] });
+    expect(approvedHumanIdSchema).not.toHaveProperty('enum');
+    expect(JSON.stringify(approvedHumanIdSchema)).not.toContain(options[0].id);
+    expect(JSON.stringify(approvedHumanIdSchema)).not.toContain(options[250].id);
   });
 
   it.each([

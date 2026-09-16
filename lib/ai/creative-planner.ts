@@ -217,7 +217,10 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
               strategy: CREATIVE_STRATEGY_JSON_SCHEMA,
               selectionReason: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
               index: { type: 'integer', minimum: 1, maximum: args.count },
-              ...(args.approvedHumanOptions ? { approvedHumanId: { type: ['string', 'null'], enum: [null, ...args.approvedHumanOptions.map(option => option.id)] } } : {}),
+              ...(args.approvedHumanOptions ? { approvedHumanId: {
+                type: ['string', 'null'],
+                description: 'Return null or exactly one ID from approvedHumanOptions supplied in the user input.',
+              } } : {}),
               ...(args.referenceCatalog ? { referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) } : {}),
             },
           }, minItems: args.count, maxItems: args.count },
