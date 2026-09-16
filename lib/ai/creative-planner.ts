@@ -167,7 +167,7 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
   if (args.approvedHumanOptions && (args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
-    throw new Error('Invalid approved-human options.');
+    throw new Error('Invalid approved-human options: IDs must be valid and unique; option count is not bounded.');
   }
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
