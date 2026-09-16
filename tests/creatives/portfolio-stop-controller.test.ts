@@ -28,6 +28,26 @@ describe('portfolio Stop controller semantics', () => {
     expect(update).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it('does not let Stop suppress an ordinary in-flight server error', async () => {
+    const value = initial(), pending = deferredResponse(), fetchMock = vi.fn(() => pending.promise);
+    vi.stubGlobal('fetch', fetchMock); let stopped = false; const update = vi.fn();
+    const running = runPortfolio(value, update, () => stopped);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    stopped = true; pending.resolve(Response.json({ ...value, error: 'Quota reached' }, { status: 429 }));
+    await expect(running).rejects.toThrow('Quota reached');
+    expect(update).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not let Stop suppress unchanged ordinary progress validation', async () => {
+    const value = initial(), pending = deferredResponse(), fetchMock = vi.fn(() => pending.promise);
+    vi.stubGlobal('fetch', fetchMock); let stopped = false; const update = vi.fn();
+    const running = runPortfolio(value, update, () => stopped);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    stopped = true; pending.resolve(Response.json(value));
+    await expect(running).rejects.toThrow('Portfolio progress did not advance');
+    expect(update).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('does not begin another advance when Stop is requested as a successful response is applied', async () => {
     const value = initial(), next = progressed(value), fetchMock = vi.fn().mockResolvedValue(Response.json(next));
     vi.stubGlobal('fetch', fetchMock); let stopped = false;
