@@ -1,6 +1,6 @@
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { hydrateCreativeSourceSelections } from '@/lib/media/source-hydration';
-import { MAX_APPROVED_HUMAN_OPTIONS, type ApprovedHumanOption } from '@/lib/video/approved-human';
+import type { ApprovedHumanOption } from '@/lib/video/approved-human';
 import { listApprovedHumanFrames } from '@/lib/video/approved-human-store';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { videoSourceHash } from '@/lib/video/library-service';
@@ -17,14 +17,13 @@ export async function loadApprovedHumanOptions(): Promise<ApprovedHumanOption[]>
     return [];
   }
   const records = available.filter(record => record.active)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)).slice(0, 24);
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   const sourceContexts = new Map<string, Promise<{ hash: string; context: Awaited<ReturnType<typeof loadVideoSelectionContext>> } | null>>();
   const result: ApprovedHumanOption[] = [];
   const pngs = new Set<string>();
   for (const record of records) {
     const mediaId = record.source.sourceVideoMediaId;
     if (!sourceContexts.has(mediaId)) {
-      if (sourceContexts.size >= MAX_APPROVED_HUMAN_OPTIONS) continue;
       sourceContexts.set(mediaId, (async () => {
         try {
           const [source] = await hydrateCreativeSourceSelections(getMediaStorage(), [{ mediaId, role: 'TRA_VIDEO' }]);
@@ -41,7 +40,6 @@ export async function loadApprovedHumanOptions(): Promise<ApprovedHumanOption[]>
       || pngs.has(expected.approvedPngSha256)) continue;
     pngs.add(expected.approvedPngSha256);
     result.push({ id: record.id, sourceName: record.sourceName, description: record.description });
-    if (result.length === MAX_APPROVED_HUMAN_OPTIONS) break;
   }
   return result;
 }
