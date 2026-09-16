@@ -245,7 +245,9 @@ describe('creative batch planner', () => {
     expect(result.creatives[1].strategy).not.toHaveProperty('approvedHumanId');
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(JSON.parse(body.input[1].content[0].text).approvedHumanOptions).toEqual(approvedHumanOptions);
-    expect(body.text.format.schema.properties.creatives.items.properties.approvedHumanId.enum).toEqual([null, id]);
+    const approvedHumanIdSchema = body.text.format.schema.properties.creatives.items.properties.approvedHumanId;
+    expect(approvedHumanIdSchema).toMatchObject({ type: ['string', 'null'] });
+    expect(approvedHumanIdSchema).not.toHaveProperty('enum');
     expect(body.input[0].content[0].text).toContain('face availability alone is insufficient');
     creatives = [{ ...concept(1, 'approved-tra-human'), approvedHumanId: null }, { ...concept(2), approvedHumanId: null }];
     await expect(planCreativeBatch(args)).rejects.toThrow('invalid');
