@@ -4,8 +4,23 @@ import type {
   CreativeImageCopy,
 } from '@/lib/creatives/generated';
 
+const MAX_MODERN_COPY_LENGTH = 1000;
+const MODERN_COPY_KEYS = ['primaryText', 'headline', 'description'] as const;
+const MODERN_IMAGE_COPY_KEYS = [
+  'headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure',
+] as const;
+const OPTIONAL_IMAGE_COPY_KEYS = MODERN_IMAGE_COPY_KEYS.slice(1);
+const MODERN_COPY_KEY_SET = new Set<string>(MODERN_COPY_KEYS);
+const MODERN_IMAGE_COPY_KEY_SET = new Set<string>(MODERN_IMAGE_COPY_KEYS);
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
+const hasOwn = (value: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(value, key);
+const isModernString = (value: unknown, nonblank = false) =>
+  typeof value === 'string' &&
+  value.length <= MAX_MODERN_COPY_LENGTH &&
+  (!nonblank || value.trim().length > 0);
 
 export const parseCreativeAdCopy = (value: unknown): CreativeAdCopy | null => {
   if (!isRecord(value)) return null;
@@ -52,6 +67,33 @@ export const parseCreativeImageCopy = (
   };
 };
 
+const parseModernAdCopy = (value: unknown): CreativeAdCopy | null => {
+  const parsed = parseCreativeAdCopy(value);
+  if (!parsed || !isRecord(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length !== MODERN_COPY_KEYS.length ||
+    keys.some((key) => !MODERN_COPY_KEY_SET.has(key))
+  ) return null;
+  return isModernString(parsed.primaryText, true) &&
+    isModernString(parsed.headline, true) &&
+    isModernString(parsed.description) ? parsed : null;
+};
+
+const parseModernImageCopy = (value: unknown): CreativeImageCopy | null => {
+  const parsed = parseCreativeImageCopy(value);
+  if (
+    !parsed ||
+    !isRecord(value) ||
+    Object.keys(value).some((key) => !MODERN_IMAGE_COPY_KEY_SET.has(key))
+  ) return null;
+  if (!isModernString(parsed.headline, true)) return null;
+  for (const key of OPTIONAL_IMAGE_COPY_KEYS) {
+    if (hasOwn(value, key) && !isModernString(value[key], true)) return null;
+  }
+  return parsed;
+};
+
 const adCopyMatches = (copy: CreativeCopy, adCopy: CreativeAdCopy) =>
   copy.primaryText === adCopy.primaryText &&
   copy.headline === adCopy.headline &&
@@ -64,25 +106,24 @@ export const parseCreativeCopyContract = (
   adCopy?: CreativeAdCopy;
   imageCopy?: CreativeImageCopy;
 } | null => {
-  const copy = parseCreativeAdCopy(value.copy);
-  if (!copy) return null;
+  const hasAdCopy = hasOwn(value, 'adCopy');
+  const hasImageCopy = hasOwn(value, 'imageCopy');
 
-  const adCopy =
-    value.adCopy === undefined ? undefined : parseCreativeAdCopy(value.adCopy);
-  if (value.adCopy !== undefined && !adCopy) return null;
-  if (adCopy && !adCopyMatches(copy, adCopy)) return null;
+  if (!hasAdCopy && !hasImageCopy) {
+    const copy = parseCreativeAdCopy(value.copy);
+    return copy ? { copy } : null;
+  }
 
-  const imageCopy =
-    value.imageCopy === undefined
-      ? undefined
-      : parseCreativeImageCopy(value.imageCopy);
-  if (value.imageCopy !== undefined && !imageCopy) return null;
+  if (!hasAdCopy || !hasImageCopy) return null;
 
-  return {
-    copy,
-    ...(adCopy ? { adCopy } : {}),
-    ...(imageCopy ? { imageCopy } : {}),
-  };
+  const copy = parseModernAdCopy(value.copy);
+  const adCopy = parseModernAdCopy(value.adCopy);
+  const imageCopy = parseModernImageCopy(value.imageCopy);
+  if (!copy || !adCopy || !imageCopy || !adCopyMatches(copy, adCopy)) {
+    return null;
+  }
+
+  return { copy, adCopy, imageCopy };
 };
 
 export type CreativeCopyContractMode =
