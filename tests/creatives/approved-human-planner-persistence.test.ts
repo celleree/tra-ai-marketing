@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { claimCreativePortfolio, finishPortfolioInitialPlan } from '@/lib/creatives/portfolio-job';
+import {
+  checkpointPortfolioPreparation,
+  claimCreativePortfolio,
+  finishPortfolioInitialPlan,
+} from '@/lib/creatives/portfolio-job';
 import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 
@@ -18,6 +22,11 @@ describe('approved-human planner checkpoint persistence', () => {
     const storage = new MemoryPortfolioStorage();
     const job = await createCreativePortfolio(portfolioRequest(), storage, 1000);
     await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, 2000, 'plan').job, storage);
+    await updateCreativePortfolio(
+      job.id,
+      current => checkpointPortfolioPreparation(current, 'plan', { quotaReserved: true }, 2500),
+      storage,
+    );
     const planned = portfolioSnapshot(job);
     const { portfolioAudit: _audit, ...batchPlan } = planned.batchPlan;
     const checkpoint = {
