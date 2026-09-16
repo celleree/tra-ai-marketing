@@ -84,12 +84,16 @@ const baseState = (sources: ReturnType<typeof videoSource>[]): PlanningSourceAna
     evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'LAYOUT_BLUEPRINT', layout: {
       blueprint: referenceCandidate().blueprint, contentHash: layout.sha256, analyzerModel: 'layout-model', cacheHit: true } } }] };
 };
-const plannedConcept = (index: number) => ({ index, format: 'educational', copy: { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' },
-  selectionReason: `Reason ${index}`, strategy: { conceptDetails, category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer',
-    painPoint: 'Uncertainty', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Understand options', cta: 'Talk with TRA', offer: null,
-    soWhat: { surfaceMessage: `Message ${index}`, functionalConsequence: 'See options', meaningfulOutcome: 'Move forward' },
-    execution: { taxDocumentReference: 'none', subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low',
-      ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'Simple graphic' } });
+const plannedConcept = (index: number) => {
+  const adCopy = { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' };
+  return { index, format: 'educational', copy: adCopy, adCopy: { ...adCopy },
+    imageCopy: { headline: `Headline ${index}`, cta: 'Talk with TRA' },
+    selectionReason: `Reason ${index}`, strategy: { conceptDetails, category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer',
+      painPoint: 'Uncertainty', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Understand options', cta: 'Talk with TRA', offer: null,
+      soWhat: { surfaceMessage: `Message ${index}`, functionalConsequence: 'See options', meaningfulOutcome: 'Move forward' },
+      execution: { taxDocumentReference: 'none', subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low',
+        ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'Simple graphic' } };
+};
 const ok = () => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ creatives: [plannedConcept(1), plannedConcept(2)] }) }] }] }), { status: 200 });
 const legacyContext = (source: ReturnType<typeof videoSource>, value = library(source, 30)): VideoPlanningContextV1 => {
   const saved = dependency(source), indexes = (total: number, limit: number) => Array.from({ length: Math.min(total, limit) }, (_, index) =>

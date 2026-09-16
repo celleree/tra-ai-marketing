@@ -9,7 +9,7 @@ import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
-import type { CreativeCopy } from '@/lib/creatives/generated';
+import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import { MAX_PORTFOLIO_CREATIVES, type CreativeBatchPlan, type PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
   CREATIVE_STRATEGY_JSON_SCHEMA,
@@ -18,16 +18,17 @@ import {
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const MAX_TEXT_LENGTH = 1000;
-// Compact per-concept allowance: ~1,024 tokens for the 3 copy fields, 20 strategy/
-// concept text fields, selection rationale, enums/IDs and JSON; 512 for reasoning
-// and detail variance. Retain 4,096 batch reasoning tokens (Responses counts both).
+// Compact per-concept allowance: Meta copy, image copy, strategy/concept fields,
+// selection rationale, enums/IDs and JSON; retain batch reasoning headroom.
 const planningOutputTokens = (count: number) => 4096 + 1536 * count;
 
 const PLANNER_RULES = `
 Plan a batch of original static Meta ad concepts for Tax Relief Advocates (TRA).
 ${TAX_DOCUMENT_PLANNING_GUIDANCE}
 Consider alternatives internally; return the strongest concepts first. Select distinct fits to approved TRA context, without performance predictions or calling concepts likely winners.
-The SO WHAT outcome chain must directly shape both the copy and visualDirection for every concept.
+The SO WHAT outcome chain must directly shape both Meta adCopy and imageCopy plus visualDirection for every concept.
+Write adCopy and imageCopy separately. adCopy is normal Meta delivery copy: primaryText, headline and description. imageCopy contains only text intentionally rendered inside the creative: a concise headline plus optional shortSupport, proofAttribution, cta and disclosure.
+Keep imageCopy as sparse as the planned/reference text density allows. Omit shortSupport and cta when unnecessary. Never add supporting copy merely to fill space. Simple visual concepts should remain simple. proofAttribution may only repeat explicitly approved attribution supplied in approved company context; otherwise set it to null. disclosure is only for an actually applicable required disclosure; otherwise set it to null. Never move Meta primaryText or Meta description into imageCopy merely because those fields exist in adCopy.
 Plan proposition first: angle is strategic framing; proposition is the particular reason to care or act, not a category. Connect mainMessage and objection (null if none) to painPoint, emotion, awareness and SO WHAT.
 Make visualArchetype, visualMechanism, subject and environment explicit and consistent with execution. Specify the mechanism making the proposition visible and exact subjects/props; a graphic field is an environment. These directions never add copy or evidence.
 Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Avoid default desks, paper or next-step messaging.
@@ -35,7 +36,7 @@ Plan globally distinct problem/outcome framings, objections, emotions, awareness
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
-Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, or other evidence.
+Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, proof attribution, or other evidence.
 Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
 Do not restrict concepts to the analysis category.
 Return exactly the requested count with sequential indexes beginning at 1.
@@ -91,6 +92,12 @@ const parseRequiredText = (value: unknown) => {
   const text = value.trim();
   return text && text.length <= MAX_TEXT_LENGTH ? text : null;
 };
+const parseOptionalText = (value: unknown) => {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length > MAX_TEXT_LENGTH) return null;
+  const text = value.trim();
+  return text || undefined;
+};
 
 const parseConcept = (
   value: unknown,
@@ -99,12 +106,25 @@ const parseConcept = (
   referenceCatalog?: ReferencePlanningCandidate[],
   approvedHumanOptions?: ApprovedHumanOption[]
 ): PlannedCreativeConcept | null => {
-  if (!isRecord(value) || !hasOnly(value, ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['approvedHumanId'] : [])])) return null;
+  const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['approvedHumanId'] : [])];
+  if (!isRecord(value) || (!hasOnly(value, expectedKeys) && !hasOnly(value, [...expectedKeys, 'copy']))) return null;
   if (value.index !== expectedIndex || typeof value.format !== 'string' || !isCreativeFormat(value.format)) return null;
-  if (!isRecord(value.copy) || !hasOnly(value.copy, ['primaryText', 'headline', 'description'])) return null;
-  const primaryText = parseRequiredText(value.copy.primaryText);
-  const headline = parseRequiredText(value.copy.headline);
-  if (!primaryText || !headline || typeof value.copy.description !== 'string' || value.copy.description.length > MAX_TEXT_LENGTH) return null;
+  if (!isRecord(value.adCopy) || !hasOnly(value.adCopy, ['primaryText', 'headline', 'description'])) return null;
+  const primaryText = parseRequiredText(value.adCopy.primaryText);
+  const headline = parseRequiredText(value.adCopy.headline);
+  if (!primaryText || !headline || typeof value.adCopy.description !== 'string' || value.adCopy.description.length > MAX_TEXT_LENGTH) return null;
+  if ('copy' in value) {
+    if (!isRecord(value.copy) || !hasOnly(value.copy, ['primaryText', 'headline', 'description'])) return null;
+    if (value.copy.primaryText !== value.adCopy.primaryText || value.copy.headline !== value.adCopy.headline || value.copy.description !== value.adCopy.description) return null;
+  }
+  const imageCopyKeys = ['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure'];
+  if (!isRecord(value.imageCopy) || !('headline' in value.imageCopy) || Object.keys(value.imageCopy).some((key) => !imageCopyKeys.includes(key))) return null;
+  const imageHeadline = parseRequiredText(value.imageCopy.headline);
+  const shortSupport = parseOptionalText(value.imageCopy.shortSupport);
+  const proofAttribution = parseOptionalText(value.imageCopy.proofAttribution);
+  const cta = parseOptionalText(value.imageCopy.cta);
+  const disclosure = parseOptionalText(value.imageCopy.disclosure);
+  if (!imageHeadline || shortSupport === null || proofAttribution === null || cta === null || disclosure === null) return null;
   if (isRecord(value.strategy) && 'approvedHumanId' in value.strategy) return null;
   const humanId = approvedHumanOptions ? value.approvedHumanId : null;
   if (humanId !== null && (!isApprovedHumanId(humanId) || !approvedHumanOptions?.some(option => option.id === humanId))) return null;
@@ -118,8 +138,15 @@ const parseConcept = (
   if (referenceCatalog) {
     try { strategy.referenceSelection = resolveReferenceSelection(value.referenceChoices, referenceCatalog); } catch { return null; }
   }
-  const copy: CreativeCopy = { primaryText, headline, description: value.copy.description.trim() };
-  return { index: expectedIndex, format: value.format, copy, strategy, selectionReason };
+  const adCopy: CreativeAdCopy = { primaryText, headline, description: value.adCopy.description.trim() };
+  const imageCopy: CreativeImageCopy = {
+    headline: imageHeadline,
+    ...(shortSupport ? { shortSupport } : {}),
+    ...(proofAttribution ? { proofAttribution } : {}),
+    ...(cta ? { cta } : {}),
+    ...(disclosure ? { disclosure } : {}),
+  };
+  return { index: expectedIndex, format: value.format, copy: adCopy, adCopy, imageCopy, strategy, selectionReason };
 };
 
 export type CreativeBatchPlannerArgs = {
@@ -171,16 +198,22 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
       ],
       text: { format: { type: 'json_schema', name: 'tra_creative_batch_plan', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['creatives'], properties: {
-          // Keep invariant schema content before request-specific counts/ID enums.
           creatives: { type: 'array', items: {
             type: 'object', additionalProperties: false,
-            required: ['index', 'format', 'copy', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['approvedHumanId'] : [])],
+            required: ['index', 'format', 'adCopy', 'imageCopy', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['approvedHumanId'] : [])],
             properties: {
               format: { type: 'string', enum: CREATIVE_FORMATS },
-              copy: { type: 'object', additionalProperties: false, required: ['primaryText', 'headline', 'description'], properties: {
+              adCopy: { type: 'object', additionalProperties: false, required: ['primaryText', 'headline', 'description'], properties: {
                 primaryText: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
                 headline: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
                 description: { type: 'string', maxLength: MAX_TEXT_LENGTH },
+              } },
+              imageCopy: { type: 'object', additionalProperties: false, required: ['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure'], properties: {
+                headline: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
+                shortSupport: { type: ['string', 'null'], maxLength: MAX_TEXT_LENGTH },
+                proofAttribution: { type: ['string', 'null'], maxLength: MAX_TEXT_LENGTH },
+                cta: { type: ['string', 'null'], maxLength: MAX_TEXT_LENGTH },
+                disclosure: { type: ['string', 'null'], maxLength: MAX_TEXT_LENGTH },
               } },
               strategy: CREATIVE_STRATEGY_JSON_SCHEMA,
               selectionReason: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },

@@ -174,41 +174,52 @@ const imageTreatments = [
 const plannedCreative = (
   index: number,
   subjectSource: 'approved-tra-human' | 'non-human' = 'non-human'
-) => ({
-  index,
-  format: 'direct-response' as const,
-  copy: {
+) => {
+  const copy = {
     headline: `Headline ${index}`,
-    primaryText: `Primary ${index}`,
-    description: `Description ${index}`,
-  },
-  strategy: {
-    category: 'customer-problems' as const,
-    awarenessStage: awarenessStages[index - 1] || 'action-ready',
-    persona: 'Taxpayer seeking clarity',
-    painPoint: `Unclear tax options ${index}`,
-    desiredOutcome: `A clear next step ${index}`,
-    emotion: 'reassured',
-    hook: `Understand option ${index}`,
-    cta: 'Talk with TRA',
-    offer: null,
-    soWhat: {
-      surfaceMessage: `Surface message ${index}`,
-      functionalConsequence: `Functional consequence ${index}`,
-      meaningfulOutcome: `Meaningful outcome ${index}`,
+    primaryText: `META_PRIMARY_${index}`,
+    description: `META_DESCRIPTION_${index}`,
+  };
+  return {
+    index,
+    format: 'direct-response' as const,
+    copy,
+    adCopy: { ...copy },
+    imageCopy: {
+      headline: `Headline ${index}`,
+      shortSupport: index === 1 ? 'Short support' : '',
+      proofAttribution: '',
+      cta: 'Talk with TRA',
+      disclosure: '',
     },
-    execution: {
-      subjectSource,
-      composition: compositions[index - 1] || 'comparison',
-      imageTreatment: imageTreatments[index - 1] || 'documentary',
-      textDensity: 'medium' as const,
-      ctaTreatment: 'button' as const,
-      typographyHierarchy: 'headline-dominant' as const,
+    strategy: {
+      category: 'customer-problems' as const,
+      awarenessStage: awarenessStages[index - 1] || 'action-ready',
+      persona: 'Taxpayer seeking clarity',
+      painPoint: `Unclear tax options ${index}`,
+      desiredOutcome: `A clear next step ${index}`,
+      emotion: 'reassured',
+      hook: `Understand option ${index}`,
+      cta: 'Talk with TRA',
+      offer: null,
+      soWhat: {
+        surfaceMessage: `Surface message ${index}`,
+        functionalConsequence: `Functional consequence ${index}`,
+        meaningfulOutcome: `Meaningful outcome ${index}`,
+      },
+      execution: {
+        subjectSource,
+        composition: compositions[index - 1] || 'comparison',
+        imageTreatment: imageTreatments[index - 1] || 'documentary',
+        textDensity: 'medium' as const,
+        ctaTreatment: 'button' as const,
+        typographyHierarchy: 'headline-dominant' as const,
+      },
+      visualDirection: `Distinct visual direction ${index}`,
     },
-    visualDirection: `Distinct visual direction ${index}`,
-  },
-  selectionReason: `Distinct strategic fit ${index}`,
-});
+    selectionReason: `Distinct strategic fit ${index}`,
+  };
+};
 const batchPlan = (count: number) => ({
   creatives: Array.from({ length: count }, (_, index) =>
     plannedCreative(index + 1)
@@ -381,6 +392,8 @@ it('uses a seeded document and rich concept from the real planner through render
     expect(prompt).not.toContain('PLANNER_ONLY_SUMMARY');
     expect(prompt).not.toContain('Create compliant TRA concepts.');
     expect(prompt).not.toContain('Distinct strategic fit');
+    expect(prompt).not.toContain('META_PRIMARY_');
+    expect(prompt).not.toContain('META_DESCRIPTION_');
   }
   expect(ordinary.prompt).not.toContain('DOCUMENT-ONLY REFERENCE');
   expect(readMediaById).not.toHaveBeenCalled();
@@ -389,6 +402,8 @@ it('uses a seeded document and rich concept from the real planner through render
   expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.execution.taxDocumentReference).toBe('irs-notice-v1');
   expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.conceptDetails).toEqual(plan.creatives[0].strategy.conceptDetails);
   expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.portfolioAudit).toEqual(portfolioAudit());
+  expect(saved.copy).toEqual(saved.adCopy);
+  expect(saved.imageCopy).toMatchObject({ headline: 'Headline 1', shortSupport: 'Short support', cta: 'Talk with TRA' });
   expect(saved.generationProvenance.imageGeneration.prompt).not.toContain(portfolioAudit().executionNotes);
   expect(saved.generationProvenance.imageGeneration.prompt).toContain(TAX_DOCUMENT_REFERENCES[0].sha256);
 });
@@ -407,7 +422,7 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
     primaryFormat: 'direct-response',
     placement,
     context: 'Approved prompt-only context',
-    copy: { headline: 'Headline', primaryText: 'Primary', description: 'Description' },
+    copy: { headline: 'Image headline', shortSupport: 'Short support', cta: 'Learn more' },
     reserveLogoArea: placement === 'VERTICAL_9_16',
   });
   const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
@@ -417,6 +432,11 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
   expect(result.model).toBe(body.model);
   expect(body.model).toBe('gpt-image-2.5-sunburst');
   expect(result.routing).toMatchObject({ operationType: 'PROMPT_GENERATION', fallbackUsed: false });
+  expect(body.prompt).toContain('Image headline');
+  expect(body.prompt).toContain('Short support');
+  expect(body.prompt).toContain('Learn more');
+  expect(body.prompt).not.toContain('Primary text:');
+  expect(body.prompt).not.toContain('Description:');
   if (placement === 'VERTICAL_9_16') {
     expect(body.prompt).toContain('x=70..1081, y=287..1330');
     expect(body.prompt).toContain('x=105..401, y=322..546');
@@ -581,6 +601,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(body.prompt).toContain('"layoutBlueprint"');
       expect(body.prompt).toContain('HUMAN_PLACEHOLDER regions describe geometry only');
       expect(body.prompt).toContain('This planned concept is explicitly non-human');
+      expect(body.prompt).not.toContain('META_PRIMARY_');
+      expect(body.prompt).not.toContain('META_DESCRIPTION_');
       expect(String(options?.body)).not.toContain(storedById[layoutId].buffer.toString('base64'));
     }
   });
@@ -724,6 +746,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
       const attachments = (body as FormData).getAll('image[]') as File[];
       expect(await Promise.all(attachments.map(async file => Buffer.from(await file.arrayBuffer())))).toEqual([PNG]);
       if (withLayout) expect(String((body as FormData).get('prompt'))).toContain('"layoutBlueprint"');
+      expect(String((body as FormData).get('prompt'))).not.toContain('META_PRIMARY_');
+      expect(String((body as FormData).get('prompt'))).not.toContain('META_DESCRIPTION_');
     }
     expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
     expect(mocks.loadVideoSelectionContext).toHaveBeenCalledWith(
@@ -901,6 +925,9 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(call.context).not.toContain('Runtime TRA layout-plus-video context.');
       expect(call.context).toContain('"layoutBlueprint"');
       expect(call.context).toContain('TEXT_LEFT_VISUAL_RIGHT');
+      expect(call.copy).toEqual(expect.objectContaining({ headline: expect.stringContaining('Headline') }));
+      expect(call.copy).not.toHaveProperty('primaryText');
+      expect(call.copy).not.toHaveProperty('description');
     }
     expect(fetch).not.toHaveBeenCalled();
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
@@ -942,6 +969,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(call.context).toContain('ONE-AD RENDER BRIEF v1');
       expect(call.context).not.toContain('Runtime calm and direct.');
       expect(call.context).toContain('"layoutBlueprint"');
+      expect(call.copy).not.toHaveProperty('primaryText');
+      expect(call.copy).not.toHaveProperty('description');
     }
     expect(fetch).not.toHaveBeenCalled();
     for (const { data } of events.filter(({ event }) => event === 'creative')) {
@@ -1023,7 +1052,9 @@ describe('layout blueprint and final image-provider boundaries', () => {
       )
     ).toBe(true);
     const firstCall = mocks.generateApprovedTraReferenceCreativeImage.mock.calls[0][0];
-    expect(firstCall.copy).toEqual(plannedCreative(1).copy);
+    expect(firstCall.copy).toEqual(plannedCreative(1).imageCopy);
+    expect(firstCall.copy).not.toHaveProperty('primaryText');
+    expect(firstCall.copy).not.toHaveProperty('description');
     expect(firstCall.context).not.toContain('Distinct strategic fit 1');
     expect(firstCall.context).not.toContain('Surface message 1');
     expect(firstCall.context).toContain('"composition": "single-focus"');
@@ -1130,6 +1161,8 @@ describe('progressive creative delivery', () => {
     const result = await renderPlannedCreative(context.batchPlan.creatives[0], context, { creativeId, assertCurrentWork });
     expect(result.id).toBe(creativeId);
     expect(result.identity?.conceptId).toBe(creativeId);
+    expect(result.copy).toEqual(result.adCopy);
+    expect(result.imageCopy).toEqual(context.batchPlan.creatives[0].imageCopy);
     expect(mocks.saveCreativeBatch.mock.calls[0][0][0].id).toBe(creativeId);
     expect(assertCurrentWork).toHaveBeenCalledTimes(3);
     expect(assertCurrentWork.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(fetch).mock.invocationCallOrder[0]);
@@ -1167,6 +1200,8 @@ describe('progressive creative delivery', () => {
       const creative = data.creative as { id: string; image: unknown; finalization: unknown };
       const record = saved.find((item) => item.id === creative.id);
       expect(record).toMatchObject({ image: creative.image, placement: 'PORTRAIT_4_5', identity: expect.any(Object), planning: expect.any(Object), generationProvenance: expect.any(Object) });
+      expect(record.copy).toEqual(record.adCopy);
+      expect(record.imageCopy).toBeDefined();
       expect(creative.finalization).toEqual({ status: 'SAVED', createdAt: record.createdAt });
     }
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
@@ -1240,6 +1275,8 @@ describe('progressive creative delivery', () => {
       analysisSources: [],
     });
     expect(provenance?.imageGeneration.prompt).toContain('ONE-AD RENDER BRIEF v1');
+    expect(provenance?.imageGeneration.prompt).not.toContain('META_PRIMARY_');
+    expect(provenance?.imageGeneration.prompt).not.toContain('META_DESCRIPTION_');
   });
 
   it('streams a GENERATE identity for initial portrait generation', async () => {
@@ -1311,6 +1348,8 @@ describe('progressive creative delivery', () => {
       expect(body.size).toBe('1152x2048');
       expect(body.prompt).toContain('9:16 canvas (1152x2048)');
       expect(body.prompt).toContain('do not crop or stretch a square design');
+      expect(body.prompt).not.toContain('META_PRIMARY_');
+      expect(body.prompt).not.toContain('META_DESCRIPTION_');
     }
     expect(
       events

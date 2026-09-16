@@ -67,13 +67,17 @@ const videoFixture = async (seed: string) => {
   return { mediaId, sourceHash, identity, candidate, manifest, manifestBytes, preparation, thumbnail, observation, hydrated };
 };
 const videos = [await videoFixture('b'), await videoFixture('c')];
-const planned = (index: number) => ({ index, format: 'educational', copy: { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' },
-  selectionReason: `Reason ${index}`, referenceChoices: { angleSource: null, layoutSource: null }, strategy: { conceptDetails,
-    category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer',
-    painPoint: 'Uncertainty', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Understand options', cta: 'Talk with TRA', offer: null,
-    soWhat: { surfaceMessage: `Message ${index}`, functionalConsequence: 'See options', meaningfulOutcome: 'Move forward' },
-    execution: { taxDocumentReference: 'none', subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic',
-      textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'Simple graphic' } });
+const planned = (index: number) => {
+  const adCopy = { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' };
+  return { index, format: 'educational', copy: adCopy, adCopy: { ...adCopy },
+    imageCopy: { headline: `Headline ${index}`, cta: 'Talk with TRA' },
+    selectionReason: `Reason ${index}`, referenceChoices: { angleSource: null, layoutSource: null }, strategy: { conceptDetails,
+      category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer',
+      painPoint: 'Uncertainty', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Understand options', cta: 'Talk with TRA', offer: null,
+      soWhat: { surfaceMessage: `Message ${index}`, functionalConsequence: 'See options', meaningfulOutcome: 'Move forward' },
+      execution: { taxDocumentReference: 'none', subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic',
+        textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'Simple graphic' } };
+};
 
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 

@@ -16,7 +16,7 @@ import {
   type CreativePlacement,
 } from '@/lib/creatives/placements';
 import type { PlannedCreativeFormat } from '@/lib/creatives/generate-request';
-import type { CreativeCopy } from '@/lib/creatives/generated';
+import type { CreativeCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import type { StoredMediaFile } from '@/lib/media/types';
@@ -382,12 +382,20 @@ export async function generateCreativeCopy(
   return copyByIndex;
 }
 
+const formatImageCopy = (copy: CreativeImageCopy) => [
+  `Headline: ${copy.headline}`,
+  copy.shortSupport ? `Short support: ${copy.shortSupport}` : '',
+  copy.proofAttribution ? `Proof attribution: ${copy.proofAttribution}` : '',
+  copy.cta ? `CTA: ${copy.cta}` : '',
+  copy.disclosure ? `Disclosure: ${copy.disclosure}` : '',
+].filter(Boolean).join('\n');
+
 const buildApprovedTraSourceImagePrompt = (
   primaryFormat: CreativeFormatId,
   secondaryFormat: CreativeFormatId | undefined,
   placement: CreativePlacement,
   context: string,
-  copy: CreativeCopy,
+  copy: CreativeImageCopy,
   reserveLogoArea: boolean,
   documentPrompt = ''
 ) => {
@@ -395,7 +403,7 @@ const buildApprovedTraSourceImagePrompt = (
   return `
 Create an ORIGINAL ${placementSpec.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
-Compose natively for the ${placementSpec.aspectRatio} canvas (${placementSpec.width}x${placementSpec.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
+Compose natively for the ${placementSpec.aspectRatio} canvas (${placementSpec.width}x${placementSpec.height}). Recompose the hierarchy, subject, image copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
 The first attached image is a validated, TRA-owned reference. Layout references and video frames are not attached.
 ${documentPrompt}
@@ -408,10 +416,8 @@ ${
 }
 One-ad render brief: ${context}
 
-Use this planned ad copy verbatim when rendered:
-Headline: ${copy.headline}
-Primary text: ${copy.primaryText}
-Description: ${copy.description}
+Use only this planned image copy when rendering text inside the creative:
+${formatImageCopy(copy)}
 
 Approved-source rules:
 - The first attached TRA image is the only approved human-identity source for this generation call.
@@ -485,7 +491,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
   secondaryFormat?: CreativeFormatId;
   placement?: CreativePlacement;
   context: string;
-  copy: CreativeCopy;
+  copy: CreativeImageCopy;
   reserveLogoArea?: boolean;
 }): Promise<ImageGenerationResult> {
   const document = await prepareTaxDocumentReference(args.taxDocumentReference);
