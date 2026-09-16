@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/openai';
 import { generateApprovedTraVideoFrameCreativeImage } from '@/lib/ai/video-frame-generation';
+import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
+import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { StoredMediaFile } from '@/lib/media/types';
 import { getVideoFrameIntegrity } from '@/lib/video/frame-cache';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
@@ -43,6 +45,33 @@ describe('approved TRA final image-provider boundary', () => {
     expect(prompt).not.toContain('left 27%');
     expectImageCopyOnly(prompt);
     expectImageCopyOnly(result.prompt);
+  });
+
+  it('keeps E2 Meta-only sentinel copy out of the actual image-provider prompt', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: TRA_SOURCE_BYTES.toString('base64') }] })));
+    vi.stubGlobal('fetch', fetchMock);
+    const e2Concept: PlannedCreativeConcept = {
+      index: 1, format: 'direct-response', selectionReason: 'Boundary regression',
+      copy: { headline: 'Meta headline', primaryText: 'META_PRIMARY_SENTINEL', description: 'META_DESCRIPTION_SENTINEL' },
+      adCopy: { headline: 'Meta headline', primaryText: 'META_PRIMARY_SENTINEL', description: 'META_DESCRIPTION_SENTINEL' },
+      imageCopy: { headline: 'IMAGE_ONLY_HEADLINE' },
+      strategy: { category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer', painPoint: 'Uncertainty',
+        desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Understand options', cta: 'Talk to TRA', offer: null,
+        soWhat: { surfaceMessage: 'Understand the issue', functionalConsequence: 'Review options', meaningfulOutcome: 'Clear next step' },
+        execution: { subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low',
+          ctaTreatment: 'inline', typographyHierarchy: 'headline-dominant' }, visualDirection: 'Simple graphic' },
+    };
+    const context = formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: e2Concept }));
+    const result = await generateApprovedTraReferenceCreativeImage({
+      source, primaryFormat: e2Concept.format, placement: 'SQUARE_1_1', context,
+      copy: e2Concept.imageCopy!, reserveLogoArea: false,
+    });
+    const prompt = String((fetchMock.mock.calls[0][1].body as FormData).get('prompt'));
+    expect(prompt).toContain('IMAGE_ONLY_HEADLINE');
+    expect(prompt).not.toContain('META_PRIMARY_SENTINEL');
+    expect(prompt).not.toContain('META_DESCRIPTION_SENTINEL');
+    expect(result.prompt).toBe(prompt);
   });
 
   it.each(['none', 'irs-notice-v1'] as const)('keeps TRA identity separate from the selected document: %s', async taxDocumentReference => {
