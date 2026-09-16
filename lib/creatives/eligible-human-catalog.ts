@@ -76,6 +76,17 @@ const candidatePriority: Record<EligibleHumanCandidate['kind'], number> = {
 const identityKey = (candidate: EligibleHumanCandidate) =>
   `${candidate.sourceMediaId}:${candidate.sourceContentSha256}:${candidate.pixelSha256}`;
 
+function canonicalDuplicate(
+  existing: EligibleHumanCandidate,
+  candidate: EligibleHumanCandidate,
+): EligibleHumanCandidate {
+  if (existing.kind !== 'APPROVED_VIDEO_FRAME' || candidate.kind !== 'APPROVED_VIDEO_FRAME') return existing;
+  if (candidate.frameIndex !== existing.frameIndex) {
+    return candidate.frameIndex < existing.frameIndex ? candidate : existing;
+  }
+  return candidate.timestampMs < existing.timestampMs ? candidate : existing;
+}
+
 /** Exact duplicate pixels are one candidate; conflicting stable source IDs fail closed. */
 function dedupeCandidates(candidates: EligibleHumanCandidate[]) {
   const bySourceId = new Map<string, EligibleHumanCandidate>();
@@ -84,6 +95,7 @@ function dedupeCandidates(candidates: EligibleHumanCandidate[]) {
     const existing = bySourceId.get(candidate.sourceId);
     if (!existing) bySourceId.set(candidate.sourceId, candidate);
     else if (identityKey(existing) !== identityKey(candidate)) conflictingIds.add(candidate.sourceId);
+    else bySourceId.set(candidate.sourceId, canonicalDuplicate(existing, candidate));
   }
   for (const sourceId of conflictingIds) bySourceId.delete(sourceId);
 

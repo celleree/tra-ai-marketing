@@ -127,6 +127,30 @@ describe('eligible human catalog v1', () => {
     ]));
   });
 
+  it('canonically resolves duplicate approved-frame provenance independent of input order', () => {
+    const canonical = approvedFrame(1);
+    const duplicate: ApprovedTraVideoFrame = {
+      ...canonical,
+      frameIndex: canonical.frameIndex + 1,
+      timestampMs: canonical.timestampMs + 500,
+    };
+
+    const forward = buildEligibleHumanCatalog({
+      approvedHumans: [], approvedVideoFrames: [canonical, duplicate],
+    });
+    const reversed = buildEligibleHumanCatalog({
+      approvedHumans: [], approvedVideoFrames: [duplicate, canonical],
+    });
+
+    expect(reversed).toEqual(forward);
+    expect(forward.candidates).toHaveLength(1);
+    expect(forward.candidates[0]).toMatchObject({
+      kind: 'APPROVED_VIDEO_FRAME',
+      frameIndex: canonical.frameIndex,
+      timestampMs: canonical.timestampMs,
+    });
+  });
+
   it('does not truncate the complete eligible catalog at the legacy MAX 8 planner option bound', () => {
     const records = Array.from({ length: 12 }, (_, index) => approvedHuman(index + 1));
     const catalog = buildEligibleHumanCatalog({ approvedHumans: records });
