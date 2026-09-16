@@ -48,6 +48,15 @@ beforeEach(() => {
 });
 
 describe('Proof Library storage', () => {
+  it('reads legacy active records without manufacturing advertising approval', async () => {
+    const legacy = review();
+    readFileMock.mockResolvedValue(index([legacy]));
+    const [loaded] = await listProofRecords();
+    expect(loaded.status).toBe('ACTIVE');
+    expect(loaded.advertisingUseApproved).toBeUndefined();
+    expect(loaded.advertisingUseApproved === true).toBe(false);
+  });
+
   it('persists exact review text without inventing optional metadata', async () => {
     const record = review();
     await expect(addProofRecords([record])).resolves.toEqual([record]);
@@ -56,6 +65,23 @@ describe('Proof Library storage', () => {
     expect(saved.items[0].originalReviewText).toBe(record.originalReviewText);
     expect(saved.items[0]).not.toHaveProperty('source');
     expect(saved.items[0]).not.toHaveProperty('rating');
+  });
+
+  it('persists explicit advertising approval and revocation values', async () => {
+    const approved = { ...review(), advertisingUseApproved: true };
+    await expect(addProofRecords([approved])).resolves.toEqual([approved]);
+    let saved = JSON.parse(writeFileMock.mock.calls[0][1] as string);
+    expect(saved.items[0].advertisingUseApproved).toBe(true);
+
+    readFileMock.mockResolvedValue(index([approved]));
+    const revoked = {
+      ...approved,
+      advertisingUseApproved: false,
+      updatedAt: '2026-09-10T13:00:00.000Z',
+    };
+    await expect(updateProofRecord(revoked, approved.updatedAt)).resolves.toEqual(revoked);
+    saved = JSON.parse(writeFileMock.mock.calls.at(-1)?.[1] as string);
+    expect(saved.items[0].advertisingUseApproved).toBe(false);
   });
 
   it('fails closed on malformed persisted records', async () => {

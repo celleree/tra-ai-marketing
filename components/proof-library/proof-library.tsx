@@ -30,7 +30,14 @@ const nextFieldKey = (fields: EditableField[]) =>
   Math.max(...fields.map(({ key }) => key)) + 1;
 
 const recordItem = (record: ProofRecord) => {
-  const { id: _id, status: _status, createdAt: _createdAt, updatedAt: _updatedAt, ...item } = record;
+  const {
+    id: _id,
+    status: _status,
+    advertisingUseApproved: _advertisingUseApproved,
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    ...item
+  } = record;
   return item;
 };
 
@@ -53,6 +60,7 @@ export function ProofRecordCard({
         <span className={styles.status}>{record.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span>
         <div><button type="button" aria-label={`Edit proof ${record.id}`} onClick={onEdit}>Edit</button><button type="button" aria-label={`${record.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'} proof ${record.id}`} onClick={onToggle}>{record.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}</button></div>
       </div>
+      <p className={styles.meta}>Advertising use: {record.advertisingUseApproved === true ? 'Approved' : 'Not approved'}</p>
       {record.type === 'review' ? (
         <>
           <blockquote>{record.originalReviewText}</blockquote>
@@ -207,7 +215,13 @@ function ProofForm({ type, record, onSaved, onCancel }: {
       };
     }
     const body = matching
-      ? { id: matching.id, expectedUpdatedAt: matching.updatedAt, status: matching.status, item }
+      ? {
+          id: matching.id,
+          expectedUpdatedAt: matching.updatedAt,
+          status: matching.status,
+          advertisingUseApproved: data.get('advertisingUseApproved') === 'on',
+          item,
+        }
       : { items: [item] };
     try {
       const response = await fetch('/api/proof', {
@@ -250,6 +264,7 @@ function ProofForm({ type, record, onSaved, onCancel }: {
         <label>Usage restrictions<textarea name="usageRestrictions" rows={2} defaultValue={matching?.type === 'case-study' ? matching.usageRestrictions : ''} /></label>
         <label>Required disclaimer<textarea name="requiredDisclaimer" rows={2} defaultValue={matching?.type === 'case-study' ? matching.requiredDisclaimer : ''} /></label>
       </>}
+      {matching ? <label className={styles.check}><input name="advertisingUseApproved" type="checkbox" defaultChecked={matching.advertisingUseApproved === true} /> Explicitly approve this proof record for advertising use</label> : <p className={styles.note}>New proof records are not approved for advertising use. Edit the saved record to approve it explicitly.</p>}
       <div className={styles.facts}><strong>Tags</strong>{tagFields.map((tag, index) => <div className={styles.fact} key={tag.key}>
         <label>Tag {index + 1}<textarea rows={2} value={tag.value} onChange={(event) => setTagFields((current) => current.map((field) => field.key === tag.key ? { ...field, value: event.target.value } : field))} /></label>
         {tagFields.length > 1 || tag.value ? <button type="button" onClick={() => setTagFields((current) => current.length === 1 ? [{ key: nextFieldKey(current), value: '' }] : current.filter(({ key }) => key !== tag.key))}>Remove tag</button> : null}

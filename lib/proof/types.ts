@@ -9,6 +9,7 @@ export type ProofBase = {
   id: string;
   tags: string[];
   status: ProofStatus;
+  advertisingUseApproved?: boolean;
   createdAt: string;
   updatedAt: string;
 };

@@ -62,7 +62,7 @@ describe('Proof Library API', () => {
     await expect(response.json()).resolves.toEqual({ items: [review()] });
   });
 
-  it('creates server-owned IDs and preserves exact review text', async () => {
+  it('creates server-owned IDs and leaves new active reviews unapproved for advertising', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-10T14:00:00.000Z'));
     const originalReviewText = '  Case, punctuation—AND line breaks.\nStay exact.  ';
@@ -76,7 +76,7 @@ describe('Proof Library API', () => {
     expect(saved.originalReviewText).toBe(originalReviewText);
     expect(saved).not.toHaveProperty('source');
     expect(saved).not.toHaveProperty('rating');
-    expect(saved).toMatchObject({ tags: [], status: 'ACTIVE' });
+    expect(saved).toMatchObject({ tags: [], status: 'ACTIVE', advertisingUseApproved: false });
   });
 
   it('rejects malformed or oversized batches before storage', async () => {
@@ -93,7 +93,7 @@ describe('Proof Library API', () => {
     expect(mocks.addProofRecords).not.toHaveBeenCalled();
   });
 
-  it('keeps case-study facts separate from approved wording', async () => {
+  it('keeps case-study wording approval independent from advertising-use authorization', async () => {
     const response = await route.POST(request('POST', { items: [{
       type: 'case-study',
       title: 'Case A',
@@ -103,26 +103,86 @@ describe('Proof Library API', () => {
     }] }));
     expect(response.status).toBe(201);
     expect(mocks.addProofRecords.mock.calls[0][0][0]).toMatchObject({
+      status: 'ACTIVE',
+      advertisingUseApproved: false,
       verifiedFacts: ['Fact one.'],
       approvedClaimWording: 'Approved wording only.',
     });
   });
 
-  it('updates and deactivates using server-owned version timestamps', async () => {
+  it('persists explicit advertising approval and revocation without changing attribution', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-10T13:00:00.000Z'));
+    const attributed = {
+      ...review(),
+      attribution: { display: 'Jane D.', allowed: true as const },
+    };
+    mocks.listProofRecords.mockResolvedValue([attributed]);
+
+    const approve = await route.PATCH(request('PATCH', {
+      id: attributed.id,
+      expectedUpdatedAt: attributed.updatedAt,
+      status: 'ACTIVE',
+      advertisingUseApproved: true,
+      item: {
+        type: 'review',
+        originalReviewText: attributed.originalReviewText,
+        attribution: attributed.attribution,
+      },
+    }));
+    expect(approve.status).toBe(200);
+    expect(mocks.updateProofRecord).toHaveBeenLastCalledWith(
+      expect.objectContaining({ advertisingUseApproved: true, attribution: attributed.attribution }),
+      attributed.updatedAt
+    );
+
+    mocks.listProofRecords.mockResolvedValue([{ ...attributed, advertisingUseApproved: true }]);
+    const revoke = await route.PATCH(request('PATCH', {
+      id: attributed.id,
+      expectedUpdatedAt: attributed.updatedAt,
+      status: 'ACTIVE',
+      advertisingUseApproved: false,
+      item: {
+        type: 'review',
+        originalReviewText: attributed.originalReviewText,
+        attribution: attributed.attribution,
+      },
+    }));
+    expect(revoke.status).toBe(200);
+    expect(mocks.updateProofRecord).toHaveBeenLastCalledWith(
+      expect.objectContaining({ advertisingUseApproved: false, attribution: attributed.attribution }),
+      attributed.updatedAt
+    );
+  });
+
+  it('changes lifecycle state without manufacturing or clearing advertising approval', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-10T13:00:00.000Z'));
     mocks.listProofRecords.mockResolvedValue([review()]);
-    const response = await route.PATCH(request('PATCH', {
+    const deactivate = await route.PATCH(request('PATCH', {
       id: review().id,
       expectedUpdatedAt: review().updatedAt,
       status: 'INACTIVE',
       item: { type: 'review', originalReviewText: review().originalReviewText },
     }));
-
-    expect(response.status).toBe(200);
-    expect(mocks.updateProofRecord).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'INACTIVE', updatedAt: '2026-09-10T13:00:00.000Z' }),
+    expect(deactivate.status).toBe(200);
+    expect(mocks.updateProofRecord).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ advertisingUseApproved: true }),
       review().updatedAt
+    );
+
+    const approved = { ...review(), status: 'INACTIVE' as const, advertisingUseApproved: true };
+    mocks.listProofRecords.mockResolvedValue([approved]);
+    const reactivate = await route.PATCH(request('PATCH', {
+      id: approved.id,
+      expectedUpdatedAt: approved.updatedAt,
+      status: 'ACTIVE',
+      item: { type: 'review', originalReviewText: approved.originalReviewText },
+    }));
+    expect(reactivate.status).toBe(200);
+    expect(mocks.updateProofRecord).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'ACTIVE', advertisingUseApproved: true }),
+      approved.updatedAt
     );
   });
 

@@ -16,7 +16,7 @@ import {
 const INDEX_KEY = '_metadata/proof-library.json';
 const LOCAL_INDEX_PATH = resolve(process.cwd(), 'data', 'proof-library.json');
 const SAVE_ATTEMPTS = 3;
-const BASE_KEYS = ['id', 'type', 'tags', 'status', 'createdAt', 'updatedAt'];
+const BASE_KEYS = ['id', 'type', 'tags', 'status', 'advertisingUseApproved', 'createdAt', 'updatedAt'];
 const REVIEW_KEYS = [...BASE_KEYS, 'originalReviewText', 'source', 'attribution', 'rating'];
 const CASE_STUDY_KEYS = [
   ...BASE_KEYS,
@@ -52,6 +52,7 @@ const normalizeRecord = (value: unknown): ProofRecord | null => {
   }
   if (
     (value.status !== 'ACTIVE' && value.status !== 'INACTIVE') ||
+    (value.advertisingUseApproved !== undefined && typeof value.advertisingUseApproved !== 'boolean') ||
     Date.parse(value.updatedAt) < Date.parse(value.createdAt)
   ) {
     return null;
@@ -60,6 +61,9 @@ const normalizeRecord = (value: unknown): ProofRecord | null => {
     id: value.id,
     tags: value.tags,
     status: value.status,
+    ...(typeof value.advertisingUseApproved === 'boolean'
+      ? { advertisingUseApproved: value.advertisingUseApproved }
+      : {}),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   } as const;

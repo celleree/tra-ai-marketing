@@ -23,7 +23,7 @@ const CASE_STUDY_KEYS = [
   'tags',
 ];
 const CREATE_KEYS = ['items'];
-const UPDATE_KEYS = ['id', 'expectedUpdatedAt', 'status', 'item'];
+const UPDATE_KEYS = ['id', 'expectedUpdatedAt', 'status', 'advertisingUseApproved', 'item'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -94,6 +94,7 @@ export async function POST(request: Request) {
     id: proofId(),
     tags: draft!.tags ?? [],
     status: 'ACTIVE',
+    advertisingUseApproved: false,
     createdAt: timestamp,
     updatedAt: timestamp,
   }));
@@ -112,6 +113,7 @@ export async function PATCH(request: Request) {
   const id = body?.id;
   const expectedUpdatedAt = body?.expectedUpdatedAt;
   const status = body?.status;
+  const advertisingUseApproved = body?.advertisingUseApproved;
   const draft = parseDraft(body?.item);
   if (
     !body ||
@@ -119,6 +121,7 @@ export async function PATCH(request: Request) {
     !isProofId(id) ||
     !isIsoDate(expectedUpdatedAt) ||
     (status !== 'ACTIVE' && status !== 'INACTIVE') ||
+    (advertisingUseApproved !== undefined && typeof advertisingUseApproved !== 'boolean') ||
     !draft
   ) {
     return NextResponse.json({ error: 'Proof record update was invalid.' }, { status: 400 });
@@ -132,6 +135,11 @@ export async function PATCH(request: Request) {
       id,
       tags: draft.tags ?? [],
       status: status as ProofStatus,
+      ...(advertisingUseApproved === undefined
+        ? (typeof current.advertisingUseApproved === 'boolean'
+          ? { advertisingUseApproved: current.advertisingUseApproved }
+          : {})
+        : { advertisingUseApproved }),
       createdAt: current.createdAt,
       updatedAt: nextTimestamp(current.updatedAt),
     };
