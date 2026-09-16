@@ -57,6 +57,41 @@ describe('single-creative revision planning', () => {
     expect(body.input[0].content[0].text).toContain('canvas and layout/reference-library content never confer human approval');
   });
 
+  it('keeps E2 EDIT copy separated and makes copy the adCopy alias', async () => {
+    const adCopy = { primaryText: 'META_PRIMARY_SENTINEL', headline: 'Meta headline', description: 'META_DESCRIPTION_SENTINEL' };
+    const e2Parent = { ...parent, copy: adCopy, adCopy, imageCopy: { headline: 'Image headline', cta: 'Image CTA' } };
+    const revisedAdCopy = { ...adCopy, headline: 'Revised Meta headline' };
+    const output = { format: parent.format, adCopy: revisedAdCopy,
+      imageCopy: { headline: 'Revised image headline', shortSupport: null, proofAttribution: null, cta: 'Start here', disclosure: null },
+      strategy: { ...strategy, conceptDetails }, selectionReason: 'Edit the requested surfaces only.' };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(payload(output))));
+    const result = await planCreativeRevision({ ...args, parent: e2Parent });
+    expect(result.concept.copy).toEqual(revisedAdCopy);
+    expect(result.concept.adCopy).toEqual(revisedAdCopy);
+    expect(result.concept.imageCopy).toEqual({ headline: 'Revised image headline', cta: 'Start here' });
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.text.format.schema.required).toContain('imageCopy');
+    expect(request.input[0].content[0].text).toContain('Never move Meta primaryText or Meta description into imageCopy');
+  });
+
+  it('keeps E2 VARIATION purpose-specific instead of collapsing copy surfaces', async () => {
+    const adCopy = { primaryText: 'META_PRIMARY_SENTINEL', headline: 'Meta headline', description: 'META_DESCRIPTION_SENTINEL' };
+    const e2Parent = { ...parent, copy: adCopy, adCopy, imageCopy: { headline: 'Image headline' } };
+    const changedStrategy = { ...strategy, conceptDetails, awarenessStage: 'solution-aware' as const,
+      soWhat: { ...strategy.soWhat, surfaceMessage: 'Compare a clearer path' },
+      execution: { ...strategy.execution, composition: 'split' as const, imageTreatment: 'illustrative' as const } };
+    const output = { format: parent.format,
+      adCopy: { primaryText: 'Different Meta body', headline: 'Different Meta headline', description: 'Different Meta description' },
+      imageCopy: { headline: 'Sparse image headline', shortSupport: null, proofAttribution: null, cta: null, disclosure: null },
+      strategy: changedStrategy, selectionReason: 'Meaningfully different execution.' };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(payload(output))));
+    const result = await planCreativeRevision({ ...args, parent: e2Parent, operation: 'VARIATION' });
+    expect(result.concept.copy).toEqual(result.concept.adCopy);
+    expect(result.concept.imageCopy).toEqual({ headline: 'Sparse image headline' });
+    expect(result.concept.imageCopy).not.toHaveProperty('primaryText');
+    expect(result.concept.strategy.awarenessStage).toBe('solution-aware');
+  });
+
   it('retains configured planner model identity', async () => {
     vi.stubEnv('OPENAI_TEXT_MODEL', 'configured-planner');
     expect((await planCreativeRevision(args)).plannerModel).toBe('configured-planner');
