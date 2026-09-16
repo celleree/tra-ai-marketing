@@ -85,6 +85,33 @@ export const parseCreativeCopyContract = (
   };
 };
 
+export type CreativeCopyContractMode =
+  | { kind: 'LEGACY'; copy: CreativeCopy }
+  | {
+      kind: 'E2';
+      copy: CreativeCopy;
+      adCopy: CreativeAdCopy;
+      imageCopy: CreativeImageCopy;
+    }
+  | { kind: 'INVALID' };
+
+export const classifyCreativeCopyContract = (
+  value: Record<string, unknown>
+): CreativeCopyContractMode => {
+  const parsed = parseCreativeCopyContract(value);
+  if (!parsed) return { kind: 'INVALID' };
+  const hasAdCopy = parsed.adCopy !== undefined;
+  const hasImageCopy = parsed.imageCopy !== undefined;
+  if (!hasAdCopy && !hasImageCopy) return { kind: 'LEGACY', copy: parsed.copy };
+  if (!hasAdCopy || !hasImageCopy) return { kind: 'INVALID' };
+  return {
+    kind: 'E2',
+    copy: parsed.copy,
+    adCopy: parsed.adCopy!,
+    imageCopy: parsed.imageCopy!,
+  };
+};
+
 export const resolveCreativeAdCopy = (value: {
   copy: CreativeCopy;
   adCopy?: CreativeAdCopy;
