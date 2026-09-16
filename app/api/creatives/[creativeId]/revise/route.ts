@@ -7,6 +7,7 @@ import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import { generateCreativeRevisionImage } from '@/lib/ai/creative-revision-image';
 import { buildCreativeCompanyContext, formatCreativeCompanyContext } from '@/lib/company/creative-context';
 import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
+import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { validateCreativeRevisionRequest } from '@/lib/creatives/revision-request';
@@ -37,6 +38,10 @@ export async function POST(request: Request, context: { params: Promise<{ creati
   try {
     const parent = (await listCreatives()).find(record => record.id === parentId);
     if (!parent) return NextResponse.json({ error: 'Saved creative not found.' }, { status: 404 });
+    const parentCopyMode = classifyCreativeCopyContract(parent as unknown as Record<string, unknown>);
+    if (parentCopyMode.kind === 'INVALID') {
+      throw new CreativeRevisionHydrationError('Saved creative has an invalid separated ad/image copy contract.', 409);
+    }
     const storage = getMediaStorage();
     const sources = await hydrateSavedCreativeRevisionContext(parent, storage);
     const { planning, provenance } = sources.parent;
@@ -44,12 +49,16 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const placement = revision.operation === 'PLACEMENT' ? revision.placement : parent.placement!;
     const companyContext = formatCreativeCompanyContext(buildCreativeCompanyContext(revision.companyProfile));
     let concept: PlannedCreativeConcept = {
-      index: 1, format: parent.format!, copy: parent.copy, strategy: planning.strategy, selectionReason: planning.selectionReason,
+      index: 1, format: parent.format!, copy: parentCopyMode.copy,
+      ...(parentCopyMode.kind === 'E2' ? { adCopy: parentCopyMode.adCopy, imageCopy: parentCopyMode.imageCopy } : {}),
+      strategy: planning.strategy, selectionReason: planning.selectionReason,
     };
     let plannerModel = planning.model;
     if (revision.operation === 'EDIT' || revision.operation === 'VARIATION') {
       const plan = await planCreativeRevision({
-        parent: { format: concept.format, copy: concept.copy, strategy: concept.strategy },
+        parent: { format: concept.format, copy: concept.copy,
+          ...(concept.adCopy ? { adCopy: concept.adCopy } : {}),
+          ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}), strategy: concept.strategy },
         operation: revision.operation, instruction: revision.instruction, companyContext,
         hasApprovedHumanSource: sources.originalApprovedSource !== null,
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}),
@@ -57,6 +66,8 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       concept = plan.concept;
       plannerModel = plan.plannerModel;
     }
+    const conceptCopyMode = classifyCreativeCopyContract(concept as unknown as Record<string, unknown>);
+    if (conceptCopyMode.kind === 'INVALID') throw new Error('Revision planner returned an invalid separated ad/image copy contract.');
     const id = `creative_${randomUUID().replaceAll('-', '')}`;
     const identity = revision.operation === 'EDIT' || revision.operation === 'VARIATION'
       ? buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent, strategy: concept.strategy })
@@ -69,7 +80,10 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const removedLibraryHuman = !!planning.strategy.approvedHumanId && concept.strategy.execution.subjectSource === 'non-human';
     const imageResult = await generateCreativeRevisionImage({
       sources: removedLibraryHuman ? { ...sources, originalApprovedSource: null } : sources,
-      operation: revision.operation, concept: { format: concept.format, copy: concept.copy, strategy: concept.strategy },
+      operation: revision.operation,
+      concept: { format: concept.format, copy: conceptCopyMode.copy,
+        ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
+        strategy: concept.strategy },
       placement, companyProfile: revision.companyProfile,
       referenceCatalog: planning.referenceCatalog,
     });
@@ -80,7 +94,9 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const image = await storage.saveImage(new File([new Uint8Array(finalBuffer)], `tra-revision-${id}.png`, { type: 'image/png' }));
     const record: CreativeRecord = {
       id, createdAt: new Date().toISOString(), image, category: concept.strategy.category,
-      format: concept.format, placement, copy: concept.copy, identity,
+      format: concept.format, placement, copy: conceptCopyMode.copy,
+      ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
+      identity,
       planning: { strategy: concept.strategy, selectionReason: concept.selectionReason, model: plannerModel, reasoningEffort: 'medium',
         ...((revision.operation === 'PLACEMENT' || revision.operation === 'REGENERATE') && planning.portfolioAudit ? { portfolioAudit: planning.portfolioAudit } : {}),
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}) },
