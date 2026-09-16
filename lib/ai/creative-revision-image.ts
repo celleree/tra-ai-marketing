@@ -6,6 +6,7 @@ import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.serv
 import type { hydrateSavedCreativeRevisionContext } from '@/lib/creatives/revision-source-hydration';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { CreativeIdentity } from '@/lib/creatives/identity';
+import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { CREATIVE_PLACEMENT_SPECS, type CreativePlacement } from '@/lib/creatives/placements';
 import { parseCreativeStrategy } from '@/lib/creatives/strategy';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
@@ -29,12 +30,15 @@ const DIRECTIONS: Record<RevisionOperation, string> = {
 export async function generateCreativeRevisionImage(args: {
   sources: RevisionSources;
   operation: RevisionOperation;
-  concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'strategy'>;
+  concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'adCopy' | 'imageCopy' | 'strategy'>;
   placement: CreativePlacement;
   companyProfile?: RuntimeCompanyProfileSnapshot;
   referenceCatalog?: ReferencePlanningCandidate[];
 }): Promise<ImageGenerationResult> {
   const { canvas, originalApprovedSource, logoOverlay } = args.sources;
+  if (classifyCreativeCopyContract(args.concept as unknown as Record<string, unknown>).kind === 'INVALID') {
+    throw new Error('Revision concept has an invalid separated ad/image copy contract.');
+  }
   if (!parseCreativeStrategy(args.concept.strategy, originalApprovedSource !== null)) {
     throw new Error('Revision strategy is invalid or requires an unavailable approved TRA source.');
   }

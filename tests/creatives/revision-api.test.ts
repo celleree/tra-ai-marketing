@@ -33,6 +33,11 @@ const parent = (): CreativeRecord => ({
   planning: { strategy, selectionReason: 'Saved choice', model: 'saved-planner', reasoningEffort: 'medium' },
   generationProvenance: { version: 1, imageGeneration: { prompt: 'old prompt', model: 'old-image-model' }, requestedSources: [], attachedSource: null, analysisSources: [] },
 });
+const e2Parent = (): CreativeRecord => {
+  const record = parent();
+  const adCopy = { primaryText: 'META_PRIMARY_SENTINEL_NEVER_IMAGE', headline: 'Meta headline', description: 'META_DESCRIPTION_SENTINEL_NEVER_IMAGE' };
+  return { ...record, copy: adCopy, adCopy, imageCopy: { headline: 'IMAGE_HEADLINE_SENTINEL', cta: 'IMAGE_CTA_SENTINEL' } };
+};
 const call = (body: unknown, creativeId = parentId) => POST(new Request('http://localhost/api/creatives/revise', { method: 'POST', body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
 const hydrate = (record: CreativeRecord) => ({ parent: { record, identity: record.identity, planning: record.planning, provenance: record.generationProvenance }, canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId, sha256: 'c'.repeat(64) }, originalApprovedSource: null, logoOverlay: null });
 beforeEach(() => {
@@ -71,7 +76,7 @@ describe('saved creative revision API', () => {
     expect((await call({operation:'REGENERATE'})).status).toBe(409);
     expect(mocks.generate).not.toHaveBeenCalled();
   });
-  it.each(['REGENERATE', 'PLACEMENT'] as const)('creates a new saved %s without replanning or modifying the parent', async operation => {
+  it.each(['REGENERATE', 'PLACEMENT'] as const)('creates a new saved legacy %s without inventing separated copy', async operation => {
     const original = parent();
     const result = await call({ operation, ...(operation === 'PLACEMENT' ? { placement: 'PORTRAIT_4_5' } : {}) });
     expect(result.status).toBe(201);
@@ -79,13 +84,27 @@ describe('saved creative revision API', () => {
     expect(creative.id).not.toBe(parentId);
     expect(creative.identity).toMatchObject({ operation, parentCreativeId: parentId, fingerprint: original.identity!.fingerprint, conceptId: operation === 'PLACEMENT' ? parentId : creative.id });
     expect(creative.copy).toEqual(original.copy);
+    expect(creative).not.toHaveProperty('adCopy');
+    expect(creative).not.toHaveProperty('imageCopy');
     expect(creative.placement).toBe(operation === 'PLACEMENT' ? 'PORTRAIT_4_5' : 'SQUARE_1_1');
     expect(creative.generationProvenance).toMatchObject({ imageGeneration: { prompt: 'actual revision prompt', model: 'gpt-image-2.5-sunburst', routing: { preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false } }, revision: { parentCreativeId: parentId, canvasMediaId: mediaId, canvasSha256: 'c'.repeat(64) } });
     expect(mocks.plan).not.toHaveBeenCalled();
     expect(mocks.save.mock.calls[0][0]).toHaveLength(1);
-    expect(mocks.list.mock.results[0].value).resolves.toEqual([original]);
+    await expect(mocks.list.mock.results[0].value).resolves.toEqual([original]);
   });
-  it.each(['EDIT', 'VARIATION'] as const)('plans %s with current company context and stores its resulting strategy', async operation => {
+  it.each(['REGENERATE', 'PLACEMENT'] as const)('preserves separated E2 copy through saved %s revisions', async operation => {
+    const original = e2Parent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const response = await call({ operation, ...(operation === 'PLACEMENT' ? { placement: 'PORTRAIT_4_5' } : {}) });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.generate.mock.calls[0][0].concept).toMatchObject({ copy: original.adCopy, adCopy: original.adCopy, imageCopy: original.imageCopy });
+    expect(creative.copy).toEqual(original.adCopy);
+    expect(creative.adCopy).toEqual(original.adCopy);
+    expect(creative.imageCopy).toEqual(original.imageCopy);
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('plans legacy %s with current company context without inventing separated copy', async operation => {
     const changed = { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const, textDensity: 'medium' as const } };
     mocks.plan.mockResolvedValue({ concept: { index: 1, format: 'direct-response', copy: parent().copy, strategy: changed, selectionReason: 'Changed strategy' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
     const response = await call({ operation, instruction: 'Use a different composition.' });
@@ -95,10 +114,43 @@ describe('saved creative revision API', () => {
     expect(mocks.generate.mock.calls[0][0]).not.toHaveProperty('companyContext');
     expect(mocks.generate.mock.calls[0][0]).not.toHaveProperty('instruction');
     expect(mocks.generate.mock.calls[0][0].concept.strategy).toEqual(changed);
+    expect(creative).not.toHaveProperty('adCopy');
+    expect(creative).not.toHaveProperty('imageCopy');
     expect(creative.planning.strategy).toEqual(changed);
     expect(creative.identity.fingerprint).not.toBe(parent().identity!.fingerprint);
     expect(creative.identity.conceptId).toBe(operation === 'EDIT' ? parentId : creative.id);
     expect(creative.generationProvenance.revision.instruction).toBe('Use a different composition.');
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('preserves separated E2 copy through planned %s revisions', async operation => {
+    const original = e2Parent();
+    const changed = { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const, textDensity: 'medium' as const } };
+    const adCopy = { primaryText: 'Revised Meta body', headline: 'Revised Meta headline', description: 'Revised Meta description' };
+    const imageCopy = { headline: 'Revised image headline', cta: 'Start here' };
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: 'direct-response', copy: adCopy, adCopy, imageCopy, strategy: changed, selectionReason: 'Changed strategy' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    const response = await call({ operation, instruction: 'Use a different composition.' });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(mocks.plan.mock.calls[0][0].parent).toMatchObject({ copy: original.adCopy, adCopy: original.adCopy, imageCopy: original.imageCopy });
+    expect(mocks.generate.mock.calls[0][0].concept).toMatchObject({ copy: adCopy, adCopy, imageCopy });
+    expect(creative.copy).toEqual(adCopy);
+    expect(creative.adCopy).toEqual(adCopy);
+    expect(creative.imageCopy).toEqual(imageCopy);
+  });
+  it.each([
+    ['adCopy-only', (record: CreativeRecord) => { record.adCopy = { ...record.copy }; }],
+    ['imageCopy-only', (record: CreativeRecord) => { record.imageCopy = { headline: 'Image only' }; }],
+    ['copy/adCopy mismatch', (record: CreativeRecord) => { record.adCopy = { ...record.copy, headline: 'Mismatch' }; record.imageCopy = { headline: 'Image copy' }; }],
+  ])('rejects invalid saved %s state before hydration, providers, or child save', async (_name, mutate) => {
+    const record = parent(); mutate(record); mocks.list.mockResolvedValue([record]);
+    const response = await call({ operation: 'REGENERATE' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'Saved creative has an invalid separated ad/image copy contract.' });
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
   });
   it('validates before branding and persists only the final image before returning success', async () => {
     mocks.hydrate.mockResolvedValue({ ...hydrate(parent()), logoOverlay: { buffer: Buffer.from('logo') } });
