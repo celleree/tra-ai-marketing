@@ -3,7 +3,7 @@ import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
-import { isApprovedHumanId, MAX_APPROVED_HUMAN_OPTIONS, type ApprovedHumanOption } from '@/lib/video/approved-human';
+import { isApprovedHumanId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
@@ -165,10 +165,9 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
     throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
   }
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
-  if (args.approvedHumanOptions && (args.approvedHumanOptions.length > MAX_APPROVED_HUMAN_OPTIONS
-    || args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
+  if (args.approvedHumanOptions && (args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
-    throw new Error('Invalid bounded approved-human options.');
+    throw new Error('Invalid approved-human options.');
   }
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
