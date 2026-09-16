@@ -56,8 +56,8 @@ export async function runPortfolio(
     if (next.job.requestedCount !== previous.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
     onUpdate(next);
     current = next;
-    if (shouldStop()) break;
     if (next.retryAfterMs !== undefined) {
+      if (shouldStop()) break;
       await wait(next.retryAfterMs);
       if (shouldStop()) break;
       continue;
@@ -67,6 +67,7 @@ export async function runPortfolio(
     if (!polling && !next.job.lease && JSON.stringify(next.job) === JSON.stringify(previous.job) && portfolioCanAdvance(next.job)) {
       throw new Error('Portfolio progress did not advance. Reload saved progress before resuming.');
     }
+    if (shouldStop()) break;
   }
   return current;
 }
