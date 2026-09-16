@@ -18,7 +18,7 @@ beforeEach(() => {
   mocks.hydrate.mockResolvedValue([{}]); mocks.hash.mockReturnValue('hash');
   mocks.context.mockResolvedValue({ library: { id: 'library', representativeFrames: Array.from({length:10}, (_,i)=>frame(i+1)) } });
 });
-describe('bounded approved-human planning options', () => {
+describe('approved-human planning options', () => {
   it('keeps graphic planning available when the optional catalog cannot be read', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mocks.list.mockRejectedValue(new Error('Catalog corrupt or storage unavailable'));
@@ -27,10 +27,11 @@ describe('bounded approved-human planning options', () => {
     expect(warning).toHaveBeenCalledWith(expect.stringContaining('without library human options'));
     warning.mockRestore();
   });
-  it('offers at most eight curated options and hydrates each shared source once', async () => {
+  it('offers every valid curated option beyond the legacy eight-option cap and hydrates each shared source once', async () => {
     mocks.list.mockResolvedValue(Array.from({length:10}, (_,i)=>record(i+1)));
     const result = await loadApprovedHumanOptions();
-    expect(result).toHaveLength(8); expect(mocks.hydrate).toHaveBeenCalledTimes(1);
+    expect(result).toHaveLength(10); expect(mocks.hydrate).toHaveBeenCalledTimes(1);
+    expect(result.map(item => item.id)).toEqual(Array.from({length:10}, (_,i)=>record(i+1).id));
     expect(result[0]).toEqual({id:record().id,sourceName:record().sourceName,description:record().description});
   });
   it('omits inactive, duplicate-PNG and source-mismatched records without inventing replacements', async () => {
