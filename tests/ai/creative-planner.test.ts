@@ -274,7 +274,7 @@ describe('creative batch planner', () => {
       description: `Presenter ${index + 1}`,
     }));
     const finalSourceId = approvedHumanSourceId(approvedHumanOptions.at(-1)!.id);
-    const fetchMock = vi.fn(async () => okResponse({ creatives: [
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives: [
       { ...concept(1, 'approved-tra-human'), humanSourceId: finalSourceId }, { ...concept(2), humanSourceId: null },
     ] }));
     vi.stubGlobal('fetch', fetchMock);
