@@ -1,5 +1,5 @@
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
-import type { ApprovedHumanFrame } from '@/lib/video/approved-human';
+import { approvedHumanSourceId, type ApprovedHumanFrame } from '@/lib/video/approved-human';
 import { listApprovedHumanFrames } from '@/lib/video/approved-human-store';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
@@ -118,7 +118,7 @@ export function buildEligibleHumanCatalog(input: EligibleHumanCatalogInput): Eli
     const frame = record.source.frames[0];
     candidates.push({
       identityVersion: 1,
-      sourceId: `approved-human:${record.id}`,
+      sourceId: approvedHumanSourceId(record.id),
       kind: 'APPROVED_HUMAN_RECORD',
       sourceMediaId: record.source.sourceVideoMediaId,
       sourceContentSha256: record.source.sourceVideoContentHash,
