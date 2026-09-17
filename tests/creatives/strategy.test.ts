@@ -29,12 +29,13 @@ describe('CreativeStrategy contract', () => {
   it('persists and fingerprints one generalized approved-human source while rejecting ambiguity and unsupported kinds', () => {
     const approvedHumanId = `human_${'b'.repeat(64)}`;
     const humanSourceId = approvedHumanSourceId(approvedHumanId);
-    const human = { ...strategy(), humanSourceId, execution: { ...strategy().execution, subjectSource: 'approved-tra-human' } };
+    const directHuman = { ...strategy(), execution: { ...strategy().execution, subjectSource: 'approved-tra-human' } };
+    const human = { ...directHuman, humanSourceId };
     const planning = { strategy: human, selectionReason: 'Credible explanation', model: 'gpt-6-astra', reasoningEffort: 'medium' };
     const parsed = parseCreativePlanning(JSON.parse(JSON.stringify(planning)))?.strategy;
     expect(parsed?.humanSourceId).toBe(humanSourceId);
     expect(parsed).not.toHaveProperty('approvedHumanId');
-    expect(fingerprintCreativeStrategy(human)).not.toBe(fingerprintCreativeStrategy({ ...human, humanSourceId: undefined }));
+    expect(fingerprintCreativeStrategy(human)).not.toBe(fingerprintCreativeStrategy(directHuman));
     expect(parseCreativeStrategy(human, false)).toBeNull();
     expect(parseCreativeStrategy({ ...strategy(), humanSourceId }, true)).toBeNull();
     expect(parseCreativeStrategy({ ...human, approvedHumanId }, true)).toBeNull();
