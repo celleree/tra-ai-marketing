@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
+import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 import { referenceCandidate } from '../fixtures/reference-catalog';
 
@@ -35,6 +36,20 @@ describe('single-creative revision planning', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload({ ...humanOutput, strategy: { ...humanOutput.strategy, approvedHumanId } }))));
     await expect(planCreativeRevision(humanArgs)).rejects.toThrow('cannot replace');
   });
+  it('preserves a generalized identity for human revisions and drops it for a non-human edit', async () => {
+    const approvedHumanId = `human_${'b'.repeat(64)}`;
+    const humanSourceId = approvedHumanSourceId(approvedHumanId);
+    const humanStrategy = { ...strategy, humanSourceId, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' as const } };
+    const humanArgs = { ...args, parent: { ...parent, strategy: humanStrategy }, hasApprovedHumanSource: true };
+    const humanOutput = { ...plan(), strategy: { ...strategy, conceptDetails, execution: humanStrategy.execution } };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload(humanOutput))));
+    const preserved = await planCreativeRevision(humanArgs);
+    expect(preserved.concept.strategy.humanSourceId).toBe(humanSourceId);
+    expect(preserved.concept.strategy).not.toHaveProperty('approvedHumanId');
+    expect((await planCreativeRevision(humanArgs)).concept.strategy).not.toHaveProperty('humanSourceId');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload({ ...humanOutput, strategy: { ...humanOutput.strategy, humanSourceId } }))));
+    await expect(planCreativeRevision(humanArgs)).rejects.toThrow('cannot replace');
+  });
   it('resolves independent revision choices and rejects missing catalog IDs', async () => {
     const referenceCatalog = [referenceCandidate()];
     const referenceChoices = { angleSource: referenceCatalog[0].referenceId, layoutSource: null };
@@ -52,6 +67,8 @@ describe('single-creative revision planning', () => {
     expect(body.reasoning).toEqual({ effort: 'medium' });
     expect(body.store).toBe(false);
     expect(body.text.format.strict).toBe(true);
+    expect(body.text.format.schema.properties.strategy.properties).not.toHaveProperty('approvedHumanId');
+    expect(body.text.format.schema.properties.strategy.properties).not.toHaveProperty('humanSourceId');
     expect(JSON.parse(body.input[1].content[0].text)).toEqual(args);
     expect(body.input[0].content[0].text).toContain('not evidence that its claims are approved');
     expect(body.input[0].content[0].text).toContain('canvas and layout/reference-library content never confer human approval');

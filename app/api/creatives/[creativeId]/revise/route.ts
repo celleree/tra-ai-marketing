@@ -12,6 +12,7 @@ import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { validateCreativeRevisionRequest } from '@/lib/creatives/revision-request';
 import { CreativeRevisionHydrationError, hydrateSavedCreativeRevisionContext } from '@/lib/creatives/revision-source-hydration';
+import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import { requireActiveHumanSelection } from '@/lib/video/approved-human-service';
 import { isSafeCreativeId, listCreatives, saveCreativeBatch } from '@/lib/creatives/storage';
 import { getMediaStorage } from '@/lib/media/local-storage';
@@ -73,11 +74,20 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       ? buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent, strategy: concept.strategy })
       : buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent });
     const instruction = 'instruction' in revision ? revision.instruction : undefined;
-    if (concept.strategy.approvedHumanId) {
-      try { await requireActiveHumanSelection(concept.strategy.approvedHumanId, parent.videoFrameSelection); }
+    let activeHumanRecordId = concept.strategy.approvedHumanId ?? null;
+    if (concept.strategy.humanSourceId) {
+      const parsedHumanRecordId = parseApprovedHumanSourceId(concept.strategy.humanSourceId);
+      if (!parsedHumanRecordId || activeHumanRecordId) {
+        throw new CreativeRevisionHydrationError('The approved human is unavailable.', 409);
+      }
+      activeHumanRecordId = parsedHumanRecordId;
+    }
+    if (activeHumanRecordId) {
+      try { await requireActiveHumanSelection(activeHumanRecordId, parent.videoFrameSelection); }
       catch (error) { throw new CreativeRevisionHydrationError(error instanceof Error ? error.message : 'The approved human is unavailable.', 409); }
     }
-    const removedLibraryHuman = !!planning.strategy.approvedHumanId && concept.strategy.execution.subjectSource === 'non-human';
+    const removedLibraryHuman = !!(planning.strategy.humanSourceId || planning.strategy.approvedHumanId)
+      && concept.strategy.execution.subjectSource === 'non-human';
     const imageResult = await generateCreativeRevisionImage({
       sources: removedLibraryHuman ? { ...sources, originalApprovedSource: null } : sources,
       operation: revision.operation,
