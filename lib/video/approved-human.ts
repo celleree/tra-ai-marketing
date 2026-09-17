@@ -14,6 +14,16 @@ export type ApprovedHumanFrame = {
   active: boolean;
 };
 export const isApprovedHumanId = (value: unknown): value is string => typeof value === 'string' && /^human_[a-f0-9]{64}$/.test(value);
+export const APPROVED_HUMAN_SOURCE_PREFIX = 'approved-human:' as const;
+export const approvedHumanSourceId = (id: string) => {
+  if (!isApprovedHumanId(id)) throw new Error('Invalid approved-human ID.');
+  return `${APPROVED_HUMAN_SOURCE_PREFIX}${id}`;
+};
+export const parseApprovedHumanSourceId = (value: unknown): string | null => {
+  if (typeof value !== 'string' || !value.startsWith(APPROVED_HUMAN_SOURCE_PREFIX)) return null;
+  const id = value.slice(APPROVED_HUMAN_SOURCE_PREFIX.length);
+  return isApprovedHumanId(id) && value === approvedHumanSourceId(id) ? id : null;
+};
 export type ApprovedHumanOption = Pick<ApprovedHumanFrame, 'id' | 'description' | 'sourceName'>;
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 const date = (value: unknown): value is string => typeof value === 'string'
