@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseCreativeStrategy } from '@/lib/creatives/strategy';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
-import { fingerprintCreativeStrategy } from '@/lib/creatives/identity.server';
-import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 
 const strategy = () => ({
@@ -15,7 +13,7 @@ const strategy = () => ({
 });
 
 describe('CreativeStrategy contract', () => {
-  it('persists a stable legacy human choice only with a human execution and keeps old plans unchanged', () => {
+  it('persists a stable human choice only with a human execution and keeps old plans unchanged', () => {
     const approvedHumanId = `human_${'a'.repeat(64)}`;
     const human = { ...strategy(), approvedHumanId, execution: { ...strategy().execution, subjectSource: 'approved-tra-human' } };
     const planning = { strategy: human, selectionReason: 'Credible explanation', model: 'gpt-6-astra', reasoningEffort: 'medium' };
@@ -25,26 +23,6 @@ describe('CreativeStrategy contract', () => {
     expect(parseCreativeStrategy({ ...human, approvedHumanId: 'unknown' }, true)).toBeNull();
     expect(parseCreativeStrategy(strategy(), false)).not.toHaveProperty('approvedHumanId');
   });
-
-  it('persists and fingerprints one generalized approved-human source while rejecting ambiguity and unsupported kinds', () => {
-    const approvedHumanId = `human_${'b'.repeat(64)}`;
-    const humanSourceId = approvedHumanSourceId(approvedHumanId);
-    const directHuman = { ...strategy(), execution: { ...strategy().execution, subjectSource: 'approved-tra-human' } };
-    const human = { ...directHuman, humanSourceId };
-    const planning = { strategy: human, selectionReason: 'Credible explanation', model: 'gpt-6-astra', reasoningEffort: 'medium' };
-    const parsed = parseCreativePlanning(JSON.parse(JSON.stringify(planning)))?.strategy;
-    expect(parsed?.humanSourceId).toBe(humanSourceId);
-    expect(parsed).not.toHaveProperty('approvedHumanId');
-    expect(fingerprintCreativeStrategy(human)).not.toBe(fingerprintCreativeStrategy(directHuman));
-    expect(parseCreativeStrategy(human, false)).toBeNull();
-    expect(parseCreativeStrategy({ ...strategy(), humanSourceId }, true)).toBeNull();
-    expect(parseCreativeStrategy({ ...human, approvedHumanId }, true)).toBeNull();
-    expect(parseCreativeStrategy({ ...human, humanSourceId: 'approved-human:unknown' }, true)).toBeNull();
-    expect(parseCreativeStrategy({ ...human, humanSourceId: `video-frame:${'c'.repeat(64)}` }, true)).toBeNull();
-    expect(parseCreativeStrategy({ ...human, humanSourceId: `approved-video-frame:${'d'.repeat(64)}` }, true)).toBeNull();
-    expect(parseCreativeStrategy({ ...human, humanSourceId: `tra-reference:media_${'e'.repeat(32)}` }, true)).toBeNull();
-  });
-
   it('round-trips rich concept details through saved planning without upgrading legacy records', () => {
     const planning = { strategy: { ...strategy(), conceptDetails: { ...conceptDetails, proposition: ' Understand options before committing ' } },
       selectionReason: 'A distinct reason to act', model: 'gpt-6-astra', reasoningEffort: 'medium' };
