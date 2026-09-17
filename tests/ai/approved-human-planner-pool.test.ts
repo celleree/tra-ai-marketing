@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
+import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 
 const analysis = {
@@ -16,14 +17,14 @@ const strategy = (subjectSource: 'non-human' | 'approved-tra-human') => ({
   execution: { taxDocumentReference: 'none', subjectSource, composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' },
   visualDirection: 'An organized notice leading toward one clear next step',
 });
-const concept = (index: number, approvedHumanId: string | null) => ({
+const concept = (index: number, humanSourceId: string | null) => ({
   index,
   format: 'direct-response',
   adCopy: { primaryText: `Meta primary ${index}`, headline: `Meta headline ${index}`, description: '' },
   imageCopy: { headline: `Image headline ${index}`, shortSupport: null, proofAttribution: null, cta: null, disclosure: null },
-  strategy: strategy(approvedHumanId ? 'approved-tra-human' : 'non-human'),
+  strategy: strategy(humanSourceId ? 'approved-tra-human' : 'non-human'),
   selectionReason: `Distinct reason ${index}`,
-  approvedHumanId,
+  humanSourceId,
 });
 const payload = (value: unknown) => ({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
 const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value)), { status: 200 });
@@ -38,27 +39,33 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 describe('approved-human planner pool', () => {
   it('sends 251 validated options to Astra without a dynamic schema enum and accepts the final option', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const finalSourceId = approvedHumanSourceId(options[250].id);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      okResponse({ creatives: [concept(1, options[250].id), concept(2, null)] }));
+      okResponse({ creatives: [concept(1, finalSourceId), concept(2, null)] }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await requestCreativeBatch({
       count: 2, context: 'Approved context', analysis, hasApprovedHumanSource: false, approvedHumanOptions: options,
     });
 
-    expect(result.creatives[0].strategy.approvedHumanId).toBe(options[250].id);
+    expect(result.creatives[0].strategy.humanSourceId).toBe(finalSourceId);
+    expect(result.creatives[0].strategy).not.toHaveProperty('approvedHumanId');
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     const input = JSON.parse(body.input[1].content[0].text);
-    expect(input.approvedHumanOptions).toEqual(options);
+    expect(input.approvedHumanOptions).toEqual(options.map(option => ({
+      humanSourceId: approvedHumanSourceId(option.id),
+      sourceName: option.sourceName,
+      description: option.description,
+    })));
     expect(input.approvedHumanOptions).toHaveLength(251);
 
     const itemSchema = body.text.format.schema.properties.creatives.items;
-    expect(itemSchema.required).toContain('approvedHumanId');
-    const approvedHumanIdSchema = itemSchema.properties.approvedHumanId;
-    expect(approvedHumanIdSchema).toMatchObject({ type: ['string', 'null'] });
-    expect(approvedHumanIdSchema).not.toHaveProperty('enum');
-    expect(JSON.stringify(approvedHumanIdSchema)).not.toContain(options[0].id);
-    expect(JSON.stringify(approvedHumanIdSchema)).not.toContain(options[250].id);
+    expect(itemSchema.required).toContain('humanSourceId');
+    const humanSourceIdSchema = itemSchema.properties.humanSourceId;
+    expect(humanSourceIdSchema).toMatchObject({ type: ['string', 'null'] });
+    expect(humanSourceIdSchema).not.toHaveProperty('enum');
+    expect(JSON.stringify(humanSourceIdSchema)).not.toContain(approvedHumanSourceId(options[0].id));
+    expect(JSON.stringify(humanSourceIdSchema)).not.toContain(finalSourceId);
   });
 
   it.each([
@@ -75,7 +82,7 @@ describe('approved-human planner pool', () => {
 
   it('rejects an Astra human ID that was not offered', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const unknown = `human_${'f'.repeat(64)}`;
+    const unknown = approvedHumanSourceId(`human_${'f'.repeat(64)}`);
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [concept(1, unknown), concept(2, null)] })));
     await expect(requestCreativeBatch({
       count: 2, context: '', analysis, hasApprovedHumanSource: false, approvedHumanOptions: options,
