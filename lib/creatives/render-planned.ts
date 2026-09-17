@@ -22,6 +22,7 @@ import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { EligibleProviderImageSource } from '@/lib/media/source-hydration';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
+import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
@@ -71,7 +72,11 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
   if (!/^creative_[a-f0-9]{32}$/.test(creativeId)) throw new Error('Invalid reserved creative ID.');
   const copyMode = classifyPlannedCopy(item);
-  const human = item.strategy.approvedHumanId ? await resolveApprovedHumanFrame(item.strategy.approvedHumanId) : null;
+  const humanRecordId = item.strategy.humanSourceId
+    ? parseApprovedHumanSourceId(item.strategy.humanSourceId)
+    : item.strategy.approvedHumanId ?? null;
+  if (item.strategy.humanSourceId && !humanRecordId) throw new Error('Unsupported or invalid human source ID.');
+  const human = humanRecordId ? await resolveApprovedHumanFrame(humanRecordId) : null;
   const itemVideoFrames = human?.selected ?? videoFrameSet;
   const itemImageSource = human ? null : providerImageSource;
   const itemFrameSelection = human?.record.source ?? generatedVideoFrameSelection;
