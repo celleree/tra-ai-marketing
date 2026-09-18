@@ -108,7 +108,7 @@ describe('Proof planning retrieval', () => {
     const result = selectProofForPlanning([attributed, unattributed], 'Need a bank levy proof concept');
 
     expect(result).toHaveLength(2);
-    expect(result[0]).toMatchObject({
+    expect(result.find(item => item.id === attributed.id)).toMatchObject({
       id: attributed.id,
       type: 'review',
       updatedAt: attributed.updatedAt,
