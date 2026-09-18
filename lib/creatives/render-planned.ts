@@ -92,16 +92,17 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   });
   const copy = item.copy;
   const selectedReference = selectedReferences.find(reference => reference.item.id === item.strategy.referenceSelection?.layoutSource);
-  const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
-    concept: item, companyProfile: request.companyProfile,
-    brandColors: request.brandColors, brandFontNames: request.brandFontNames,
-    referenceCatalog,
-  }));
   let imageResult: ImageGenerationResult;
   let providerFrames: ApprovedTraVideoFrame[] | undefined;
 
   await options.assertCurrentWork?.();
   const proofProvenance = await revalidateSelectedProofForPaidWork(item.selectedProof);
+  const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
+    concept: item, companyProfile: request.companyProfile,
+    brandColors: request.brandColors, brandFontNames: request.brandFontNames,
+    referenceCatalog,
+    ...(proofProvenance ? { proofProvenance } : {}),
+  }));
 
   if (itemImageSource) {
     imageResult = copyMode.kind === 'LEGACY'
