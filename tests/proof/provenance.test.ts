@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProofRecord } from '@/lib/proof/types';
+import type { CaseStudyProofRecord, ReviewProofRecord } from '@/lib/proof/types';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn() }));
 vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.list }));
@@ -15,7 +15,7 @@ const proofId = (hex: string) => `proof_${hex.repeat(32)}`;
 const createdAt = '2026-09-18T12:00:00.000Z';
 const updatedAt = '2026-09-18T13:00:00.000Z';
 
-const review = (): ProofRecord => ({
+const review = (): ReviewProofRecord => ({
   id: proofId('a'),
   type: 'review',
   tags: ['clarity'],
@@ -27,7 +27,7 @@ const review = (): ProofRecord => ({
   attribution: { display: 'Verified TRA client', allowed: true },
 });
 
-const caseStudy = (): ProofRecord => ({
+const caseStudy = (): CaseStudyProofRecord => ({
   id: proofId('b'),
   type: 'case-study',
   tags: ['case-study'],
