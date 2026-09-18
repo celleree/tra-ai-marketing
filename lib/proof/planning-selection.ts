@@ -2,6 +2,7 @@ import type { PlanningProofRecord } from '@/lib/proof/planning';
 import {
   isApprovedCaseStudyClaim,
   requireVerbatimReviewExcerpt,
+  reviewSourceBoundUnits,
 } from '@/lib/proof/validation';
 
 export type SelectedReviewProof = {
@@ -160,3 +161,75 @@ export function isSelectedPlanningProof(value: unknown): value is SelectedPlanni
 
   return false;
 }
+
+type PlanningProofCopy = {
+  adCopy: {
+    primaryText: string;
+    headline: string;
+    description: string;
+  };
+  imageCopy: {
+    headline: string;
+    shortSupport?: string;
+    proofAttribution?: string;
+    cta?: string;
+    disclosure?: string;
+  };
+};
+
+const proofBearingCopyFields = (copy: PlanningProofCopy) => [
+  copy.adCopy.primaryText,
+  copy.adCopy.headline,
+  copy.adCopy.description,
+  copy.imageCopy.headline,
+  copy.imageCopy.shortSupport,
+  copy.imageCopy.disclosure,
+].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+export function validatePlanningProofCopyConsistency(
+  selectedProof: SelectedPlanningProof | null,
+  proofCatalog: readonly PlanningProofRecord[],
+  copy: PlanningProofCopy
+) {
+  const fields = proofBearingCopyFields(copy);
+
+  if (selectedProof && !fields.some((field) => field.includes(selectedProof.selectedText))) {
+    throw new Error('Selected Proof text is not present in any ad-facing copy field.');
+  }
+
+  for (const proof of proofCatalog) {
+    if (proof.type === 'review') {
+      for (const unit of reviewSourceBoundUnits(proof.originalReviewText)) {
+        if (!fields.some((field) => field.includes(unit))) continue;
+        if (
+          selectedProof?.type !== 'review'
+          || selectedProof.proofId !== proof.id
+          || !selectedProof.selectedText.includes(unit)
+        ) {
+          throw new Error('Ad-facing Review text is not bound to the matching Proof selection.');
+        }
+      }
+      continue;
+    }
+
+    if (
+      fields.some((field) => field.includes(proof.approvedClaimWording))
+      && (
+        selectedProof?.type !== 'case-study'
+        || selectedProof.proofId !== proof.id
+        || selectedProof.selectedText !== proof.approvedClaimWording
+      )
+    ) {
+      throw new Error('Ad-facing Case Study wording is not bound to the matching Proof selection.');
+    }
+  }
+
+  if (
+    selectedProof?.type === 'case-study'
+    && selectedProof.requiredDisclaimer !== undefined
+    && copy.imageCopy.disclosure !== selectedProof.requiredDisclaimer
+  ) {
+    throw new Error('Selected Case Study requires its canonical disclosure.');
+  }
+}
+

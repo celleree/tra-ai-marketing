@@ -132,10 +132,89 @@ export function parseCaseStudyProofDraft(
   };
 }
 
+const SENTENCE_TERMINATORS = new Set(['.', '!', '?']);
+const CLOSING_PUNCTUATION = new Set(['"', "'", '’', '”', ')', ']', '}']);
+const horizontalWhitespace = (character: string | undefined) =>
+  character === ' ' || character === '\t';
+const lineBreak = (character: string | undefined) =>
+  character === '\n' || character === '\r';
+
+const sentenceEndsAt = (value: string, end: number) => {
+  let cursor = end - 1;
+  while (cursor >= 0 && horizontalWhitespace(value[cursor])) cursor -= 1;
+  while (cursor >= 0 && CLOSING_PUNCTUATION.has(value[cursor])) cursor -= 1;
+  return cursor >= 0 && SENTENCE_TERMINATORS.has(value[cursor]);
+};
+
+const sourceBoundStart = (source: string, start: number) => {
+  if (start === 0) return true;
+  let cursor = start - 1;
+  if (lineBreak(source[cursor])) return true;
+  let sawWhitespace = false;
+  while (cursor >= 0 && horizontalWhitespace(source[cursor])) {
+    sawWhitespace = true;
+    cursor -= 1;
+  }
+  if (cursor < 0 || lineBreak(source[cursor])) return true;
+  while (cursor >= 0 && CLOSING_PUNCTUATION.has(source[cursor])) cursor -= 1;
+  return sawWhitespace && cursor >= 0 && SENTENCE_TERMINATORS.has(source[cursor]);
+};
+
+const sourceBoundEnd = (source: string, end: number, excerpt: string) => {
+  if (end === source.length || lineBreak(source[end])) return true;
+  let cursor = end;
+  while (cursor < source.length && CLOSING_PUNCTUATION.has(source[cursor])) cursor += 1;
+  let sawWhitespace = false;
+  while (cursor < source.length && horizontalWhitespace(source[cursor])) {
+    sawWhitespace = true;
+    cursor += 1;
+  }
+  if (cursor === source.length || lineBreak(source[cursor])) return true;
+  return sawWhitespace && sentenceEndsAt(excerpt, excerpt.length);
+};
+
 export const isVerbatimReviewExcerpt = (
   originalReviewText: string,
   excerpt: string
-) => excerpt.length > 0 && originalReviewText.includes(excerpt);
+) => {
+  if (!excerpt.length) return false;
+  let start = originalReviewText.indexOf(excerpt);
+  while (start !== -1) {
+    const end = start + excerpt.length;
+    if (
+      sourceBoundStart(originalReviewText, start)
+      && sourceBoundEnd(originalReviewText, end, excerpt)
+    ) {
+      return true;
+    }
+    start = originalReviewText.indexOf(excerpt, start + 1);
+  }
+  return false;
+};
+
+export const reviewSourceBoundUnits = (originalReviewText: string) => {
+  const units = new Set<string>();
+  for (const rawLine of originalReviewText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    units.add(line);
+
+    let start = 0;
+    for (let index = 0; index < line.length; index += 1) {
+      if (!SENTENCE_TERMINATORS.has(line[index])) continue;
+      let end = index + 1;
+      while (end < line.length && SENTENCE_TERMINATORS.has(line[end])) end += 1;
+      while (end < line.length && CLOSING_PUNCTUATION.has(line[end])) end += 1;
+      if (end < line.length && !horizontalWhitespace(line[end])) continue;
+      const sentence = line.slice(start, end).trim();
+      if (sentence) units.add(sentence);
+      while (end < line.length && horizontalWhitespace(line[end])) end += 1;
+      start = end;
+      index = end - 1;
+    }
+  }
+  return [...units];
+};
 
 export function requireVerbatimReviewExcerpt(
   originalReviewText: string,
@@ -143,7 +222,7 @@ export function requireVerbatimReviewExcerpt(
 ) {
   if (!isVerbatimReviewExcerpt(originalReviewText, excerpt)) {
     throw new Error(
-      'Review excerpt must be a contiguous exact substring of the original review.'
+      'Review excerpt must be exact source text bounded by whole sentence or whole line boundaries.'
     );
   }
   return excerpt;

@@ -207,9 +207,94 @@ describe('Proof planning retrieval', () => {
       .toEqual([approvedCase.id, approvedReview.id]);
     expect(JSON.stringify(input.proofCatalog)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
     expect(JSON.stringify(input.proofCatalog)).not.toContain(legacy.id);
-    expect(body.input[0].content[0].text).toContain('selectedText must be one contiguous verbatim excerpt');
+    expect(body.input[0].content[0].text).toContain('whole sentence or whole line boundaries');
+    expect(body.input[0].content[0].text).toContain('proofSelection:null means no supplied Proof wording or attribution');
     expect(body.input[0].content[0].text).toContain('never broaden it into a universal outcome');
   });
+  it('fails closed when ad-facing Proof text is used without the matching selection', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const reviewSource = review('a', { originalReviewText: 'I did not save $10,000.' });
+    const caseSource = caseStudy('b');
+    listProofRecordsMock.mockResolvedValue([reviewSource, caseSource]);
+
+    const reviewBypass = {
+      ...concept(1),
+      adCopy: { ...concept(1).adCopy, primaryText: reviewSource.originalReviewText },
+      proofSelection: null,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      okResponse({ creatives: [reviewBypass, concept(2)] })));
+    await expect(requestCreativeBatch({
+      count: 2,
+      context: 'Planner context',
+      proofRetrievalQuery: 'bank levy',
+      analysis,
+      hasApprovedHumanSource: false,
+    })).rejects.toThrow('invalid creative batch plan concept');
+
+    const caseBypass = {
+      ...concept(1),
+      imageCopy: { ...concept(1).imageCopy, headline: caseSource.approvedClaimWording },
+      proofSelection: null,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      okResponse({ creatives: [caseBypass, concept(2)] })));
+    await expect(requestCreativeBatch({
+      count: 2,
+      context: 'Planner context',
+      proofRetrievalQuery: 'bank levy',
+      analysis,
+      hasApprovedHumanSource: false,
+    })).rejects.toThrow('invalid creative batch plan concept');
+  });
+
+  it('rejects context-stripped Review selections and accepts the full source-bound sentence', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const source = review('a', { originalReviewText: 'I did not save $10,000.' });
+    listProofRecordsMock.mockResolvedValue([source]);
+
+    const unsafe = {
+      ...concept(1),
+      adCopy: { ...concept(1).adCopy, primaryText: 'save $10,000.' },
+      proofSelection: {
+        type: 'review',
+        proofId: source.id,
+        proofUpdatedAt: source.updatedAt,
+        selectedText: 'save $10,000.',
+        includeAttribution: false,
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [unsafe, concept(2)] })));
+    await expect(requestCreativeBatch({
+      count: 2,
+      context: 'Planner context',
+      proofRetrievalQuery: 'bank levy',
+      analysis,
+      hasApprovedHumanSource: false,
+    })).rejects.toThrow('invalid creative batch plan concept');
+
+    const safe = {
+      ...concept(1),
+      adCopy: { ...concept(1).adCopy, primaryText: source.originalReviewText },
+      proofSelection: {
+        type: 'review',
+        proofId: source.id,
+        proofUpdatedAt: source.updatedAt,
+        selectedText: source.originalReviewText,
+        includeAttribution: false,
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [safe, concept(2)] })));
+    const result = await requestCreativeBatch({
+      count: 2,
+      context: 'Planner context',
+      proofRetrievalQuery: 'bank levy',
+      analysis,
+      hasApprovedHumanSource: false,
+    });
+    expect(result.creatives[0].selectedProof?.selectedText).toBe(source.originalReviewText);
+  });
+
   it('fails the whole planner response closed when a selection is not valid for that call catalog', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const source = review('a');
@@ -247,7 +332,12 @@ describe('Proof planning retrieval', () => {
       selectedText: source.approvedClaimWording,
     };
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [
-      { ...concept(1), proofSelection: selected },
+      {
+        ...concept(1),
+        adCopy: { ...concept(1).adCopy, primaryText: source.approvedClaimWording },
+        imageCopy: { ...concept(1).imageCopy, disclosure: source.requiredDisclaimer },
+        proofSelection: selected,
+      },
       concept(2),
     ] })));
 

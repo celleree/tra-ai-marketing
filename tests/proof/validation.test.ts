@@ -17,25 +17,40 @@ describe('proof validation', () => {
     expect(parsed?.originalReviewText).toBe(originalReviewText);
   });
 
-  it('accepts only contiguous, case-sensitive, exact review excerpts', () => {
-    const original = 'They answered all of my questions, clearly and patiently.';
+  it('accepts only exact Review excerpts on whole sentence or whole line boundaries', () => {
+    const original = 'They answered all of my questions, clearly and patiently. Another sentence.';
 
-    expect(isVerbatimReviewExcerpt(original, 'all of my questions, clearly')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'They answered all of my questions, clearly and patiently.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'Another sentence.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'all of my questions, clearly')).toBe(false);
     expect(isVerbatimReviewExcerpt(original, 'All of my questions, clearly')).toBe(false);
-    expect(isVerbatimReviewExcerpt(original, 'answered my questions')).toBe(false);
     expect(isVerbatimReviewExcerpt(original, '')).toBe(false);
-    expect(requireVerbatimReviewExcerpt(original, 'clearly and patiently.')).toBe(
-      'clearly and patiently.'
+    expect(requireVerbatimReviewExcerpt(original, 'Another sentence.')).toBe(
+      'Another sentence.'
     );
     expect(() =>
       requireVerbatimReviewExcerpt(original, 'answered every question')
-    ).toThrow('contiguous exact substring');
+    ).toThrow('whole sentence or whole line boundaries');
   });
 
-  it('does not normalize punctuation or line breaks for excerpt matching', () => {
-    const original = 'Straightforward help—no pressure.\nVery responsive.';
+  it('preserves negation and qualification context instead of accepting arbitrary substrings', () => {
+    const negative = 'I did not save $10,000.';
+    expect(isVerbatimReviewExcerpt(negative, negative)).toBe(true);
+    expect(isVerbatimReviewExcerpt(negative, 'save $10,000.')).toBe(false);
+    expect(isVerbatimReviewExcerpt(negative, '$10,000.')).toBe(false);
 
-    expect(isVerbatimReviewExcerpt(original, 'help—no pressure.\nVery')).toBe(true);
+    const qualified = 'I may save $10,000 depending on my final IRS outcome.';
+    expect(isVerbatimReviewExcerpt(qualified, qualified)).toBe(true);
+    expect(isVerbatimReviewExcerpt(qualified, 'save $10,000 depending on my final IRS outcome.')).toBe(false);
+  });
+
+  it('allows exact whole lines and consecutive source-bound sentences without normalizing text', () => {
+    const original = 'Straightforward help—no pressure.\nVery responsive. Clear explanations.';
+
+    expect(isVerbatimReviewExcerpt(original, 'Straightforward help—no pressure.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'Very responsive.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'Very responsive. Clear explanations.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'help—no pressure.\nVery')).toBe(false);
     expect(isVerbatimReviewExcerpt(original, 'help - no pressure. Very')).toBe(false);
   });
 

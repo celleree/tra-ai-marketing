@@ -3,6 +3,7 @@ import type { PlanningCaseStudyProof, PlanningReviewProof } from '@/lib/proof/pl
 import {
   hydratePlanningProofSelection,
   isSelectedPlanningProof,
+  validatePlanningProofCopyConsistency,
 } from '@/lib/proof/planning-selection';
 
 const review = (overrides: Partial<PlanningReviewProof> = {}): PlanningReviewProof => ({
@@ -136,6 +137,71 @@ describe('planning proof selection', () => {
     expect(() => hydratePlanningProofSelection(selection, [source])).toThrow(
       'canonical approved text'
     );
+  });
+
+  it('rejects Proof-derived ad-facing copy when no matching selection exists', () => {
+    const reviewSource = review();
+    const caseSource = caseStudy();
+    const base = {
+      adCopy: { primaryText: 'Ordinary copy', headline: 'Ordinary headline', description: '' },
+      imageCopy: { headline: 'Ordinary image headline' },
+    };
+    expect(() => validatePlanningProofCopyConsistency(null, [reviewSource], {
+      ...base,
+      adCopy: { ...base.adCopy, primaryText: 'Second exact line.' },
+    })).toThrow('Review text is not bound');
+    expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
+      ...base,
+      imageCopy: { headline: caseSource.approvedClaimWording },
+    })).toThrow('Case Study wording is not bound');
+  });
+
+  it('requires selected Proof text to be used exactly and rejects wording from another Proof', () => {
+    const selectedSource = review();
+    const otherSource = review({
+      id: `proof_${'c'.repeat(32)}`,
+      originalReviewText: 'Different approved sentence.',
+    });
+    const selected = hydratePlanningProofSelection({
+      type: 'review',
+      proofId: selectedSource.id,
+      proofUpdatedAt: selectedSource.updatedAt,
+      selectedText: 'Second exact line.',
+      includeAttribution: false,
+    }, [selectedSource, otherSource]);
+    const base = {
+      adCopy: { primaryText: 'Second exact line.', headline: 'Ordinary headline', description: '' },
+      imageCopy: { headline: 'Ordinary image headline' },
+    };
+    expect(() => validatePlanningProofCopyConsistency(selected, [selectedSource, otherSource], base))
+      .not.toThrow();
+    expect(() => validatePlanningProofCopyConsistency(selected, [selectedSource, otherSource], {
+      ...base,
+      imageCopy: { headline: 'Different approved sentence.' },
+    })).toThrow('Review text is not bound');
+    expect(() => validatePlanningProofCopyConsistency(selected, [selectedSource], {
+      ...base,
+      adCopy: { ...base.adCopy, primaryText: 'Ordinary copy' },
+    })).toThrow('Selected Proof text is not present');
+  });
+
+  it('requires the canonical Case Study disclosure when the selected record requires one', () => {
+    const source = caseStudy();
+    const selected = hydratePlanningProofSelection({
+      type: 'case-study',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.approvedClaimWording,
+    }, [source]);
+    const valid = {
+      adCopy: { primaryText: source.approvedClaimWording, headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline', disclosure: source.requiredDisclaimer },
+    };
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], valid)).not.toThrow();
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
+      ...valid,
+      imageCopy: { headline: 'Image headline' },
+    })).toThrow('canonical disclosure');
   });
 
   it('requires exact Case Study approved wording and hydrates restrictions/disclaimer', () => {

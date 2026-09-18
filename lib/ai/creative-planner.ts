@@ -3,7 +3,10 @@ import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
-import { hydratePlanningProofSelection } from '@/lib/proof/planning-selection';
+import {
+  hydratePlanningProofSelection,
+  validatePlanningProofCopyConsistency,
+} from '@/lib/proof/planning-selection';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { approvedHumanSourceId, isApprovedHumanId, parseApprovedHumanSourceId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
@@ -38,7 +41,7 @@ Plan globally distinct problem/outcome framings, objections, emotions, awareness
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
-proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. Review originalReviewText is exact source text: selectedText must be one contiguous verbatim excerpt and must never be rewritten, summarized, merged, or fabricated. Set includeAttribution true only when that Review record includes approved attribution, and then imageCopy.proofAttribution must exactly match its supplied display text. For Case Studies, selectedText must exactly equal approvedClaimWording; never broaden it into a universal outcome. Obey usageRestrictions and requiredDisclaimer. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
+proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. Any Proof wording used anywhere in adCopy or imageCopy must be backed by that same proofSelection; proofSelection:null means no supplied Proof wording or attribution may appear in ad-facing copy. Review originalReviewText is exact source text: selectedText must use exact source wording bounded by whole sentence or whole line boundaries, preserving negations and qualifications, and must never be clipped, rewritten, summarized, merged, or fabricated. Set includeAttribution true only when that Review record includes approved attribution, and then imageCopy.proofAttribution must exactly match its supplied display text. For Case Studies, selectedText must exactly equal approvedClaimWording; never broaden it into a universal outcome. Obey usageRestrictions and requiredDisclaimer, including the exact requiredDisclaimer in imageCopy.disclosure when one is supplied. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, proof attribution, or other evidence.
 Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
 Do not restrict concepts to the analysis category.
@@ -159,6 +162,7 @@ const parseConcept = (
       proofCatalog,
       typeof rawProofAttribution === 'string' ? rawProofAttribution : undefined
     );
+    validatePlanningProofCopyConsistency(selectedProof, proofCatalog, { adCopy, imageCopy });
   } catch {
     return null;
   }
