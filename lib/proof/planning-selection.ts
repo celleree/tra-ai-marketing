@@ -226,6 +226,15 @@ const COMMON_TOKENS = new Set([
   'to', 'was', 'we', 'were', 'with', 'you', 'your',
 ]);
 
+// Short outcome wording can still carry the material meaning of a Proof record.
+// Fingerprint these claim-bearing words even when the reused fragment is only
+// one or two non-numeric tokens, while leaving generic short overlap alone.
+const MATERIAL_CLAIM_TOKENS = new Set([
+  'abated', 'abatement', 'eliminated', 'elimination', 'forgiven', 'forgiveness',
+  'lowered', 'reduced', 'reduction', 'released', 'resolved', 'resolution',
+  'saved', 'savings', 'settled', 'settlement', 'waived', 'waiver',
+]);
+
 const materialPhrase = (tokens: ProofToken[]) =>
   tokens.filter(token => token.numeric || !COMMON_TOKENS.has(token.key)).length >= 2
   && tokens.map(token => token.key).join('').replace(/[^a-z0-9]/g, '').length >= 12;
@@ -234,12 +243,14 @@ const materialFingerprintSet = (value: string) => {
   const tokens = proofTokens(value);
   const fingerprints = new Set<string>();
   for (let index = 0; index < tokens.length; index += 1) {
-    if (tokens[index].materialNumber) fingerprints.add(`1:${tokens[index].key}`);
-    if (
-      index + 1 < tokens.length
-      && [tokens[index], tokens[index + 1]].some(token => token.numeric)
-    ) {
-      fingerprints.add(`2:${tokens.slice(index, index + 2).map(token => token.key).join(' ')}`);
+    const token = tokens[index];
+    const materialClaim = !token.numeric && MATERIAL_CLAIM_TOKENS.has(token.key);
+    if (token.materialNumber || materialClaim) fingerprints.add(`1:${token.key}`);
+    if (index + 1 < tokens.length) {
+      const pair = [token, tokens[index + 1]];
+      if (pair.some(item => item.numeric || MATERIAL_CLAIM_TOKENS.has(item.key))) {
+        fingerprints.add(`2:${pair.map(item => item.key).join(' ')}`);
+      }
     }
     if (index + 2 < tokens.length) {
       const three = tokens.slice(index, index + 3);
