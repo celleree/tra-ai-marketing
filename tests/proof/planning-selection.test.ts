@@ -62,7 +62,56 @@ describe('planning proof selection', () => {
     }, [source])).toThrow();
   });
 
-  it('hydrates only canonical approved Review attribution and rejects model wording', () => {
+  it('rejects model-supplied attribution when no Proof is selected', () => {
+    expect(() => hydratePlanningProofSelection(null, [review()], 'Jane D.')).toThrow(
+      'requires an attributed Review selection'
+    );
+  });
+
+  it('rejects Review-style attribution for a Case Study selection', () => {
+    const source = caseStudy();
+    expect(() => hydratePlanningProofSelection({
+      type: 'case-study',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.approvedClaimWording,
+    }, [source], 'Jane D.')).toThrow('cannot include Review attribution');
+  });
+
+  it('rejects exact canonical attribution when Review attribution was not selected', () => {
+    const source = review();
+    expect(() => hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: 'Second exact line.',
+      includeAttribution: false,
+    }, [source], 'Jane D.')).toThrow('not selected for inclusion');
+  });
+
+  it('rejects noncanonical attribution when Review attribution was not selected', () => {
+    const source = review();
+    expect(() => hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: 'Second exact line.',
+      includeAttribution: false,
+    }, [source], 'Model supplied name')).toThrow('not selected for inclusion');
+  });
+
+  it('rejects supplied attribution when the selected Review has no approved attribution', () => {
+    const source = review({ attribution: undefined });
+    expect(() => hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: 'Second exact line.',
+      includeAttribution: true,
+    }, [source], 'Jane D.')).toThrow('not approved');
+  });
+
+  it('accepts only exact canonical approved Review attribution and hydrates it', () => {
     const source = review();
     const selection = {
       type: 'review',
@@ -84,17 +133,6 @@ describe('planning proof selection', () => {
     expect(() => hydratePlanningProofSelection(selection, [source])).toThrow(
       'canonical approved text'
     );
-    expect(() => hydratePlanningProofSelection(
-      { ...selection, includeAttribution: false },
-      [source],
-      'Jane D.'
-    )).toThrow('not selected');
-    const unavailable = review({ attribution: undefined });
-    expect(() => hydratePlanningProofSelection({
-      ...selection,
-      proofId: unavailable.id,
-      proofUpdatedAt: unavailable.updatedAt,
-    }, [unavailable], 'Jane D.')).toThrow('not approved');
   });
 
   it('requires exact Case Study approved wording and hydrates restrictions/disclaimer', () => {

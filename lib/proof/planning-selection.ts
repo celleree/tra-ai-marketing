@@ -45,7 +45,12 @@ export function hydratePlanningProofSelection(
   proofCatalog: readonly PlanningProofRecord[],
   imageProofAttribution?: string
 ): SelectedPlanningProof | null {
-  if (value === null) return null;
+  if (value === null) {
+    if (imageProofAttribution !== undefined) {
+      throw new Error('Proof attribution requires an attributed Review selection.');
+    }
+    return null;
+  }
   if (!isRecord(value) || typeof value.type !== 'string') {
     throw new Error('Proof selection is malformed.');
   }
@@ -88,10 +93,7 @@ export function hydratePlanningProofSelection(
       };
     }
 
-    if (
-      proof.attribution?.allowed === true
-      && imageProofAttribution === proof.attribution.display
-    ) {
+    if (imageProofAttribution !== undefined) {
       throw new Error('Review proof attribution was not selected for inclusion.');
     }
     return {
@@ -115,6 +117,9 @@ export function hydratePlanningProofSelection(
     }
     if (!isApprovedCaseStudyClaim(proof.approvedClaimWording, value.selectedText)) {
       throw new Error('Case Study proof selection must use exact approved wording.');
+    }
+    if (imageProofAttribution !== undefined) {
+      throw new Error('Case Study proof selections cannot include Review attribution.');
     }
     return {
       type: 'case-study',
