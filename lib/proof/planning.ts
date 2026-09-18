@@ -14,9 +14,7 @@ const COMPANY_CONTEXT_MARKER = '\n\nAPPROVED TRA COMPANY CONTEXT:';
 export function proofRetrievalQueryFromRequestContext(context: string) {
   if (!context.startsWith(USER_DIRECTION_PREFIX)) return context.trim();
   const end = context.lastIndexOf(COMPANY_CONTEXT_MARKER);
-  return context
-    .slice(USER_DIRECTION_PREFIX.length, end >= USER_DIRECTION_PREFIX.length ? end : undefined)
-    .trim();
+  return context.slice(USER_DIRECTION_PREFIX.length, end >= USER_DIRECTION_PREFIX.length ? end : undefined).trim();
 }
 
 export type PlanningReviewProof = Pick<
