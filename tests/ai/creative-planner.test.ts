@@ -46,6 +46,7 @@ const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human
     cta: index === 1 ? 'Talk with TRA' : null,
     disclosure: null,
   },
+  proofSelection: null,
   strategy: { ...strategy(subjectSource), soWhat: { ...strategy().soWhat, surfaceMessage: `Distinct message ${index}` },
     conceptDetails: { ...conceptDetails, proposition: `Different proposition ${index}` } }, selectionReason: `Distinct reason ${index}`,
 });
