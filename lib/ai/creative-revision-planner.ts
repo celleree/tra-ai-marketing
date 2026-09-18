@@ -6,6 +6,7 @@ import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { CREATIVE_STRATEGY_JSON_SCHEMA, parseCreativeStrategy } from '@/lib/creatives/strategy';
+import type { CreativeProofProvenance } from '@/lib/proof/provenance';
 
 type RevisionParentConcept = Omit<PlannedCreativeConcept, 'index' | 'selectionReason'>;
 export type CreativeRevisionPlan = {
@@ -31,6 +32,10 @@ This parent uses the modern separated-copy contract. Keep Meta adCopy and imageC
 adCopy is Meta delivery copy: primaryText, headline and description. imageCopy is only text intentionally rendered inside the image: headline plus optional shortSupport, proofAttribution, cta and disclosure.
 For EDIT, preserve unrequested content on both surfaces where practical and apply the requested change only where it belongs. For VARIATION, both surfaces may change but must remain purpose-specific rather than duplicates.
 Keep imageCopy sparse. Never move Meta primaryText or Meta description into imageCopy merely because those fields exist. Return exactly format, adCopy, imageCopy, strategy and selectionReason.`;
+
+const INHERITED_PROOF_RULES = `
+When proofProvenance is supplied, it is an immutable, already revalidated Proof constraint inherited from the saved parent. D3 does not allow selecting, replacing, broadening, paraphrasing or silently dropping that Proof during EDIT or VARIATION.
+The exact proofProvenance.selectedText must remain verbatim in the revised creative copy. For a Review with attribution, imageCopy.proofAttribution must remain exactly the supplied attribution. For a Review without attribution, do not introduce proofAttribution. For a Case Study, do not use Review attribution; when requiredDisclaimer is supplied, imageCopy.disclosure must remain exactly that disclaimer. Obey usageRestrictions. If the requested revision conflicts with these constraints, retain the Proof-linked copy; the application will deterministically reject any inconsistent result before image generation.`;
 
 const textSchema = { type: 'string', minLength: 1, maxLength: 1000 };
 const copySchema = { type: 'object', additionalProperties: false, required: ['primaryText', 'headline', 'description'], properties: {
@@ -92,6 +97,7 @@ export async function planCreativeRevision(args: {
   instruction: string;
   companyContext: string;
   hasApprovedHumanSource: boolean;
+  proofProvenance?: CreativeProofProvenance;
   referenceCatalog?: ReferencePlanningCandidate[];
 }): Promise<CreativeRevisionPlan> {
   const copyMode = classifyCreativeCopyContract(args.parent as unknown as Record<string, unknown>);
@@ -107,7 +113,7 @@ export async function planCreativeRevision(args: {
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, input: [
-      { role: 'system', content: [{ type: 'input_text', text: RULES + (copyMode.kind === 'E2' ? SEPARATED_COPY_RULES : '\nReturn exactly one format, copy, strategy and selectionReason in the required schema.') + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') }] },
+      { role: 'system', content: [{ type: 'input_text', text: RULES + (copyMode.kind === 'E2' ? SEPARATED_COPY_RULES : '\nReturn exactly one format, copy, strategy and selectionReason in the required schema.') + (args.proofProvenance ? INHERITED_PROOF_RULES : '') + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(args) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_creative_revision', strict: true, schema } } }),
   });
