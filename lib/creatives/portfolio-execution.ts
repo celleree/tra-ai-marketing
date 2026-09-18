@@ -191,6 +191,7 @@ export async function advanceCreativePortfolio(
     const automaticVideoSelection = job.videoPreparationVersion === 1
       && !job.request.videoFrameSelection
       && !concept.strategy.approvedHumanId
+      && !concept.strategy.humanSourceId
       && !context.providerImageSource
       && context.videoFrameSet !== null;
     if (automaticVideoSelection) {

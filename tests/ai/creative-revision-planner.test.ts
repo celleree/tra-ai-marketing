@@ -50,6 +50,28 @@ describe('single-creative revision planning', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload({ ...humanOutput, strategy: { ...humanOutput.strategy, humanSourceId } }))));
     await expect(planCreativeRevision(humanArgs)).rejects.toThrow('cannot replace');
   });
+  it('preserves a generalized identity through a meaningful human VARIATION', async () => {
+    const approvedHumanId = `human_${'c'.repeat(64)}`;
+    const humanSourceId = approvedHumanSourceId(approvedHumanId);
+    const humanStrategy = { ...strategy, humanSourceId, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' as const } };
+    const variationArgs = { ...args, parent: { ...parent, strategy: humanStrategy }, hasApprovedHumanSource: true, operation: 'VARIATION' as const };
+    const changedStrategy = { ...strategy, conceptDetails, awarenessStage: 'solution-aware' as const,
+      soWhat: { ...strategy.soWhat, surfaceMessage: 'Compare a clearer path' },
+      execution: { ...humanStrategy.execution, composition: 'split' as const, imageTreatment: 'illustrative' as const } };
+    const output = { ...plan(), copy: { ...parent.copy, headline: 'Move beyond the notices' },
+      strategy: changedStrategy, selectionReason: 'Meaningfully different human execution.' };
+
+    expect(output.strategy).not.toHaveProperty('humanSourceId');
+    expect(output.strategy).not.toHaveProperty('approvedHumanId');
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload(output))));
+    const result = await planCreativeRevision(variationArgs);
+
+    expect(result.concept.strategy.awarenessStage).toBe('solution-aware');
+    expect(result.concept.strategy.humanSourceId).toBe(humanSourceId);
+    expect(result.concept.strategy).not.toHaveProperty('approvedHumanId');
+  });
+
   it('resolves independent revision choices and rejects missing catalog IDs', async () => {
     const referenceCatalog = [referenceCandidate()];
     const referenceChoices = { angleSource: referenceCatalog[0].referenceId, layoutSource: null };
