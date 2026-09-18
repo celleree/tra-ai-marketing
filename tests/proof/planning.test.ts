@@ -77,6 +77,7 @@ const concept = (index: number) => ({
     headline: `Image headline ${index}`, shortSupport: null, proofAttribution: null,
     cta: null, disclosure: null,
   },
+  proofSelection: null,
   strategy: {
     ...strategy,
     conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${index}` },
