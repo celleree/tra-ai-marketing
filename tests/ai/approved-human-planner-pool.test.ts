@@ -22,6 +22,7 @@ const concept = (index: number, humanSourceId: string | null) => ({
   format: 'direct-response',
   adCopy: { primaryText: `Meta primary ${index}`, headline: `Meta headline ${index}`, description: '' },
   imageCopy: { headline: `Image headline ${index}`, shortSupport: null, proofAttribution: null, cta: null, disclosure: null },
+  proofSelection: null,
   strategy: strategy(humanSourceId ? 'approved-tra-human' : 'non-human'),
   selectionReason: `Distinct reason ${index}`,
   humanSourceId,

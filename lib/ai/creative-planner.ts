@@ -2,7 +2,8 @@ import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
-import { loadPlanningProofCatalog } from '@/lib/proof/planning';
+import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
+import { hydratePlanningProofSelection } from '@/lib/proof/planning-selection';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { approvedHumanSourceId, isApprovedHumanId, parseApprovedHumanSourceId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
@@ -37,7 +38,7 @@ Plan globally distinct problem/outcome framings, objections, emotions, awareness
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
-proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Review originalReviewText is exact source text: quote it only verbatim and never rewrite, summarize, merge, or fabricate it. Use Review attribution only when that record includes attribution. For Case Studies, approvedClaimWording is the only approved claim wording from that record; never broaden it into a universal outcome. Obey usageRestrictions and requiredDisclaimer. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, no Proof Library evidence is available for this plan.
+proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. Review originalReviewText is exact source text: selectedText must be one contiguous verbatim excerpt and must never be rewritten, summarized, merged, or fabricated. Set includeAttribution true only when that Review record includes approved attribution, and then imageCopy.proofAttribution must exactly match its supplied display text. For Case Studies, selectedText must exactly equal approvedClaimWording; never broaden it into a universal outcome. Obey usageRestrictions and requiredDisclaimer. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, proof attribution, or other evidence.
 Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
 Do not restrict concepts to the analysis category.
@@ -106,9 +107,10 @@ const parseConcept = (
   expectedIndex: number,
   hasApprovedHumanSource: boolean,
   referenceCatalog?: ReferencePlanningCandidate[],
-  approvedHumanOptions?: ApprovedHumanOption[]
+  approvedHumanOptions?: ApprovedHumanOption[],
+  proofCatalog: readonly PlanningProofRecord[] = []
 ): PlannedCreativeConcept | null => {
-  const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['humanSourceId'] : [])];
+  const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['humanSourceId'] : [])];
   if (!isRecord(value) || (!hasOnly(value, expectedKeys) && !hasOnly(value, [...expectedKeys, 'copy']))) return null;
   if (value.index !== expectedIndex || typeof value.format !== 'string' || !isCreativeFormat(value.format)) return null;
   if (!isRecord(value.adCopy) || !hasOnly(value.adCopy, ['primaryText', 'headline', 'description'])) return null;
@@ -123,7 +125,8 @@ const parseConcept = (
   if (!isRecord(value.imageCopy) || !('headline' in value.imageCopy) || Object.keys(value.imageCopy).some((key) => !imageCopyKeys.includes(key))) return null;
   const imageHeadline = parseRequiredText(value.imageCopy.headline);
   const shortSupport = parseOptionalText(value.imageCopy.shortSupport);
-  const proofAttribution = parseOptionalText(value.imageCopy.proofAttribution);
+  const rawProofAttribution = value.imageCopy.proofAttribution;
+  const proofAttribution = parseOptionalText(rawProofAttribution);
   const cta = parseOptionalText(value.imageCopy.cta);
   const disclosure = parseOptionalText(value.imageCopy.disclosure);
   if (!imageHeadline || shortSupport === null || proofAttribution === null || cta === null || disclosure === null) return null;
@@ -149,7 +152,17 @@ const parseConcept = (
     ...(cta ? { cta } : {}),
     ...(disclosure ? { disclosure } : {}),
   };
-  return { index: expectedIndex, format: value.format, copy: adCopy, adCopy, imageCopy, strategy, selectionReason };
+  let selectedProof;
+  try {
+    selectedProof = hydratePlanningProofSelection(
+      value.proofSelection,
+      proofCatalog,
+      typeof rawProofAttribution === 'string' ? rawProofAttribution : undefined
+    );
+  } catch {
+    return null;
+  }
+  return { index: expectedIndex, format: value.format, copy: adCopy, adCopy, imageCopy, selectedProof, strategy, selectionReason };
 };
 
 export type CreativeBatchPlannerArgs = {
@@ -209,7 +222,7 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
         type: 'object', additionalProperties: false, required: ['creatives'], properties: {
           creatives: { type: 'array', items: {
             type: 'object', additionalProperties: false,
-            required: ['index', 'format', 'adCopy', 'imageCopy', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['humanSourceId'] : [])],
+            required: ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['humanSourceId'] : [])],
             properties: {
               format: { type: 'string', enum: CREATIVE_FORMATS },
               adCopy: { type: 'object', additionalProperties: false, required: ['primaryText', 'headline', 'description'], properties: {
@@ -224,6 +237,23 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
                 cta: { type: ['string', 'null'], maxLength: MAX_TEXT_LENGTH },
                 disclosure: { type: ['string', 'null'], maxLength: MAX_TEXT_LENGTH },
               } },
+              proofSelection: { anyOf: [
+                { type: 'null' },
+                { type: 'object', additionalProperties: false,
+                  required: ['type', 'proofId', 'proofUpdatedAt', 'selectedText', 'includeAttribution'],
+                  properties: {
+                    type: { type: 'string', enum: ['review'] },
+                    proofId: { type: 'string' }, proofUpdatedAt: { type: 'string' },
+                    selectedText: { type: 'string', minLength: 1 }, includeAttribution: { type: 'boolean' },
+                  } },
+                { type: 'object', additionalProperties: false,
+                  required: ['type', 'proofId', 'proofUpdatedAt', 'selectedText'],
+                  properties: {
+                    type: { type: 'string', enum: ['case-study'] },
+                    proofId: { type: 'string' }, proofUpdatedAt: { type: 'string' },
+                    selectedText: { type: 'string', minLength: 1 },
+                  } },
+              ] },
               strategy: CREATIVE_STRATEGY_JSON_SCHEMA,
               selectionReason: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
               index: { type: 'integer', minimum: 1, maximum: args.count },
@@ -252,7 +282,7 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
   if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== args.count) {
     throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${args.count} creatives.`);
   }
-  const creatives = parsed.creatives.map((value, index) => parseConcept(value, index + 1, args.hasApprovedHumanSource, args.referenceCatalog, args.approvedHumanOptions));
+  const creatives = parsed.creatives.map((value, index) => parseConcept(value, index + 1, args.hasApprovedHumanSource, args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
 }

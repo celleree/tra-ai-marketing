@@ -46,6 +46,7 @@ const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human
     cta: index === 1 ? 'Talk with TRA' : null,
     disclosure: null,
   },
+  proofSelection: null,
   strategy: { ...strategy(subjectSource), soWhat: { ...strategy().soWhat, surfaceMessage: `Distinct message ${index}` },
     conceptDetails: { ...conceptDetails, proposition: `Different proposition ${index}` } }, selectionReason: `Distinct reason ${index}`,
 });
@@ -177,6 +178,8 @@ describe('creative batch planner', () => {
     expect(properties).not.toHaveProperty('copy');
     expect(properties.adCopy.required).toEqual(['primaryText', 'headline', 'description']);
     expect(properties.imageCopy.required).toEqual(['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure']);
+    expect(second.text.format.schema.properties.creatives.items.required).toContain('proofSelection');
+    expect(properties.proofSelection.anyOf).toHaveLength(3);
     expect(properties.referenceChoices.properties.layoutSource.anyOf[0].enum).toEqual([before[0].referenceId]);
     expect(properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
     expect(properties.humanSourceId).toMatchObject({ type: ['string', 'null'] });
@@ -231,11 +234,28 @@ describe('creative batch planner', () => {
   it('parses sparse and complete optional image-copy fields without inventing omitted text', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const first = { ...concept(1), imageCopy: { headline: 'Only image headline', shortSupport: null, proofAttribution: null, cta: null, disclosure: null } };
-    const second = { ...concept(2), imageCopy: { headline: 'Full image headline', shortSupport: 'Support', proofAttribution: 'Approved attribution', cta: 'Learn more', disclosure: 'Applicable disclosure' } };
+    const second = { ...concept(2), imageCopy: { headline: 'Full image headline', shortSupport: 'Support', proofAttribution: null, cta: 'Learn more', disclosure: 'Applicable disclosure' } };
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [first, second] })));
     const result = await requestCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
     expect(result.creatives[0].imageCopy).toEqual({ headline: 'Only image headline' });
-    expect(result.creatives[1].imageCopy).toEqual(second.imageCopy);
+    expect(result.creatives[1].imageCopy).toEqual({
+      headline: 'Full image headline',
+      shortSupport: 'Support',
+      cta: 'Learn more',
+      disclosure: 'Applicable disclosure',
+    });
+  });
+
+  it('rejects model-supplied proof attribution even when optional-text parsing would trim it away', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const invalid = { ...concept(1), imageCopy: { ...concept(1).imageCopy, proofAttribution: '   ' } };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [invalid, concept(2)] })));
+    await expect(requestCreativeBatch({
+      count: 2,
+      context: '',
+      analysis,
+      hasApprovedHumanSource: false,
+    })).rejects.toThrow(/invalid creative batch plan/i);
   });
 
   it('selects a known library human independently per concept without a fixed ratio', async () => {
@@ -406,6 +426,7 @@ describe('creative batch planner', () => {
     ['human without approved source', { creatives: [concept(1, 'approved-tra-human'), concept(2)] }, false],
     ['overlong ad copy', { creatives: [{ ...concept(1), adCopy: { ...concept(1).adCopy, headline: 'x'.repeat(1001) } }, concept(2)] }, false],
     ['missing image copy', { creatives: [{ ...concept(1), imageCopy: undefined }, concept(2)] }, false],
+    ['missing proof selection', { creatives: [{ ...concept(1), proofSelection: undefined }, concept(2)] }, false],
     ['malformed image copy', { creatives: [{ ...concept(1), imageCopy: { ...concept(1).imageCopy, shortSupport: 42 } }, concept(2)] }, false],
   ])('rejects %s output', async (_name, value, hasApprovedHumanSource) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key'); vi.stubGlobal('fetch', vi.fn(async () => okResponse(value)));

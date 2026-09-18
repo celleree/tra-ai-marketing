@@ -44,6 +44,7 @@ beforeEach(async () => {
     if (body.model === 'gpt-6-astra') {
       astra.push(JSON.parse(body.input[1].content[0].text));
       const creatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
+        proofSelection: null,
         strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct ${c.index}` },
           execution: { ...c.strategy.execution, taxDocumentReference: 'none' } }, referenceChoices: { angleSource: item.id, layoutSource: item.id } }));
       return Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ creatives }) }] }] });
