@@ -26,6 +26,7 @@ import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
+import { revalidateSelectedProofForPaidWork } from '@/lib/proof/provenance';
 
 export type CreativeRenderContext = {
   request: ValidGenerateCreativeRequest;
@@ -100,6 +101,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   let providerFrames: ApprovedTraVideoFrame[] | undefined;
 
   await options.assertCurrentWork?.();
+  const proofProvenance = await revalidateSelectedProofForPaidWork(item.selectedProof);
 
   if (itemImageSource) {
     imageResult = copyMode.kind === 'LEGACY'
@@ -222,6 +224,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     copy,
     ...(copyMode.kind === 'E2' ? { adCopy: copyMode.adCopy, imageCopy: copyMode.imageCopy } : {}),
     generationProvenance,
+    ...(proofProvenance ? { proofProvenance } : {}),
     identity,
     planning: {
       strategy: item.strategy,
