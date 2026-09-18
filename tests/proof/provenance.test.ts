@@ -199,6 +199,18 @@ describe('creative Proof provenance', () => {
     })).toThrow('no longer contains the exact selected Proof text');
   });
 
+  it('rejects Review attribution introduced when the inherited snapshot has none', () => {
+    const snapshot = proofProvenanceFromSelectedProof({
+      type: 'review', proofId: review().id, proofUpdatedAt: updatedAt,
+      selectedText: 'patient and explained every step clearly.',
+    });
+    expect(() => validateCreativeProofCopyConsistency(snapshot, {
+      copy: { primaryText: snapshot.selectedText, headline: 'Clarity', description: '' },
+      adCopy: { primaryText: snapshot.selectedText, headline: 'Clarity', description: '' },
+      imageCopy: { headline: 'Clarity', proofAttribution: 'Invented attribution' },
+    })).toThrow('introduced Review attribution');
+  });
+
   it('requires revised Case Study copy to retain exact claim and disclaimer', () => {
     const current = caseStudy();
     const snapshot = proofProvenanceFromSelectedProof({
