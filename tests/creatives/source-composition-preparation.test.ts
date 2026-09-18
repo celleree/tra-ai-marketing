@@ -87,20 +87,16 @@ describe('real preparation to Astra with composed sources', () => {
       companyProfile: { knowledgeBase: { companySummary: 'IRS tax professionalism patience reassurance.' } } });
     if (!parsed.success) throw new Error(parsed.error);
     const unrelatedId = `proof_${'a'.repeat(32)}`, relevantId = `proof_${'b'.repeat(32)}`;
-    const proofBase = { type: 'review' as const, status: 'ACTIVE' as const, advertisingUseApproved: true,
-      createdAt: '2026-09-10T12:00:00.000Z' };
+    const proofBase = { type: 'review' as const, status: 'ACTIVE' as const, advertisingUseApproved: true, createdAt: '2026-09-10T12:00:00.000Z' };
     mocks.proof.mockResolvedValue([
-      { ...proofBase, id: unrelatedId, originalReviewText: 'IRS tax professionalism patience reassurance.',
-        tags: ['IRS', 'professionalism', 'patience'], updatedAt: proofBase.createdAt },
-      { ...proofBase, id: relevantId, originalReviewText: 'Wage garnishment support.',
-        tags: ['wage garnishment'], updatedAt: '2026-09-10T13:00:00.000Z' },
+      { ...proofBase, id: unrelatedId, originalReviewText: 'IRS tax professionalism patience reassurance.', tags: ['IRS', 'professionalism', 'patience'], updatedAt: proofBase.createdAt },
+      { ...proofBase, id: relevantId, originalReviewText: 'Wage garnishment support.', tags: ['wage garnishment'], updatedAt: '2026-09-10T13:00:00.000Z' },
     ]);
     mocks.audit.mockResolvedValueOnce({ ...portfolioAudit(2),
       groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] })
       .mockResolvedValueOnce(portfolioAudit(2));
     const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
-    expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection,
-      context: expect.stringContaining('IRS tax professionalism patience reassurance.') });
+    expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection, context: expect.stringContaining('IRS tax professionalism patience reassurance.') });
     expect(outbound).toHaveLength(2); expect(outbound[1].creativeContext).toContain('PORTFOLIO REPAIR:');
     for (const input of outbound) {
       expect(input.proofCatalog.map((proof: { id: string }) => proof.id)).toEqual([relevantId]);
