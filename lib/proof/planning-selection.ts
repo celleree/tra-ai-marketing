@@ -76,10 +76,7 @@ export function hydratePlanningProofSelection(
       if (proof.attribution?.allowed !== true) {
         throw new Error('Review proof attribution is not approved.');
       }
-      if (
-        imageProofAttribution !== undefined
-        && imageProofAttribution !== proof.attribution.display
-      ) {
+      if (imageProofAttribution !== proof.attribution.display) {
         throw new Error('Review proof attribution must match canonical approved text.');
       }
       return {
