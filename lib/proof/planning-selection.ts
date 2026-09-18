@@ -88,10 +88,7 @@ export function hydratePlanningProofSelection(
       };
     }
 
-    if (
-      proof.attribution?.allowed === true
-      && imageProofAttribution === proof.attribution.display
-    ) {
+    if (imageProofAttribution !== undefined) {
       throw new Error('Review proof attribution was not selected for inclusion.');
     }
     return {
