@@ -236,6 +236,38 @@ describe('Proof planning retrieval', () => {
     })).rejects.toThrow('invalid creative batch plan concept');
   });
 
+  it('hydrates an attributed Review selection into durable ready-to-render state without changing it', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const source = review('a', { attribution: { display: 'Sam', allowed: true } });
+    listProofRecordsMock.mockResolvedValue([source]);
+    const selected = {
+      type: 'review' as const,
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: 'Second line.',
+      includeAttribution: true,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [
+      { ...concept(1), imageCopy: { ...concept(1).imageCopy, proofAttribution: 'Sam' }, proofSelection: selected },
+      concept(2),
+    ] })));
+
+    const proofRetrievalQuery = 'bank levy review';
+    const plannerArgs = { count: 2, context: 'Frozen planner context', proofRetrievalQuery, analysis, hasApprovedHumanSource: false };
+    const batchPlan = await requestCreativeBatch(plannerArgs);
+    expect(batchPlan.creatives[0].selectedProof).toEqual({
+      type: 'review', proofId: source.id, proofUpdatedAt: source.updatedAt,
+      selectedText: 'Second line.', attribution: 'Sam',
+    });
+
+    const job = newCreativePortfolio({ ...portfolioRequest(), proofRetrievalQuery });
+    job.planning = { phase: 'READY_TO_RENDER' };
+    job.snapshot = { ...portfolioSnapshot(job), batchPlan: { ...batchPlan, portfolioAudit: portfolioAudit(2) } };
+    const reloaded = parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id);
+    expect(reloaded.snapshot?.batchPlan.creatives[0].selectedProof)
+      .toEqual(batchPlan.creatives[0].selectedProof);
+  });
+
   it('hydrates selected Proof into durable checkpoint and audited reload state', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const source = caseStudy('b');
