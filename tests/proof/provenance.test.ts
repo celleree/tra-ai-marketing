@@ -67,15 +67,16 @@ describe('creative Proof provenance', () => {
   });
 
   it('preserves and revalidates Case Study restrictions and disclaimer', async () => {
+    const current = caseStudy();
     const selected = {
       type: 'case-study' as const,
-      proofId: caseStudy().id,
+      proofId: current.id,
       proofUpdatedAt: updatedAt,
-      selectedText: caseStudy().approvedClaimWording,
-      usageRestrictions: caseStudy().usageRestrictions,
-      requiredDisclaimer: caseStudy().requiredDisclaimer,
+      selectedText: current.approvedClaimWording,
+      usageRestrictions: current.usageRestrictions!,
+      requiredDisclaimer: current.requiredDisclaimer!,
     };
-    mocks.list.mockResolvedValue([caseStudy()]);
+    mocks.list.mockResolvedValue([current]);
 
     await expect(revalidateSelectedProofForPaidWork(selected)).resolves.toEqual({
       version: 1,
@@ -139,8 +140,8 @@ describe('creative Proof provenance', () => {
       proofId: caseStudy().id,
       proofUpdatedAt: updatedAt,
       selectedText: caseStudy().approvedClaimWording,
-      usageRestrictions: caseStudy().usageRestrictions,
-      requiredDisclaimer: caseStudy().requiredDisclaimer,
+      usageRestrictions: caseStudy().usageRestrictions!,
+      requiredDisclaimer: caseStudy().requiredDisclaimer!,
     });
     mocks.list.mockResolvedValue([
       { ...caseStudy(), usageRestrictions: 'Current use is restricted further.' },
