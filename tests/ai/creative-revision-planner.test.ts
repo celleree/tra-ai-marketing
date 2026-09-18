@@ -113,6 +113,29 @@ describe('single-creative revision planning', () => {
     expect(request.input[0].content[0].text).toContain('Never move Meta primaryText or Meta description into imageCopy');
   });
 
+  it('supplies inherited Proof provenance to Astra as an immutable revision constraint', async () => {
+    const selectedText = 'Exact inherited review excerpt.';
+    const adCopy = { primaryText: selectedText, headline: 'Meta headline', description: '' };
+    const e2Parent = { ...parent, copy: adCopy, adCopy,
+      imageCopy: { headline: 'Image headline', proofAttribution: 'Verified TRA client' } };
+    const proofProvenance = {
+      version: 1 as const, type: 'review' as const, proofId: `proof_${'9'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T13:00:00.000Z', selectedText, attribution: 'Verified TRA client',
+    };
+    const output = { format: parent.format, adCopy,
+      imageCopy: { headline: 'Image headline', shortSupport: null, proofAttribution: 'Verified TRA client', cta: null, disclosure: null },
+      strategy: { ...strategy, conceptDetails }, selectionReason: 'Keep inherited Proof intact.' };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(payload(output))));
+
+    await planCreativeRevision({ ...args, parent: e2Parent, proofProvenance });
+
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(JSON.parse(request.input[1].content[0].text).proofProvenance).toEqual(proofProvenance);
+    expect(request.input[0].content[0].text).toContain('immutable, already revalidated Proof constraint');
+    expect(request.input[0].content[0].text).toContain('must remain verbatim');
+    expect(request.input[0].content[0].text).toContain('D3 does not allow selecting, replacing');
+  });
+
   it('keeps E2 VARIATION purpose-specific instead of collapsing copy surfaces', async () => {
     const adCopy = { primaryText: 'META_PRIMARY_SENTINEL', headline: 'Meta headline', description: 'META_DESCRIPTION_SENTINEL' };
     const e2Parent = { ...parent, copy: adCopy, adCopy, imageCopy: { headline: 'Image headline' } };
