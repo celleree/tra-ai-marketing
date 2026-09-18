@@ -192,6 +192,36 @@ describe('planning proof selection', () => {
     })).toThrow('Case Study text is not bound');
   });
 
+  it.each(['debt forgiven', 'levy released', 'tax resolved'])(
+    'rejects short non-numeric material Case Study fragments without Proof selection: %s',
+    fragment => {
+      const source = caseStudy({
+        approvedClaimWording: `Client ${fragment} after review.`,
+        requiredDisclaimer: undefined,
+      });
+      const copy = {
+        adCopy: { primaryText: fragment, headline: 'Headline', description: '' },
+        imageCopy: { headline: 'Image headline' },
+      };
+
+      expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
+        .toThrow('Material ad-facing Case Study text');
+    }
+  );
+
+  it('does not treat generic short Case Study overlap as material Proof use', () => {
+    const source = caseStudy({
+      approvedClaimWording: 'TRA helped the client understand the next steps clearly.',
+      requiredDisclaimer: undefined,
+    });
+    const copy = {
+      adCopy: { primaryText: 'Understand the next steps', headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(null, [source], copy)).not.toThrow();
+  });
+
   it('rejects extra Proof-derived wording even when the valid selected Review text is present', () => {
     const source = review({ originalReviewText: 'I did not save $10,000.' });
     const selected = hydratePlanningProofSelection({
