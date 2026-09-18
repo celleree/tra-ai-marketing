@@ -40,7 +40,7 @@ export type ValidGenerateCreativeRequest = Omit<
 > & {
   sourceAssets: CreativeSourceSelection[];
   placement: CreativePlacement;
-  proofRetrievalQuery: string;
+  proofRetrievalQuery?: string;
 };
 
 export type PlannedCreative = {
