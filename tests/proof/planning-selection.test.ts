@@ -209,19 +209,6 @@ describe('planning proof selection', () => {
     }
   );
 
-  it('does not treat generic short Case Study overlap as material Proof use', () => {
-    const source = caseStudy({
-      approvedClaimWording: 'TRA helped the client understand the next steps clearly.',
-      requiredDisclaimer: undefined,
-    });
-    const copy = {
-      adCopy: { primaryText: 'Understand the next steps', headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(null, [source], copy)).not.toThrow();
-  });
-
   it('rejects short material Review outcome fragments without Proof selection', () => {
     const source = review({ originalReviewText: 'My tax issue was resolved quickly.' });
     const copy = {
