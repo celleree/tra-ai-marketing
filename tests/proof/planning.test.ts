@@ -29,97 +29,6 @@ const review = (hex: string, overrides: Partial<ReviewProofRecord> = {}): Review
   updatedAt: '2026-09-10T12:00:00.000Z',
   ...overrides,
 
-  it('fails the whole planner response closed when a selection is not valid for that call catalog', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const source = review('a');
-    listProofRecordsMock.mockResolvedValue([source]);
-    const invalid = {
-      ...concept(1),
-      proofSelection: {
-        type: 'review',
-        proofId: `proof_${'f'.repeat(32)}`,
-        proofUpdatedAt: source.updatedAt,
-        selectedText: 'Second line.',
-        includeAttribution: false,
-      },
-    };
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      okResponse({ creatives: [invalid, concept(2)] })));
-
-    await expect(requestCreativeBatch({
-      count: 2,
-      context: 'Planner context',
-      proofRetrievalQuery: 'bank levy',
-      analysis,
-      hasApprovedHumanSource: false,
-    })).rejects.toThrow('invalid creative batch plan concept');
-  });
-
-  it('hydrates selected Proof into durable checkpoint and audited reload state', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const source = caseStudy('b');
-    listProofRecordsMock.mockResolvedValue([source]);
-    const selected = {
-      type: 'case-study' as const,
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: source.approvedClaimWording,
-    };
-    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [
-      { ...concept(1), proofSelection: selected },
-      concept(2),
-    ] })));
-
-    const proofRetrievalQuery = 'bank levy';
-    const plannerArgs = {
-      count: 2,
-      context: 'Frozen planner context',
-      proofRetrievalQuery,
-      analysis,
-      hasApprovedHumanSource: false,
-    };
-    const batchPlan = await requestCreativeBatch(plannerArgs);
-    expect(batchPlan.creatives[0].selectedProof).toEqual({
-      ...selected,
-      type: 'case-study',
-      usageRestrictions: source.usageRestrictions,
-      requiredDisclaimer: source.requiredDisclaimer,
-    });
-    expect(JSON.stringify(batchPlan.creatives[0].selectedProof)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
-
-    const job = newCreativePortfolio({ ...portfolioRequest(), proofRetrievalQuery });
-    job.planning = {
-      phase: 'DIVERSITY_AUDIT',
-      repairAttempted: false,
-      checkpoint: {
-        plannerArgs,
-        snapshot: { ...portfolioSnapshot(job), batchPlan },
-      },
-    };
-    const checkpointReload = parseCreativePortfolioJob(
-      Buffer.from(JSON.stringify(job)),
-      job.id
-    );
-    if (checkpointReload.planning.phase !== 'DIVERSITY_AUDIT') {
-      throw new Error('Expected diversity-audit checkpoint.');
-    }
-    expect(checkpointReload.planning.checkpoint.snapshot.batchPlan.creatives[0].selectedProof)
-      .toEqual(batchPlan.creatives[0].selectedProof);
-
-    const audited = structuredClone(job);
-    audited.planning = { phase: 'READY_TO_RENDER' };
-    audited.snapshot = {
-      ...portfolioSnapshot(audited),
-      batchPlan: { ...batchPlan, portfolioAudit: portfolioAudit(2) },
-    };
-    const auditedReload = parseCreativePortfolioJob(
-      Buffer.from(JSON.stringify(audited)),
-      audited.id
-    );
-    expect(auditedReload.snapshot?.batchPlan.creatives[0].selectedProof)
-      .toEqual(batchPlan.creatives[0].selectedProof);
-  });
-
 });
 
 const caseStudy = (hex: string, overrides: Partial<CaseStudyProofRecord> = {}): CaseStudyProofRecord => ({
@@ -300,5 +209,95 @@ describe('Proof planning retrieval', () => {
     expect(JSON.stringify(input.proofCatalog)).not.toContain(legacy.id);
     expect(body.input[0].content[0].text).toContain('quote it only verbatim');
     expect(body.input[0].content[0].text).toContain('never broaden it into a universal outcome');
+  });
+  it('fails the whole planner response closed when a selection is not valid for that call catalog', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const source = review('a');
+    listProofRecordsMock.mockResolvedValue([source]);
+    const invalid = {
+      ...concept(1),
+      proofSelection: {
+        type: 'review',
+        proofId: `proof_${'f'.repeat(32)}`,
+        proofUpdatedAt: source.updatedAt,
+        selectedText: 'Second line.',
+        includeAttribution: false,
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      okResponse({ creatives: [invalid, concept(2)] })));
+
+    await expect(requestCreativeBatch({
+      count: 2,
+      context: 'Planner context',
+      proofRetrievalQuery: 'bank levy',
+      analysis,
+      hasApprovedHumanSource: false,
+    })).rejects.toThrow('invalid creative batch plan concept');
+  });
+
+  it('hydrates selected Proof into durable checkpoint and audited reload state', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const source = caseStudy('b');
+    listProofRecordsMock.mockResolvedValue([source]);
+    const selected = {
+      type: 'case-study' as const,
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.approvedClaimWording,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [
+      { ...concept(1), proofSelection: selected },
+      concept(2),
+    ] })));
+
+    const proofRetrievalQuery = 'bank levy';
+    const plannerArgs = {
+      count: 2,
+      context: 'Frozen planner context',
+      proofRetrievalQuery,
+      analysis,
+      hasApprovedHumanSource: false,
+    };
+    const batchPlan = await requestCreativeBatch(plannerArgs);
+    expect(batchPlan.creatives[0].selectedProof).toEqual({
+      ...selected,
+      type: 'case-study',
+      usageRestrictions: source.usageRestrictions,
+      requiredDisclaimer: source.requiredDisclaimer,
+    });
+    expect(JSON.stringify(batchPlan.creatives[0].selectedProof)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
+
+    const job = newCreativePortfolio({ ...portfolioRequest(), proofRetrievalQuery });
+    job.planning = {
+      phase: 'DIVERSITY_AUDIT',
+      repairAttempted: false,
+      checkpoint: {
+        plannerArgs,
+        snapshot: { ...portfolioSnapshot(job), batchPlan },
+      },
+    };
+    const checkpointReload = parseCreativePortfolioJob(
+      Buffer.from(JSON.stringify(job)),
+      job.id
+    );
+    if (checkpointReload.planning.phase !== 'DIVERSITY_AUDIT') {
+      throw new Error('Expected diversity-audit checkpoint.');
+    }
+    expect(checkpointReload.planning.checkpoint.snapshot.batchPlan.creatives[0].selectedProof)
+      .toEqual(batchPlan.creatives[0].selectedProof);
+
+    const audited = structuredClone(job);
+    audited.planning = { phase: 'READY_TO_RENDER' };
+    audited.snapshot = {
+      ...portfolioSnapshot(audited),
+      batchPlan: { ...batchPlan, portfolioAudit: portfolioAudit(2) },
+    };
+    const auditedReload = parseCreativePortfolioJob(
+      Buffer.from(JSON.stringify(audited)),
+      audited.id
+    );
+    expect(auditedReload.snapshot?.batchPlan.creatives[0].selectedProof)
+      .toEqual(batchPlan.creatives[0].selectedProof);
   });
 });
