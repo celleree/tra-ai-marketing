@@ -153,7 +153,7 @@ describe('planning proof selection', () => {
     expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
       ...base,
       imageCopy: { headline: caseSource.approvedClaimWording },
-    })).toThrow('Case Study wording is not bound');
+    })).toThrow('Case Study text is not bound');
   });
 
   it('rejects material shortened Proof fragments and unselected Case Study disclaimers', () => {
@@ -184,7 +184,7 @@ describe('planning proof selection', () => {
     expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
       ...base,
       adCopy: { ...base.adCopy, headline: 'understand the next steps clearly' },
-    })).toThrow('Material ad-facing Case Study wording');
+    })).toThrow('Material ad-facing Case Study text');
 
     expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
       ...base,
