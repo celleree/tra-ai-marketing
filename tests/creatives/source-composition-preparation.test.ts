@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
+import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { newCreativePortfolio, retryPortfolioWork, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
@@ -16,7 +17,7 @@ import { portfolioAudit } from '../fixtures/portfolio-audit';
 const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
 vi.mock('@/lib/video/intelligence-service', () => ({ executeVideoIntelligenceStep: disabledVideo, readVideoIntelligenceSource: disabledVideo }));
 afterEach(() => expect(disabledVideo).not.toHaveBeenCalled());
-const mocks = vi.hoisted(() => ({ image: vi.fn(), angle: vi.fn(), video: vi.fn(), layout: vi.fn(), media: vi.fn(), frames: vi.fn(), audit: vi.fn(), library: vi.fn(), select: vi.fn() }));
+const mocks = vi.hoisted(() => ({ image: vi.fn(), angle: vi.fn(), video: vi.fn(), layout: vi.fn(), media: vi.fn(), frames: vi.fn(), audit: vi.fn(), library: vi.fn(), select: vi.fn(), proof: vi.fn() }));
 vi.mock('@/lib/ai/openai', () => ({ analyzeTraSourceCreative: mocks.image, analyzeReferenceCreative: mocks.angle }));
 vi.mock('@/lib/ai/video-frame-generation', async original => ({
   ...await original<typeof import('@/lib/ai/video-frame-generation')>(), analyzeApprovedTraVideoFrames: mocks.video,
@@ -34,6 +35,7 @@ vi.mock('@/lib/references/storage', () => ({ listAllReferenceLibrary: mocks.libr
 vi.mock('@/lib/ai/reference-selector', () => ({ selectBestReferenceCreatives: mocks.select }));
 vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: async () => [] }));
 vi.mock('@/lib/creatives/storage', () => ({ listCreatives: async () => [] }));
+vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.proof }));
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: mocks.audit }));
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -46,7 +48,7 @@ let operations: string[], outbound: Record<string, any>[], media: Record<string,
 beforeEach(() => {
   vi.clearAllMocks(); operations = []; outbound = []; media = {};
   mocks.audit.mockResolvedValue(portfolioAudit(2));
-  mocks.library.mockResolvedValue([]); mocks.select.mockResolvedValue([]);
+  mocks.library.mockResolvedValue([]); mocks.select.mockResolvedValue([]); mocks.proof.mockResolvedValue([]);
   vi.stubEnv('OPENAI_API_KEY', 'mock-key'); vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'analysis-model');
   for (const { role, mediaId } of request().sourceAssets) media[mediaId] = role === 'TRA_VIDEO'
     ? { fileName: `${mediaId}.mp4`, mediaType: 'VIDEO', mimeType: 'video/mp4', buffer: Buffer.from(REAL_ENCODED_MP4) }
@@ -79,6 +81,30 @@ const createHistoricalPortfolio = async (data: ReturnType<typeof request>, stora
 };
 
 describe('real preparation to Astra with composed sources', () => {
+  it('keeps Proof retrieval bound to original Create direction across audit repair feedback', async () => {
+    const userDirection = 'Create proof-led ads about wage garnishment.';
+    const parsed = validateGenerateCreativeRequest({ context: userDirection, variationCount: 2,
+      companyProfile: { knowledgeBase: { companySummary: 'APPROVED TRA COMPANY CONTEXT IRS tax professionalism patience reassurance.' } } });
+    if (!parsed.success) throw new Error(parsed.error);
+    const unrelatedId = `proof_${'a'.repeat(32)}`, relevantId = `proof_${'b'.repeat(32)}`;
+    const proofBase = { type: 'review' as const, status: 'ACTIVE' as const, advertisingUseApproved: true, createdAt: '2026-09-10T12:00:00.000Z' };
+    mocks.proof.mockResolvedValue([
+      { ...proofBase, id: unrelatedId, originalReviewText: 'IRS tax professionalism patience reassurance.', tags: ['IRS', 'professionalism', 'patience'], updatedAt: proofBase.createdAt },
+      { ...proofBase, id: relevantId, originalReviewText: 'Wage garnishment support.', tags: ['wage garnishment'], updatedAt: '2026-09-10T13:00:00.000Z' },
+    ]);
+    mocks.audit.mockResolvedValueOnce({ ...portfolioAudit(2),
+      groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] })
+      .mockResolvedValueOnce(portfolioAudit(2));
+    expect(parsed.data.proofRetrievalQuery).toBe(userDirection);
+    const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
+    expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection, context: expect.stringContaining('IRS tax professionalism patience reassurance.') });
+    expect(outbound).toHaveLength(2); expect(outbound[1].creativeContext).toContain('PORTFOLIO REPAIR:');
+    for (const input of outbound) {
+      expect(input.proofCatalog.map((proof: { id: string }) => proof.id)).toEqual([relevantId]);
+      expect(JSON.stringify(input.proofCatalog)).not.toContain(unrelatedId);
+    }
+  });
+
   it.each([false, true])('checkpoints mixed/repeated sources before Astra, ordering=%s and stop/resume', async reversed => {
     const data = request(); if (reversed) data.sourceAssets.reverse();
     const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(data, storage);

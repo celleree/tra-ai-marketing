@@ -168,6 +168,7 @@ export async function prepareCreativeGeneration(
   const plannerArgs: CreativeBatchPlannerArgs = {
     count: data.variationCount,
     context: generationContext,
+    proofRetrievalQuery: data.proofRetrievalQuery,
     analysis, sourceAnalysis,
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
     referenceCatalog,

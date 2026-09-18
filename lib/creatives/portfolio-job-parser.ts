@@ -154,7 +154,7 @@ const validSnapshot = (
 const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: 'required' | 'forbidden' | 'optional') => {
   if (!record(value) || !record(value.plannerArgs) || !record(value.snapshot)) return false;
   const checkpoint = value as unknown as PortfolioPlanningCheckpoint, args = checkpoint.plannerArgs;
-  if (args.count !== job.slots.length || !text(args.context) || !validAnalysis(args.analysis)
+  if (args.count !== job.slots.length || !text(args.context) || args.proofRetrievalQuery !== job.request.proofRetrievalQuery || !validAnalysis(args.analysis)
     || typeof args.hasApprovedHumanSource !== 'boolean'
     || !isDeepStrictEqual(args.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)
     || !isDeepStrictEqual(args.sourceAnalysis, checkpoint.snapshot.sourceAnalysis)

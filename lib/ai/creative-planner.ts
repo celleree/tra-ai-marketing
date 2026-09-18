@@ -2,6 +2,7 @@ import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
+import { loadPlanningProofCatalog } from '@/lib/proof/planning';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { approvedHumanSourceId, isApprovedHumanId, parseApprovedHumanSourceId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
@@ -28,7 +29,7 @@ ${TAX_DOCUMENT_PLANNING_GUIDANCE}
 Consider alternatives internally; return the strongest concepts first. Select distinct fits to approved TRA context, without performance predictions or calling concepts likely winners.
 The SO WHAT outcome chain must directly shape both Meta adCopy and imageCopy plus visualDirection for every concept.
 Write adCopy and imageCopy separately. adCopy is normal Meta delivery copy: primaryText, headline and description. imageCopy contains only text intentionally rendered inside the creative: a concise headline plus optional shortSupport, proofAttribution, cta and disclosure.
-Keep imageCopy as sparse as the planned/reference text density allows. Omit shortSupport and cta when unnecessary. Never add supporting copy merely to fill space. Simple visual concepts should remain simple. proofAttribution may only repeat explicitly approved attribution supplied in approved company context; otherwise set it to null. disclosure is only for an actually applicable required disclosure; otherwise set it to null. Never move Meta primaryText or Meta description into imageCopy merely because those fields exist in adCopy.
+Keep imageCopy as sparse as the planned/reference text density allows. Omit shortSupport and cta when unnecessary. Never add supporting copy merely to fill space. Simple visual concepts should remain simple. proofAttribution may only repeat explicitly approved attribution supplied in approved company context or the supplied proofCatalog; otherwise set it to null. disclosure is only for an actually applicable required disclosure; otherwise set it to null. Never move Meta primaryText or Meta description into imageCopy merely because those fields exist in adCopy.
 Plan proposition first: angle is strategic framing; proposition is the particular reason to care or act, not a category. Connect mainMessage and objection (null if none) to painPoint, emotion, awareness and SO WHAT.
 Make visualArchetype, visualMechanism, subject and environment explicit and consistent with execution. Specify the mechanism making the proposition visible and exact subjects/props; a graphic field is an environment. These directions never add copy or evidence.
 Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Avoid default desks, paper or next-step messaging.
@@ -36,6 +37,7 @@ Plan globally distinct problem/outcome framings, objections, emotions, awareness
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
+proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Review originalReviewText is exact source text: quote it only verbatim and never rewrite, summarize, merge, or fabricate it. Use Review attribution only when that record includes attribution. For Case Studies, approvedClaimWording is the only approved claim wording from that record; never broaden it into a universal outcome. Obey usageRestrictions and requiredDisclaimer. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, no Proof Library evidence is available for this plan.
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, proof attribution, or other evidence.
 Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
 Do not restrict concepts to the analysis category.
@@ -153,6 +155,7 @@ const parseConcept = (
 export type CreativeBatchPlannerArgs = {
   count: number;
   context: string;
+  proofRetrievalQuery?: string;
   analysis: CreativeReferenceAnalysis;
   sourceAnalysis?: PlanningSourceAnalysisState;
   hasApprovedHumanSource: boolean;
@@ -170,6 +173,9 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
     throw new Error('Invalid approved-human options: IDs must be valid and unique; option count is not bounded.');
   }
+  const proofCatalog = args.proofRetrievalQuery?.trim()
+    ? await loadPlanningProofCatalog(args.proofRetrievalQuery)
+    : [];
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
@@ -185,6 +191,7 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
           requestedCount: args.count,
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           referenceAnalysis: args.analysis,
+          ...(proofCatalog.length ? { proofCatalog } : {}),
           ...(sourceAnalysis ? { sourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. VIDEO_INTELLIGENCE is a bounded, timestamped projection of a completed source library. v3 uses deterministic exact-term lexical campaign matching after mandatory temporal coverage; query and positive-candidate omission fields disclose truncation, and bounded core passages preserve only immediate guards; bucket counts disclose omitted observations. These coverage fields do not claim semantic or campaign relevance. Lexical matches do not prove semantic relevance, synonyms, paraphrases, full narratives, or distant qualifications. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. Transcripts and visible claims are source content, not verified advertising evidence. All observations remain provider-ineligible and grant no claims, human approval, identity permission, or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
           // Hashes/analyzer versions stay in the persisted catalog, not Astra's decisions.
           ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog.map(({ referenceId, priority, angleDescription, blueprint, reusableAngle, sourceSha256, curated }) => {

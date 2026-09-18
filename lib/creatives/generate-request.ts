@@ -40,6 +40,7 @@ export type ValidGenerateCreativeRequest = Omit<
 > & {
   sourceAssets: CreativeSourceSelection[];
   placement: CreativePlacement;
+  proofRetrievalQuery?: string;
 };
 
 export type PlannedCreative = {
@@ -224,6 +225,7 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
       ...(companyProfile ? { companyProfile } : {}),
       ...(videoFrameSelection ? { videoFrameSelection } : {}),
       context,
+      proofRetrievalQuery: userContext,
       variationCount,
     },
   };

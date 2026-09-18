@@ -270,6 +270,7 @@ export async function advancePortfolioPreparation(
   const plannerArgs = {
     count: data.variationCount,
     context: generationContext,
+    proofRetrievalQuery: data.proofRetrievalQuery,
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
