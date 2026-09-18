@@ -78,6 +78,31 @@ describe('revision image provider', () => {
     expect(prompt).not.toContain('META_HEADLINE_SENTINEL_NEVER_IMAGE');
     expect(prompt).not.toContain('META_DESCRIPTION_SENTINEL_NEVER_IMAGE');
   });
+  it.each(['EDIT', 'VARIATION', 'REGENERATE', 'PLACEMENT'] as const)('carries authoritative Proof into the %s revision render contract', async operation => {
+    const input = args();
+    input.operation = operation;
+    input.proofProvenance = {
+      version: 1, type: 'case-study', proofId: `proof_${'7'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T14:00:00.000Z',
+      selectedText: 'Approved source-bound claim wording.',
+      usageRestrictions: 'Use only for bank-levy messaging.',
+      requiredDisclaimer: 'Results vary by circumstances.',
+    };
+    const adCopy = { primaryText: input.proofProvenance.selectedText, headline: 'Meta headline', description: '' };
+    input.concept = { ...input.concept, copy: adCopy, adCopy,
+      imageCopy: { headline: 'Image headline', disclosure: input.proofProvenance.requiredDisclaimer } };
+
+    const result = await generateCreativeRevisionImage(input);
+
+    expect(result.prompt).toContain(input.proofProvenance.proofId);
+    expect(result.prompt).toContain(input.proofProvenance.proofUpdatedAt);
+    expect(result.prompt).toContain(input.proofProvenance.selectedText);
+    expect(result.prompt).toContain(input.proofProvenance.usageRestrictions);
+    expect(result.prompt).toContain(input.proofProvenance.requiredDisclaimer);
+    expect(result.prompt).toContain('It is NOT additional image copy');
+    expect(result.prompt).toContain(`"disclosure": "${input.proofProvenance.requiredDisclaimer}"`);
+  });
+
   it('rejects invalid separated copy before image-provider work', async () => {
     const cases = [
       { adCopy: { primaryText: 'Meta only', headline: 'Meta only', description: '' } },
