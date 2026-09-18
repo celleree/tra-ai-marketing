@@ -1196,7 +1196,41 @@ describe('progressive creative delivery', () => {
 
     expect(result.proofProvenance).toEqual({ version: 1, ...item.selectedProof });
     expect(mocks.saveCreativeBatch.mock.calls[0][0][0].proofProvenance).toEqual(result.proofProvenance);
+    const prompt = result.generationProvenance!.imageGeneration.prompt;
+    expect(prompt).toContain(item.selectedProof.proofId);
+    expect(prompt).toContain(item.selectedProof.proofUpdatedAt);
+    expect(prompt).toContain(item.selectedProof.selectedText);
+    expect(prompt).toContain(item.selectedProof.attribution);
+    expect(prompt).toContain('It is NOT additional image copy');
     expect(mocks.listProofRecords.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(fetch).mock.invocationCallOrder[0]);
+  });
+  it('puts revalidated Case Study restrictions and exact disclaimer into the actual render brief', async () => {
+    const context = await prepared();
+    const currentProof = {
+      id: `proof_${'b'.repeat(32)}`, type: 'case-study' as const, tags: ['case-study'], status: 'ACTIVE' as const,
+      advertisingUseApproved: true, createdAt: '2026-09-18T12:00:00.000Z', updatedAt: '2026-09-18T14:00:00.000Z',
+      title: 'Approved case', verifiedFacts: ['source only'], approvedClaimWording: 'Approved source-bound claim wording.',
+      sourceNote: 'Internal source', usageRestrictions: 'Use only for bank-levy messaging.',
+      requiredDisclaimer: 'Results vary by circumstances.',
+    };
+    mocks.listProofRecords.mockResolvedValue([currentProof]);
+    const item = {
+      ...context.batchPlan.creatives[0],
+      selectedProof: {
+        type: 'case-study' as const, proofId: currentProof.id, proofUpdatedAt: currentProof.updatedAt,
+        selectedText: currentProof.approvedClaimWording, usageRestrictions: currentProof.usageRestrictions,
+        requiredDisclaimer: currentProof.requiredDisclaimer,
+      },
+      imageCopy: { ...context.batchPlan.creatives[0].imageCopy!, disclosure: currentProof.requiredDisclaimer },
+    };
+
+    const result = await renderPlannedCreative(item, context);
+    const prompt = result.generationProvenance!.imageGeneration.prompt;
+
+    expect(prompt).toContain(currentProof.approvedClaimWording);
+    expect(prompt).toContain(currentProof.usageRestrictions);
+    expect(prompt).toContain(currentProof.requiredDisclaimer);
+    expect(prompt).toContain(`"disclosure": "${currentProof.requiredDisclaimer}"`);
   });
   it('rejects stale selected Proof before any paid image provider or image save', async () => {
     const context = await prepared();
