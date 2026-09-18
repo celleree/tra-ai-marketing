@@ -246,7 +246,9 @@ describe('saved creative revision API', () => {
       : strategy;
     mocks.plan.mockResolvedValue({ concept: {
       index: 1, format: original.format, copy: original.copy, adCopy: original.adCopy,
-      imageCopy: { ...original.imageCopy!, proofAttribution: operation === 'EDIT' ? undefined : 'Changed attribution' },
+      imageCopy: operation === 'EDIT'
+        ? { headline: original.imageCopy!.headline, cta: original.imageCopy!.cta }
+        : { ...original.imageCopy!, proofAttribution: 'Changed attribution' },
       strategy: changed, selectionReason: 'Invalid proof edit.',
     }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
 
@@ -286,7 +288,9 @@ describe('saved creative revision API', () => {
       : strategy;
     mocks.plan.mockResolvedValue({ concept: {
       index: 1, format: original.format, copy: original.copy, adCopy: original.adCopy,
-      imageCopy: { ...original.imageCopy!, disclosure: operation === 'EDIT' ? undefined : 'Changed disclaimer.' },
+      imageCopy: operation === 'EDIT'
+        ? { headline: original.imageCopy!.headline, cta: original.imageCopy!.cta }
+        : { ...original.imageCopy!, disclosure: 'Changed disclaimer.' },
       strategy: changed, selectionReason: 'Invalid disclaimer edit.',
     }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
 
