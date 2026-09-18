@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   selectBestReferenceCreatives: vi.fn(),
   getOperatorAccess: vi.fn(),
   requireOperatorQuota: vi.fn(),
+  listProofRecords: vi.fn(),
 }));
 vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: mocks.humanOptions }));
 vi.mock('@/lib/video/approved-human-service', () => ({ resolveApprovedHumanFrame: mocks.resolveHuman }));
@@ -51,6 +52,7 @@ vi.mock('@/lib/quotas/require-quota', () => ({
 
 vi.mock('@/lib/creatives/brand-logo.server', () => ({ compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo }));
 vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveCreativeBatch }));
+vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.listProofRecords }));
 
 vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
   ...(await original<typeof import('@/lib/creatives/generated-image-validation')>()),
@@ -453,6 +455,7 @@ beforeEach(() => {
   mocks.resolveHuman.mockReset();
   mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
   mocks.requireOperatorQuota.mockResolvedValue(null);
+  mocks.listProofRecords.mockResolvedValue([]);
   mocks.compositeCreativeBrandLogo.mockReset().mockImplementation(async (buffer) => buffer);
   mocks.saveCreativeBatch.mockReset().mockImplementation(async (records) => records);
   mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);
@@ -1170,6 +1173,55 @@ describe('progressive creative delivery', () => {
     expect(assertCurrentWork.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(fetch).mock.invocationCallOrder[0]);
     expect(assertCurrentWork.mock.invocationCallOrder[1]).toBeLessThan(saveImage.mock.invocationCallOrder[0]);
     expect(assertCurrentWork.mock.invocationCallOrder[2]).toBeLessThan(mocks.saveCreativeBatch.mock.invocationCallOrder[0]);
+  });
+  it('revalidates selected Review Proof immediately before paid rendering and saves its immutable snapshot', async () => {
+    const context = await prepared();
+    const currentProof = {
+      id: `proof_${'a'.repeat(32)}`, type: 'review' as const, tags: ['clarity'], status: 'ACTIVE' as const,
+      advertisingUseApproved: true, createdAt: '2026-09-18T12:00:00.000Z', updatedAt: '2026-09-18T13:00:00.000Z',
+      originalReviewText: 'The representative was patient and explained every step clearly.',
+      attribution: { display: 'Verified TRA client', allowed: true as const },
+    };
+    mocks.listProofRecords.mockResolvedValue([currentProof]);
+    const item = {
+      ...context.batchPlan.creatives[0],
+      selectedProof: {
+        type: 'review' as const, proofId: currentProof.id, proofUpdatedAt: currentProof.updatedAt,
+        selectedText: 'patient and explained every step clearly.', attribution: 'Verified TRA client',
+      },
+      imageCopy: { ...context.batchPlan.creatives[0].imageCopy!, proofAttribution: 'Verified TRA client' },
+    };
+
+    const result = await renderPlannedCreative(item, context);
+
+    expect(result.proofProvenance).toEqual({ version: 1, ...item.selectedProof });
+    expect(mocks.saveCreativeBatch.mock.calls[0][0][0].proofProvenance).toEqual(result.proofProvenance);
+    expect(mocks.listProofRecords.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(fetch).mock.invocationCallOrder[0]);
+  });
+  it('rejects stale selected Proof before any paid image provider or image save', async () => {
+    const context = await prepared();
+    const selectedProof = {
+      type: 'review' as const, proofId: `proof_${'a'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T13:00:00.000Z',
+      selectedText: 'patient and explained every step clearly.',
+    };
+    mocks.listProofRecords.mockResolvedValue([{
+      id: selectedProof.proofId, type: 'review', tags: ['clarity'], status: 'ACTIVE',
+      advertisingUseApproved: true, createdAt: '2026-09-18T12:00:00.000Z', updatedAt: '2026-09-18T14:00:00.000Z',
+      originalReviewText: 'The representative was patient and explained every step clearly.',
+    }]);
+    vi.mocked(fetch).mockClear();
+    saveImage.mockClear();
+    mocks.saveCreativeBatch.mockClear();
+
+    await expect(renderPlannedCreative(
+      { ...context.batchPlan.creatives[0], selectedProof },
+      context
+    )).rejects.toThrow('Selected Proof must be reselected');
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(saveImage).not.toHaveBeenCalled();
+    expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();
   });
   it.each([1, 2, 3])('stops stale work at ownership checkpoint %s without saving a creative record', async checkpoint => {
     const context = await prepared(); let calls = 0;
