@@ -1,3 +1,4 @@
+import type { CreativeAdCopy, CreativeCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import type { SelectedPlanningProof } from '@/lib/proof/planning-selection';
 import { listProofRecords } from '@/lib/proof/storage';
 import type { ProofRecord } from '@/lib/proof/types';
@@ -176,6 +177,50 @@ function validateCurrentProof(
   }
   if (current.requiredDisclaimer !== snapshot.requiredDisclaimer) {
     return ineligible('the Case Study required disclaimer changed.');
+  }
+}
+
+export type ProofLinkedCreativeCopy = {
+  copy: CreativeCopy;
+  adCopy?: CreativeAdCopy;
+  imageCopy?: CreativeImageCopy;
+};
+
+export function validateCreativeProofCopyConsistency(
+  snapshot: CreativeProofProvenance,
+  creative: ProofLinkedCreativeCopy
+) {
+  const adCopy = creative.adCopy ?? creative.copy;
+  const imageCopy = creative.imageCopy;
+  const proofBearingText = [
+    adCopy.primaryText,
+    adCopy.headline,
+    adCopy.description,
+    imageCopy?.headline,
+    imageCopy?.shortSupport,
+  ];
+  if (!proofBearingText.some((value) =>
+    typeof value === 'string' && value.includes(snapshot.selectedText))) {
+    return ineligible('the creative copy no longer contains the exact selected Proof text.');
+  }
+
+  if (snapshot.type === 'review') {
+    if (snapshot.attribution !== undefined) {
+      if (imageCopy?.proofAttribution !== snapshot.attribution) {
+        return ineligible('the creative copy changed or removed the approved Review attribution.');
+      }
+    } else if (imageCopy?.proofAttribution !== undefined) {
+      return ineligible('the creative copy introduced Review attribution that is not authorized by the Proof snapshot.');
+    }
+    return;
+  }
+
+  if (imageCopy?.proofAttribution !== undefined) {
+    return ineligible('Case Study Proof cannot carry Review attribution.');
+  }
+  if (snapshot.requiredDisclaimer !== undefined &&
+    imageCopy?.disclosure !== snapshot.requiredDisclaimer) {
+    return ineligible('the creative copy changed or removed the required Case Study disclaimer.');
   }
 }
 
