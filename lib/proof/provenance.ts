@@ -146,47 +146,36 @@ function validateCurrentProof(
   snapshot: CreativeProofProvenance,
   current: ProofRecord | undefined
 ) {
-  if (!current) ineligible('the Proof record no longer exists.');
-  if (current.type !== snapshot.type) ineligible('the Proof type changed.');
-  if (current.status !== 'ACTIVE') ineligible('the Proof record is inactive.');
+  if (!current) return ineligible('the Proof record no longer exists.');
+  if (current.status !== 'ACTIVE') return ineligible('the Proof record is inactive.');
   if (current.advertisingUseApproved !== true) {
-    ineligible('advertising use is no longer approved.');
+    return ineligible('advertising use is no longer approved.');
   }
   if (current.updatedAt !== snapshot.proofUpdatedAt) {
-    ineligible('the Proof version changed.');
+    return ineligible('the Proof version changed.');
   }
 
   if (snapshot.type === 'review') {
-    if (
-      current.type !== 'review' ||
-      !isVerbatimReviewExcerpt(current.originalReviewText, snapshot.selectedText)
-    ) {
-      ineligible('the selected Review excerpt is no longer canonical.');
+    if (current.type !== 'review') return ineligible('the Proof type changed.');
+    if (!isVerbatimReviewExcerpt(current.originalReviewText, snapshot.selectedText)) {
+      return ineligible('the selected Review excerpt is no longer canonical.');
     }
-    if (
-      snapshot.attribution !== undefined &&
-      (current.attribution?.allowed !== true ||
-        current.attribution.display !== snapshot.attribution)
-    ) {
-      ineligible('the Review attribution is no longer permitted.');
+    if (snapshot.attribution !== undefined &&
+      (current.attribution?.allowed !== true || current.attribution.display !== snapshot.attribution)) {
+      return ineligible('the Review attribution is no longer permitted.');
     }
     return;
   }
 
-  if (
-    current.type !== 'case-study' ||
-    !isApprovedCaseStudyClaim(
-      current.approvedClaimWording,
-      snapshot.selectedText
-    )
-  ) {
-    ineligible('the selected Case Study claim is no longer canonical.');
+  if (current.type !== 'case-study') return ineligible('the Proof type changed.');
+  if (!isApprovedCaseStudyClaim(current.approvedClaimWording, snapshot.selectedText)) {
+    return ineligible('the selected Case Study claim is no longer canonical.');
   }
   if (current.usageRestrictions !== snapshot.usageRestrictions) {
-    ineligible('the Case Study usage restrictions changed.');
+    return ineligible('the Case Study usage restrictions changed.');
   }
   if (current.requiredDisclaimer !== snapshot.requiredDisclaimer) {
-    ineligible('the Case Study required disclaimer changed.');
+    return ineligible('the Case Study required disclaimer changed.');
   }
 }
 
