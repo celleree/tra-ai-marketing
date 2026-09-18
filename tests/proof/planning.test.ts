@@ -275,6 +275,78 @@ describe('Proof planning retrieval', () => {
     }
   });
 
+  it('rejects selected Proof plus extra derived wording and normalized currency variants', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const source = review('a', { originalReviewText: 'I did not save $10,000.' });
+    listProofRecordsMock.mockResolvedValue([source]);
+
+    const selected = {
+      type: 'review' as const,
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.originalReviewText,
+      includeAttribution: false,
+    };
+    const variants = [
+      {
+        ...concept(1),
+        adCopy: {
+          ...concept(1).adCopy,
+          primaryText: `${source.originalReviewText} I saved $10,000.`,
+        },
+        proofSelection: selected,
+      },
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'save 10,000' } },
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'save $10000' } },
+    ];
+
+    for (const invalid of variants) {
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        okResponse({ creatives: [invalid, concept(2)] })));
+      await expect(requestCreativeBatch({
+        count: 2,
+        context: 'Planner context',
+        proofRetrievalQuery: 'bank levy',
+        analysis,
+        hasApprovedHumanSource: false,
+      })).rejects.toThrow('invalid creative batch plan concept');
+    }
+  });
+
+  it('accepts a valid selected Review when another catalog Review shares generic wording', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const selectedSource = review('a', {
+      originalReviewText: 'They were very helpful and professional.',
+    });
+    const overlapping = review('b', {
+      originalReviewText: 'The team was very helpful and responsive.',
+    });
+    listProofRecordsMock.mockResolvedValue([selectedSource, overlapping]);
+
+    const valid = {
+      ...concept(1),
+      adCopy: { ...concept(1).adCopy, primaryText: selectedSource.originalReviewText },
+      proofSelection: {
+        type: 'review' as const,
+        proofId: selectedSource.id,
+        proofUpdatedAt: selectedSource.updatedAt,
+        selectedText: selectedSource.originalReviewText,
+        includeAttribution: false,
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      okResponse({ creatives: [valid, concept(2)] })));
+
+    const result = await requestCreativeBatch({
+      count: 2,
+      context: 'Planner context',
+      proofRetrievalQuery: 'bank levy',
+      analysis,
+      hasApprovedHumanSource: false,
+    });
+    expect(result.creatives[0].selectedProof?.proofId).toBe(selectedSource.id);
+  });
+
   it('rejects context-stripped Review selections and accepts the full source-bound line', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const source = review('a', { originalReviewText: 'I did not save $10,000.' });

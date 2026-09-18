@@ -192,6 +192,91 @@ describe('planning proof selection', () => {
     })).toThrow('Case Study disclaimer is not bound');
   });
 
+  it('rejects extra Proof-derived wording even when the valid selected Review text is present', () => {
+    const source = review({ originalReviewText: 'I did not save $10,000.' });
+    const selected = hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.originalReviewText,
+      includeAttribution: false,
+    }, [source]);
+    const base = {
+      adCopy: { primaryText: source.originalReviewText, headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], base)).not.toThrow();
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
+      ...base,
+      adCopy: {
+        ...base.adCopy,
+        primaryText: `${source.originalReviewText} I saved $10,000.`,
+      },
+    })).toThrow('additional Proof-derived wording');
+  });
+
+  it('rejects extra Case Study-derived wording even when the exact approved claim is present', () => {
+    const source = caseStudy({
+      approvedClaimWording: 'TRA helped the client understand the next steps clearly.',
+      requiredDisclaimer: 'Results vary by circumstances.',
+    });
+    const selected = hydratePlanningProofSelection({
+      type: 'case-study',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.approvedClaimWording,
+    }, [source]);
+    const base = {
+      adCopy: { primaryText: source.approvedClaimWording, headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline', disclosure: source.requiredDisclaimer },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], base)).not.toThrow();
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
+      ...base,
+      adCopy: {
+        ...base.adCopy,
+        primaryText: `${source.approvedClaimWording} understand the next steps clearly`,
+      },
+    })).toThrow('additional Proof-derived wording');
+  });
+
+  it.each(['save 10,000', 'save $10000'])(
+    'normalizes equivalent currency formatting before Proof matching: %s',
+    fragment => {
+      const source = review({ originalReviewText: 'I did not save $10,000.' });
+      const base = {
+        adCopy: { primaryText: fragment, headline: 'Headline', description: '' },
+        imageCopy: { headline: 'Image headline' },
+      };
+      expect(() => validatePlanningProofCopyConsistency(null, [source], base))
+        .toThrow('Review text is not bound');
+    }
+  );
+
+  it('does not let overlapping generic Review wording steal a valid selected Proof', () => {
+    const selectedSource = review({
+      originalReviewText: 'They were very helpful and professional.',
+    });
+    const overlapping = review({
+      id: `proof_${'c'.repeat(32)}`,
+      originalReviewText: 'The team was very helpful and responsive.',
+    });
+    const selected = hydratePlanningProofSelection({
+      type: 'review',
+      proofId: selectedSource.id,
+      proofUpdatedAt: selectedSource.updatedAt,
+      selectedText: selectedSource.originalReviewText,
+      includeAttribution: false,
+    }, [selectedSource, overlapping]);
+
+    expect(() => validatePlanningProofCopyConsistency(selected, [selectedSource, overlapping], {
+      adCopy: { primaryText: selectedSource.originalReviewText, headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    })).not.toThrow();
+  });
+
   it('requires selected Proof text to be used exactly and rejects wording from another Proof', () => {
     const selectedSource = review();
     const otherSource = review({
