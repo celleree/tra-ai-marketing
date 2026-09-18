@@ -222,6 +222,17 @@ describe('planning proof selection', () => {
     expect(() => validatePlanningProofCopyConsistency(null, [source], copy)).not.toThrow();
   });
 
+  it('rejects short material Review outcome fragments without Proof selection', () => {
+    const source = review({ originalReviewText: 'My tax issue was resolved quickly.' });
+    const copy = {
+      adCopy: { primaryText: 'Tax issue resolved', headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
+      .toThrow('Material ad-facing Review text');
+  });
+
   it('rejects extra Proof-derived wording even when the valid selected Review text is present', () => {
     const source = review({ originalReviewText: 'I did not save $10,000.' });
     const selected = hydratePlanningProofSelection({
