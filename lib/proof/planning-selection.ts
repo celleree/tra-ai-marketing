@@ -183,8 +183,65 @@ const proofBearingCopyFields = (copy: PlanningProofCopy) => [
   copy.adCopy.description,
   copy.imageCopy.headline,
   copy.imageCopy.shortSupport,
+  copy.imageCopy.proofAttribution,
+  copy.imageCopy.cta,
   copy.imageCopy.disclosure,
 ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+const proofTokens = (value: string) =>
+  (value.toLowerCase().match(/[$€£]?\d[\d,]*(?:\.\d+)?%?|[a-z0-9]+(?:['’][a-z0-9]+)*/g) ?? [])
+    .map(token => token.replace(/’/g, "'"));
+
+const distinctiveNumericToken = (token: string) =>
+  /\d/.test(token) && (/^[$€£]/.test(token) || token.includes(',') || token.endsWith('%'));
+
+const COMMON_TOKENS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by', 'for', 'from',
+  'had', 'has', 'have', 'he', 'her', 'his', 'i', 'in', 'is', 'it', 'me', 'my',
+  'of', 'on', 'or', 'our', 'she', 'that', 'the', 'their', 'them', 'they', 'this',
+  'to', 'was', 'we', 'were', 'with', 'you', 'your',
+]);
+
+const materialPhrase = (tokens: string[]) =>
+  tokens.filter(token => !COMMON_TOKENS.has(token)).length >= 2
+  && tokens.join('').replace(/[^a-z0-9]/g, '').length >= 12;
+
+const materialFingerprintSet = (value: string) => {
+  const tokens = proofTokens(value);
+  const fingerprints = new Set<string>();
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (distinctiveNumericToken(tokens[index])) fingerprints.add(`1:${tokens[index]}`);
+    if (
+      index + 1 < tokens.length
+      && [tokens[index], tokens[index + 1]].some(token => /\d/.test(token))
+    ) {
+      fingerprints.add(`2:${tokens.slice(index, index + 2).join(' ')}`);
+    }
+    if (index + 2 < tokens.length) {
+      const three = tokens.slice(index, index + 3);
+      if (materialPhrase(three)) fingerprints.add(`3:${three.join(' ')}`);
+    }
+    if (index + 3 < tokens.length) {
+      const four = tokens.slice(index, index + 4);
+      if (materialPhrase(four)) fingerprints.add(`4:${four.join(' ')}`);
+    }
+  }
+  return fingerprints;
+};
+
+const fieldOverlapsFingerprints = (
+  sourceFingerprints: ReadonlySet<string>,
+  field: string
+) => {
+  if (!sourceFingerprints.size) return false;
+  for (const fingerprint of materialFingerprintSet(field)) {
+    if (sourceFingerprints.has(fingerprint)) return true;
+  }
+  return false;
+};
+
+const exactTextPresent = (field: string, exactText: string) =>
+  field.includes(exactText);
 
 export function validatePlanningProofCopyConsistency(
   selectedProof: SelectedPlanningProof | null,
@@ -193,34 +250,77 @@ export function validatePlanningProofCopyConsistency(
 ) {
   const fields = proofBearingCopyFields(copy);
 
-  if (selectedProof && !fields.some((field) => field.includes(selectedProof.selectedText))) {
+  if (selectedProof && !fields.some((field) => exactTextPresent(field, selectedProof.selectedText))) {
     throw new Error('Selected Proof text is not present in any ad-facing copy field.');
   }
 
   for (const proof of proofCatalog) {
     if (proof.type === 'review') {
-      for (const unit of reviewSourceBoundUnits(proof.originalReviewText)) {
-        if (!fields.some((field) => field.includes(unit))) continue;
-        if (
-          selectedProof?.type !== 'review'
-          || selectedProof.proofId !== proof.id
-          || !selectedProof.selectedText.includes(unit)
-        ) {
-          throw new Error('Ad-facing Review text is not bound to the matching Proof selection.');
+      const reviewUnits = reviewSourceBoundUnits(proof.originalReviewText);
+      const reviewFingerprints = materialFingerprintSet(proof.originalReviewText);
+      const fieldUsesReview = (field: string) =>
+        reviewUnits.some(unit => exactTextPresent(field, unit))
+        || fieldOverlapsFingerprints(reviewFingerprints, field);
+      const usesReview = fields.some(fieldUsesReview);
+      if (usesReview) {
+        if (selectedProof?.type !== 'review' || selectedProof.proofId !== proof.id) {
+          throw new Error('Material ad-facing Review text is not bound to the matching Proof selection.');
+        }
+        for (const field of fields) {
+          if (
+            fieldUsesReview(field)
+            && !exactTextPresent(field, selectedProof.selectedText)
+          ) {
+            throw new Error('Ad-facing Review text clips or changes the selected source-bound excerpt.');
+          }
         }
       }
       continue;
     }
 
-    if (
-      fields.some((field) => field.includes(proof.approvedClaimWording))
-      && (
-        selectedProof?.type !== 'case-study'
-        || selectedProof.proofId !== proof.id
-        || selectedProof.selectedText !== proof.approvedClaimWording
-      )
-    ) {
-      throw new Error('Ad-facing Case Study wording is not bound to the matching Proof selection.');
+    const claimFingerprints = materialFingerprintSet(proof.approvedClaimWording);
+    const usesClaim = fields.some(field =>
+      exactTextPresent(field, proof.approvedClaimWording)
+      || fieldOverlapsFingerprints(claimFingerprints, field)
+    );
+    if (usesClaim) {
+      if (selectedProof?.type !== 'case-study' || selectedProof.proofId !== proof.id) {
+        throw new Error('Material ad-facing Case Study wording is not bound to the matching Proof selection.');
+      }
+      for (const field of fields) {
+        if (
+          (exactTextPresent(field, proof.approvedClaimWording)
+            || fieldOverlapsFingerprints(claimFingerprints, field))
+          && !exactTextPresent(field, proof.approvedClaimWording)
+        ) {
+          throw new Error('Ad-facing Case Study wording must use the exact approved claim.');
+        }
+      }
+    }
+
+    if (proof.requiredDisclaimer) {
+      const disclaimerFingerprints = materialFingerprintSet(proof.requiredDisclaimer);
+      const usesDisclaimer = fields.some(field =>
+        exactTextPresent(field, proof.requiredDisclaimer!)
+        || fieldOverlapsFingerprints(disclaimerFingerprints, field)
+      );
+      if (
+        usesDisclaimer
+        && (selectedProof?.type !== 'case-study' || selectedProof.proofId !== proof.id)
+      ) {
+        throw new Error('Ad-facing Case Study disclaimer is not bound to the matching Proof selection.');
+      }
+      if (usesDisclaimer) {
+        for (const field of fields) {
+          if (
+            (exactTextPresent(field, proof.requiredDisclaimer!)
+              || fieldOverlapsFingerprints(disclaimerFingerprints, field))
+            && !exactTextPresent(field, proof.requiredDisclaimer!)
+          ) {
+            throw new Error('Ad-facing Case Study disclaimer must use the exact required wording.');
+          }
+        }
+      }
     }
   }
 
@@ -232,4 +332,3 @@ export function validatePlanningProofCopyConsistency(
     throw new Error('Selected Case Study requires its canonical disclosure.');
   }
 }
-

@@ -207,7 +207,7 @@ describe('Proof planning retrieval', () => {
       .toEqual([approvedCase.id, approvedReview.id]);
     expect(JSON.stringify(input.proofCatalog)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
     expect(JSON.stringify(input.proofCatalog)).not.toContain(legacy.id);
-    expect(body.input[0].content[0].text).toContain('whole sentence or whole line boundaries');
+    expect(body.input[0].content[0].text).toContain('whole review-line boundaries');
     expect(body.input[0].content[0].text).toContain('proofSelection:null means no supplied Proof wording or attribution');
     expect(body.input[0].content[0].text).toContain('never broaden it into a universal outcome');
   });
@@ -248,7 +248,34 @@ describe('Proof planning retrieval', () => {
     })).rejects.toThrow('invalid creative batch plan concept');
   });
 
-  it('rejects context-stripped Review selections and accepts the full source-bound sentence', async () => {
+  it('fails closed on shortened Review, Case Study, and disclaimer fragments without matching selection', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const reviewSource = review('a', { originalReviewText: 'I did not save $10,000.' });
+    const caseSource = caseStudy('b', {
+      approvedClaimWording: 'TRA helped the client understand the next steps clearly.',
+      requiredDisclaimer: 'Results vary based on each client circumstances.',
+    });
+    listProofRecordsMock.mockResolvedValue([reviewSource, caseSource]);
+
+    const variants = [
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'save $10,000' } },
+      { ...concept(1), imageCopy: { ...concept(1).imageCopy, shortSupport: 'understand the next steps clearly' } },
+      { ...concept(1), imageCopy: { ...concept(1).imageCopy, disclosure: caseSource.requiredDisclaimer } },
+    ];
+    for (const invalid of variants) {
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        okResponse({ creatives: [invalid, concept(2)] })));
+      await expect(requestCreativeBatch({
+        count: 2,
+        context: 'Planner context',
+        proofRetrievalQuery: 'bank levy',
+        analysis,
+        hasApprovedHumanSource: false,
+      })).rejects.toThrow('invalid creative batch plan concept');
+    }
+  });
+
+  it('rejects context-stripped Review selections and accepts the full source-bound line', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const source = review('a', { originalReviewText: 'I did not save $10,000.' });
     listProofRecordsMock.mockResolvedValue([source]);

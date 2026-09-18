@@ -132,45 +132,23 @@ export function parseCaseStudyProofDraft(
   };
 }
 
-const SENTENCE_TERMINATORS = new Set(['.', '!', '?']);
-const CLOSING_PUNCTUATION = new Set(['"', "'", '’', '”', ')', ']', '}']);
 const horizontalWhitespace = (character: string | undefined) =>
   character === ' ' || character === '\t';
 const lineBreak = (character: string | undefined) =>
   character === '\n' || character === '\r';
 
-const sentenceEndsAt = (value: string, end: number) => {
-  let cursor = end - 1;
-  while (cursor >= 0 && horizontalWhitespace(value[cursor])) cursor -= 1;
-  while (cursor >= 0 && CLOSING_PUNCTUATION.has(value[cursor])) cursor -= 1;
-  return cursor >= 0 && SENTENCE_TERMINATORS.has(value[cursor]);
-};
-
-const sourceBoundStart = (source: string, start: number) => {
+const sourceBoundLineStart = (source: string, start: number) => {
   if (start === 0) return true;
   let cursor = start - 1;
-  if (lineBreak(source[cursor])) return true;
-  let sawWhitespace = false;
-  while (cursor >= 0 && horizontalWhitespace(source[cursor])) {
-    sawWhitespace = true;
-    cursor -= 1;
-  }
-  if (cursor < 0 || lineBreak(source[cursor])) return true;
-  while (cursor >= 0 && CLOSING_PUNCTUATION.has(source[cursor])) cursor -= 1;
-  return sawWhitespace && cursor >= 0 && SENTENCE_TERMINATORS.has(source[cursor]);
+  while (cursor >= 0 && horizontalWhitespace(source[cursor])) cursor -= 1;
+  return cursor < 0 || lineBreak(source[cursor]);
 };
 
-const sourceBoundEnd = (source: string, end: number, excerpt: string) => {
-  if (end === source.length || lineBreak(source[end])) return true;
+const sourceBoundLineEnd = (source: string, end: number) => {
+  if (end === source.length) return true;
   let cursor = end;
-  while (cursor < source.length && CLOSING_PUNCTUATION.has(source[cursor])) cursor += 1;
-  let sawWhitespace = false;
-  while (cursor < source.length && horizontalWhitespace(source[cursor])) {
-    sawWhitespace = true;
-    cursor += 1;
-  }
-  if (cursor === source.length || lineBreak(source[cursor])) return true;
-  return sawWhitespace && sentenceEndsAt(excerpt, excerpt.length);
+  while (cursor < source.length && horizontalWhitespace(source[cursor])) cursor += 1;
+  return cursor === source.length || lineBreak(source[cursor]);
 };
 
 export const isVerbatimReviewExcerpt = (
@@ -182,8 +160,8 @@ export const isVerbatimReviewExcerpt = (
   while (start !== -1) {
     const end = start + excerpt.length;
     if (
-      sourceBoundStart(originalReviewText, start)
-      && sourceBoundEnd(originalReviewText, end, excerpt)
+      sourceBoundLineStart(originalReviewText, start)
+      && sourceBoundLineEnd(originalReviewText, end)
     ) {
       return true;
     }
@@ -192,29 +170,11 @@ export const isVerbatimReviewExcerpt = (
   return false;
 };
 
-export const reviewSourceBoundUnits = (originalReviewText: string) => {
-  const units = new Set<string>();
-  for (const rawLine of originalReviewText.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    units.add(line);
-
-    let start = 0;
-    for (let index = 0; index < line.length; index += 1) {
-      if (!SENTENCE_TERMINATORS.has(line[index])) continue;
-      let end = index + 1;
-      while (end < line.length && SENTENCE_TERMINATORS.has(line[end])) end += 1;
-      while (end < line.length && CLOSING_PUNCTUATION.has(line[end])) end += 1;
-      if (end < line.length && !horizontalWhitespace(line[end])) continue;
-      const sentence = line.slice(start, end).trim();
-      if (sentence) units.add(sentence);
-      while (end < line.length && horizontalWhitespace(line[end])) end += 1;
-      start = end;
-      index = end - 1;
-    }
-  }
-  return [...units];
-};
+export const reviewSourceBoundUnits = (originalReviewText: string) =>
+  originalReviewText
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
 
 export function requireVerbatimReviewExcerpt(
   originalReviewText: string,
@@ -222,7 +182,7 @@ export function requireVerbatimReviewExcerpt(
 ) {
   if (!isVerbatimReviewExcerpt(originalReviewText, excerpt)) {
     throw new Error(
-      'Review excerpt must be exact source text bounded by whole sentence or whole line boundaries.'
+      'Review excerpt must be exact source text bounded by whole review-line boundaries.'
     );
   }
   return excerpt;

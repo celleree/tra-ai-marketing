@@ -156,6 +156,42 @@ describe('planning proof selection', () => {
     })).toThrow('Case Study wording is not bound');
   });
 
+  it('rejects material shortened Proof fragments and unselected Case Study disclaimers', () => {
+    const negative = review({ originalReviewText: 'I did not save $10,000.' });
+    const contextual = review({
+      id: `proof_${'d'.repeat(32)}`,
+      originalReviewText: 'The representative was patient and explained every step clearly.',
+    });
+    const caseSource = caseStudy({
+      approvedClaimWording: 'TRA helped the client understand the next steps clearly.',
+      requiredDisclaimer: 'Results vary based on each client circumstances.',
+    });
+    const base = {
+      adCopy: { primaryText: 'Ordinary copy', headline: 'Ordinary headline', description: '' },
+      imageCopy: { headline: 'Ordinary image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(null, [negative], {
+      ...base,
+      adCopy: { ...base.adCopy, primaryText: 'save $10,000' },
+    })).toThrow('Material ad-facing Review text');
+
+    expect(() => validatePlanningProofCopyConsistency(null, [contextual], {
+      ...base,
+      imageCopy: { ...base.imageCopy, shortSupport: 'explained every step clearly' },
+    })).toThrow('Material ad-facing Review text');
+
+    expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
+      ...base,
+      adCopy: { ...base.adCopy, headline: 'understand the next steps clearly' },
+    })).toThrow('Material ad-facing Case Study wording');
+
+    expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
+      ...base,
+      imageCopy: { ...base.imageCopy, disclosure: caseSource.requiredDisclaimer },
+    })).toThrow('Case Study disclaimer is not bound');
+  });
+
   it('requires selected Proof text to be used exactly and rejects wording from another Proof', () => {
     const selectedSource = review();
     const otherSource = review({

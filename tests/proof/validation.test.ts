@@ -17,20 +17,20 @@ describe('proof validation', () => {
     expect(parsed?.originalReviewText).toBe(originalReviewText);
   });
 
-  it('accepts only exact Review excerpts on whole sentence or whole line boundaries', () => {
-    const original = 'They answered all of my questions, clearly and patiently. Another sentence.';
+  it('accepts only exact Review excerpts on whole review-line boundaries', () => {
+    const original = 'They answered all of my questions, clearly and patiently. Another sentence.\nSecond exact line.';
 
-    expect(isVerbatimReviewExcerpt(original, 'They answered all of my questions, clearly and patiently.')).toBe(true);
-    expect(isVerbatimReviewExcerpt(original, 'Another sentence.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'They answered all of my questions, clearly and patiently. Another sentence.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'Second exact line.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'Another sentence.')).toBe(false);
     expect(isVerbatimReviewExcerpt(original, 'all of my questions, clearly')).toBe(false);
-    expect(isVerbatimReviewExcerpt(original, 'All of my questions, clearly')).toBe(false);
     expect(isVerbatimReviewExcerpt(original, '')).toBe(false);
-    expect(requireVerbatimReviewExcerpt(original, 'Another sentence.')).toBe(
-      'Another sentence.'
+    expect(requireVerbatimReviewExcerpt(original, 'Second exact line.')).toBe(
+      'Second exact line.'
     );
     expect(() =>
       requireVerbatimReviewExcerpt(original, 'answered every question')
-    ).toThrow('whole sentence or whole line boundaries');
+    ).toThrow('whole review-line boundaries');
   });
 
   it('preserves negation and qualification context instead of accepting arbitrary substrings', () => {
@@ -44,14 +44,23 @@ describe('proof validation', () => {
     expect(isVerbatimReviewExcerpt(qualified, 'save $10,000 depending on my final IRS outcome.')).toBe(false);
   });
 
-  it('allows exact whole lines and consecutive source-bound sentences without normalizing text', () => {
+  it('allows exact whole lines and rejects sentence-like fragments within a line', () => {
     const original = 'Straightforward help—no pressure.\nVery responsive. Clear explanations.';
 
     expect(isVerbatimReviewExcerpt(original, 'Straightforward help—no pressure.')).toBe(true);
-    expect(isVerbatimReviewExcerpt(original, 'Very responsive.')).toBe(true);
     expect(isVerbatimReviewExcerpt(original, 'Very responsive. Clear explanations.')).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, 'Very responsive.')).toBe(false);
     expect(isVerbatimReviewExcerpt(original, 'help—no pressure.\nVery')).toBe(false);
     expect(isVerbatimReviewExcerpt(original, 'help - no pressure. Very')).toBe(false);
+  });
+
+  it('does not treat abbreviation periods as safe excerpt boundaries', () => {
+    const original = 'I saved approx. $10,000 after fees.';
+
+    expect(isVerbatimReviewExcerpt(original, original)).toBe(true);
+    expect(isVerbatimReviewExcerpt(original, '$10,000 after fees.')).toBe(false);
+    expect(() => requireVerbatimReviewExcerpt(original, '$10,000 after fees.'))
+      .toThrow('whole review-line boundaries');
   });
 
   it('requires explicit permission before storing display attribution', () => {
