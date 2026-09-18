@@ -102,6 +102,16 @@ const planning: NonNullable<CreativeRecord['planning']> = {
   }, selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium' as const,
 };
 
+const proofProvenance: NonNullable<CreativeRecord['proofProvenance']> = {
+  version: 1,
+  type: 'case-study',
+  proofId: `proof_${'9'.repeat(32)}`,
+  proofUpdatedAt: '2026-09-18T13:00:00.000Z',
+  selectedText: 'Approved source-bound claim.',
+  usageRestrictions: 'Use only in approved tax-resolution creative.',
+  requiredDisclaimer: 'Results vary by individual circumstances.',
+};
+
 const generationProvenance: NonNullable<CreativeRecord['generationProvenance']> = {
   version: 1,
   revision: { parentCreativeId: `creative_${'f'.repeat(32)}`, canvasMediaId: `media_${'a'.repeat(32)}`, canvasSha256: 'a'.repeat(64), instruction: 'Improve headline contrast.' },
@@ -178,7 +188,7 @@ describe('TRA creative storage', () => {
 
   it('round-trips generated metadata while retaining legacy records', async () => {
     const legacy = record('a', '2026-08-20T12:00:00.000Z');
-    const generated = { ...record('b', '2026-08-25T12:00:00.000Z'), format: 'direct-response' as const, placement: 'PORTRAIT_4_5' as const, planning, generationProvenance };
+    const generated = { ...record('b', '2026-08-25T12:00:00.000Z'), format: 'direct-response' as const, placement: 'PORTRAIT_4_5' as const, planning, generationProvenance, proofProvenance };
     readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [legacy] }));
     await saveCreativeBatch([generated]);
     const encoded = writeFileMock.mock.calls[0][1] as string;
@@ -194,6 +204,7 @@ describe('TRA creative storage', () => {
     ['placement', { placement: 'LANDSCAPE_16_9' }],
     ['planning', { planning: { ...planning, reasoningEffort: 'high' } }],
     ['generation provenance', { generationProvenance: { ...generationProvenance, version: 2 } }],
+    ['proof provenance', { proofProvenance: { ...proofProvenance, proofId: 'proof_bad' } }],
     ['null generation provenance', { generationProvenance: null }],
     ['identity', { identity: { operation: 'GENERATE' } }],
     ['source', { source: 'manual' }],
