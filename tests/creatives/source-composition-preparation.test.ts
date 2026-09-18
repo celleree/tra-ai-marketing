@@ -83,33 +83,25 @@ const createHistoricalPortfolio = async (data: ReturnType<typeof request>, stora
 describe('real preparation to Astra with composed sources', () => {
   it('keeps Proof retrieval bound to original Create direction across audit repair feedback', async () => {
     const userDirection = 'Create proof-led ads about wage garnishment.';
-    const parsed = validateGenerateCreativeRequest({
-      context: userDirection,
-      variationCount: 2,
-      companyProfile: { knowledgeBase: { companySummary: 'IRS tax professionalism patience reassurance.' } },
-    });
-    expect(parsed.success).toBe(true);
-    if (!parsed.success) return;
-
+    const parsed = validateGenerateCreativeRequest({ context: userDirection, variationCount: 2,
+      companyProfile: { knowledgeBase: { companySummary: 'IRS tax professionalism patience reassurance.' } } });
+    if (!parsed.success) throw new Error(parsed.error);
     const unrelatedId = `proof_${'a'.repeat(32)}`, relevantId = `proof_${'b'.repeat(32)}`;
+    const proofBase = { type: 'review' as const, status: 'ACTIVE' as const, advertisingUseApproved: true,
+      createdAt: '2026-09-10T12:00:00.000Z' };
     mocks.proof.mockResolvedValue([
-      { id: unrelatedId, type: 'review', originalReviewText: 'IRS tax professionalism patience reassurance.',
-        tags: ['IRS', 'professionalism', 'patience'], status: 'ACTIVE', advertisingUseApproved: true,
-        createdAt: '2026-09-10T12:00:00.000Z', updatedAt: '2026-09-10T12:00:00.000Z' },
-      { id: relevantId, type: 'review', originalReviewText: 'Wage garnishment support.',
-        tags: ['wage garnishment'], status: 'ACTIVE', advertisingUseApproved: true,
-        createdAt: '2026-09-10T12:00:00.000Z', updatedAt: '2026-09-10T13:00:00.000Z' },
+      { ...proofBase, id: unrelatedId, originalReviewText: 'IRS tax professionalism patience reassurance.',
+        tags: ['IRS', 'professionalism', 'patience'], updatedAt: proofBase.createdAt },
+      { ...proofBase, id: relevantId, originalReviewText: 'Wage garnishment support.',
+        tags: ['wage garnishment'], updatedAt: '2026-09-10T13:00:00.000Z' },
     ]);
     mocks.audit.mockResolvedValueOnce({ ...portfolioAudit(2),
       groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] })
       .mockResolvedValueOnce(portfolioAudit(2));
-
     const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
-
-    expect(prepared.plannerArgs?.proofRetrievalQuery).toBe(userDirection);
-    expect(prepared.plannerArgs?.context).toContain('IRS tax professionalism patience reassurance.');
-    expect(outbound).toHaveLength(2);
-    expect(outbound[1].creativeContext).toContain('PORTFOLIO REPAIR:');
+    expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection,
+      context: expect.stringContaining('IRS tax professionalism patience reassurance.') });
+    expect(outbound).toHaveLength(2); expect(outbound[1].creativeContext).toContain('PORTFOLIO REPAIR:');
     for (const input of outbound) {
       expect(input.proofCatalog.map((proof: { id: string }) => proof.id)).toEqual([relevantId]);
       expect(JSON.stringify(input.proofCatalog)).not.toContain(unrelatedId);
