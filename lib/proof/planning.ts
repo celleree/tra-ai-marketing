@@ -8,15 +8,6 @@ import type {
 export const MAX_PLANNING_PROOF_RECORDS = 8;
 export const MAX_PLANNING_PROOF_SERIALIZED_CHARS = 32_000;
 
-const USER_DIRECTION_PREFIX = 'USER CREATIVE DIRECTION:\n';
-const COMPANY_CONTEXT_MARKER = '\n\nAPPROVED TRA COMPANY CONTEXT';
-
-export function proofRetrievalQueryFromRequestContext(context: string) {
-  if (!context.startsWith(USER_DIRECTION_PREFIX)) return context.trim();
-  const end = context.lastIndexOf(COMPANY_CONTEXT_MARKER);
-  return context.slice(USER_DIRECTION_PREFIX.length, end >= USER_DIRECTION_PREFIX.length ? end : undefined).trim();
-}
-
 export type PlanningReviewProof = Pick<
   ReviewProofRecord,
   'id' | 'type' | 'updatedAt' | 'tags' | 'originalReviewText'

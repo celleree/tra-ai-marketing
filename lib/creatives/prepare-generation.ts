@@ -16,7 +16,6 @@ import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
-import { proofRetrievalQueryFromRequestContext } from '@/lib/proof/planning';
 
 const buildPromptOnlyAnalysis = (
   context: string
@@ -169,7 +168,7 @@ export async function prepareCreativeGeneration(
   const plannerArgs: CreativeBatchPlannerArgs = {
     count: data.variationCount,
     context: generationContext,
-    proofRetrievalQuery: proofRetrievalQueryFromRequestContext(data.context),
+    proofRetrievalQuery: data.proofRetrievalQuery,
     analysis, sourceAnalysis,
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
     referenceCatalog,

@@ -84,7 +84,7 @@ describe('real preparation to Astra with composed sources', () => {
   it('keeps Proof retrieval bound to original Create direction across audit repair feedback', async () => {
     const userDirection = 'Create proof-led ads about wage garnishment.';
     const parsed = validateGenerateCreativeRequest({ context: userDirection, variationCount: 2,
-      companyProfile: { knowledgeBase: { companySummary: 'IRS tax professionalism patience reassurance.' } } });
+      companyProfile: { knowledgeBase: { companySummary: 'APPROVED TRA COMPANY CONTEXT IRS tax professionalism patience reassurance.' } } });
     if (!parsed.success) throw new Error(parsed.error);
     const unrelatedId = `proof_${'a'.repeat(32)}`, relevantId = `proof_${'b'.repeat(32)}`;
     const proofBase = { type: 'review' as const, status: 'ACTIVE' as const, advertisingUseApproved: true, createdAt: '2026-09-10T12:00:00.000Z' };
@@ -95,6 +95,7 @@ describe('real preparation to Astra with composed sources', () => {
     mocks.audit.mockResolvedValueOnce({ ...portfolioAudit(2),
       groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] })
       .mockResolvedValueOnce(portfolioAudit(2));
+    expect(parsed.data.proofRetrievalQuery).toBe(userDirection);
     const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
     expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection, context: expect.stringContaining('IRS tax professionalism patience reassurance.') });
     expect(outbound).toHaveLength(2); expect(outbound[1].creativeContext).toContain('PORTFOLIO REPAIR:');
