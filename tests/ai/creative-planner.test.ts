@@ -178,6 +178,8 @@ describe('creative batch planner', () => {
     expect(properties).not.toHaveProperty('copy');
     expect(properties.adCopy.required).toEqual(['primaryText', 'headline', 'description']);
     expect(properties.imageCopy.required).toEqual(['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure']);
+    expect(second.text.format.schema.properties.creatives.items.required).toContain('proofSelection');
+    expect(properties.proofSelection.anyOf).toHaveLength(3);
     expect(properties.referenceChoices.properties.layoutSource.anyOf[0].enum).toEqual([before[0].referenceId]);
     expect(properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
     expect(properties.humanSourceId).toMatchObject({ type: ['string', 'null'] });
@@ -407,6 +409,7 @@ describe('creative batch planner', () => {
     ['human without approved source', { creatives: [concept(1, 'approved-tra-human'), concept(2)] }, false],
     ['overlong ad copy', { creatives: [{ ...concept(1), adCopy: { ...concept(1).adCopy, headline: 'x'.repeat(1001) } }, concept(2)] }, false],
     ['missing image copy', { creatives: [{ ...concept(1), imageCopy: undefined }, concept(2)] }, false],
+    ['missing proof selection', { creatives: [{ ...concept(1), proofSelection: undefined }, concept(2)] }, false],
     ['malformed image copy', { creatives: [{ ...concept(1), imageCopy: { ...concept(1).imageCopy, shortSupport: 42 } }, concept(2)] }, false],
   ])('rejects %s output', async (_name, value, hasApprovedHumanSource) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key'); vi.stubGlobal('fetch', vi.fn(async () => okResponse(value)));
