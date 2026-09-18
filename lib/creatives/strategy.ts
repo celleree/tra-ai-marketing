@@ -6,7 +6,7 @@ import {
 
 import { TAX_DOCUMENT_SELECTIONS, type TaxDocumentSelection } from '@/lib/references/tax-documents';
 import { parseReferenceSelection, type ReferenceSelection } from '@/lib/references/planning';
-import { isApprovedHumanId } from '@/lib/video/approved-human';
+import { isApprovedHumanId, parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 
 const awarenessStages = ['problem-aware', 'solution-aware', 'service-aware', 'action-ready'] as const;
 const subjectSources = ['approved-tra-human', 'non-human'] as const;
@@ -23,7 +23,8 @@ const conceptFields = ['angle', 'proposition', 'mainMessage', 'visualArchetype',
 export type CreativeConceptDetails = Record<(typeof conceptFields)[number], string> & { version: 1; objection: string | null };
 
 export type CreativeStrategy = {
-  approvedHumanId?: string; // Stable curated source choice; absent on legacy/direct-source plans.
+  approvedHumanId?: string; // Legacy curated source choice; absent on new/direct-source plans.
+  humanSourceId?: string; // Generic stable C1 source choice for new plans.
   referenceSelection?: ReferenceSelection; // Resolved by the app; absent on legacy plans.
   conceptDetails?: CreativeConceptDetails; // Absent on legacy saved plans; required for new planner output.
   category: CreativeCategoryId;
@@ -88,8 +89,11 @@ const parseString = (value: unknown) => {
 };
 
 export function parseCreativeStrategy(value: unknown, hasApprovedHumanSource: boolean): CreativeStrategy | null {
-  if (!isRecord(value) || !hasOnly(value, [...stringFields, 'category', 'awarenessStage', 'offer', 'soWhat', 'execution', ...('conceptDetails' in value ? ['conceptDetails'] : []), ...('referenceSelection' in value ? ['referenceSelection'] : []), ...('approvedHumanId' in value ? ['approvedHumanId'] : [])])) return null;
+  if (!isRecord(value) || !hasOnly(value, [...stringFields, 'category', 'awarenessStage', 'offer', 'soWhat', 'execution', ...('conceptDetails' in value ? ['conceptDetails'] : []), ...('referenceSelection' in value ? ['referenceSelection'] : []), ...('approvedHumanId' in value ? ['approvedHumanId'] : []), ...('humanSourceId' in value ? ['humanSourceId'] : [])])) return null;
+  if ('approvedHumanId' in value && 'humanSourceId' in value) return null;
   if ('approvedHumanId' in value && !isApprovedHumanId(value.approvedHumanId)) return null;
+  const approvedHumanRecordId = 'humanSourceId' in value ? parseApprovedHumanSourceId(value.humanSourceId) : null;
+  if ('humanSourceId' in value && !approvedHumanRecordId) return null;
   const referenceSelection = 'referenceSelection' in value ? parseReferenceSelection(value.referenceSelection) : undefined;
   if (referenceSelection === null) return null;
   let conceptDetails: CreativeConceptDetails | undefined;
@@ -115,10 +119,11 @@ export function parseCreativeStrategy(value: unknown, hasApprovedHumanSource: bo
     || !isEnum(execution.imageTreatment, imageTreatments) || !isEnum(execution.textDensity, textDensities)
     || !isEnum(execution.ctaTreatment, ctaTreatments) || !isEnum(execution.typographyHierarchy, typographyHierarchies)
     || (execution.subjectSource === 'approved-tra-human' && !hasApprovedHumanSource)
-    || ('approvedHumanId' in value && execution.subjectSource !== 'approved-tra-human')) return null;
+    || (('approvedHumanId' in value || 'humanSourceId' in value) && execution.subjectSource !== 'approved-tra-human')) return null;
   return { category: value.category, awarenessStage: value.awarenessStage, ...strings as Record<(typeof stringFields)[number], string>,
     offer: value.offer === null ? null : parseString(value.offer)!,
     soWhat: soWhat as CreativeStrategy['soWhat'], execution: execution as CreativeStrategy['execution'],
     ...(conceptDetails ? { conceptDetails } : {}), ...(referenceSelection ? { referenceSelection } : {}),
-    ...(isApprovedHumanId(value.approvedHumanId) ? { approvedHumanId: value.approvedHumanId } : {}) };
+    ...(isApprovedHumanId(value.approvedHumanId) ? { approvedHumanId: value.approvedHumanId } : {}),
+    ...(approvedHumanRecordId ? { humanSourceId: value.humanSourceId as string } : {}) };
 }

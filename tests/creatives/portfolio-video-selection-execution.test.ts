@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioPlan, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
+import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
 const mocks = vi.hoisted(() => ({
@@ -149,6 +150,28 @@ describe('durable portfolio B3 selection activation', () => {
     const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(failed.job.slots[0]).toMatchObject({ status: 'RETRY_REQUIRED', videoSelection: { selection } });
     expect(mocks.render).not.toHaveBeenCalled(); expect(mocks.select).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a generalized approved human isolated from automatic B3 selection', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await ready(storage);
+    const context = contextFor(job);
+    const humanSourceId = approvedHumanSourceId(`human_${'1'.repeat(64)}`);
+    context.batchPlan.creatives[0].strategy = {
+      ...context.batchPlan.creatives[0].strategy,
+      humanSourceId,
+      execution: { ...context.batchPlan.creatives[0].strategy.execution, subjectSource: 'approved-tra-human' },
+    };
+    mocks.restore.mockResolvedValue(context);
+
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+
+    expect(context.batchPlan.creatives[0].strategy.humanSourceId).toBe(humanSourceId);
+    expect(result.job.slots[0].status).toBe('SAVED');
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.render).toHaveBeenCalledOnce();
+    expect(mocks.render.mock.calls[0][0].strategy.humanSourceId).toBe(humanSourceId);
+    expect(quotaGroups()).toEqual(['CREATIVE_GENERATION']);
   });
 
   it.each([

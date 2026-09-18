@@ -15,6 +15,7 @@ import type { PreparedCreativeGeneration } from '@/lib/creatives/prepare-generat
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
+import { approvedHumanSourceId } from '@/lib/video/approved-human';
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: vi.fn(async (concepts: unknown[]) => portfolioAudit(concepts.length)) }));
 
 const analysis = {
@@ -154,8 +155,8 @@ describe('creative batch planner', () => {
     await requestCreativeBatch(args);
     const referenceCatalog = [referenceCandidate('a')];
     const before = structuredClone(referenceCatalog);
-    const id = `human_${'a'.repeat(64)}`;
-    fetchMock.mockResolvedValueOnce(okResponse({ creatives: [1, 2, 3].map(index => ({ ...concept(index), approvedHumanId: null,
+    const id = `human_${'a'.repeat(64)}`, sourceId = approvedHumanSourceId(id);
+    fetchMock.mockResolvedValueOnce(okResponse({ creatives: [1, 2, 3].map(index => ({ ...concept(index), humanSourceId: null,
       referenceChoices: { angleSource: null, layoutSource: null } })) }));
     await requestCreativeBatch({ ...args, count: 3, referenceCatalog,
       approvedHumanOptions: [{ id, sourceName: 'TRA', description: 'Approved frame' }] });
@@ -165,17 +166,21 @@ describe('creative batch planner', () => {
     const input = JSON.parse(inputText);
     expect(inputText).toBe(JSON.stringify(input));
     expect(input).toMatchObject({ creativeContext: args.context, referenceAnalysis: analysis });
+    expect(input.approvedHumanOptions).toEqual([{ humanSourceId: sourceId, sourceName: 'TRA', description: 'Approved frame' }]);
     expect(input.referenceCatalog).toEqual(before.map(({ referenceId, priority, angleDescription, blueprint }) =>
       ({ referenceId, priority, angleDescription, blueprint })));
     expect(referenceCatalog).toEqual(before);
     expect(inputText.length).toBeLessThan(JSON.stringify({ ...input, referenceCatalog: before }, null, 2).length);
     const properties = second.text.format.schema.properties.creatives.items.properties;
-    expect(Object.keys(properties).indexOf('strategy')).toBeLessThan(Object.keys(properties).indexOf('approvedHumanId'));
+    expect(Object.keys(properties).indexOf('strategy')).toBeLessThan(Object.keys(properties).indexOf('humanSourceId'));
+    expect(properties).not.toHaveProperty('approvedHumanId');
     expect(properties).not.toHaveProperty('copy');
     expect(properties.adCopy.required).toEqual(['primaryText', 'headline', 'description']);
     expect(properties.imageCopy.required).toEqual(['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure']);
     expect(properties.referenceChoices.properties.layoutSource.anyOf[0].enum).toEqual([before[0].referenceId]);
     expect(properties.strategy).toEqual(CREATIVE_STRATEGY_JSON_SCHEMA);
+    expect(properties.humanSourceId).toMatchObject({ type: ['string', 'null'] });
+    expect(properties.humanSourceId).not.toHaveProperty('enum');
     const rules = first.input[0].content[0].text;
     for (const rule of ['SO WHAT', 'Never invent testimonials', 'Without either, every subjectSource must be non-human',
       'third-party identity, branding, exact copy, people, claims, or evidence', 'document structure only',
@@ -186,8 +191,8 @@ describe('creative batch planner', () => {
 
   it('persists the real initial request result through the PR A checkpoint and retains the complete render/strategy contract', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const referenceCatalog = [referenceCandidate('a')], id = `human_${'a'.repeat(64)}`;
-    const creatives = [1, 2].map(index => ({ ...concept(index, 'approved-tra-human'), approvedHumanId: id,
+    const referenceCatalog = [referenceCandidate('a')], id = `human_${'a'.repeat(64)}`, humanSourceId = approvedHumanSourceId(id);
+    const creatives = [1, 2].map(index => ({ ...concept(index, 'approved-tra-human'), humanSourceId,
       referenceChoices: { angleSource: referenceCatalog[0].referenceId, layoutSource: referenceCatalog[0].referenceId } }));
     const fetchMock = vi.fn(async () => okResponse({ creatives }));
     vi.stubGlobal('fetch', fetchMock);
@@ -207,8 +212,9 @@ describe('creative batch planner', () => {
       expect(planned).toMatchObject({ index: index + 1, format: creatives[index].format,
         copy: creatives[index].adCopy, adCopy: creatives[index].adCopy, imageCopy: imageCopyFor(index + 1),
         selectionReason: creatives[index].selectionReason,
-        strategy: { ...creatives[index].strategy, approvedHumanId: id,
+        strategy: { ...creatives[index].strategy, humanSourceId,
           referenceSelection: { ...creatives[index].referenceChoices, referenceRelationship: 'matched' } } });
+      expect(planned.strategy).not.toHaveProperty('approvedHumanId');
       expect(planned.copy).toEqual(planned.adCopy);
       const brief = buildCreativeRenderBrief({ concept: planned, referenceCatalog });
       expect(brief).toMatchObject({ exactCopy: imageCopyFor(index + 1),
@@ -234,40 +240,67 @@ describe('creative batch planner', () => {
 
   it('selects a known library human independently per concept without a fixed ratio', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const id = `human_${'a'.repeat(64)}`;
+    const id = `human_${'a'.repeat(64)}`, humanSourceId = approvedHumanSourceId(id);
     const approvedHumanOptions = [{ id, sourceName: 'TRA video', description: 'Approved presenter with room for copy' }];
-    let creatives = [{ ...concept(1, 'approved-tra-human'), approvedHumanId: id }, { ...concept(2), approvedHumanId: null }];
+    let creatives = [{ ...concept(1, 'approved-tra-human'), humanSourceId }, { ...concept(2), humanSourceId: null }];
     const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives }));
     vi.stubGlobal('fetch', fetchMock);
     const args = { count: 2, context: '', analysis, hasApprovedHumanSource: false, approvedHumanOptions };
     const result = await planCreativeBatch(args);
-    expect(result.creatives[0].strategy.approvedHumanId).toBe(id);
-    expect(result.creatives[1].strategy).not.toHaveProperty('approvedHumanId');
+    expect(result.creatives[0].strategy.humanSourceId).toBe(humanSourceId);
+    expect(result.creatives[0].strategy).not.toHaveProperty('approvedHumanId');
+    expect(result.creatives[1].strategy).not.toHaveProperty('humanSourceId');
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    expect(JSON.parse(body.input[1].content[0].text).approvedHumanOptions).toEqual(approvedHumanOptions);
-    const approvedHumanIdSchema = body.text.format.schema.properties.creatives.items.properties.approvedHumanId;
-    expect(approvedHumanIdSchema).toMatchObject({ type: ['string', 'null'] });
-    expect(approvedHumanIdSchema).not.toHaveProperty('enum');
+    expect(JSON.parse(body.input[1].content[0].text).approvedHumanOptions).toEqual([
+      { humanSourceId, sourceName: approvedHumanOptions[0].sourceName, description: approvedHumanOptions[0].description },
+    ]);
+    const humanSourceIdSchema = body.text.format.schema.properties.creatives.items.properties.humanSourceId;
+    expect(humanSourceIdSchema).toMatchObject({ type: ['string', 'null'] });
+    expect(humanSourceIdSchema).not.toHaveProperty('enum');
     expect(body.input[0].content[0].text).toContain('face availability alone is insufficient');
-    creatives = [{ ...concept(1, 'approved-tra-human'), approvedHumanId: null }, { ...concept(2), approvedHumanId: null }];
+    creatives = [{ ...concept(1, 'approved-tra-human'), humanSourceId: null }, { ...concept(2), humanSourceId: null }];
     await expect(planCreativeBatch(args)).rejects.toThrow('invalid');
-    creatives[0].approvedHumanId = `human_${'b'.repeat(64)}`;
+    creatives[0].humanSourceId = approvedHumanSourceId(`human_${'b'.repeat(64)}`);
     await expect(planCreativeBatch(args)).rejects.toThrow('invalid');
-    creatives = [{ ...concept(1), approvedHumanId: id }, { ...concept(2), approvedHumanId: null }];
+    creatives = [{ ...concept(1), humanSourceId }, { ...concept(2), humanSourceId: null }];
     await expect(planCreativeBatch(args)).rejects.toThrow('invalid');
   });
-  it('bounds human options and keeps explicit supplied-source planning compatible', async () => {
+
+  it('keeps the complete human option pool and can select the final generalized source ID', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const approvedHumanOptions = Array.from({ length: 10 }, (_, index) => ({
+      id: `human_${(index + 1).toString(16).padStart(64, '0')}`,
+      sourceName: `TRA video ${index + 1}`,
+      description: `Presenter ${index + 1}`,
+    }));
+    const finalSourceId = approvedHumanSourceId(approvedHumanOptions.at(-1)!.id);
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives: [
+      { ...concept(1, 'approved-tra-human'), humanSourceId: finalSourceId }, { ...concept(2), humanSourceId: null },
+    ] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: '', analysis, hasApprovedHumanSource: false, approvedHumanOptions };
+    const result = await planCreativeBatch(args);
+    expect(result.creatives[0].strategy.humanSourceId).toBe(finalSourceId);
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const offered = JSON.parse(body.input[1].content[0].text).approvedHumanOptions;
+    expect(offered).toHaveLength(10);
+    expect(offered.at(-1).humanSourceId).toBe(finalSourceId);
+    expect(body.text.format.schema.properties.creatives.items.properties.humanSourceId).not.toHaveProperty('enum');
+    await expect(planCreativeBatch({ ...args, approvedHumanOptions: Array(9).fill(approvedHumanOptions[0]) })).rejects.toThrow('valid and unique');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps explicit supplied-source planning compatible when no catalog human is selected', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn(async () => okResponse({ creatives: [
-      { ...concept(1, 'approved-tra-human'), approvedHumanId: null }, { ...concept(2), approvedHumanId: null },
+      { ...concept(1, 'approved-tra-human'), humanSourceId: null }, { ...concept(2), humanSourceId: null },
     ] }));
     vi.stubGlobal('fetch', fetchMock);
     const args = { count: 2, context: '', analysis, hasApprovedHumanSource: true, approvedHumanOptions: [] };
-    expect((await planCreativeBatch(args)).creatives[0].strategy).not.toHaveProperty('approvedHumanId');
-    const option = { id: `human_${'a'.repeat(64)}`, sourceName: 'TRA video', description: 'Presenter' };
-    await expect(planCreativeBatch({ ...args, approvedHumanOptions: Array(9).fill(option) })).rejects.toThrow('bounded');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await planCreativeBatch(args)).creatives[0].strategy).not.toHaveProperty('humanSourceId');
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
+
   it('repairs a repeated semantic group once before returning the audited portfolio', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const repeated = { ...portfolioAudit(), groups: [{ conceptIndexes: [1, 2], proposition: 'Conversation leads to next steps', distinction: 'Paraphrases of the same idea' }] };

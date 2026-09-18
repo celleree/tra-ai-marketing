@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCreativeStrategy } from '@/lib/creatives/strategy';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 
 const strategy = () => ({
@@ -23,6 +24,17 @@ describe('CreativeStrategy contract', () => {
     expect(parseCreativeStrategy({ ...human, approvedHumanId: 'unknown' }, true)).toBeNull();
     expect(parseCreativeStrategy(strategy(), false)).not.toHaveProperty('approvedHumanId');
   });
+  it('rejects an approved-human strategy containing both legacy and generalized identities', () => {
+    const approvedHumanId = `human_${'b'.repeat(64)}`;
+    const human = {
+      ...strategy(),
+      approvedHumanId,
+      humanSourceId: approvedHumanSourceId(approvedHumanId),
+      execution: { ...strategy().execution, subjectSource: 'approved-tra-human' },
+    };
+    expect(parseCreativeStrategy(human, true)).toBeNull();
+  });
+
   it('round-trips rich concept details through saved planning without upgrading legacy records', () => {
     const planning = { strategy: { ...strategy(), conceptDetails: { ...conceptDetails, proposition: ' Understand options before committing ' } },
       selectionReason: 'A distinct reason to act', model: 'gpt-6-astra', reasoningEffort: 'medium' };

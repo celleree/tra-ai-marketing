@@ -3,6 +3,7 @@ import { POST } from '@/app/api/creatives/[creativeId]/revise/route';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { CreativeRevisionHydrationError } from '@/lib/creatives/revision-source-hydration';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
+import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 
@@ -20,6 +21,8 @@ vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({ saveImag
 
 const parentId = `creative_${'a'.repeat(32)}`;
 const mediaId = `media_${'b'.repeat(32)}`;
+const approvedHumanRecordId = `human_${'f'.repeat(64)}`;
+const generalizedHumanSourceId = approvedHumanSourceId(approvedHumanRecordId);
 const strategy: CreativeStrategy = {
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer', painPoint: 'Unclear next steps', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Get clarity', cta: 'Consult us', offer: null,
   soWhat: { surfaceMessage: 'Organize your case', functionalConsequence: 'Understand your options', meaningfulOutcome: 'Move forward confidently' },
@@ -33,6 +36,22 @@ const parent = (): CreativeRecord => ({
   planning: { strategy, selectionReason: 'Saved choice', model: 'saved-planner', reasoningEffort: 'medium' },
   generationProvenance: { version: 1, imageGeneration: { prompt: 'old prompt', model: 'old-image-model' }, requestedSources: [], attachedSource: null, analysisSources: [] },
 });
+const generalizedHumanParent = (): CreativeRecord => {
+  const record = parent();
+  const humanStrategy: CreativeStrategy = { ...strategy, humanSourceId: generalizedHumanSourceId,
+    execution: { ...strategy.execution, subjectSource: 'approved-tra-human' } };
+  record.planning = { ...record.planning!, strategy: humanStrategy };
+  record.identity = buildCreativeIdentity({ creativeId: record.id, operation: 'GENERATE', strategy: humanStrategy });
+  record.videoFrameSelection = { libraryId:`video-library:${'a'.repeat(64)}`, sourceVideoMediaId:mediaId, sourceVideoContentHash:'f'.repeat(64),
+    frames:[{frameIndex:0,libraryFrameId:`video-frame:${'c'.repeat(64)}`,candidateFrameSha256:'d'.repeat(64),timestampMs:1000,approvedPngSha256:'e'.repeat(64)}] };
+  record.generationProvenance = {
+    ...record.generationProvenance!,
+    requestedSources: [{ role: 'TRA_VIDEO', mediaId, sha256: 'f'.repeat(64) }],
+    attachedSource: { type: 'TRA_VIDEO_FRAMES', mediaId, sourceSha256: 'f'.repeat(64), selectionMode: 'USER_SELECTED',
+      frames: [{ timestampMs: 1000, approvedPngSha256: 'e'.repeat(64) }] },
+  };
+  return record;
+};
 const e2Parent = (): CreativeRecord => {
   const record = parent();
   const adCopy = { primaryText: 'META_PRIMARY_SENTINEL_NEVER_IMAGE', headline: 'Meta headline', description: 'META_DESCRIPTION_SENTINEL_NEVER_IMAGE' };
@@ -40,6 +59,7 @@ const e2Parent = (): CreativeRecord => {
 };
 const call = (body: unknown, creativeId = parentId) => POST(new Request('http://localhost/api/creatives/revise', { method: 'POST', body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
 const hydrate = (record: CreativeRecord) => ({ parent: { record, identity: record.identity, planning: record.planning, provenance: record.generationProvenance }, canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId, sha256: 'c'.repeat(64) }, originalApprovedSource: null, logoOverlay: null });
+const hydrateGeneralizedHuman = (record: CreativeRecord) => ({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[]} });
 beforeEach(() => {
   Object.values(mocks).forEach(mock => mock.mockReset());
   mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
@@ -75,6 +95,63 @@ describe('saved creative revision API', () => {
     mocks.generate.mockClear(); mocks.human.mockRejectedValue(new Error('Human deactivated after planning'));
     expect((await call({operation:'REGENERATE'})).status).toBe(409);
     expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('preserves generalized approved-human identity and source through %s', async operation => {
+    const record = generalizedHumanParent();
+    const revisedStrategy: CreativeStrategy = { ...record.planning!.strategy,
+      ...(operation === 'VARIATION' ? { awarenessStage: 'solution-aware' as const, execution: { ...record.planning!.strategy.execution, composition: 'split' as const } } : {}) };
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: revisedStrategy, selectionReason: 'Keep the same approved person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    const response = await call({ operation, instruction: 'Keep the same approved person while revising the creative.' });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(creative.planning.strategy.humanSourceId).toBe(generalizedHumanSourceId);
+    expect(creative.planning.strategy).not.toHaveProperty('approvedHumanId');
+    expect(mocks.human).toHaveBeenCalledWith(approvedHumanRecordId, record.videoFrameSelection);
+    expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource).not.toBeNull();
+    expect(creative.generationProvenance.attachedSource).toEqual(record.generationProvenance!.attachedSource);
+    expect(creative.videoFrameSelection).toEqual(record.videoFrameSelection);
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('rejects revoked generalized approved-human identity after %s planning before provider work', async operation => {
+    const record = generalizedHumanParent();
+    const revisedStrategy: CreativeStrategy = { ...record.planning!.strategy,
+      ...(operation === 'VARIATION' ? { awarenessStage: 'solution-aware' as const, execution: { ...record.planning!.strategy.execution, composition: 'split' as const } } : {}) };
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: revisedStrategy, selectionReason: 'Keep the same approved person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    mocks.human.mockRejectedValueOnce(new Error('Human deactivated after planning'));
+    const response = await call({ operation, instruction: 'Keep the same approved person.' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'Human deactivated after planning' });
+    expect(mocks.human).toHaveBeenCalledWith(approvedHumanRecordId, record.videoFrameSelection);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('fully detaches generalized approved-human identity when %s becomes non-human', async operation => {
+    const record = generalizedHumanParent();
+    const nonHumanStrategy: CreativeStrategy = { ...strategy,
+      ...(operation === 'VARIATION' ? { awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } } : {}) };
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: nonHumanStrategy, selectionReason: 'Remove the person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    const response = await call({ operation, instruction: 'Remove the person and make this non-human.' });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(creative.planning.strategy).not.toHaveProperty('humanSourceId');
+    expect(creative.planning.strategy).not.toHaveProperty('approvedHumanId');
+    expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource).toBeNull();
+    expect(creative.generationProvenance.attachedSource).toBeNull();
+    expect(creative).not.toHaveProperty('videoFrameSelection');
+  });
+  it('fails closed on a malformed generalized human identity before provider work', async () => {
+    const record = generalizedHumanParent();
+    const malformedStrategy: CreativeStrategy = { ...record.planning!.strategy, humanSourceId: 'approved-human:invalid' };
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: malformedStrategy, selectionReason: 'Malformed source.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    const response = await call({ operation: 'EDIT', instruction: 'Keep the same person.' });
+    expect(response.status).toBe(409);
+    expect(mocks.human).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
   });
   it.each(['REGENERATE', 'PLACEMENT'] as const)('creates a new saved legacy %s without inventing separated copy', async operation => {
     const original = parent();

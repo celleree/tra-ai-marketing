@@ -4,6 +4,7 @@ import type { CreativeRecord } from '@/lib/creatives/generated';
 import { fingerprintCreativeStrategy } from '@/lib/creatives/identity.server';
 import type { HydratedCreativeSourceAsset } from '@/lib/media/source-hydration';
 import type { MediaStorage } from '@/lib/media/storage';
+import { approvedHumanSourceId } from '@/lib/video/approved-human';
 
 const mocks = vi.hoisted(() => ({ hydrate: vi.fn(), frames: vi.fn(), human: vi.fn() }));
 vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
@@ -46,15 +47,30 @@ const storage = (files: Record<string, ReturnType<typeof image> | null>) => ({ r
 beforeEach(() => { mocks.hydrate.mockReset(); mocks.frames.mockReset(); mocks.human.mockReset(); });
 
 describe('saved creative revision hydration', () => {
-  it('checks selected library approval before hydrating its source for revision', async () => {
+  it('keeps legacy approvedHumanId revision revalidation unchanged', async () => {
     const record = parent({ attached: 'video' });
     record.planning!.strategy.approvedHumanId = `human_${'a'.repeat(64)}`;
     record.identity!.fingerprint = fingerprintCreativeStrategy(record.planning!.strategy);
     mocks.human.mockRejectedValue(new Error('Selected human is inactive'));
-    await expect(hydrateSavedCreativeRevisionContext(record, storage({ [id('a')]: image() }))).rejects.toMatchObject({status:409});
+    await expect(hydrateSavedCreativeRevisionContext(record, storage({ [id('a')]: image() }))).rejects.toMatchObject({ status: 409 });
     expect(mocks.human).toHaveBeenCalledWith(record.planning!.strategy.approvedHumanId, record.videoFrameSelection);
     expect(mocks.hydrate).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['revoked', new Error('Selected human is inactive')],
+    ['mismatched selection', new Error('Saved approved-human frame selection no longer matches the active record')],
+  ])('revalidates generalized approved-human selection and blocks %s state before source hydration', async (_label, failure) => {
+    const record = parent({ attached: 'video' });
+    const approvedHumanId = `human_${'7'.repeat(64)}`;
+    record.planning!.strategy.humanSourceId = approvedHumanSourceId(approvedHumanId);
+    record.identity!.fingerprint = fingerprintCreativeStrategy(record.planning!.strategy);
+    mocks.human.mockRejectedValue(failure);
+    await expect(hydrateSavedCreativeRevisionContext(record, storage({ [id('a')]: image() }))).rejects.toMatchObject({ status: 409 });
+    expect(mocks.human).toHaveBeenCalledWith(approvedHumanId, record.videoFrameSelection);
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+  });
+
   it('returns the saved canvas, TRA reference, and persisted logo without reading analysis assets', async () => {
     const record = parent({ logo: true }); const store = storage({ [id('a')]: image(), [id('c')]: image(PNG, id('c')) });
     mocks.hydrate.mockResolvedValue([source()]);

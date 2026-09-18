@@ -15,6 +15,7 @@ import {
 import { isCreativeFormat } from '@/lib/creative-formats';
 import { validateStoredMedia, type MediaStorage } from '@/lib/media/storage';
 import type { AllowedImageMimeType } from '@/lib/media/types';
+import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 import { resolveRevisionVideoFrames } from '@/lib/video/revision-frames';
 import { requireActiveHumanSelection } from '@/lib/video/approved-human-service';
@@ -143,8 +144,12 @@ export async function hydrateSavedCreativeRevisionContext(
     reject('Saved creative identity does not match its planning strategy.');
   }
   const canvasStored = await reloadImage(storage, parent.image.id, parent.image);
-  if (planning.strategy.approvedHumanId) {
-    try { await requireActiveHumanSelection(planning.strategy.approvedHumanId, parent.videoFrameSelection); }
+  const humanRecordId = planning.strategy.humanSourceId
+    ? parseApprovedHumanSourceId(planning.strategy.humanSourceId)
+    : planning.strategy.approvedHumanId ?? null;
+  if (planning.strategy.humanSourceId && !humanRecordId) reject('Saved creative planning contains an unsupported human source.');
+  if (humanRecordId) {
+    try { await requireActiveHumanSelection(humanRecordId, parent.videoFrameSelection); }
     catch (error) { return mapHydrationError(error); }
   }
   const originalApprovedSource = await hydrateAttachedSource(parent, storage, provenance);
