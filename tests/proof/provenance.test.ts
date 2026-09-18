@@ -9,6 +9,7 @@ import {
   proofProvenanceFromSelectedProof,
   revalidateCreativeProofProvenanceForPaidWork,
   revalidateSelectedProofForPaidWork,
+  validateCreativeProofCopyConsistency,
 } from '@/lib/proof/provenance';
 
 const proofId = (hex: string) => `proof_${hex.repeat(32)}`;
@@ -175,6 +176,51 @@ describe('creative Proof provenance', () => {
       revalidateCreativeProofProvenanceForPaidWork(historical!)
     ).rejects.toThrow('advertising use is no longer approved');
     expect(historical).toEqual(raw);
+  });
+
+  it('requires revised Review copy to retain exact text and attribution', () => {
+    const snapshot = proofProvenanceFromSelectedProof({
+      type: 'review', proofId: review().id, proofUpdatedAt: updatedAt,
+      selectedText: 'patient and explained every step clearly.', attribution: 'Verified TRA client',
+    });
+    const valid = {
+      copy: { primaryText: 'The representative was patient and explained every step clearly.', headline: 'Clarity', description: '' },
+      adCopy: { primaryText: 'The representative was patient and explained every step clearly.', headline: 'Clarity', description: '' },
+      imageCopy: { headline: 'Clarity', proofAttribution: 'Verified TRA client' },
+    };
+    expect(() => validateCreativeProofCopyConsistency(snapshot, valid)).not.toThrow();
+    expect(() => validateCreativeProofCopyConsistency(snapshot, {
+      ...valid, imageCopy: { headline: 'Clarity' },
+    })).toThrow('changed or removed the approved Review attribution');
+    expect(() => validateCreativeProofCopyConsistency(snapshot, {
+      ...valid,
+      copy: { ...valid.copy, primaryText: 'Rewritten testimonial.' },
+      adCopy: { ...valid.adCopy, primaryText: 'Rewritten testimonial.' },
+    })).toThrow('no longer contains the exact selected Proof text');
+  });
+
+  it('requires revised Case Study copy to retain exact claim and disclaimer', () => {
+    const current = caseStudy();
+    const snapshot = proofProvenanceFromSelectedProof({
+      type: 'case-study', proofId: current.id, proofUpdatedAt: updatedAt,
+      selectedText: current.approvedClaimWording,
+      usageRestrictions: current.usageRestrictions!,
+      requiredDisclaimer: current.requiredDisclaimer!,
+    });
+    const valid = {
+      copy: { primaryText: current.approvedClaimWording, headline: 'Understand the path', description: '' },
+      adCopy: { primaryText: current.approvedClaimWording, headline: 'Understand the path', description: '' },
+      imageCopy: { headline: 'Understand the path', disclosure: current.requiredDisclaimer! },
+    };
+    expect(() => validateCreativeProofCopyConsistency(snapshot, valid)).not.toThrow();
+    expect(() => validateCreativeProofCopyConsistency(snapshot, {
+      ...valid, imageCopy: { headline: 'Understand the path' },
+    })).toThrow('changed or removed the required Case Study disclaimer');
+    expect(() => validateCreativeProofCopyConsistency(snapshot, {
+      ...valid,
+      copy: { ...valid.copy, primaryText: 'Broader rewritten claim.' },
+      adCopy: { ...valid.adCopy, primaryText: 'Broader rewritten claim.' },
+    })).toThrow('no longer contains the exact selected Proof text');
   });
 
   it('keeps no-Proof legacy work compatible', async () => {
