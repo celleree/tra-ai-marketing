@@ -17,6 +17,7 @@ import type { ReferenceLibraryItem } from '@/lib/references/types';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
+import { proofRetrievalQueryFromRequestContext } from '@/lib/proof/planning';
 
 export type PortfolioPreparationState = {
   videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
@@ -270,6 +271,7 @@ export async function advancePortfolioPreparation(
   const plannerArgs = {
     count: data.variationCount,
     context: generationContext,
+    proofRetrievalQuery: proofRetrievalQueryFromRequestContext(data.context),
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
     hasApprovedHumanSource: hasUsableApprovedHumanSource,

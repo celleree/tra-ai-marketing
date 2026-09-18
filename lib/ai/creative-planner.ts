@@ -155,6 +155,7 @@ const parseConcept = (
 export type CreativeBatchPlannerArgs = {
   count: number;
   context: string;
+  proofRetrievalQuery?: string;
   analysis: CreativeReferenceAnalysis;
   sourceAnalysis?: PlanningSourceAnalysisState;
   hasApprovedHumanSource: boolean;
@@ -172,7 +173,9 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
     throw new Error('Invalid approved-human options: IDs must be valid and unique; option count is not bounded.');
   }
-  const proofCatalog = await loadPlanningProofCatalog(args.context);
+  const proofCatalog = args.proofRetrievalQuery?.trim()
+    ? await loadPlanningProofCatalog(args.proofRetrievalQuery)
+    : [];
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },

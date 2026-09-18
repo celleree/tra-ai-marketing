@@ -187,7 +187,8 @@ describe('Proof planning retrieval', () => {
 
     await requestCreativeBatch({
       count: 2,
-      context: 'Create bank levy proof concepts',
+      context: 'Planner context may include company and repair material',
+      proofRetrievalQuery: 'Create bank levy proof concepts',
       analysis,
       hasApprovedHumanSource: false,
     });
