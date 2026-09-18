@@ -248,7 +248,10 @@ const materialFingerprintSet = (value: string) => {
     if (token.materialNumber || materialClaim) fingerprints.add(`1:${token.key}`);
     if (index + 1 < tokens.length) {
       const pair = [token, tokens[index + 1]];
-      if (pair.some(item => item.numeric || MATERIAL_CLAIM_TOKENS.has(item.key))) {
+      if (
+        pair.some(item => item.numeric || MATERIAL_CLAIM_TOKENS.has(item.key))
+        || materialPhrase(pair)
+      ) {
         fingerprints.add(`2:${pair.map(item => item.key).join(' ')}`);
       }
     }
