@@ -114,8 +114,10 @@ describe('saved creative revision API', () => {
   });
   it.each(['EDIT', 'VARIATION'] as const)('rejects revoked generalized approved-human identity after %s planning before provider work', async operation => {
     const record = generalizedHumanParent();
+    const revisedStrategy: CreativeStrategy = { ...record.planning!.strategy,
+      ...(operation === 'VARIATION' ? { awarenessStage: 'solution-aware' as const, execution: { ...record.planning!.strategy.execution, composition: 'split' as const } } : {}) };
     mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
-    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: record.planning!.strategy, selectionReason: 'Keep the same approved person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: revisedStrategy, selectionReason: 'Keep the same approved person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
     mocks.human.mockRejectedValueOnce(new Error('Human deactivated after planning'));
     const response = await call({ operation, instruction: 'Keep the same approved person.' });
     expect(response.status).toBe(409);

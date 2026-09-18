@@ -70,9 +70,6 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const conceptCopyMode = classifyCreativeCopyContract(concept as unknown as Record<string, unknown>);
     if (conceptCopyMode.kind === 'INVALID') throw new Error('Revision planner returned an invalid separated ad/image copy contract.');
     const id = `creative_${randomUUID().replaceAll('-', '')}`;
-    const identity = revision.operation === 'EDIT' || revision.operation === 'VARIATION'
-      ? buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent, strategy: concept.strategy })
-      : buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent });
     const instruction = 'instruction' in revision ? revision.instruction : undefined;
     let activeHumanRecordId = concept.strategy.approvedHumanId ?? null;
     if (concept.strategy.humanSourceId) {
@@ -86,6 +83,9 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       try { await requireActiveHumanSelection(activeHumanRecordId, parent.videoFrameSelection); }
       catch (error) { throw new CreativeRevisionHydrationError(error instanceof Error ? error.message : 'The approved human is unavailable.', 409); }
     }
+    const identity = revision.operation === 'EDIT' || revision.operation === 'VARIATION'
+      ? buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent, strategy: concept.strategy })
+      : buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent });
     const removedLibraryHuman = !!(planning.strategy.humanSourceId || planning.strategy.approvedHumanId)
       && concept.strategy.execution.subjectSource === 'non-human';
     const imageResult = await generateCreativeRevisionImage({
