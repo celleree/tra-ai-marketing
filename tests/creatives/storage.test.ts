@@ -104,12 +104,11 @@ const planning: NonNullable<CreativeRecord['planning']> = {
 
 const proofProvenance: NonNullable<CreativeRecord['proofProvenance']> = {
   version: 1,
-  type: 'case-study',
+  type: 'review',
   proofId: `proof_${'9'.repeat(32)}`,
   proofUpdatedAt: '2026-09-18T13:00:00.000Z',
-  selectedText: 'Approved source-bound claim.',
-  usageRestrictions: 'Use only in approved tax-resolution creative.',
-  requiredDisclaimer: 'Results vary by individual circumstances.',
+  selectedText: 'The representative explained every step clearly.',
+  attribution: 'Verified TRA client',
 };
 
 const generationProvenance: NonNullable<CreativeRecord['generationProvenance']> = {
