@@ -130,6 +130,9 @@ describe('planning proof selection', () => {
     expect(() => hydratePlanningProofSelection(selection, [source], 'Jane')).toThrow(
       'canonical approved text'
     );
+    expect(() => hydratePlanningProofSelection(selection, [source], ' Jane D. ')).toThrow(
+      'canonical approved text'
+    );
     expect(() => hydratePlanningProofSelection(selection, [source])).toThrow(
       'canonical approved text'
     );

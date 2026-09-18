@@ -234,11 +234,23 @@ describe('creative batch planner', () => {
   it('parses sparse and complete optional image-copy fields without inventing omitted text', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const first = { ...concept(1), imageCopy: { headline: 'Only image headline', shortSupport: null, proofAttribution: null, cta: null, disclosure: null } };
-    const second = { ...concept(2), imageCopy: { headline: 'Full image headline', shortSupport: 'Support', proofAttribution: 'Approved attribution', cta: 'Learn more', disclosure: 'Applicable disclosure' } };
+    const second = { ...concept(2), imageCopy: { headline: 'Full image headline', shortSupport: 'Support', proofAttribution: null, cta: 'Learn more', disclosure: 'Applicable disclosure' } };
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [first, second] })));
     const result = await requestCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
     expect(result.creatives[0].imageCopy).toEqual({ headline: 'Only image headline' });
     expect(result.creatives[1].imageCopy).toEqual(second.imageCopy);
+  });
+
+  it('rejects model-supplied proof attribution even when optional-text parsing would trim it away', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const invalid = { ...concept(1), imageCopy: { ...concept(1).imageCopy, proofAttribution: '   ' } };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [invalid, concept(2)] })));
+    await expect(requestCreativeBatch({
+      count: 2,
+      context: '',
+      analysis,
+      hasApprovedHumanSource: false,
+    })).rejects.toThrow(/invalid creative batch plan/i);
   });
 
   it('selects a known library human independently per concept without a fixed ratio', async () => {

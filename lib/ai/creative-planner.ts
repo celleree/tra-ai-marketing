@@ -125,7 +125,8 @@ const parseConcept = (
   if (!isRecord(value.imageCopy) || !('headline' in value.imageCopy) || Object.keys(value.imageCopy).some((key) => !imageCopyKeys.includes(key))) return null;
   const imageHeadline = parseRequiredText(value.imageCopy.headline);
   const shortSupport = parseOptionalText(value.imageCopy.shortSupport);
-  const proofAttribution = parseOptionalText(value.imageCopy.proofAttribution);
+  const rawProofAttribution = value.imageCopy.proofAttribution;
+  const proofAttribution = parseOptionalText(rawProofAttribution);
   const cta = parseOptionalText(value.imageCopy.cta);
   const disclosure = parseOptionalText(value.imageCopy.disclosure);
   if (!imageHeadline || shortSupport === null || proofAttribution === null || cta === null || disclosure === null) return null;
@@ -153,7 +154,11 @@ const parseConcept = (
   };
   let selectedProof;
   try {
-    selectedProof = hydratePlanningProofSelection(value.proofSelection, proofCatalog, proofAttribution);
+    selectedProof = hydratePlanningProofSelection(
+      value.proofSelection,
+      proofCatalog,
+      typeof rawProofAttribution === 'string' ? rawProofAttribution : undefined
+    );
   } catch {
     return null;
   }
