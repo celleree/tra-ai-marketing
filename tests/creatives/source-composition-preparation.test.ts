@@ -65,8 +65,13 @@ beforeEach(() => {
   mocks.video.mockImplementation(async ({ frames }) => { operations.push(frames[0].sourceVideoFileName); return analysis(frames[0].sourceVideoFileName); });
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
     const body = JSON.parse(init.body); expect(body.model).toBe('gpt-6-astra');
-    outbound.push(JSON.parse(body.input[1].content[0].text)); operations.push('Astra');
+    const plannerInput = JSON.parse(body.input[1].content[0].text);
+    outbound.push(plannerInput); operations.push('Astra');
+    const proof = plannerInput.proofCatalog?.[0];
     const creatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
+      proofSelection: proof ? { type: proof.type, proofId: proof.id, proofUpdatedAt: proof.updatedAt,
+        selectedText: proof.type === 'review' ? proof.originalReviewText : proof.approvedClaimWording,
+        ...(proof.type === 'review' ? { includeAttribution: false } : {}) } : null,
       strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${c.index}` },
         execution: { ...c.strategy.execution, taxDocumentReference: 'none' } }, referenceChoices: { angleSource: null, layoutSource: null } }));
     return Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ creatives }) }] }] });
@@ -88,10 +93,14 @@ describe('real preparation to Astra with composed sources', () => {
     if (!parsed.success) throw new Error(parsed.error);
     const unrelatedId = `proof_${'a'.repeat(32)}`, relevantId = `proof_${'b'.repeat(32)}`;
     const proofBase = { type: 'review' as const, status: 'ACTIVE' as const, advertisingUseApproved: true, createdAt: '2026-09-10T12:00:00.000Z' };
-    mocks.proof.mockResolvedValue([
-      { ...proofBase, id: unrelatedId, originalReviewText: 'IRS tax professionalism patience reassurance.', tags: ['IRS', 'professionalism', 'patience'], updatedAt: proofBase.createdAt },
-      { ...proofBase, id: relevantId, originalReviewText: 'Wage garnishment support.', tags: ['wage garnishment'], updatedAt: '2026-09-10T13:00:00.000Z' },
-    ]);
+    const firstRelevant = { ...proofBase, id: relevantId, originalReviewText: 'Wage garnishment support.', tags: ['wage garnishment'], updatedAt: '2026-09-10T13:00:00.000Z' };
+    const repairedRelevant = { ...firstRelevant, originalReviewText: 'Updated wage garnishment support.', updatedAt: '2026-09-10T14:00:00.000Z' };
+    mocks.proof
+      .mockResolvedValueOnce([
+        { ...proofBase, id: unrelatedId, originalReviewText: 'IRS tax professionalism patience reassurance.', tags: ['IRS', 'professionalism', 'patience'], updatedAt: proofBase.createdAt },
+        firstRelevant,
+      ])
+      .mockResolvedValueOnce([repairedRelevant]);
     mocks.audit.mockResolvedValueOnce({ ...portfolioAudit(2),
       groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] })
       .mockResolvedValueOnce(portfolioAudit(2));
@@ -99,10 +108,10 @@ describe('real preparation to Astra with composed sources', () => {
     const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
     expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection, context: expect.stringContaining('IRS tax professionalism patience reassurance.') });
     expect(outbound).toHaveLength(2); expect(outbound[1].creativeContext).toContain('PORTFOLIO REPAIR:');
-    for (const input of outbound) {
-      expect(input.proofCatalog.map((proof: { id: string }) => proof.id)).toEqual([relevantId]);
-      expect(JSON.stringify(input.proofCatalog)).not.toContain(unrelatedId);
-    }
+    expect(outbound[0].proofCatalog).toEqual([expect.objectContaining({ id: relevantId, updatedAt: firstRelevant.updatedAt })]);
+    expect(outbound[1].proofCatalog).toEqual([expect.objectContaining({ id: relevantId, updatedAt: repairedRelevant.updatedAt })]);
+    expect(JSON.stringify(outbound[0].proofCatalog)).not.toContain(unrelatedId);
+    expect(prepared.batchPlan.creatives.every(creative => creative.selectedProof?.proofUpdatedAt === repairedRelevant.updatedAt)).toBe(true);
   });
 
   it.each([false, true])('checkpoints mixed/repeated sources before Astra, ordering=%s and stop/resume', async reversed => {
