@@ -52,6 +52,7 @@ it.each(['layout', 'tra'] as const)('edits, clears and reloads %s records throug
     expect(await getLayoutBlueprintCache().readAngle(candidate.sourceSha256, reusableAngle.analyzerModel)).toEqual(reusableAngle);
     expect(await getLayoutBlueprintCache().read(candidate.sourceSha256, candidate.analyzerModel)).toEqual(candidate.blueprint);
     const creatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
+      proofSelection: null,
       strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct ${c.index}` },
         execution: { ...c.strategy.execution, taxDocumentReference: 'none' } }, referenceChoices: { angleSource: null, layoutSource: null } }));
     vi.mocked(fetch).mockImplementationOnce(async (_url, init) => {

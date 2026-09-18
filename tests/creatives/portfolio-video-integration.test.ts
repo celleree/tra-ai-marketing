@@ -71,6 +71,7 @@ const planned = (index: number) => {
   const adCopy = { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' };
   return { index, format: 'educational', copy: adCopy, adCopy: { ...adCopy },
     imageCopy: { headline: `Headline ${index}`, cta: 'Talk with TRA' },
+    proofSelection: null,
     selectionReason: `Reason ${index}`, referenceChoices: { angleSource: null, layoutSource: null }, strategy: { conceptDetails,
       category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer',
       painPoint: 'Uncertainty', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Understand options', cta: 'Talk with TRA', offer: null,

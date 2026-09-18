@@ -207,7 +207,7 @@ describe('Proof planning retrieval', () => {
       .toEqual([approvedCase.id, approvedReview.id]);
     expect(JSON.stringify(input.proofCatalog)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
     expect(JSON.stringify(input.proofCatalog)).not.toContain(legacy.id);
-    expect(body.input[0].content[0].text).toContain('quote it only verbatim');
+    expect(body.input[0].content[0].text).toContain('selectedText must be one contiguous verbatim excerpt');
     expect(body.input[0].content[0].text).toContain('never broaden it into a universal outcome');
   });
   it('fails the whole planner response closed when a selection is not valid for that call catalog', async () => {

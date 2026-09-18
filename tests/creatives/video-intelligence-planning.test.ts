@@ -88,6 +88,7 @@ const plannedConcept = (index: number) => {
   const adCopy = { primaryText: `Primary ${index}`, headline: `Headline ${index}`, description: '' };
   return { index, format: 'educational', copy: adCopy, adCopy: { ...adCopy },
     imageCopy: { headline: `Headline ${index}`, cta: 'Talk with TRA' },
+    proofSelection: null,
     selectionReason: `Reason ${index}`, strategy: { conceptDetails, category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer',
       painPoint: 'Uncertainty', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Understand options', cta: 'Talk with TRA', offer: null,
       soWhat: { surfaceMessage: `Message ${index}`, functionalConsequence: 'See options', meaningfulOutcome: 'Move forward' },

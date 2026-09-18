@@ -238,7 +238,12 @@ describe('creative batch planner', () => {
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [first, second] })));
     const result = await requestCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
     expect(result.creatives[0].imageCopy).toEqual({ headline: 'Only image headline' });
-    expect(result.creatives[1].imageCopy).toEqual(second.imageCopy);
+    expect(result.creatives[1].imageCopy).toEqual({
+      headline: 'Full image headline',
+      shortSupport: 'Support',
+      cta: 'Learn more',
+      disclosure: 'Applicable disclosure',
+    });
   });
 
   it('rejects model-supplied proof attribution even when optional-text parsing would trim it away', async () => {
