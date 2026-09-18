@@ -189,7 +189,7 @@ describe('planning proof selection', () => {
     expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
       ...base,
       imageCopy: { ...base.imageCopy, disclosure: caseSource.requiredDisclaimer },
-    })).toThrow('Case Study disclaimer is not bound');
+    })).toThrow('Case Study text is not bound');
   });
 
   it('rejects extra Proof-derived wording even when the valid selected Review text is present', () => {
