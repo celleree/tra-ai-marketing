@@ -72,6 +72,7 @@ beforeEach(() => {
       ? (proof.type === 'review' ? proof.originalReviewText : proof.approvedClaimWording)
       : null;
     const creatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
+      copy: selectedText ? { ...c.copy, primaryText: selectedText } : c.copy,
       adCopy: selectedText ? { ...c.adCopy, primaryText: selectedText } : c.adCopy,
       imageCopy: proof?.type === 'case-study' && proof.requiredDisclaimer
         ? { ...c.imageCopy, disclosure: proof.requiredDisclaimer }
