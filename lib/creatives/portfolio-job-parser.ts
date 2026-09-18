@@ -15,6 +15,7 @@ import { videoPlanningSelectorBinding } from '@/lib/creatives/video-intelligence
 import { parseReferenceCatalog } from '@/lib/references/planning';
 import { isApprovedHumanId } from '@/lib/video/approved-human';
 import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { isSelectedPlanningProof } from '@/lib/proof/planning-selection';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
@@ -142,6 +143,7 @@ const validSnapshot = (
       || (auditMode === 'required' && !audit) || (auditMode === 'forbidden' && plan.portfolioAudit !== undefined)
       || (plan.portfolioAudit !== undefined && (!audit || audit.conceptCount !== job.slots.length))
       || plan.creatives.some((concept, index) => concept.index !== index + 1 || !isCreativeFormat(concept.format)
+        || (concept.selectedProof !== undefined && concept.selectedProof !== null && !isSelectedPlanningProof(concept.selectedProof))
         || ![concept.copy.headline, concept.copy.primaryText].every(text) || typeof concept.copy.description !== 'string'
         || !parseCreativePlanning({ strategy: concept.strategy, selectionReason: concept.selectionReason,
           model: plan.plannerModel, reasoningEffort: plan.reasoningEffort,
