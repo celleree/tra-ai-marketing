@@ -356,7 +356,7 @@ it('uses a seeded document and rich concept from the real planner through render
   const plan = { creatives: [
     { ...first, strategy: { ...first.strategy, execution: { ...first.strategy.execution, taxDocumentReference: 'irs-notice-v1' } } },
     plannedCreative(2),
-  ].map(concept => ({ ...concept, proofSelection: null, strategy: { ...concept.strategy, conceptDetails: { ...conceptDetails, proposition: `Different proposition ${concept.index}` } }, referenceChoices: { angleSource: null, layoutSource: null } })) };
+  ].map(concept => ({ ...concept, imageCopy: { ...concept.imageCopy, proofAttribution: null }, proofSelection: null, strategy: { ...concept.strategy, conceptDetails: { ...conceptDetails, proposition: `Different proposition ${concept.index}` } }, referenceChoices: { angleSource: null, layoutSource: null } })) };
   const requests: Array<{ url: string; body: string | FormData }> = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     requests.push({ url, body: init.body as string | FormData });
@@ -672,6 +672,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
       requests.push({ url, body: init.body as string | FormData });
       const plan = { creatives: [1, 2].map(index => ({ ...plannedCreative(index, 'approved-tra-human'),
+        imageCopy: { ...plannedCreative(index, 'approved-tra-human').imageCopy, proofAttribution: null },
         proofSelection: null,
         strategy: { ...plannedCreative(index, 'approved-tra-human').strategy,
           conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${index}` } },
