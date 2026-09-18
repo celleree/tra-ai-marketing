@@ -18,7 +18,24 @@ Every value must be concrete. Codex should execute the selected route but not ec
 
 ## Task handoff
 
-Send only the current checkpoint: `TASK`, minimal `CONTEXT`, exact `SOURCE OF TRUTH`, `SCOPE`, `DO NOT`, `INSTRUCTIONS`, and required `RETURN`. Do not paste broad project history when canonical repo sources already contain it.
+Keep copyable handoffs compact and task-local. The coordinator-owned routing block stays outside the prompt.
+
+Default handoff shape:
+
+```text
+PROJECT / REPO: <only when needed>
+ACTIVE: <task, PR/branch, and exact relevant SHA(s)>
+STATUS: <current state>
+NEXT: <one bounded next action>
+VERIFY FIRST: <live-state checks required before acting>
+CONSTRAINTS: <only task-critical do/do-not rules>
+```
+
+Add acceptance criteria or source references only when the next chat cannot reliably derive them from the repo. Prefer a file, Issue, PR, or exact commit reference over copying its contents.
+
+Do not repeat permanent workflow rules, model-routing guidance, roadmap history, completed phases, broad architecture, or repository conventions already stored in `AGENTS.md` or canonical docs. Do not carry long implementation summaries when the live PR/diff is the source of truth. If a fact can be safely re-derived from live repository state, omit it unless carrying it forward prevents stale or unsafe work.
+
+Default target: about 200-400 words or less. Use one short source-of-truth reminder when useful: `Follow AGENTS.md and task-relevant canonical docs. Live GitHub state is authoritative.`
 
 ## Implementation cycle
 
@@ -46,24 +63,18 @@ Live GitHub state is authoritative for current PR HEAD/base/diff/checks. Histori
 
 ## Result handoff
 
-Return these concise fields by default:
+Return only what the next chat needs to continue safely:
 
 - `STATUS`
-- `TASK`
-- `BRANCH`
-- `BASE STAGING SHA` when branch ancestry matters
-- `HEAD SHA`
-- relevant `FILES INSPECTED/CHANGED`
-- `IMPLEMENTATION / FINDINGS`
+- `ACTIVE` — task plus PR/branch and exact relevant SHA(s)
+- `COMPLETED / FINDINGS` — brief
 - `VERIFICATION`
-- `BLOCKERS`
-- `DECISIONS NEEDED`
-- `RISKS / CONFLICTS`
-- `REMAINING`
-- `NEXT RECOMMENDED ACTION`
-- `PARALLEL-SAFE NEXT WORK`
+- `BLOCKERS` — only when present
+- `NEXT`
 
-Use `N/A` where a SHA is not applicable and `NONE` for empty sections. Do not include raw logs, long diffs, private reasoning, or repeated repository context unless needed to explain a failure.
+Add changed files, decisions, risks/conflicts, remaining work, or parallel-safe work only when materially relevant. Do not emit empty sections just to satisfy a template.
+
+Do not include raw logs, long diffs, private reasoning, repeated repository context, old completed work, or routing metadata that belongs outside the handoff.
 
 ## Parallel work
 
