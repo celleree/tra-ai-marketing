@@ -192,7 +192,7 @@ describe('planning proof selection', () => {
     })).toThrow('Case Study text is not bound');
   });
 
-  it.each(['debt forgiven', 'levy released', 'tax resolved'])(
+  it.each(['debt forgiven', 'levy released', 'tax resolved', 'penalties removed'])(
     'rejects short non-numeric material Case Study fragments without Proof selection: %s',
     fragment => {
       const source = caseStudy({
