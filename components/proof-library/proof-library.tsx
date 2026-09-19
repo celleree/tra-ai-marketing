@@ -94,7 +94,7 @@ export const eligibleVideoPassageProof = (items: ProofRecord[]) =>
 const candidateTime = (milliseconds: number) => {
   const minutes = Math.floor(milliseconds / 60_000);
   const seconds = Math.floor(milliseconds / 1_000) % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(milliseconds % 1_000).padStart(3, '0')}`;
 };
 
 const linkHealthLabel: Record<VideoPassageCandidateView['linkHealth'], string> = {
