@@ -242,6 +242,43 @@ describe('planning proof selection', () => {
       .toThrow('Material ad-facing Review text');
   });
 
+  it.each([
+    ['The levy was lifted.', 'Levy lifted'],
+    ['The lien was lifted.', 'Lien lifted'],
+    ['The tax issue was fixed.', 'Tax fixed'],
+  ])('rejects short tax-outcome fragments outside the original hard-coded states: %s', (originalReviewText, fragment) => {
+    const source = review({ originalReviewText });
+    const copy = {
+      adCopy: { primaryText: fragment, headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
+      .toThrow('Material ad-facing Review text');
+  });
+
+  it('normalizes whitespace before percentage signs for Proof matching', () => {
+    const source = review({ originalReviewText: 'The balance was reduced by 50%.' });
+    const copy = {
+      adCopy: { primaryText: '50 %', headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
+      .toThrow('Material ad-facing Review text');
+  });
+
+  it('rejects trivially reformatted Review attribution without Proof selection', () => {
+    const source = review();
+    const copy = {
+      adCopy: { primaryText: 'Jane D', headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
+      .toThrow('Material ad-facing Review text');
+  });
+
   it('rejects selected Review attribution outside proofAttribution when attribution was not selected', () => {
     const source = review();
     const selected = hydratePlanningProofSelection({
@@ -252,12 +289,28 @@ describe('planning proof selection', () => {
       includeAttribution: false,
     }, [source]);
     const copy = {
-      adCopy: { primaryText: 'Second exact line.', headline: 'Jane D.', description: '' },
+      adCopy: { primaryText: 'Second exact line.', headline: 'Jane D', description: '' },
       imageCopy: { headline: 'Image headline' },
     };
 
     expect(() => validatePlanningProofCopyConsistency(selected, [source], copy))
       .toThrow('attribution appears in ad-facing copy but was not selected');
+  });
+
+  it('rejects an altered duplicate attribution beyond the exact authorized attribution', () => {
+    const source = review();
+    const selected = hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: 'Second exact line.',
+      includeAttribution: true,
+    }, [source], 'Jane D.');
+
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
+      adCopy: { primaryText: 'Second exact line.', headline: 'Jane D', description: '' },
+      imageCopy: { headline: 'Image headline', proofAttribution: 'Jane D.' },
+    })).toThrow('additional Proof-derived attribution');
   });
 
   it('does not mistake attribution text inside the selected Review excerpt for separate attribution', () => {
