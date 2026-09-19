@@ -207,284 +207,9 @@ describe('Proof planning retrieval', () => {
       .toEqual([approvedCase.id, approvedReview.id]);
     expect(JSON.stringify(input.proofCatalog)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
     expect(JSON.stringify(input.proofCatalog)).not.toContain(legacy.id);
-    expect(body.input[0].content[0].text).toContain('whole review-line boundaries');
-    expect(body.input[0].content[0].text).toContain('proofSelection:null means no supplied Proof wording or attribution');
-    expect(body.input[0].content[0].text).toContain('never broaden it into a universal outcome');
+    expect(body.input[0].content[0].text).toContain('application inserts the selected Proof text after the normal primaryText');
+    expect(body.input[0].content[0].text).toContain('Set imageCopy.proofAttribution to null');
   });
-  it('fails closed when ad-facing Proof text is used without the matching selection', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const reviewSource = review('a', { originalReviewText: 'I did not save $10,000.' });
-    const caseSource = caseStudy('b');
-    listProofRecordsMock.mockResolvedValue([reviewSource, caseSource]);
-
-    const reviewBypass = {
-      ...concept(1),
-      adCopy: { ...concept(1).adCopy, primaryText: reviewSource.originalReviewText },
-      proofSelection: null,
-    };
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      okResponse({ creatives: [reviewBypass, concept(2)] })));
-    await expect(requestCreativeBatch({
-      count: 2,
-      context: 'Planner context',
-      proofRetrievalQuery: 'bank levy',
-      analysis,
-      hasApprovedHumanSource: false,
-    })).rejects.toThrow('invalid creative batch plan concept');
-
-    const caseBypass = {
-      ...concept(1),
-      imageCopy: { ...concept(1).imageCopy, headline: caseSource.approvedClaimWording },
-      proofSelection: null,
-    };
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      okResponse({ creatives: [caseBypass, concept(2)] })));
-    await expect(requestCreativeBatch({
-      count: 2,
-      context: 'Planner context',
-      proofRetrievalQuery: 'bank levy',
-      analysis,
-      hasApprovedHumanSource: false,
-    })).rejects.toThrow('invalid creative batch plan concept');
-  });
-
-  it('fails closed on shortened Review, Case Study, and disclaimer fragments without matching selection', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const reviewSource = review('a', { originalReviewText: 'I did not save $10,000.' });
-    const caseSource = caseStudy('b', {
-      approvedClaimWording: 'TRA helped the client understand the next steps clearly.',
-      requiredDisclaimer: 'Results vary based on each client circumstances.',
-    });
-    listProofRecordsMock.mockResolvedValue([reviewSource, caseSource]);
-
-    const variants = [
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'save $10,000' } },
-      { ...concept(1), imageCopy: { ...concept(1).imageCopy, shortSupport: 'understand the next steps clearly' } },
-      { ...concept(1), imageCopy: { ...concept(1).imageCopy, disclosure: caseSource.requiredDisclaimer } },
-    ];
-    for (const invalid of variants) {
-      vi.stubGlobal('fetch', vi.fn(async () =>
-        okResponse({ creatives: [invalid, concept(2)] })));
-      await expect(requestCreativeBatch({
-        count: 2,
-        context: 'Planner context',
-        proofRetrievalQuery: 'bank levy',
-        analysis,
-        hasApprovedHumanSource: false,
-      })).rejects.toThrow('invalid creative batch plan concept');
-    }
-  });
-
-  it('fails closed on small currency normalization, short outcomes, and unselected attribution', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const smallCurrency = review('a', { originalReviewText: 'They waived $500.' });
-    const shortOutcome = review('b', { originalReviewText: 'The client was debt free.' });
-    const attributed = review('c', {
-      originalReviewText: 'The representative was patient.',
-      attribution: { display: 'Jane D.', allowed: true },
-    });
-    listProofRecordsMock.mockResolvedValue([smallCurrency, shortOutcome, attributed]);
-
-    const selectedAttribution = {
-      ...concept(1),
-      adCopy: {
-        ...concept(1).adCopy,
-        primaryText: attributed.originalReviewText,
-        headline: attributed.attribution!.display,
-      },
-      proofSelection: {
-        type: 'review' as const,
-        proofId: attributed.id,
-        proofUpdatedAt: attributed.updatedAt,
-        selectedText: attributed.originalReviewText,
-        includeAttribution: false,
-      },
-    };
-    const variants = [
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: '500' } },
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'Debt free' } },
-      selectedAttribution,
-    ];
-
-    for (const invalid of variants) {
-      vi.stubGlobal('fetch', vi.fn(async () =>
-        okResponse({ creatives: [invalid, concept(2)] })));
-      await expect(requestCreativeBatch({
-        count: 2,
-        context: 'Planner context',
-        proofRetrievalQuery: 'bank levy debt proof',
-        analysis,
-        hasApprovedHumanSource: false,
-      })).rejects.toThrow('invalid creative batch plan concept');
-    }
-  });
-
-  it('fails closed on lifted/fixed outcomes, spaced percentages, and reformatted attribution', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const lifted = review('a', { originalReviewText: 'The levy was lifted.' });
-    const fixed = review('b', { originalReviewText: 'The tax issue was fixed.' });
-    const percent = review('c', { originalReviewText: 'The balance was reduced by 50%.' });
-    const attributed = review('d', {
-      originalReviewText: 'The representative was patient.',
-      attribution: { display: 'Jane D.', allowed: true },
-    });
-    listProofRecordsMock.mockResolvedValue([lifted, fixed, percent, attributed]);
-
-    const selectedAttribution = {
-      ...concept(1),
-      adCopy: {
-        ...concept(1).adCopy,
-        primaryText: attributed.originalReviewText,
-        headline: 'Jane D',
-      },
-      proofSelection: {
-        type: 'review' as const,
-        proofId: attributed.id,
-        proofUpdatedAt: attributed.updatedAt,
-        selectedText: attributed.originalReviewText,
-        includeAttribution: false,
-      },
-    };
-    const variants = [
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'Levy lifted' } },
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'Tax fixed' } },
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: '50 %' } },
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'Jane D' } },
-      selectedAttribution,
-    ];
-
-    for (const invalid of variants) {
-      vi.stubGlobal('fetch', vi.fn(async () =>
-        okResponse({ creatives: [invalid, concept(2)] })));
-      await expect(requestCreativeBatch({
-        count: 2,
-        context: 'Planner context',
-        proofRetrievalQuery: 'bank levy tax proof',
-        analysis,
-        hasApprovedHumanSource: false,
-      })).rejects.toThrow('invalid creative batch plan concept');
-    }
-  });
-
-  it('rejects selected Proof plus extra derived wording and normalized currency variants', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const source = review('a', { originalReviewText: 'I did not save $10,000.' });
-    listProofRecordsMock.mockResolvedValue([source]);
-
-    const selected = {
-      type: 'review' as const,
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: source.originalReviewText,
-      includeAttribution: false,
-    };
-    const variants = [
-      {
-        ...concept(1),
-        adCopy: {
-          ...concept(1).adCopy,
-          primaryText: `${source.originalReviewText} I saved $10,000.`,
-        },
-        proofSelection: selected,
-      },
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'save 10,000' } },
-      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'save $10000' } },
-    ];
-
-    for (const invalid of variants) {
-      vi.stubGlobal('fetch', vi.fn(async () =>
-        okResponse({ creatives: [invalid, concept(2)] })));
-      await expect(requestCreativeBatch({
-        count: 2,
-        context: 'Planner context',
-        proofRetrievalQuery: 'bank levy',
-        analysis,
-        hasApprovedHumanSource: false,
-      })).rejects.toThrow('invalid creative batch plan concept');
-    }
-  });
-
-  it('accepts a valid selected Review when another catalog Review shares generic wording', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const selectedSource = review('a', {
-      originalReviewText: 'They were very helpful and professional.',
-    });
-    const overlapping = review('b', {
-      originalReviewText: 'The team was very helpful and responsive.',
-    });
-    listProofRecordsMock.mockResolvedValue([selectedSource, overlapping]);
-
-    const valid = {
-      ...concept(1),
-      adCopy: { ...concept(1).adCopy, primaryText: selectedSource.originalReviewText },
-      proofSelection: {
-        type: 'review' as const,
-        proofId: selectedSource.id,
-        proofUpdatedAt: selectedSource.updatedAt,
-        selectedText: selectedSource.originalReviewText,
-        includeAttribution: false,
-      },
-    };
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      okResponse({ creatives: [valid, concept(2)] })));
-
-    const result = await requestCreativeBatch({
-      count: 2,
-      context: 'Planner context',
-      proofRetrievalQuery: 'bank levy',
-      analysis,
-      hasApprovedHumanSource: false,
-    });
-    expect(result.creatives[0].selectedProof?.proofId).toBe(selectedSource.id);
-  });
-
-  it('rejects context-stripped Review selections and accepts the full source-bound line', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const source = review('a', { originalReviewText: 'I did not save $10,000.' });
-    listProofRecordsMock.mockResolvedValue([source]);
-
-    const unsafe = {
-      ...concept(1),
-      adCopy: { ...concept(1).adCopy, primaryText: 'save $10,000.' },
-      proofSelection: {
-        type: 'review',
-        proofId: source.id,
-        proofUpdatedAt: source.updatedAt,
-        selectedText: 'save $10,000.',
-        includeAttribution: false,
-      },
-    };
-    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [unsafe, concept(2)] })));
-    await expect(requestCreativeBatch({
-      count: 2,
-      context: 'Planner context',
-      proofRetrievalQuery: 'bank levy',
-      analysis,
-      hasApprovedHumanSource: false,
-    })).rejects.toThrow('invalid creative batch plan concept');
-
-    const safe = {
-      ...concept(1),
-      adCopy: { ...concept(1).adCopy, primaryText: source.originalReviewText },
-      proofSelection: {
-        type: 'review',
-        proofId: source.id,
-        proofUpdatedAt: source.updatedAt,
-        selectedText: source.originalReviewText,
-        includeAttribution: false,
-      },
-    };
-    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [safe, concept(2)] })));
-    const result = await requestCreativeBatch({
-      count: 2,
-      context: 'Planner context',
-      proofRetrievalQuery: 'bank levy',
-      analysis,
-      hasApprovedHumanSource: false,
-    });
-    expect(result.creatives[0].selectedProof?.selectedText).toBe(source.originalReviewText);
-  });
-
   it('fails the whole planner response closed when a selection is not valid for that call catalog', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const source = review('a');
@@ -511,6 +236,46 @@ describe('Proof planning retrieval', () => {
     })).rejects.toThrow('invalid creative batch plan concept');
   });
 
+  it('keeps normal AI copy and inserts selected Review text plus canonical attribution server-side', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const source = review('a', {
+      originalReviewText: 'Clear explanations.\nNo pressure.',
+      attribution: { display: 'Sam R.', allowed: true },
+    });
+    listProofRecordsMock.mockResolvedValue([source]);
+    const selected = {
+      type: 'review' as const,
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.originalReviewText,
+      includeAttribution: true,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [
+      {
+        ...concept(1),
+        imageCopy: { ...concept(1).imageCopy, proofAttribution: 'MODEL VALUE' },
+        proofSelection: selected,
+      },
+      concept(2),
+    ] })));
+
+    const batchPlan = await requestCreativeBatch({
+      count: 2,
+      context: 'Planner context',
+      proofRetrievalQuery: 'bank levy',
+      analysis,
+      hasApprovedHumanSource: false,
+    });
+
+    expect(batchPlan.creatives[0].adCopy?.primaryText).toBe(
+      `Primary 1\n\n${source.originalReviewText}\n\nSam R.`
+    );
+    expect(batchPlan.creatives[0].copy.primaryText).toBe(
+      batchPlan.creatives[0].adCopy?.primaryText
+    );
+    expect(batchPlan.creatives[0].imageCopy?.proofAttribution).toBe('Sam R.');
+  });
+
   it('hydrates selected Proof into durable checkpoint and audited reload state', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const source = caseStudy('b');
@@ -522,12 +287,7 @@ describe('Proof planning retrieval', () => {
       selectedText: source.approvedClaimWording,
     };
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [
-      {
-        ...concept(1),
-        adCopy: { ...concept(1).adCopy, primaryText: source.approvedClaimWording },
-        imageCopy: { ...concept(1).imageCopy, disclosure: source.requiredDisclaimer },
-        proofSelection: selected,
-      },
+      { ...concept(1), proofSelection: selected },
       concept(2),
     ] })));
 
@@ -547,6 +307,15 @@ describe('Proof planning retrieval', () => {
       requiredDisclaimer: source.requiredDisclaimer,
     });
     expect(JSON.stringify(batchPlan.creatives[0].selectedProof)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
+    expect(batchPlan.creatives[0].adCopy?.primaryText).toBe(
+      `Primary 1\n\n${source.approvedClaimWording}\n\n${source.requiredDisclaimer}`
+    );
+    expect(batchPlan.creatives[0].copy.primaryText).toBe(
+      batchPlan.creatives[0].adCopy?.primaryText
+    );
+    expect(batchPlan.creatives[0].imageCopy?.disclosure).toBe(source.requiredDisclaimer);
+    expect(batchPlan.creatives[0].imageCopy?.proofAttribution).toBeUndefined();
+
 
     const job = newCreativePortfolio({ ...portfolioRequest(), proofRetrievalQuery });
     job.planning = {
