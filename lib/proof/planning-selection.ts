@@ -310,7 +310,7 @@ const exactTextPresent = (field: string, exactText: string) =>
 
 const normalizedTextTokens = (value: string) =>
   value.toLowerCase().normalize('NFKC')
-    .match(/[a-z0-9]+(?:['’][a-z0-9]+)*/g)
+    .match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu)
     ?.map(token => token.replace(/’/g, "'")) ?? [];
 
 const normalizedTextPresent = (field: string, source: string) => {
