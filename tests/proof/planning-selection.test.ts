@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanningCaseStudyProof, PlanningReviewProof } from '@/lib/proof/planning';
 import {
+  composePlanningCopyWithProof,
   hydratePlanningProofSelection,
   isSelectedPlanningProof,
-  validatePlanningProofCopyConsistency,
 } from '@/lib/proof/planning-selection';
 
 const review = (overrides: Partial<PlanningReviewProof> = {}): PlanningReviewProof => ({
@@ -31,7 +31,7 @@ const caseStudy = (
 });
 
 describe('planning proof selection', () => {
-  it('hydrates exact contiguous Review excerpts including multiline text', () => {
+  it('hydrates exact Review text on whole review-line boundaries', () => {
     const source = review();
     const selectedText = 'First exact line.\nSecond exact line.';
     expect(hydratePlanningProofSelection({
@@ -50,9 +50,10 @@ describe('planning proof selection', () => {
 
   it.each([
     'First exact line. Second exact line.',
+    'Second exact line.',
     'First exact line.\nThird exact line.',
     'First exact line.\nSecond rewritten line.',
-  ])('rejects rewritten or noncontiguous Review text: %j', selectedText => {
+  ])('rejects clipped, rewritten, or noncontiguous Review text: %j', selectedText => {
     const source = review();
     expect(() => hydratePlanningProofSelection({
       type: 'review',
@@ -63,408 +64,33 @@ describe('planning proof selection', () => {
     }, [source])).toThrow();
   });
 
-  it('rejects model-supplied attribution when no Proof is selected', () => {
-    expect(() => hydratePlanningProofSelection(null, [review()], 'Jane D.')).toThrow(
-      'requires an attributed Review selection'
-    );
-  });
-
-  it('rejects Review-style attribution for a Case Study selection', () => {
-    const source = caseStudy();
-    expect(() => hydratePlanningProofSelection({
-      type: 'case-study',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: source.approvedClaimWording,
-    }, [source], 'Jane D.')).toThrow('cannot include Review attribution');
-  });
-
-  it('rejects exact canonical attribution when Review attribution was not selected', () => {
+  it('hydrates approved Review attribution from the record instead of model copy', () => {
     const source = review();
-    expect(() => hydratePlanningProofSelection({
+    expect(hydratePlanningProofSelection({
       type: 'review',
       proofId: source.id,
       proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
-      includeAttribution: false,
-    }, [source], 'Jane D.')).toThrow('not selected for inclusion');
-  });
-
-  it('rejects noncanonical attribution when Review attribution was not selected', () => {
-    const source = review();
-    expect(() => hydratePlanningProofSelection({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
-      includeAttribution: false,
-    }, [source], 'Model supplied name')).toThrow('not selected for inclusion');
-  });
-
-  it('rejects supplied attribution when the selected Review has no approved attribution', () => {
-    const source = review({ attribution: undefined });
-    expect(() => hydratePlanningProofSelection({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
+      selectedText: source.originalReviewText,
       includeAttribution: true,
-    }, [source], 'Jane D.')).toThrow('not approved');
-  });
-
-  it('accepts only exact canonical approved Review attribution and hydrates it', () => {
-    const source = review();
-    const selection = {
+    }, [source])).toEqual({
       type: 'review',
       proofId: source.id,
       proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
-      includeAttribution: true,
-    };
-    expect(hydratePlanningProofSelection(selection, [source], 'Jane D.')).toEqual({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
+      selectedText: source.originalReviewText,
       attribution: 'Jane D.',
     });
-    expect(() => hydratePlanningProofSelection(selection, [source], 'Jane')).toThrow(
-      'canonical approved text'
-    );
-    expect(() => hydratePlanningProofSelection(selection, [source], ' Jane D. ')).toThrow(
-      'canonical approved text'
-    );
-    expect(() => hydratePlanningProofSelection(selection, [source])).toThrow(
-      'canonical approved text'
-    );
-  });
 
-  it('rejects Proof-derived ad-facing copy when no matching selection exists', () => {
-    const reviewSource = review();
-    const caseSource = caseStudy();
-    const base = {
-      adCopy: { primaryText: 'Ordinary copy', headline: 'Ordinary headline', description: '' },
-      imageCopy: { headline: 'Ordinary image headline' },
-    };
-    expect(() => validatePlanningProofCopyConsistency(null, [reviewSource], {
-      ...base,
-      adCopy: { ...base.adCopy, primaryText: 'Second exact line.' },
-    })).toThrow('Review text is not bound');
-    expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
-      ...base,
-      imageCopy: { headline: caseSource.approvedClaimWording },
-    })).toThrow('Case Study text is not bound');
-  });
-
-  it('rejects material shortened Proof fragments and unselected Case Study disclaimers', () => {
-    const negative = review({ originalReviewText: 'I did not save $10,000.' });
-    const contextual = review({
-      id: `proof_${'d'.repeat(32)}`,
-      originalReviewText: 'The representative was patient and explained every step clearly.',
-    });
-    const caseSource = caseStudy({
-      approvedClaimWording: 'TRA helped the client understand the next steps clearly.',
-      requiredDisclaimer: 'Results vary based on each client circumstances.',
-    });
-    const base = {
-      adCopy: { primaryText: 'Ordinary copy', headline: 'Ordinary headline', description: '' },
-      imageCopy: { headline: 'Ordinary image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(null, [negative], {
-      ...base,
-      adCopy: { ...base.adCopy, primaryText: 'save $10,000' },
-    })).toThrow('Material ad-facing Review text');
-
-    expect(() => validatePlanningProofCopyConsistency(null, [contextual], {
-      ...base,
-      imageCopy: { ...base.imageCopy, shortSupport: 'explained every step clearly' },
-    })).toThrow('Material ad-facing Review text');
-
-    expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
-      ...base,
-      adCopy: { ...base.adCopy, headline: 'understand the next steps clearly' },
-    })).toThrow('Material ad-facing Case Study text');
-
-    expect(() => validatePlanningProofCopyConsistency(null, [caseSource], {
-      ...base,
-      imageCopy: { ...base.imageCopy, disclosure: caseSource.requiredDisclaimer },
-    })).toThrow('Case Study text is not bound');
-  });
-
-  it.each(['debt forgiven', 'levy released', 'tax resolved', 'penalties removed'])(
-    'rejects short non-numeric material Case Study fragments without Proof selection: %s',
-    fragment => {
-      const source = caseStudy({
-        approvedClaimWording: `Client ${fragment} after review.`,
-        requiredDisclaimer: undefined,
-      });
-      const copy = {
-        adCopy: { primaryText: fragment, headline: 'Headline', description: '' },
-        imageCopy: { headline: 'Image headline' },
-      };
-
-      expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
-        .toThrow('Material ad-facing Case Study text');
-    }
-  );
-
-  it('rejects short material Review outcome fragments without Proof selection', () => {
-    const source = review({ originalReviewText: 'My tax issue was resolved quickly.' });
-    const copy = {
-      adCopy: { primaryText: 'Tax issue resolved', headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
-      .toThrow('Material ad-facing Review text');
-  });
-
-  it('rejects plain small-number reuse when the Proof source marks the number as currency', () => {
-    const source = review({ originalReviewText: 'They waived $500.' });
-    const copy = {
-      adCopy: { primaryText: '500', headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
-      .toThrow('Material ad-facing Review text');
-  });
-
-  it('rejects short outcome phrases that retain material Proof meaning', () => {
-    const source = review({ originalReviewText: 'The client was debt free.' });
-    const copy = {
-      adCopy: { primaryText: 'Debt free', headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
-      .toThrow('Material ad-facing Review text');
-  });
-
-  it.each([
-    ['The levy was lifted.', 'Levy lifted'],
-    ['The lien was lifted.', 'Lien lifted'],
-    ['The tax issue was fixed.', 'Tax fixed'],
-  ])('rejects short tax-outcome fragments outside the original hard-coded states: %s', (originalReviewText, fragment) => {
-    const source = review({ originalReviewText });
-    const copy = {
-      adCopy: { primaryText: fragment, headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
-      .toThrow('Material ad-facing Review text');
-  });
-
-  it('normalizes whitespace before percentage signs for Proof matching', () => {
-    const source = review({ originalReviewText: 'The balance was reduced by 50%.' });
-    const copy = {
-      adCopy: { primaryText: '50 %', headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
-      .toThrow('Material ad-facing Review text');
-  });
-
-  it('rejects trivially reformatted Review attribution without Proof selection', () => {
-    const source = review();
-    const copy = {
-      adCopy: { primaryText: 'Jane D', headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
-      .toThrow('Material ad-facing Review text');
-  });
-
-  it('rejects selected Review attribution outside proofAttribution when attribution was not selected', () => {
-    const source = review();
-    const selected = hydratePlanningProofSelection({
+    const noAttribution = review({ attribution: undefined });
+    expect(() => hydratePlanningProofSelection({
       type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
-      includeAttribution: false,
-    }, [source]);
-    const copy = {
-      adCopy: { primaryText: 'Second exact line.', headline: 'Jane D', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], copy))
-      .toThrow('attribution appears in ad-facing copy but was not selected');
-  });
-
-  it('rejects an altered duplicate attribution beyond the exact authorized attribution', () => {
-    const source = review();
-    const selected = hydratePlanningProofSelection({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
+      proofId: noAttribution.id,
+      proofUpdatedAt: noAttribution.updatedAt,
+      selectedText: noAttribution.originalReviewText,
       includeAttribution: true,
-    }, [source], 'Jane D.');
-
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
-      adCopy: { primaryText: 'Second exact line.', headline: 'Jane D', description: '' },
-      imageCopy: { headline: 'Image headline', proofAttribution: 'Jane D.' },
-    })).toThrow('additional Proof-derived attribution');
+    }, [noAttribution])).toThrow('not approved');
   });
 
-  it('does not mistake attribution text inside the selected Review excerpt for separate attribution', () => {
-    const source = review({
-      originalReviewText: 'Jane D. said the representative was patient.',
-    });
-    const selected = hydratePlanningProofSelection({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: source.originalReviewText,
-      includeAttribution: false,
-    }, [source]);
-
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
-      adCopy: { primaryText: source.originalReviewText, headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    })).not.toThrow();
-  });
-
-  it('rejects extra Proof-derived wording even when the valid selected Review text is present', () => {
-    const source = review({ originalReviewText: 'I did not save $10,000.' });
-    const selected = hydratePlanningProofSelection({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: source.originalReviewText,
-      includeAttribution: false,
-    }, [source]);
-    const base = {
-      adCopy: { primaryText: source.originalReviewText, headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], base)).not.toThrow();
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
-      ...base,
-      adCopy: {
-        ...base.adCopy,
-        primaryText: `${source.originalReviewText} I saved $10,000.`,
-      },
-    })).toThrow('additional Proof-derived wording');
-  });
-
-  it('rejects extra Case Study-derived wording even when the exact approved claim is present', () => {
-    const source = caseStudy({
-      approvedClaimWording: 'TRA helped the client understand the next steps clearly.',
-      requiredDisclaimer: 'Results vary by circumstances.',
-    });
-    const selected = hydratePlanningProofSelection({
-      type: 'case-study',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: source.approvedClaimWording,
-    }, [source]);
-    const base = {
-      adCopy: { primaryText: source.approvedClaimWording, headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline', disclosure: source.requiredDisclaimer },
-    };
-
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], base)).not.toThrow();
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
-      ...base,
-      adCopy: {
-        ...base.adCopy,
-        primaryText: `${source.approvedClaimWording} understand the next steps clearly`,
-      },
-    })).toThrow('additional Proof-derived wording');
-  });
-
-  it.each(['save 10,000', 'save $10000'])(
-    'normalizes equivalent currency formatting before Proof matching: %s',
-    fragment => {
-      const source = review({ originalReviewText: 'I did not save $10,000.' });
-      const base = {
-        adCopy: { primaryText: fragment, headline: 'Headline', description: '' },
-        imageCopy: { headline: 'Image headline' },
-      };
-      expect(() => validatePlanningProofCopyConsistency(null, [source], base))
-        .toThrow('Review text is not bound');
-    }
-  );
-
-  it('does not let overlapping generic Review wording steal a valid selected Proof', () => {
-    const selectedSource = review({
-      originalReviewText: 'They were very helpful and professional.',
-    });
-    const overlapping = review({
-      id: `proof_${'c'.repeat(32)}`,
-      originalReviewText: 'The team was very helpful and responsive.',
-    });
-    const selected = hydratePlanningProofSelection({
-      type: 'review',
-      proofId: selectedSource.id,
-      proofUpdatedAt: selectedSource.updatedAt,
-      selectedText: selectedSource.originalReviewText,
-      includeAttribution: false,
-    }, [selectedSource, overlapping]);
-
-    expect(() => validatePlanningProofCopyConsistency(selected, [selectedSource, overlapping], {
-      adCopy: { primaryText: selectedSource.originalReviewText, headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline' },
-    })).not.toThrow();
-  });
-
-  it('requires selected Proof text to be used exactly and rejects wording from another Proof', () => {
-    const selectedSource = review();
-    const otherSource = review({
-      id: `proof_${'c'.repeat(32)}`,
-      originalReviewText: 'Different approved sentence.',
-    });
-    const selected = hydratePlanningProofSelection({
-      type: 'review',
-      proofId: selectedSource.id,
-      proofUpdatedAt: selectedSource.updatedAt,
-      selectedText: 'Second exact line.',
-      includeAttribution: false,
-    }, [selectedSource, otherSource]);
-    const base = {
-      adCopy: { primaryText: 'Second exact line.', headline: 'Ordinary headline', description: '' },
-      imageCopy: { headline: 'Ordinary image headline' },
-    };
-    expect(() => validatePlanningProofCopyConsistency(selected, [selectedSource, otherSource], base))
-      .not.toThrow();
-    expect(() => validatePlanningProofCopyConsistency(selected, [selectedSource, otherSource], {
-      ...base,
-      imageCopy: { headline: 'Different approved sentence.' },
-    })).toThrow('Review text is not bound');
-    expect(() => validatePlanningProofCopyConsistency(selected, [selectedSource], {
-      ...base,
-      adCopy: { ...base.adCopy, primaryText: 'Ordinary copy' },
-    })).toThrow('Selected Proof text is not present');
-  });
-
-  it('requires the canonical Case Study disclosure when the selected record requires one', () => {
-    const source = caseStudy();
-    const selected = hydratePlanningProofSelection({
-      type: 'case-study',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: source.approvedClaimWording,
-    }, [source]);
-    const valid = {
-      adCopy: { primaryText: source.approvedClaimWording, headline: 'Headline', description: '' },
-      imageCopy: { headline: 'Image headline', disclosure: source.requiredDisclaimer },
-    };
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], valid)).not.toThrow();
-    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
-      ...valid,
-      imageCopy: { headline: 'Image headline' },
-    })).toThrow('canonical disclosure');
-  });
-
-  it('requires exact Case Study approved wording and hydrates restrictions/disclaimer', () => {
+  it('requires exact Case Study wording and hydrates restrictions/disclaimer', () => {
     const source = caseStudy();
     expect(hydratePlanningProofSelection({
       type: 'case-study',
@@ -495,7 +121,7 @@ describe('planning proof selection', () => {
         type: 'review',
         proofId: source.id,
         proofUpdatedAt: source.updatedAt,
-        selectedText: 'Second exact line.',
+        selectedText: source.originalReviewText,
         includeAttribution: false,
       };
       if (problem === 'unknown') selection.proofId = `proof_${'f'.repeat(32)}`;
@@ -508,6 +134,85 @@ describe('planning proof selection', () => {
       );
     }
   );
+
+  it('appends exact Review Proof after normal primary text and owns attribution', () => {
+    const source = review();
+    const selected = hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.originalReviewText,
+      includeAttribution: true,
+    }, [source]);
+
+    expect(composePlanningCopyWithProof(
+      selected,
+      { primaryText: 'Normal AI-written copy.', headline: 'Headline', description: '' },
+      {
+        headline: 'Image headline',
+        shortSupport: 'Support',
+        proofAttribution: 'MODEL SHOULD NOT CONTROL THIS',
+        disclosure: 'General disclosure',
+      }
+    )).toEqual({
+      adCopy: {
+        primaryText: `Normal AI-written copy.\n\n${source.originalReviewText}\n\nJane D.`,
+        headline: 'Headline',
+        description: '',
+      },
+      imageCopy: {
+        headline: 'Image headline',
+        shortSupport: 'Support',
+        proofAttribution: 'Jane D.',
+        disclosure: 'General disclosure',
+      },
+    });
+  });
+
+  it('appends exact Case Study Proof and required disclaimer deterministically', () => {
+    const source = caseStudy();
+    const selected = hydratePlanningProofSelection({
+      type: 'case-study',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.approvedClaimWording,
+    }, [source]);
+
+    expect(composePlanningCopyWithProof(
+      selected,
+      { primaryText: 'Normal AI-written copy.', headline: 'Headline', description: '' },
+      {
+        headline: 'Image headline',
+        proofAttribution: 'MODEL ATTRIBUTION',
+        disclosure: 'MODEL DISCLOSURE',
+      }
+    )).toEqual({
+      adCopy: {
+        primaryText: `Normal AI-written copy.\n\n${source.approvedClaimWording}\n\n${source.requiredDisclaimer}`,
+        headline: 'Headline',
+        description: '',
+      },
+      imageCopy: {
+        headline: 'Image headline',
+        disclosure: source.requiredDisclaimer,
+      },
+    });
+  });
+
+  it('leaves normal copy alone when no Proof is selected and strips proof attribution', () => {
+    expect(composePlanningCopyWithProof(
+      null,
+      { primaryText: 'Normal copy.', headline: 'Headline', description: '' },
+      {
+        headline: 'Image headline',
+        proofAttribution: 'UNBOUND ATTRIBUTION',
+        disclosure: 'General disclosure',
+      }
+    )).toEqual({
+      adCopy: { primaryText: 'Normal copy.', headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline', disclosure: 'General disclosure' },
+    });
+  });
 
   it('accepts null and persisted shapes without exposing source-only Case Study facts', () => {
     expect(hydratePlanningProofSelection(null, [review(), caseStudy()])).toBeNull();
