@@ -319,6 +319,53 @@ describe('Proof planning retrieval', () => {
     }
   });
 
+  it('fails closed on lifted/fixed outcomes, spaced percentages, and reformatted attribution', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const lifted = review('a', { originalReviewText: 'The levy was lifted.' });
+    const fixed = review('b', { originalReviewText: 'The tax issue was fixed.' });
+    const percent = review('c', { originalReviewText: 'The balance was reduced by 50%.' });
+    const attributed = review('d', {
+      originalReviewText: 'The representative was patient.',
+      attribution: { display: 'Jane D.', allowed: true },
+    });
+    listProofRecordsMock.mockResolvedValue([lifted, fixed, percent, attributed]);
+
+    const selectedAttribution = {
+      ...concept(1),
+      adCopy: {
+        ...concept(1).adCopy,
+        primaryText: attributed.originalReviewText,
+        headline: 'Jane D',
+      },
+      proofSelection: {
+        type: 'review' as const,
+        proofId: attributed.id,
+        proofUpdatedAt: attributed.updatedAt,
+        selectedText: attributed.originalReviewText,
+        includeAttribution: false,
+      },
+    };
+    const variants = [
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'Levy lifted' } },
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'Tax fixed' } },
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: '50 %' } },
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'Jane D' } },
+      selectedAttribution,
+    ];
+
+    for (const invalid of variants) {
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        okResponse({ creatives: [invalid, concept(2)] })));
+      await expect(requestCreativeBatch({
+        count: 2,
+        context: 'Planner context',
+        proofRetrievalQuery: 'bank levy tax proof',
+        analysis,
+        hasApprovedHumanSource: false,
+      })).rejects.toThrow('invalid creative batch plan concept');
+    }
+  });
+
   it('rejects selected Proof plus extra derived wording and normalized currency variants', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const source = review('a', { originalReviewText: 'I did not save $10,000.' });
