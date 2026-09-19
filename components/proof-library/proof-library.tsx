@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { MAX_REVIEW_CSV_BYTES, parseReviewCsv } from '@/lib/proof/review-csv';
-import type { ProofRecord } from '@/lib/proof/types';
+import type { ProofRecord, VideoPassageCandidateView } from '@/lib/proof/types';
 import styles from './proof-library.module.css';
 
 type ProofTab = ProofRecord['type'];
@@ -86,6 +86,46 @@ export function ProofRecordCard({
       <small className={styles.id}>{record.id}</small>
     </article>
   );
+}
+
+export const eligibleVideoPassageProof = (items: ProofRecord[]) =>
+  items.filter((item) => item.status === 'ACTIVE' && item.advertisingUseApproved === true);
+
+const candidateTime = (milliseconds: number) => {
+  const minutes = Math.floor(milliseconds / 60_000);
+  const seconds = Math.floor(milliseconds / 1_000) % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
+const linkHealthLabel: Record<VideoPassageCandidateView['linkHealth'], string> = {
+  UNLINKED: 'Not linked', CURRENT: 'Current linked Proof', MISSING: 'Linked Proof is missing',
+  CHANGED: 'Linked Proof changed', INACTIVE: 'Linked Proof is inactive', UNAPPROVED: 'Linked Proof is not advertising-approved',
+};
+
+export function VideoPassageCandidateCard({
+  candidate, items, pending, onMutate,
+}: {
+  candidate: VideoPassageCandidateView;
+  items: ProofRecord[];
+  pending: boolean;
+  onMutate: (action: 'link' | 'dismiss' | 'reopen', proofId?: string) => void;
+}) {
+  const eligible = eligibleVideoPassageProof(items);
+  const stale = candidate.status === 'LINKED' && !['CURRENT', 'UNLINKED'].includes(candidate.linkHealth);
+  const linked = candidate.link ? items.find((item) => item.id === candidate.link!.proofId) : undefined;
+  return <article className={styles.candidate}>
+    <div className={styles.candidateHeader}><strong>Video passage candidate</strong><span className={styles.status}>{candidate.status}</span></div>
+    <p className={styles.meta}>{candidateTime(candidate.passage.startMs)}–{candidateTime(candidate.passage.endMs)} · segments {candidate.passage.startSegmentIndex + 1}–{candidate.passage.endSegmentIndex + 1}</p>
+    <blockquote>{candidate.passage.segments.map((segment) => segment.text).join(' ')}</blockquote>
+    <p className={candidate.linkHealth === 'CURRENT' ? styles.success : styles.meta}>Link health: {linkHealthLabel[candidate.linkHealth]}{linked ? ` (${linked.type}: ${linked.id})` : ''}</p>
+    {candidate.status === 'DISMISSED' ? <button type="button" onClick={() => onMutate('reopen')} disabled={pending}>Reopen candidate</button> : <div className={styles.candidateActions}>
+      {candidate.status === 'PENDING' || stale ? <label>Link to eligible Proof<select aria-label={`Eligible Proof for ${candidate.id}`} defaultValue="" disabled={pending || !eligible.length} onChange={(event) => { if (event.target.value) onMutate('link', event.target.value); }}><option value="">{eligible.length ? 'Choose active, approved Proof' : 'No eligible Proof available'}</option>{eligible.map((item) => <option key={item.id} value={item.id}>{item.type}: {item.id}</option>)}</select></label> : null}
+      {candidate.status === 'PENDING' && !eligible.length ? <p className={styles.meta}>An ACTIVE Proof with explicit advertising approval is required before linking.</p> : null}
+      {stale ? <p className={styles.error}>This linked Proof is unusable or stale. Relink to a current eligible Proof, or dismiss this candidate.</p> : null}
+      {candidate.status === 'LINKED' && candidate.linkHealth === 'CURRENT' ? <p className={styles.meta}>Current linked Proof: {linked?.id || candidate.link?.proofId}</p> : null}
+      <button type="button" onClick={() => onMutate('dismiss')} disabled={pending}>Dismiss candidate</button>
+    </div>}
+  </article>;
 }
 
 export function ReviewCsvImport({ onImported }: { onImported: (records: ProofRecord[]) => void }) {
@@ -278,11 +318,15 @@ function ProofForm({ type, record, onSaved, onCancel }: {
 
 export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord[] }) {
   const [items, setItems] = useState(initialItems);
+  const [candidates, setCandidates] = useState<VideoPassageCandidateView[]>([]);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<ProofTab>('review');
   const [editing, setEditing] = useState<ProofRecord | null>(null);
   const [error, setError] = useState('');
+  const [candidateFeedback, setCandidateFeedback] = useState('');
+  const [candidateFailed, setCandidateFailed] = useState(false);
+  const [candidatePending, setCandidatePending] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -292,6 +336,7 @@ export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Proof Library could not be loaded.');
       setItems(payload.items);
+      setCandidates(payload.candidates);
       setLoaded(true);
     } catch {
       setLoaded(false);
@@ -327,12 +372,23 @@ export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Proof status could not be updated.'); }
   };
   const visible = items.filter(({ type }) => type === activeTab);
+  const mutateCandidate = async (candidateId: string, action: 'link' | 'dismiss' | 'reopen', proofId?: string) => {
+    setCandidateFeedback(''); setCandidateFailed(false); setCandidatePending(candidateId);
+    try {
+      const response = await fetch('/api/proof/video-passages', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, candidateId, ...(proofId ? { proofId } : {}) }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Video passage candidate could not be updated.');
+      setCandidateFeedback(action === 'link' ? 'Proof linked to video passage candidate.' : action === 'dismiss' ? 'Video passage candidate dismissed.' : 'Video passage candidate reopened.');
+    } catch (cause) { setCandidateFailed(true); setCandidateFeedback(cause instanceof Error ? cause.message : 'Video passage candidate could not be updated.'); }
+    finally { await load(); setCandidatePending(''); }
+  };
 
   return (
     <div className={styles.shell}>
       <nav className={styles.tabs} aria-label="Proof Library sections">{tabs.map((tab) => <button key={tab.id} type="button" aria-pressed={activeTab === tab.id} className={activeTab === tab.id ? styles.activeTab : ''} onClick={() => { setActiveTab(tab.id); setEditing(null); }}>{tab.label}</button>)}</nav>
       <p className={styles.note}>{activeTab === 'review' ? 'Original review text is stored exactly. Any future quoted excerpt must be a contiguous verbatim substring.' : 'Verified facts remain separate from the exact advertising wording approved for use.'}</p>
       {loading ? <p className={styles.empty}>Loading proof records…</p> : loaded ? <>
+        <section className={styles.candidates} aria-label="Video Passage Candidates"><h2>Video Passage Candidates</h2>{candidateFeedback ? <p className={candidateFailed ? styles.error : styles.success} role={candidateFailed ? 'alert' : 'status'} aria-live="polite">{candidateFeedback}</p> : null}{candidates.length ? candidates.map((candidate) => <VideoPassageCandidateCard key={candidate.id} candidate={candidate} items={items} pending={candidatePending === candidate.id} onMutate={(action, proofId) => void mutateCandidate(candidate.id, action, proofId)} />) : <p className={styles.meta}>No video passage candidates yet.</p>}</section>
         {activeTab === 'review' ? <ReviewCsvImport onImported={imported} /> : null}
         <ProofForm key={editing?.id ?? activeTab} type={activeTab} record={editing} onSaved={saved} onCancel={() => setEditing(null)} />
         {error ? <ProofLibraryError>{error}</ProofLibraryError> : null}

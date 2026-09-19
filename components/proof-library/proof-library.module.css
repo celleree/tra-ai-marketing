@@ -43,4 +43,12 @@
 .error { margin: 0; color: #b42318; }
 .success { margin: 0; color: #187348; }
 .empty { padding: 32px; text-align: center; }
+.candidates { display: grid; gap: 12px; margin: 0 0 24px; }
+.candidates h2 { margin: 0; font-size: 18px; }
+.candidate { display: grid; gap: 8px; padding: 16px; border: 1px solid #dfe4ea; border-radius: 14px; background: #f8fafc; }
+.candidateHeader, .candidateActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.candidate blockquote { margin: 0; white-space: pre-wrap; line-height: 1.5; }
+.candidateActions label { display: grid; gap: 5px; color: #354454; font-size: 13px; font-weight: 700; }
+.candidateActions select, .candidateActions button, .candidate > button { border: 0; border-radius: 8px; padding: 8px 11px; background: #edf1f5; color: #354454; font: inherit; font-weight: 700; }
+.candidateActions select { border: 1px solid #cfd7df; background: #fff; }
 @media (max-width: 700px) { .shell { width: min(100% - 28px, 1080px); } .grid, .fact { grid-template-columns: 1fr; } .cardHeader { align-items: flex-start; } }

@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ProofLibraryError, ProofRecordCard, ReviewCsvImport, proofLibraryLoadFailureMessage } from '@/components/proof-library/proof-library';
+import { eligibleVideoPassageProof, ProofLibraryError, ProofRecordCard, ReviewCsvImport, VideoPassageCandidateCard, proofLibraryLoadFailureMessage } from '@/components/proof-library/proof-library';
 import { createProofEditFields, normalizeProofTextareaEdit, proofEditValues } from '@/components/proof-library/proof-library';
 import type { ProofRecord } from '@/lib/proof/types';
 
@@ -65,5 +65,26 @@ describe('Proof Library UI', () => {
     expect(html).toContain('Quote fields containing commas, quotes, or line breaks.');
     expect(html).toContain('Imports up to 100 reviews in one batch.');
     expect(html).toContain('Original review text is preserved exactly as supplied.');
+  });
+
+  it('renders stored passage, lifecycle, server-derived link health, and eligible relinking controls', () => {
+    const approved = { ...base, id: `proof_${'c'.repeat(32)}`, type: 'review' as const, advertisingUseApproved: true, originalReviewText: 'Approved proof.' };
+    const inactive = { ...base, id: `proof_${'d'.repeat(32)}`, type: 'review' as const, status: 'INACTIVE' as const, advertisingUseApproved: true, originalReviewText: 'Inactive proof.' };
+    const candidate = { version: 1 as const, id: 'video-passage_candidate', status: 'LINKED' as const, linkHealth: 'CHANGED' as const, source: { locator: { version: 1 as const, sourceVideoMediaId: 'media', sourceVideoContentHash: 'a', analyzerFingerprintSha256: 'b' }, library: { id: 'library', version: 1 as const } }, passage: { startSegmentIndex: 0, endSegmentIndex: 1, startMs: 1_000, endMs: 3_500, segments: [{ segmentIndex: 0, startMs: 1_000, endMs: 2_000, text: 'Exact first segment.' }, { segmentIndex: 1, startMs: 2_100, endMs: 3_500, text: 'Exact second segment.' }] }, link: { proofId: approved.id, proofType: 'review' as const, proofUpdatedAt: '2026-09-09T12:00:00.000Z' }, createdAt: base.createdAt, updatedAt: base.updatedAt };
+    const html = renderToStaticMarkup(createElement(VideoPassageCandidateCard, { candidate, items: [approved, inactive], pending: false, onMutate: () => {} }));
+    expect(html).toContain('00:00–00:03'); expect(html).toContain('Exact first segment. Exact second segment.');
+    expect(html).toContain('LINKED'); expect(html).toContain('Link health: Linked Proof changed');
+    expect(html).toContain(`aria-label="Eligible Proof for ${candidate.id}"`); expect(html).toContain(`review: ${approved.id}`); expect(html).not.toContain(`review: ${inactive.id}`);
+    expect(html).toContain('Dismiss candidate');
+  });
+
+  it('preserves dismissed passage candidates and exposes reopen only', () => {
+    const candidate = { version: 1 as const, id: 'dismissed', status: 'DISMISSED' as const, linkHealth: 'UNLINKED' as const, source: { locator: { version: 1 as const, sourceVideoMediaId: 'media', sourceVideoContentHash: 'a', analyzerFingerprintSha256: 'b' }, library: { id: 'library', version: 1 as const } }, passage: { startSegmentIndex: 0, endSegmentIndex: 0, startMs: 0, endMs: 1_000, segments: [{ segmentIndex: 0, startMs: 0, endMs: 1_000, text: 'Preserved passage.' }] }, createdAt: base.createdAt, updatedAt: base.updatedAt };
+    const html = renderToStaticMarkup(createElement(VideoPassageCandidateCard, { candidate, items: [], pending: false, onMutate: () => {} }));
+    expect(html).toContain('Preserved passage.'); expect(html).toContain('Reopen candidate'); expect(html).not.toContain('Dismiss candidate');
+  });
+
+  it('filters eligible Proof to active, explicitly advertising-approved records', () => {
+    expect(eligibleVideoPassageProof([{ ...base, id: 'active-approved', type: 'review', advertisingUseApproved: true, originalReviewText: 'Yes' }, { ...base, id: 'active-unapproved', type: 'review', originalReviewText: 'No' }, { ...base, id: 'inactive-approved', type: 'review', status: 'INACTIVE', advertisingUseApproved: true, originalReviewText: 'No' }])).toMatchObject([{ id: 'active-approved' }]);
   });
 });
