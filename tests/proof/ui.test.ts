@@ -72,7 +72,7 @@ describe('Proof Library UI', () => {
     const inactive = { ...base, id: `proof_${'d'.repeat(32)}`, type: 'review' as const, status: 'INACTIVE' as const, advertisingUseApproved: true, originalReviewText: 'Inactive proof.' };
     const candidate = { version: 1 as const, id: 'video-passage_candidate', status: 'LINKED' as const, linkHealth: 'CHANGED' as const, source: { locator: { version: 1 as const, sourceVideoMediaId: 'media', sourceVideoContentHash: 'a', analyzerFingerprintSha256: 'b' }, library: { id: 'library', version: 1 as const } }, passage: { startSegmentIndex: 0, endSegmentIndex: 1, startMs: 1_000, endMs: 3_500, segments: [{ segmentIndex: 0, startMs: 1_000, endMs: 2_000, text: 'Exact first segment.' }, { segmentIndex: 1, startMs: 2_100, endMs: 3_500, text: 'Exact second segment.' }] }, link: { proofId: approved.id, proofType: 'review' as const, proofUpdatedAt: '2026-09-09T12:00:00.000Z' }, createdAt: base.createdAt, updatedAt: base.updatedAt };
     const html = renderToStaticMarkup(createElement(VideoPassageCandidateCard, { candidate, items: [approved, inactive], pending: false, onMutate: () => {} }));
-    expect(html).toContain('00:00–00:03'); expect(html).toContain('Exact first segment. Exact second segment.');
+    expect(html).toContain('00:01–00:03'); expect(html).toContain('Exact first segment. Exact second segment.');
     expect(html).toContain('LINKED'); expect(html).toContain('Link health: Linked Proof changed');
     expect(html).toContain(`aria-label="Eligible Proof for ${candidate.id}"`); expect(html).toContain(`review: ${approved.id}`); expect(html).not.toContain(`review: ${inactive.id}`);
     expect(html).toContain('Dismiss candidate');
