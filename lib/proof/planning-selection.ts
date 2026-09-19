@@ -124,6 +124,18 @@ export function hydratePlanningProofSelection(
   throw new Error('Proof selection type is unsupported.');
 }
 
+export const formatPlanningProofPrimaryTextBlock = (
+  selectedProof: SelectedPlanningProof
+) => [
+  selectedProof.selectedText,
+  ...(selectedProof.type === 'review' && selectedProof.attribution
+    ? [selectedProof.attribution]
+    : []),
+  ...(selectedProof.type === 'case-study' && selectedProof.requiredDisclaimer
+    ? [selectedProof.requiredDisclaimer]
+    : []),
+].join('\n\n');
+
 export function composePlanningCopyWithProof(
   selectedProof: SelectedPlanningProof | null,
   adCopy: CreativeAdCopy,
@@ -138,20 +150,12 @@ export function composePlanningCopyWithProof(
     return { adCopy, imageCopy: baseImageCopy };
   }
 
-  const proofBlock = [
-    selectedProof.selectedText,
-    ...(selectedProof.type === 'review' && selectedProof.attribution
-      ? [selectedProof.attribution]
-      : []),
-    ...(selectedProof.type === 'case-study' && selectedProof.requiredDisclaimer
-      ? [selectedProof.requiredDisclaimer]
-      : []),
-  ];
+  const proofBlock = formatPlanningProofPrimaryTextBlock(selectedProof);
 
   return {
     adCopy: {
       ...adCopy,
-      primaryText: [adCopy.primaryText.trim(), ...proofBlock].join('\n\n'),
+      primaryText: [adCopy.primaryText.trim(), proofBlock].join('\n\n'),
     },
     imageCopy: {
       ...baseImageCopy,

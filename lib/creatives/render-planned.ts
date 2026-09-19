@@ -26,6 +26,10 @@ import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
+import {
+  revalidateSelectedProofForPaidWork,
+  validateCreativeProofCopyConsistency,
+} from '@/lib/proof/provenance';
 
 export type CreativeRenderContext = {
   request: ValidGenerateCreativeRequest;
@@ -91,15 +95,25 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   });
   const copy = item.copy;
   const selectedReference = selectedReferences.find(reference => reference.item.id === item.strategy.referenceSelection?.layoutSource);
-  const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
-    concept: item, companyProfile: request.companyProfile,
-    brandColors: request.brandColors, brandFontNames: request.brandFontNames,
-    referenceCatalog,
-  }));
   let imageResult: ImageGenerationResult;
   let providerFrames: ApprovedTraVideoFrame[] | undefined;
 
   await options.assertCurrentWork?.();
+  const proofProvenance = await revalidateSelectedProofForPaidWork(item.selectedProof);
+  if (proofProvenance) {
+    validateCreativeProofCopyConsistency(proofProvenance, {
+      copy,
+      ...(copyMode.kind === 'E2'
+        ? { adCopy: copyMode.adCopy, imageCopy: copyMode.imageCopy }
+        : {}),
+    });
+  }
+  const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
+    concept: item, companyProfile: request.companyProfile,
+    brandColors: request.brandColors, brandFontNames: request.brandFontNames,
+    referenceCatalog,
+    ...(proofProvenance ? { proofProvenance } : {}),
+  }));
 
   if (itemImageSource) {
     imageResult = copyMode.kind === 'LEGACY'
@@ -222,6 +236,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     copy,
     ...(copyMode.kind === 'E2' ? { adCopy: copyMode.adCopy, imageCopy: copyMode.imageCopy } : {}),
     generationProvenance,
+    ...(proofProvenance ? { proofProvenance } : {}),
     identity,
     planning: {
       strategy: item.strategy,

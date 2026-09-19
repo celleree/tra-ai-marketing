@@ -76,6 +76,48 @@ describe('distilled render brief', () => {
     expect(prompt).not.toContain(concept.copy.description);
   });
 
+  it('includes authoritative Review Proof only as evidence context, not extra image copy', () => {
+    const proofProvenance = {
+      version: 1 as const, type: 'review' as const, proofId: `proof_${'a'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T13:00:00.000Z', selectedText: 'Exact client review excerpt.',
+      attribution: 'Verified TRA client',
+    };
+    const brief = buildCreativeRenderBrief({
+      concept: { ...concept, imageCopy: { headline: 'Image headline', proofAttribution: 'Verified TRA client' } },
+      proofProvenance,
+    });
+    const prompt = formatCreativeRenderBrief(brief);
+    expect(brief.proof).toEqual(proofProvenance);
+    expect(prompt).toContain(proofProvenance.proofId);
+    expect(prompt).toContain(proofProvenance.proofUpdatedAt);
+    expect(prompt).toContain(proofProvenance.selectedText);
+    expect(prompt).toContain(proofProvenance.attribution);
+    expect(prompt).toContain('It is NOT additional image copy');
+    expect(brief.exactCopy).toEqual({ headline: 'Image headline', proofAttribution: 'Verified TRA client' });
+  });
+
+  it('includes Case Study restrictions/disclaimer and invents no Proof block when none is selected', () => {
+    const proofProvenance = {
+      version: 1 as const, type: 'case-study' as const, proofId: `proof_${'b'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T14:00:00.000Z', selectedText: 'Approved source-bound claim wording.',
+      usageRestrictions: 'Use only for bank-levy messaging.',
+      requiredDisclaimer: 'Results vary by circumstances.',
+    };
+    const withProof = buildCreativeRenderBrief({
+      concept: { ...concept, imageCopy: { headline: 'Approved source-bound claim wording.', disclosure: 'Results vary by circumstances.' } },
+      proofProvenance,
+    });
+    const prompt = formatCreativeRenderBrief(withProof);
+    expect(prompt).toContain(proofProvenance.usageRestrictions);
+    expect(prompt).toContain(proofProvenance.requiredDisclaimer);
+    expect(prompt).toContain('"disclosure": "Results vary by circumstances."');
+
+    const withoutProof = buildCreativeRenderBrief({ concept: { ...concept, imageCopy: { headline: 'Image headline' } } });
+    expect(withoutProof).not.toHaveProperty('proof');
+    expect(formatCreativeRenderBrief(withoutProof)).toContain('No Proof is selected.');
+    expect(formatCreativeRenderBrief(withoutProof)).not.toContain(proofProvenance.proofId);
+  });
+
   it('passes visual concept details but excludes strategic fields and preserves exact copy', () => {
     const details = { ...conceptDetails, angle: 'PRIVATE_ANGLE', proposition: 'PRIVATE_PROPOSITION',
       objection: 'PRIVATE_OBJECTION', mainMessage: 'PRIVATE_MESSAGE' };

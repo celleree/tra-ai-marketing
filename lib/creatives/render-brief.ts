@@ -4,6 +4,7 @@ import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { CreativeConceptDetails, CreativeStrategy } from '@/lib/creatives/strategy';
 import { selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
+import type { CreativeProofProvenance } from '@/lib/proof/provenance';
 
 type LegacyCreativeRenderCopy = {
   headline: string;
@@ -26,6 +27,7 @@ export type CreativeRenderBrief = {
     prohibitedClaims: string; claimsRequiringProof: string; requiredDisclaimers: string;
     testimonialsStatisticsRules: string; industryComplianceRules: string;
   };
+  proof?: CreativeProofProvenance;
 };
 
 export function buildCreativeRenderBrief(args: {
@@ -35,6 +37,7 @@ export function buildCreativeRenderBrief(args: {
   brandFontNames?: readonly string[];
   layoutBlueprint?: LayoutBlueprint;
   referenceCatalog?: ReferencePlanningCandidate[];
+  proofProvenance?: CreativeProofProvenance;
 }): CreativeRenderBrief {
   const company = buildCreativeCompanyContext(args.companyProfile);
   const { strategy, copy, imageCopy, format } = args.concept;
@@ -70,6 +73,7 @@ export function buildCreativeRenderBrief(args: {
       testimonialsStatisticsRules: company.testimonialsStatisticsRules,
       industryComplianceRules: company.industryComplianceRules,
     },
+    ...(args.proofProvenance ? { proof: args.proofProvenance } : {}),
   };
 }
 
@@ -109,6 +113,7 @@ export function formatCreativeRenderBrief(brief: CreativeRenderBrief): string {
 ${JSON.stringify(brief, null, 2)}
 Execute this planned concept; do not invent another angle, outcome, offer or message.
 ${copyInstruction}
+${brief.proof ? 'proof is authoritative evidence/compliance context for the planned claim. It is NOT additional image copy: render only exactCopy fields, never render proof.selectedText, proof attribution, restrictions or disclaimer unless that exact text is already present in exactCopy. Preserve any exactCopy disclosure verbatim.' : 'No Proof is selected. Do not invent or infer testimonials, evidence, attribution or Proof.'}
 Planned copy is not advertising approval. Do not add factual claims or treat source pixels as proof.
 ${layoutInstruction || 'Keep the selected medium, composition and visual direction. Include only the planned subjects and props; do not add decorative objects or extra visual systems.'}
 ${layoutInstruction ? 'Within the blueprint scaffold, include only the planned subjects and props; do not add decorative objects or extra visual systems.' : ''}
