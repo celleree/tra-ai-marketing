@@ -209,8 +209,11 @@ const canonicalNumericToken = (raw: string) => {
   };
 };
 
+const normalizeProofTokenSpacing = (value: string) =>
+  value.toLowerCase().replace(/(\d)\s+%/g, '$1%');
+
 const proofTokens = (value: string): ProofToken[] =>
-  (value.toLowerCase().match(/[$€£]?\d[\d,]*(?:\.\d+)?%?|[a-z0-9]+(?:['’][a-z0-9]+)*/g) ?? [])
+  (normalizeProofTokenSpacing(value).match(/[$€£]?\d[\d,]*(?:\.\d+)?%?|[a-z0-9]+(?:['’][a-z0-9]+)*/g) ?? [])
     .map(raw => {
       if (/^[$€£]?\d/.test(raw)) {
         const numeric = canonicalNumericToken(raw);
@@ -242,7 +245,8 @@ const MATERIAL_OUTCOME_CONTEXT_TOKENS = new Set([
 ]);
 
 const SHORT_MATERIAL_OUTCOME_STATES = new Set([
-  'clear', 'cleared', 'free', 'gone', 'removed', 'stopped',
+  'clear', 'cleared', 'ended', 'fixed', 'free', 'gone', 'halted', 'lifted',
+  'removed', 'stopped',
 ]);
 
 const materialPhrase = (tokens: ProofToken[]) => {
@@ -303,6 +307,23 @@ const fieldOverlapsFingerprints = (
 
 const exactTextPresent = (field: string, exactText: string) =>
   field.includes(exactText);
+
+const normalizedTextTokens = (value: string) =>
+  value.toLowerCase().normalize('NFKC')
+    .match(/[a-z0-9]+(?:['’][a-z0-9]+)*/g)
+    ?.map(token => token.replace(/’/g, "'")) ?? [];
+
+const normalizedTextPresent = (field: string, source: string) => {
+  const sourceTokens = normalizedTextTokens(source);
+  if (!sourceTokens.length) return false;
+  const fieldTokens = normalizedTextTokens(field);
+  for (let index = 0; index <= fieldTokens.length - sourceTokens.length; index += 1) {
+    if (sourceTokens.every((token, offset) => fieldTokens[index + offset] === token)) {
+      return true;
+    }
+  }
+  return false;
+};
 
 const maskAuthorizedText = (field: string, exactTexts: readonly string[]) => {
   let masked = field;
@@ -373,7 +394,7 @@ export function validatePlanningProofCopyConsistency(
       maskAuthorizedText(field, [selectedProof.selectedText])
     );
     if (attributionResidualFields.some(field =>
-      exactTextPresent(field, selectedReviewAttribution)
+      normalizedTextPresent(field, selectedReviewAttribution)
     )) {
       throw new Error('Review proof attribution appears in ad-facing copy but was not selected for inclusion.');
     }
@@ -394,6 +415,15 @@ export function validatePlanningProofCopyConsistency(
     ]
     : [];
   const residualFields = fields.map(field => maskAuthorizedText(field, authorizedExactTexts));
+
+  if (
+    selectedReviewAttribution
+    && selectedProof?.type === 'review'
+    && selectedProof.attribution !== undefined
+    && residualFields.some(field => normalizedTextPresent(field, selectedReviewAttribution))
+  ) {
+    throw new Error('Ad-facing copy contains additional Proof-derived attribution beyond the selected exact text.');
+  }
 
   if (selectedRecord) {
     const selectedUnits = selectedRecord.type === 'review'
@@ -425,7 +455,7 @@ export function validatePlanningProofCopyConsistency(
         && exactTextPresent(field, proof.requiredDisclaimer!);
       const exactAttributionUse = proof.type === 'review'
         && proof.attribution?.allowed === true
-        && exactTextPresent(field, proof.attribution.display);
+        && normalizedTextPresent(field, proof.attribution.display);
       const materialUse = fieldOverlapsFingerprints(candidateFingerprints, field);
 
       if (
