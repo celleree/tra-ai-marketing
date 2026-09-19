@@ -183,6 +183,7 @@ describe('creative Proof provenance', () => {
       type: 'review', proofId: review().id, proofUpdatedAt: updatedAt,
       selectedText: review().originalReviewText, attribution: 'Verified TRA client',
     });
+    if (snapshot.type !== 'review') throw new Error('Expected Review Proof provenance.');
     const valid = {
       copy: { primaryText: `Normal copy.\n\n${snapshot.selectedText}\n\n${snapshot.attribution}`, headline: 'Clarity', description: '' },
       adCopy: { primaryText: `Normal copy.\n\n${snapshot.selectedText}\n\n${snapshot.attribution}`, headline: 'Clarity', description: '' },
@@ -284,6 +285,7 @@ describe('creative Proof provenance', () => {
       selectedText: review().originalReviewText,
       attribution: 'Verified TRA client',
     });
+    if (snapshot.type !== 'review') throw new Error('Expected Review Proof provenance.');
     const primaryText =
       `Normal copy.\n\n${snapshot.selectedText}\n\n${snapshot.attribution}\n\nExtra wording.`;
 
