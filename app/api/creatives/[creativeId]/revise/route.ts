@@ -18,6 +18,7 @@ import { isSafeCreativeId, listCreatives, saveCreativeBatch } from '@/lib/creati
 import { getMediaStorage } from '@/lib/media/local-storage';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
+import { ProofRevalidationError, revalidateCreativeProofProvenanceForPaidWork, validateCreativeProofCopyConsistency } from '@/lib/proof/provenance';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -43,6 +44,9 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     if (parentCopyMode.kind === 'INVALID') {
       throw new CreativeRevisionHydrationError('Saved creative has an invalid separated ad/image copy contract.', 409);
     }
+    const proofProvenance = parent.proofProvenance
+      ? await revalidateCreativeProofProvenanceForPaidWork(parent.proofProvenance)
+      : undefined;
     const storage = getMediaStorage();
     const sources = await hydrateSavedCreativeRevisionContext(parent, storage);
     const { planning, provenance } = sources.parent;
@@ -62,6 +66,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
           ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}), strategy: concept.strategy },
         operation: revision.operation, instruction: revision.instruction, companyContext,
         hasApprovedHumanSource: sources.originalApprovedSource !== null,
+        ...(proofProvenance ? { proofProvenance } : {}),
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}),
       });
       concept = plan.concept;
@@ -69,6 +74,12 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     }
     const conceptCopyMode = classifyCreativeCopyContract(concept as unknown as Record<string, unknown>);
     if (conceptCopyMode.kind === 'INVALID') throw new Error('Revision planner returned an invalid separated ad/image copy contract.');
+    if (proofProvenance) {
+      validateCreativeProofCopyConsistency(proofProvenance, {
+        copy: conceptCopyMode.copy,
+        ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
+      });
+    }
     const id = `creative_${randomUUID().replaceAll('-', '')}`;
     const instruction = 'instruction' in revision ? revision.instruction : undefined;
     let activeHumanRecordId = concept.strategy.approvedHumanId ?? null;
@@ -96,6 +107,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         strategy: concept.strategy },
       placement, companyProfile: revision.companyProfile,
       referenceCatalog: planning.referenceCatalog,
+      ...(proofProvenance ? { proofProvenance } : {}),
     });
     await validateGeneratedCreativeImage(imageResult.buffer, placement);
     const finalBuffer = sources.logoOverlay
@@ -106,6 +118,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       id, createdAt: new Date().toISOString(), image, category: concept.strategy.category,
       format: concept.format, placement, copy: conceptCopyMode.copy,
       ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
+      ...(proofProvenance ? { proofProvenance } : {}),
       identity,
       planning: { strategy: concept.strategy, selectionReason: concept.selectionReason, model: plannerModel, reasoningEffort: 'medium',
         ...((revision.operation === 'PLACEMENT' || revision.operation === 'REGENERATE') && planning.portfolioAudit ? { portfolioAudit: planning.portfolioAudit } : {}),
@@ -122,6 +135,9 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const [saved] = await saveCreativeBatch([record]);
     return NextResponse.json({ creative: saved }, { status: 201 });
   } catch (error) {
+    if (error instanceof ProofRevalidationError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     if (error instanceof CreativeRevisionHydrationError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

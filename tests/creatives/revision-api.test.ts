@@ -3,15 +3,17 @@ import { POST } from '@/app/api/creatives/[creativeId]/revise/route';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { CreativeRevisionHydrationError } from '@/lib/creatives/revision-source-hydration';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
+import { ProofRevalidationError } from '@/lib/proof/provenance';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn(), proof: vi.fn() }));
 vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.getOperatorAccess }));
 vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.requireOperatorQuota }));
 vi.mock('@/lib/creatives/storage', async importOriginal => ({ ...await importOriginal<object>(), listCreatives: mocks.list, saveCreativeBatch: mocks.save }));
+vi.mock('@/lib/proof/provenance', async importOriginal => ({ ...await importOriginal<object>(), revalidateCreativeProofProvenanceForPaidWork: mocks.proof }));
 vi.mock('@/lib/creatives/revision-source-hydration', async importOriginal => ({ ...await importOriginal<object>(), hydrateSavedCreativeRevisionContext: mocks.hydrate }));
 vi.mock('@/lib/creatives/generated-image-validation', async importOriginal => ({ ...await importOriginal<object>(), validateGeneratedCreativeImage: mocks.validate }));
 vi.mock('@/lib/ai/creative-revision-planner', () => ({ planCreativeRevision: mocks.plan }));
@@ -57,6 +59,47 @@ const e2Parent = (): CreativeRecord => {
   const adCopy = { primaryText: 'META_PRIMARY_SENTINEL_NEVER_IMAGE', headline: 'Meta headline', description: 'META_DESCRIPTION_SENTINEL_NEVER_IMAGE' };
   return { ...record, copy: adCopy, adCopy, imageCopy: { headline: 'IMAGE_HEADLINE_SENTINEL', cta: 'IMAGE_CTA_SENTINEL' } };
 };
+const proofParent = (): CreativeRecord => {
+  const record = e2Parent();
+  const selectedText = 'The representative explained every step clearly.';
+  const adCopy = {
+    ...record.adCopy!,
+    primaryText: [record.adCopy!.primaryText, selectedText, 'Verified TRA client'].join('\n\n'),
+  };
+  return {
+    ...record, copy: adCopy, adCopy,
+    imageCopy: { ...record.imageCopy!, proofAttribution: 'Verified TRA client' },
+    proofProvenance: {
+      version: 1,
+      type: 'review',
+      proofId: `proof_${'9'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T13:00:00.000Z',
+      selectedText,
+      attribution: 'Verified TRA client',
+    },
+  };
+};
+const caseStudyProofParent = (): CreativeRecord => {
+  const record = e2Parent();
+  const selectedText = 'Approved source-bound claim wording.';
+  const adCopy = {
+    ...record.adCopy!,
+    primaryText: [record.adCopy!.primaryText, selectedText, 'Results vary by circumstances.'].join('\n\n'),
+  };
+  return {
+    ...record, copy: adCopy, adCopy,
+    imageCopy: { ...record.imageCopy!, disclosure: 'Results vary by circumstances.' },
+    proofProvenance: {
+      version: 1,
+      type: 'case-study',
+      proofId: `proof_${'8'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T14:00:00.000Z',
+      selectedText,
+      usageRestrictions: 'Use only for bank-levy messaging.',
+      requiredDisclaimer: 'Results vary by circumstances.',
+    },
+  };
+};
 const call = (body: unknown, creativeId = parentId) => POST(new Request('http://localhost/api/creatives/revise', { method: 'POST', body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
 const hydrate = (record: CreativeRecord) => ({ parent: { record, identity: record.identity, planning: record.planning, provenance: record.generationProvenance }, canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId, sha256: 'c'.repeat(64) }, originalApprovedSource: null, logoOverlay: null });
 const hydrateGeneralizedHuman = (record: CreativeRecord) => ({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[]} });
@@ -64,6 +107,7 @@ beforeEach(() => {
   Object.values(mocks).forEach(mock => mock.mockReset());
   mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
   mocks.requireOperatorQuota.mockResolvedValue(null);
+  mocks.proof.mockImplementation(async proof => proof);
   const record = parent();
   mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrate(record));
   mocks.generate.mockImplementation(async ({ operation }) => ({
@@ -169,6 +213,154 @@ describe('saved creative revision API', () => {
     expect(mocks.save.mock.calls[0][0]).toHaveLength(1);
     await expect(mocks.list.mock.results[0].value).resolves.toEqual([original]);
   });
+  it.each(['EDIT', 'VARIATION', 'REGENERATE', 'PLACEMENT'] as const)('revalidates and preserves Proof provenance through %s before provider work', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]);
+    mocks.hydrate.mockResolvedValue(hydrate(original));
+    if (operation === 'EDIT' || operation === 'VARIATION') {
+      const changed = operation === 'VARIATION'
+        ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+        : strategy;
+      mocks.plan.mockResolvedValue({
+        concept: { index: 1, format: original.format, copy: original.copy, adCopy: original.adCopy, imageCopy: original.imageCopy, strategy: changed, selectionReason: 'Proof remains applicable.' },
+        plannerModel: 'gpt-6-astra', reasoningEffort: 'medium',
+      });
+    }
+    const response = await call({
+      operation,
+      ...((operation === 'EDIT' || operation === 'VARIATION') ? { instruction: 'Keep the approved proof while revising the execution.' } : {}),
+      ...(operation === 'PLACEMENT' ? { placement: 'PORTRAIT_4_5' } : {}),
+    });
+    const { creative } = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(mocks.proof).toHaveBeenCalledWith(original.proofProvenance);
+    expect(mocks.proof.mock.invocationCallOrder[0]).toBeLessThan(mocks.generate.mock.invocationCallOrder[0]);
+    if (operation === 'EDIT' || operation === 'VARIATION') {
+      expect(mocks.proof.mock.invocationCallOrder[0]).toBeLessThan(mocks.plan.mock.invocationCallOrder[0]);
+      expect(mocks.plan.mock.calls[0][0].proofProvenance).toEqual(original.proofProvenance);
+    }
+    expect(mocks.generate.mock.calls[0][0].proofProvenance).toEqual(original.proofProvenance);
+    expect(creative.proofProvenance).toEqual(original.proofProvenance);
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when inherited Review attribution is changed or removed', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: original.copy, adCopy: original.adCopy,
+      imageCopy: operation === 'EDIT'
+        ? { headline: original.imageCopy!.headline, cta: original.imageCopy!.cta }
+        : { ...original.imageCopy!, proofAttribution: 'Changed attribution' },
+      strategy: changed, selectionReason: 'Invalid proof edit.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Change the proof presentation.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when inherited selected Proof text is changed or removed', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    const adCopy = { ...original.adCopy!, primaryText: operation === 'EDIT' ? 'Rewritten testimonial.' : 'Different claim.' };
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: adCopy, adCopy, imageCopy: original.imageCopy,
+      strategy: changed, selectionReason: 'Invalid proof rewrite.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Rewrite the proof.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when text is appended after the inherited D2 Proof block', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    const adCopy = {
+      ...original.adCopy!,
+      primaryText: `${original.adCopy!.primaryText}\n\nExtra proof-derived wording.`,
+    };
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: adCopy, adCopy, imageCopy: original.imageCopy,
+      strategy: changed, selectionReason: 'Invalid proof expansion.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Expand the proof wording.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when inherited Case Study disclaimer is changed or removed', async operation => {
+    const original = caseStudyProofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: original.copy, adCopy: original.adCopy,
+      imageCopy: operation === 'EDIT'
+        ? { headline: original.imageCopy!.headline, cta: original.imageCopy!.cta }
+        : { ...original.imageCopy!, disclosure: 'Changed disclaimer.' },
+      strategy: changed, selectionReason: 'Invalid disclaimer edit.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Change the disclaimer.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('blocks a revoked historical Proof before revision planning, hydration, image provider, or saving', async () => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]);
+    mocks.proof.mockRejectedValue(new ProofRevalidationError(
+      'Selected Proof must be reselected before paid rendering or revision: advertising use is no longer approved.'
+    ));
+
+    const response = await call({ operation: 'EDIT', instruction: 'Refresh this creative.' });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'Selected Proof must be reselected before paid rendering or revision: advertising use is no longer approved.',
+    });
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(original.proofProvenance).toEqual(proofParent().proofProvenance);
+  });
+
+  it('does not fabricate or revalidate Proof provenance for legacy no-Proof revisions', async () => {
+    const response = await call({ operation: 'REGENERATE' });
+    const { creative } = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(mocks.proof).not.toHaveBeenCalled();
+    expect(creative).not.toHaveProperty('proofProvenance');
+  });
+
   it.each(['REGENERATE', 'PLACEMENT'] as const)('preserves separated E2 copy through saved %s revisions', async operation => {
     const original = e2Parent();
     mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));

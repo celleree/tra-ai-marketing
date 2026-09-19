@@ -19,6 +19,7 @@ import {
 } from '@/lib/creatives/human-review';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import { parseCreativeProofProvenance } from '@/lib/proof/provenance';
 import {
   parseCreativeIdentity,
   validateCreativeIdentityTransition,
@@ -104,6 +105,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
   const planning = parseCreativePlanning(record.planning);
   const generationProvenance = parseCreativeGenerationProvenance(record.generationProvenance);
+  const proofProvenance = parseCreativeProofProvenance(record.proofProvenance);
   const identity = parseCreativeIdentity(record.identity, id);
   const humanReview = parseCreativeHumanReview(record.humanReview);
   const lifecycle = parseCreativeLifecycle(record.lifecycle);
@@ -141,6 +143,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     || (record.videoFrameSelection !== undefined && !videoFrameSelection)
     || (record.planning !== undefined && !planning)
     || (record.generationProvenance !== undefined && !generationProvenance)
+    || (record.proofProvenance !== undefined && !proofProvenance)
     || (record.identity !== undefined && !identity)
     || (record.humanReview !== undefined && !humanReview)
     || (record.lifecycle !== undefined && !lifecycle)
@@ -168,6 +171,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
     ...(planning ? { planning } : {}),
     ...(generationProvenance ? { generationProvenance } : {}),
+    ...(proofProvenance ? { proofProvenance } : {}),
     ...(identity ? { identity } : {}),
     ...(humanReview ? { humanReview } : {}),
     ...(lifecycle ? { lifecycle } : {}),
