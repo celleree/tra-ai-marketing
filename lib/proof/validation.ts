@@ -170,12 +170,6 @@ export const isVerbatimReviewExcerpt = (
   return false;
 };
 
-export const reviewSourceBoundUnits = (originalReviewText: string) =>
-  originalReviewText
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(Boolean);
-
 export function requireVerbatimReviewExcerpt(
   originalReviewText: string,
   excerpt: string
