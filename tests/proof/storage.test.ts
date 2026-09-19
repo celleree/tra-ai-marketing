@@ -80,8 +80,10 @@ describe('Proof Library storage', () => {
     const linked = await mutateVideoPassageCandidate(first.id, 'link', approved.id);
     expect(linked).toMatchObject({ status: 'LINKED', link: { proofId: approved.id, proofType: 'review', proofUpdatedAt: approved.updatedAt } });
     expect(JSON.parse(stored).items[0]).toEqual(approved);
-    stored = candidateIndex([{ ...approved, advertisingUseApproved: false }], [linked]);
+    stored = candidateIndex([{ ...approved, advertisingUseApproved: false, updatedAt: '2026-09-10T13:00:00.000Z' }], [linked]);
     await expect(getProofLibrarySnapshot()).resolves.toMatchObject({ candidates: [{ id: first.id, linkHealth: 'UNAPPROVED' }] });
+    stored = candidateIndex([{ ...approved, status: 'INACTIVE', updatedAt: '2026-09-10T13:00:00.000Z' }], [linked]);
+    await expect(getProofLibrarySnapshot()).resolves.toMatchObject({ candidates: [{ id: first.id, linkHealth: 'INACTIVE' }] });
     await expect(mutateVideoPassageCandidate(first.id, 'dismiss')).resolves.toMatchObject({ status: 'DISMISSED' });
     await expect(mutateVideoPassageCandidate(first.id, 'reopen')).resolves.toMatchObject({ status: 'PENDING' });
     await expect(mutateVideoPassageCandidate(first.id, 'link', approved.id)).rejects.toThrow('not currently eligible');

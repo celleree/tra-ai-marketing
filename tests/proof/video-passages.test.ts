@@ -34,6 +34,7 @@ describe('Video Passage Candidate API', () => {
 
   it.each([
     ['source hash drift', () => mocks.current.mockResolvedValue({ locator: { ...locator, sourceVideoContentHash: 'f'.repeat(64) } }), { locator, startSegmentIndex: 0, endSegmentIndex: 0 }, 409],
+    ['analyzer identity drift', () => mocks.current.mockResolvedValue({ locator: { ...locator, analyzerFingerprintSha256: 'e'.repeat(64) } }), { locator, startSegmentIndex: 0, endSegmentIndex: 0 }, 409],
     ['invalid range', () => undefined, { locator, startSegmentIndex: 0, endSegmentIndex: 2 }, 400],
     ['incomplete job', () => mocks.resolve.mockResolvedValue({ identity: {}, job: { phase: 'OBSERVING' } }), { locator, startSegmentIndex: 0, endSegmentIndex: 0 }, 409],
   ])('fails closed for %s', async (_name, setup, body, status) => { setup(); expect((await route.POST(request('POST', body))).status).toBe(status); expect(mocks.upsert).not.toHaveBeenCalled(); });

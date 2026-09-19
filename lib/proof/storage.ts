@@ -280,9 +280,10 @@ const linkHealth = (candidate: VideoPassageCandidate, items: ProofRecord[]): Vid
   if (!candidate.link) return 'UNLINKED';
   const proof = items.find((item) => item.id === candidate.link!.proofId);
   if (!proof) return 'MISSING';
-  if (proof.type !== candidate.link.proofType || proof.updatedAt !== candidate.link.proofUpdatedAt) return 'CHANGED';
+  if (proof.type !== candidate.link.proofType) return 'CHANGED';
   if (proof.status !== 'ACTIVE') return 'INACTIVE';
-  return proof.advertisingUseApproved === true ? 'CURRENT' : 'UNAPPROVED';
+  if (proof.advertisingUseApproved !== true) return 'UNAPPROVED';
+  return proof.updatedAt === candidate.link.proofUpdatedAt ? 'CURRENT' : 'CHANGED';
 };
 
 export const getProofLibrarySnapshot = async (): Promise<{ items: ProofRecord[]; candidates: VideoPassageCandidateView[] }> => {
