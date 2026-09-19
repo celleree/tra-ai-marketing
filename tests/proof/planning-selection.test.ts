@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanningCaseStudyProof, PlanningReviewProof } from '@/lib/proof/planning';
 import {
+  composePlanningCopyWithProof,
   hydratePlanningProofSelection,
   isSelectedPlanningProof,
 } from '@/lib/proof/planning-selection';
@@ -30,7 +31,7 @@ const caseStudy = (
 });
 
 describe('planning proof selection', () => {
-  it('hydrates exact contiguous Review excerpts including multiline text', () => {
+  it('hydrates exact Review text on whole review-line boundaries', () => {
     const source = review();
     const selectedText = 'First exact line.\nSecond exact line.';
     expect(hydratePlanningProofSelection({
@@ -51,7 +52,7 @@ describe('planning proof selection', () => {
     'First exact line. Second exact line.',
     'First exact line.\nThird exact line.',
     'First exact line.\nSecond rewritten line.',
-  ])('rejects rewritten or noncontiguous Review text: %j', selectedText => {
+  ])('rejects clipped, rewritten, or noncontiguous Review text: %j', selectedText => {
     const source = review();
     expect(() => hydratePlanningProofSelection({
       type: 'review',
@@ -62,83 +63,33 @@ describe('planning proof selection', () => {
     }, [source])).toThrow();
   });
 
-  it('rejects model-supplied attribution when no Proof is selected', () => {
-    expect(() => hydratePlanningProofSelection(null, [review()], 'Jane D.')).toThrow(
-      'requires an attributed Review selection'
-    );
-  });
-
-  it('rejects Review-style attribution for a Case Study selection', () => {
-    const source = caseStudy();
-    expect(() => hydratePlanningProofSelection({
-      type: 'case-study',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: source.approvedClaimWording,
-    }, [source], 'Jane D.')).toThrow('cannot include Review attribution');
-  });
-
-  it('rejects exact canonical attribution when Review attribution was not selected', () => {
+  it('hydrates approved Review attribution from the record instead of model copy', () => {
     const source = review();
-    expect(() => hydratePlanningProofSelection({
+    expect(hydratePlanningProofSelection({
       type: 'review',
       proofId: source.id,
       proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
-      includeAttribution: false,
-    }, [source], 'Jane D.')).toThrow('not selected for inclusion');
-  });
-
-  it('rejects noncanonical attribution when Review attribution was not selected', () => {
-    const source = review();
-    expect(() => hydratePlanningProofSelection({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
-      includeAttribution: false,
-    }, [source], 'Model supplied name')).toThrow('not selected for inclusion');
-  });
-
-  it('rejects supplied attribution when the selected Review has no approved attribution', () => {
-    const source = review({ attribution: undefined });
-    expect(() => hydratePlanningProofSelection({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
+      selectedText: source.originalReviewText,
       includeAttribution: true,
-    }, [source], 'Jane D.')).toThrow('not approved');
-  });
-
-  it('accepts only exact canonical approved Review attribution and hydrates it', () => {
-    const source = review();
-    const selection = {
+    }, [source])).toEqual({
       type: 'review',
       proofId: source.id,
       proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
-      includeAttribution: true,
-    };
-    expect(hydratePlanningProofSelection(selection, [source], 'Jane D.')).toEqual({
-      type: 'review',
-      proofId: source.id,
-      proofUpdatedAt: source.updatedAt,
-      selectedText: 'Second exact line.',
+      selectedText: source.originalReviewText,
       attribution: 'Jane D.',
     });
-    expect(() => hydratePlanningProofSelection(selection, [source], 'Jane')).toThrow(
-      'canonical approved text'
-    );
-    expect(() => hydratePlanningProofSelection(selection, [source], ' Jane D. ')).toThrow(
-      'canonical approved text'
-    );
-    expect(() => hydratePlanningProofSelection(selection, [source])).toThrow(
-      'canonical approved text'
-    );
+
+    const noAttribution = review({ attribution: undefined });
+    expect(() => hydratePlanningProofSelection({
+      type: 'review',
+      proofId: noAttribution.id,
+      proofUpdatedAt: noAttribution.updatedAt,
+      selectedText: noAttribution.originalReviewText,
+      includeAttribution: true,
+    }, [noAttribution])).toThrow('not approved');
   });
 
-  it('requires exact Case Study approved wording and hydrates restrictions/disclaimer', () => {
+  it('requires exact Case Study wording and hydrates restrictions/disclaimer', () => {
     const source = caseStudy();
     expect(hydratePlanningProofSelection({
       type: 'case-study',
@@ -169,7 +120,7 @@ describe('planning proof selection', () => {
         type: 'review',
         proofId: source.id,
         proofUpdatedAt: source.updatedAt,
-        selectedText: 'Second exact line.',
+        selectedText: source.originalReviewText,
         includeAttribution: false,
       };
       if (problem === 'unknown') selection.proofId = `proof_${'f'.repeat(32)}`;
@@ -182,6 +133,85 @@ describe('planning proof selection', () => {
       );
     }
   );
+
+  it('appends exact Review Proof after normal primary text and owns attribution', () => {
+    const source = review();
+    const selected = hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.originalReviewText,
+      includeAttribution: true,
+    }, [source]);
+
+    expect(composePlanningCopyWithProof(
+      selected,
+      { primaryText: 'Normal AI-written copy.', headline: 'Headline', description: '' },
+      {
+        headline: 'Image headline',
+        shortSupport: 'Support',
+        proofAttribution: 'MODEL SHOULD NOT CONTROL THIS',
+        disclosure: 'General disclosure',
+      }
+    )).toEqual({
+      adCopy: {
+        primaryText: `Normal AI-written copy.\n\n${source.originalReviewText}\n\nJane D.`,
+        headline: 'Headline',
+        description: '',
+      },
+      imageCopy: {
+        headline: 'Image headline',
+        shortSupport: 'Support',
+        proofAttribution: 'Jane D.',
+        disclosure: 'General disclosure',
+      },
+    });
+  });
+
+  it('appends exact Case Study Proof and required disclaimer deterministically', () => {
+    const source = caseStudy();
+    const selected = hydratePlanningProofSelection({
+      type: 'case-study',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.approvedClaimWording,
+    }, [source]);
+
+    expect(composePlanningCopyWithProof(
+      selected,
+      { primaryText: 'Normal AI-written copy.', headline: 'Headline', description: '' },
+      {
+        headline: 'Image headline',
+        proofAttribution: 'MODEL ATTRIBUTION',
+        disclosure: 'MODEL DISCLOSURE',
+      }
+    )).toEqual({
+      adCopy: {
+        primaryText: `Normal AI-written copy.\n\n${source.approvedClaimWording}\n\n${source.requiredDisclaimer}`,
+        headline: 'Headline',
+        description: '',
+      },
+      imageCopy: {
+        headline: 'Image headline',
+        disclosure: source.requiredDisclaimer,
+      },
+    });
+  });
+
+  it('leaves normal copy alone when no Proof is selected and strips proof attribution', () => {
+    expect(composePlanningCopyWithProof(
+      null,
+      { primaryText: 'Normal copy.', headline: 'Headline', description: '' },
+      {
+        headline: 'Image headline',
+        proofAttribution: 'UNBOUND ATTRIBUTION',
+        disclosure: 'General disclosure',
+      }
+    )).toEqual({
+      adCopy: { primaryText: 'Normal copy.', headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline', disclosure: 'General disclosure' },
+    });
+  });
 
   it('accepts null and persisted shapes without exposing source-only Case Study facts', () => {
     expect(hydratePlanningProofSelection(null, [review(), caseStudy()])).toBeNull();

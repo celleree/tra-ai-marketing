@@ -3,7 +3,10 @@ import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
-import { hydratePlanningProofSelection } from '@/lib/proof/planning-selection';
+import {
+  composePlanningCopyWithProof,
+  hydratePlanningProofSelection,
+} from '@/lib/proof/planning-selection';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { approvedHumanSourceId, isApprovedHumanId, parseApprovedHumanSourceId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
@@ -30,7 +33,7 @@ ${TAX_DOCUMENT_PLANNING_GUIDANCE}
 Consider alternatives internally; return the strongest concepts first. Select distinct fits to approved TRA context, without performance predictions or calling concepts likely winners.
 The SO WHAT outcome chain must directly shape both Meta adCopy and imageCopy plus visualDirection for every concept.
 Write adCopy and imageCopy separately. adCopy is normal Meta delivery copy: primaryText, headline and description. imageCopy contains only text intentionally rendered inside the creative: a concise headline plus optional shortSupport, proofAttribution, cta and disclosure.
-Keep imageCopy as sparse as the planned/reference text density allows. Omit shortSupport and cta when unnecessary. Never add supporting copy merely to fill space. Simple visual concepts should remain simple. proofAttribution may only repeat explicitly approved attribution supplied in approved company context or the supplied proofCatalog; otherwise set it to null. disclosure is only for an actually applicable required disclosure; otherwise set it to null. Never move Meta primaryText or Meta description into imageCopy merely because those fields exist in adCopy.
+Keep imageCopy as sparse as the planned/reference text density allows. Omit shortSupport and cta when unnecessary. Never add supporting copy merely to fill space. Simple visual concepts should remain simple. Set proofAttribution to null; the application owns Proof attribution. disclosure is only for an actually applicable non-Proof disclosure; Case Study required disclaimers are inserted by the application. Never move Meta primaryText or Meta description into imageCopy merely because those fields exist in adCopy.
 Plan proposition first: angle is strategic framing; proposition is the particular reason to care or act, not a category. Connect mainMessage and objection (null if none) to painPoint, emotion, awareness and SO WHAT.
 Make visualArchetype, visualMechanism, subject and environment explicit and consistent with execution. Specify the mechanism making the proposition visible and exact subjects/props; a graphic field is an environment. These directions never add copy or evidence.
 Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Avoid default desks, paper or next-step messaging.
@@ -38,7 +41,7 @@ Plan globally distinct problem/outcome framings, objections, emotions, awareness
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
-proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. Review originalReviewText is exact source text: selectedText must be one contiguous verbatim excerpt and must never be rewritten, summarized, merged, or fabricated. Set includeAttribution true only when that Review record includes approved attribution, and then imageCopy.proofAttribution must exactly match its supplied display text. For Case Studies, selectedText must exactly equal approvedClaimWording; never broaden it into a universal outcome. Obey usageRestrictions and requiredDisclaimer. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
+proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Write the normal adCopy and imageCopy around the idea; do not rewrite, paraphrase, or manually place Proof wording. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. The application inserts the selected Proof text after the normal primaryText and fills approved attribution or required Case Study disclaimer deterministically. Review selectedText must use exact source wording bounded by whole review-line boundaries. Set includeAttribution true only when that Review record includes approved attribution. For Case Studies, selectedText must exactly equal approvedClaimWording. Obey usageRestrictions. Set imageCopy.proofAttribution to null; the application owns approved Review attribution. If a Case Study has a requiredDisclaimer, the application owns that exact disclosure. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, proof attribution, or other evidence.
 Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
 Do not restrict concepts to the analysis category.
@@ -154,15 +157,21 @@ const parseConcept = (
   };
   let selectedProof;
   try {
-    selectedProof = hydratePlanningProofSelection(
-      value.proofSelection,
-      proofCatalog,
-      typeof rawProofAttribution === 'string' ? rawProofAttribution : undefined
-    );
+    selectedProof = hydratePlanningProofSelection(value.proofSelection, proofCatalog);
   } catch {
     return null;
   }
-  return { index: expectedIndex, format: value.format, copy: adCopy, adCopy, imageCopy, selectedProof, strategy, selectionReason };
+  const composed = composePlanningCopyWithProof(selectedProof, adCopy, imageCopy);
+  return {
+    index: expectedIndex,
+    format: value.format,
+    copy: composed.adCopy,
+    adCopy: composed.adCopy,
+    imageCopy: composed.imageCopy,
+    selectedProof,
+    strategy,
+    selectionReason,
+  };
 };
 
 export type CreativeBatchPlannerArgs = {

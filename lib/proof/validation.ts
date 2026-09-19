@@ -132,10 +132,43 @@ export function parseCaseStudyProofDraft(
   };
 }
 
+const horizontalWhitespace = (character: string | undefined) =>
+  character === ' ' || character === '\t';
+const lineBreak = (character: string | undefined) =>
+  character === '\n' || character === '\r';
+
+const sourceBoundLineStart = (source: string, start: number) => {
+  if (start === 0) return true;
+  let cursor = start - 1;
+  while (cursor >= 0 && horizontalWhitespace(source[cursor])) cursor -= 1;
+  return cursor < 0 || lineBreak(source[cursor]);
+};
+
+const sourceBoundLineEnd = (source: string, end: number) => {
+  if (end === source.length) return true;
+  let cursor = end;
+  while (cursor < source.length && horizontalWhitespace(source[cursor])) cursor += 1;
+  return cursor === source.length || lineBreak(source[cursor]);
+};
+
 export const isVerbatimReviewExcerpt = (
   originalReviewText: string,
   excerpt: string
-) => excerpt.length > 0 && originalReviewText.includes(excerpt);
+) => {
+  if (!excerpt.length) return false;
+  let start = originalReviewText.indexOf(excerpt);
+  while (start !== -1) {
+    const end = start + excerpt.length;
+    if (
+      sourceBoundLineStart(originalReviewText, start)
+      && sourceBoundLineEnd(originalReviewText, end)
+    ) {
+      return true;
+    }
+    start = originalReviewText.indexOf(excerpt, start + 1);
+  }
+  return false;
+};
 
 export function requireVerbatimReviewExcerpt(
   originalReviewText: string,
@@ -143,7 +176,7 @@ export function requireVerbatimReviewExcerpt(
 ) {
   if (!isVerbatimReviewExcerpt(originalReviewText, excerpt)) {
     throw new Error(
-      'Review excerpt must be a contiguous exact substring of the original review.'
+      'Review excerpt must be exact source text bounded by whole review-line boundaries.'
     );
   }
   return excerpt;
