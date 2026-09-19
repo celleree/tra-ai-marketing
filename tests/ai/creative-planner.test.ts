@@ -246,16 +246,20 @@ describe('creative batch planner', () => {
     });
   });
 
-  it('rejects model-supplied proof attribution even when optional-text parsing would trim it away', async () => {
+  it('strips model-supplied proof attribution when no Proof is selected', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
-    const invalid = { ...concept(1), imageCopy: { ...concept(1).imageCopy, proofAttribution: '   ' } };
-    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [invalid, concept(2)] })));
-    await expect(requestCreativeBatch({
+    const first = {
+      ...concept(1),
+      imageCopy: { ...concept(1).imageCopy, proofAttribution: 'MODEL VALUE' },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [first, concept(2)] })));
+    const result = await requestCreativeBatch({
       count: 2,
       context: '',
       analysis,
       hasApprovedHumanSource: false,
-    })).rejects.toThrow(/invalid creative batch plan/i);
+    });
+    expect(result.creatives[0].imageCopy).not.toHaveProperty('proofAttribution');
   });
 
   it('selects a known library human independently per concept without a fixed ratio', async () => {

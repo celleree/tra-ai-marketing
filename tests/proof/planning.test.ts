@@ -207,8 +207,8 @@ describe('Proof planning retrieval', () => {
       .toEqual([approvedCase.id, approvedReview.id]);
     expect(JSON.stringify(input.proofCatalog)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
     expect(JSON.stringify(input.proofCatalog)).not.toContain(legacy.id);
-    expect(body.input[0].content[0].text).toContain('selectedText must be one contiguous verbatim excerpt');
-    expect(body.input[0].content[0].text).toContain('never broaden it into a universal outcome');
+    expect(body.input[0].content[0].text).toContain('application inserts the selected Proof text after the normal primaryText');
+    expect(body.input[0].content[0].text).toContain('Set imageCopy.proofAttribution to null');
   });
   it('fails the whole planner response closed when a selection is not valid for that call catalog', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
@@ -234,6 +234,46 @@ describe('Proof planning retrieval', () => {
       analysis,
       hasApprovedHumanSource: false,
     })).rejects.toThrow('invalid creative batch plan concept');
+  });
+
+  it('keeps normal AI copy and inserts selected Review text plus canonical attribution server-side', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const source = review('a', {
+      originalReviewText: 'Clear explanations.\nNo pressure.',
+      attribution: { display: 'Sam R.', allowed: true },
+    });
+    listProofRecordsMock.mockResolvedValue([source]);
+    const selected = {
+      type: 'review' as const,
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.originalReviewText,
+      includeAttribution: true,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [
+      {
+        ...concept(1),
+        imageCopy: { ...concept(1).imageCopy, proofAttribution: 'MODEL VALUE' },
+        proofSelection: selected,
+      },
+      concept(2),
+    ] })));
+
+    const batchPlan = await requestCreativeBatch({
+      count: 2,
+      context: 'Planner context',
+      proofRetrievalQuery: 'bank levy',
+      analysis,
+      hasApprovedHumanSource: false,
+    });
+
+    expect(batchPlan.creatives[0].adCopy?.primaryText).toBe(
+      `Primary 1\n\n${source.originalReviewText}\n\nSam R.`
+    );
+    expect(batchPlan.creatives[0].copy.primaryText).toBe(
+      batchPlan.creatives[0].adCopy?.primaryText
+    );
+    expect(batchPlan.creatives[0].imageCopy?.proofAttribution).toBe('Sam R.');
   });
 
   it('hydrates an attributed Review selection into durable ready-to-render state without changing it', async () => {
@@ -299,6 +339,15 @@ describe('Proof planning retrieval', () => {
       requiredDisclaimer: source.requiredDisclaimer,
     });
     expect(JSON.stringify(batchPlan.creatives[0].selectedProof)).not.toContain('SOURCE_ONLY_VERIFIED_FACT');
+    expect(batchPlan.creatives[0].adCopy?.primaryText).toBe(
+      `Primary 1\n\n${source.approvedClaimWording}\n\n${source.requiredDisclaimer}`
+    );
+    expect(batchPlan.creatives[0].copy.primaryText).toBe(
+      batchPlan.creatives[0].adCopy?.primaryText
+    );
+    expect(batchPlan.creatives[0].imageCopy?.disclosure).toBe(source.requiredDisclaimer);
+    expect(batchPlan.creatives[0].imageCopy?.proofAttribution).toBeUndefined();
+
 
     const job = newCreativePortfolio({ ...portfolioRequest(), proofRetrievalQuery });
     job.planning = {

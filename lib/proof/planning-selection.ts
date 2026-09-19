@@ -1,3 +1,4 @@
+import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import type { PlanningProofRecord } from '@/lib/proof/planning';
 import {
   isApprovedCaseStudyClaim,
@@ -42,15 +43,9 @@ const isoDate = (value: unknown): value is string =>
 
 export function hydratePlanningProofSelection(
   value: unknown,
-  proofCatalog: readonly PlanningProofRecord[],
-  imageProofAttribution?: string
+  proofCatalog: readonly PlanningProofRecord[]
 ): SelectedPlanningProof | null {
-  if (value === null) {
-    if (imageProofAttribution !== undefined) {
-      throw new Error('Proof attribution requires an attributed Review selection.');
-    }
-    return null;
-  }
+  if (value === null) return null;
   if (!isRecord(value) || typeof value.type !== 'string') {
     throw new Error('Proof selection is malformed.');
   }
@@ -81,9 +76,6 @@ export function hydratePlanningProofSelection(
       if (proof.attribution?.allowed !== true) {
         throw new Error('Review proof attribution is not approved.');
       }
-      if (imageProofAttribution !== proof.attribution.display) {
-        throw new Error('Review proof attribution must match canonical approved text.');
-      }
       return {
         type: 'review',
         proofId: proof.id,
@@ -93,9 +85,6 @@ export function hydratePlanningProofSelection(
       };
     }
 
-    if (imageProofAttribution !== undefined) {
-      throw new Error('Review proof attribution was not selected for inclusion.');
-    }
     return {
       type: 'review',
       proofId: proof.id,
@@ -118,9 +107,6 @@ export function hydratePlanningProofSelection(
     if (!isApprovedCaseStudyClaim(proof.approvedClaimWording, value.selectedText)) {
       throw new Error('Case Study proof selection must use exact approved wording.');
     }
-    if (imageProofAttribution !== undefined) {
-      throw new Error('Case Study proof selections cannot include Review attribution.');
-    }
     return {
       type: 'case-study',
       proofId: proof.id,
@@ -136,6 +122,47 @@ export function hydratePlanningProofSelection(
   }
 
   throw new Error('Proof selection type is unsupported.');
+}
+
+export function composePlanningCopyWithProof(
+  selectedProof: SelectedPlanningProof | null,
+  adCopy: CreativeAdCopy,
+  imageCopy: CreativeImageCopy
+): { adCopy: CreativeAdCopy; imageCopy: CreativeImageCopy } {
+  const {
+    proofAttribution: _modelProofAttribution,
+    ...baseImageCopy
+  } = imageCopy;
+
+  if (!selectedProof) {
+    return { adCopy, imageCopy: baseImageCopy };
+  }
+
+  const proofBlock = [
+    selectedProof.selectedText,
+    ...(selectedProof.type === 'review' && selectedProof.attribution
+      ? [selectedProof.attribution]
+      : []),
+    ...(selectedProof.type === 'case-study' && selectedProof.requiredDisclaimer
+      ? [selectedProof.requiredDisclaimer]
+      : []),
+  ];
+
+  return {
+    adCopy: {
+      ...adCopy,
+      primaryText: [adCopy.primaryText.trim(), ...proofBlock].join('\n\n'),
+    },
+    imageCopy: {
+      ...baseImageCopy,
+      ...(selectedProof.type === 'review' && selectedProof.attribution
+        ? { proofAttribution: selectedProof.attribution }
+        : {}),
+      ...(selectedProof.type === 'case-study' && selectedProof.requiredDisclaimer
+        ? { disclosure: selectedProof.requiredDisclaimer }
+        : {}),
+    },
+  };
 }
 
 export function isSelectedPlanningProof(value: unknown): value is SelectedPlanningProof {
