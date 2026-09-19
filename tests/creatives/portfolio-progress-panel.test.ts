@@ -108,6 +108,28 @@ describe('portfolio progress panel', () => {
     expect(stopped).toContain('Resume generation');
   });
 
+  it('treats terminal video preparation failure as attention, not resumable planning', () => {
+    const html = renderPanel({
+      videoPreparation: { total: 1, completed: 0, phase: 'FAILED', busy: false },
+    }).html;
+    expect(html).toContain('Generation needs attention.');
+    expect(html).toContain('Preparation failed');
+    expect(html).not.toContain('Ready to resume planning');
+    expect(html).not.toContain('Resume generation');
+  });
+
+  it('shows completion after Stop when the final in-flight creative saves', () => {
+    const html = renderPanel({
+      count: 2,
+      planReady: true,
+      stopped: true,
+      statuses: ['SAVED', 'SAVED'],
+    }).html;
+    expect(html).toContain('Generation complete.');
+    expect(html).not.toContain('Generation stopped. Saved progress is preserved.');
+    expect(html).not.toContain('Resume generation');
+  });
+
   it('keeps Resume and paid-work Retry explicit after failures', () => {
     const { html } = renderPanel({
       count: 2,
