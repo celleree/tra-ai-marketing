@@ -17,15 +17,18 @@ export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<ty
   const savedCount = job.slots.filter(slot => slot.status === 'SAVED').length;
   const failed = job.slots.filter(slot => slot.status === 'RETRY_REQUIRED');
   const complete = savedCount === job.requestedCount;
-  const hasFailure = Boolean(job.planningError) || failed.length > 0;
+  const videoFailed = job.videoPreparation?.phase === 'FAILED';
+  const hasFailure = Boolean(job.planningError) || failed.length > 0 || videoFailed;
+  const retryFailure = Boolean(job.planningError) || failed.length > 0;
   const preparingVideo = Boolean(job.videoPreparation && activeVideoPhases.has(job.videoPreparation.phase));
 
-  const status = portfolio.stopped
-    ? portfolio.running ? 'Stopping after current work…' : 'Generation stopped. Saved progress is preserved.'
-    : portfolio.running
-      ? preparingVideo ? 'Preparing video sources…'
-        : job.planReady ? 'Generating creatives…' : `Planning ${job.requestedCount} creatives…`
-      : complete ? 'Generation complete.'
+  const status = !portfolio.running && complete
+    ? 'Generation complete.'
+    : portfolio.stopped
+      ? portfolio.running ? 'Stopping after current work…' : 'Generation stopped. Saved progress is preserved.'
+      : portfolio.running
+        ? preparingVideo ? 'Preparing video sources…'
+          : job.planReady ? 'Generating creatives…' : `Planning ${job.requestedCount} creatives…`
         : hasFailure ? 'Generation needs attention.'
           : job.planReady ? 'Ready to resume generation.' : `Ready to resume planning ${job.requestedCount} creatives.`;
 
@@ -56,7 +59,7 @@ export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<ty
       <a href={`?portfolio=${job.id}`} target="_blank" rel="noreferrer">Open saved portfolio</a>
     </div>
 
-    {hasFailure ? <div className={styles.failures} aria-live="polite">
+    {retryFailure ? <div className={styles.failures} aria-live="polite">
       <p>Retrying failed work may make another paid call.</p>
       {job.planningError ? <p>{job.planningError} <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease)}
         onClick={() => void portfolio.retry(null)}>Retry planning</button></p> : null}
