@@ -81,6 +81,9 @@ By default:
 
 ## Risk and review
 
+**Review realism:** TRA is an internal trusted-user tool. Review defects that are realistically reachable through normal use, ordinary operator mistakes, expected application/API/model flows, retries, partial failures, or plausible persisted state. Do not fail work solely for contrived adversarial cases that require intentional human bypass, manual data corruption, abnormal internal requests, or deliberate exploitation. This does not relax strict review of auth/authz, secrets/security, compliance and Proof/provenance, publishing/spend, destructive actions, production-data integrity, realistic data-loss risks, or other hard safety invariants. A material finding should identify a realistic path by which the failure can occur.
+
+Detailed review rules live in `docs/agent-workflow.md`.
 - LOW: docs/copy/simple styling/additive tests or similarly contained reversible work.
 - MEDIUM: runtime/business logic, APIs, data mappings, storage/creative behavior, external integrations, meaningful dependencies/infrastructure.
 - HIGH: ad spend/publishing, Meta mutation, auth/authz, secrets/security boundaries, destructive production operations, production data/assets/storage, billing, or weakened safeguards.
