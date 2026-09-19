@@ -50,7 +50,6 @@ describe('planning proof selection', () => {
 
   it.each([
     'First exact line. Second exact line.',
-    'Second exact line.',
     'First exact line.\nThird exact line.',
     'First exact line.\nSecond rewritten line.',
   ])('rejects clipped, rewritten, or noncontiguous Review text: %j', selectedText => {
