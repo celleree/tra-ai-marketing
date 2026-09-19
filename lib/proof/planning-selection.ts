@@ -131,7 +131,6 @@ export function composePlanningCopyWithProof(
 ): { adCopy: CreativeAdCopy; imageCopy: CreativeImageCopy } {
   const {
     proofAttribution: _modelProofAttribution,
-    disclosure: _modelDisclosure,
     ...baseImageCopy
   } = imageCopy;
 
