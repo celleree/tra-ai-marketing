@@ -156,6 +156,16 @@ function validateCurrentProof(
     return ineligible('the Proof version changed.');
   }
 
+  if (
+    snapshot.type === 'review' &&
+    current.type === 'review' &&
+    snapshot.attribution !== undefined &&
+    (current.attribution?.allowed !== true ||
+      current.attribution.display !== snapshot.attribution)
+  ) {
+    return ineligible('the Review attribution is no longer permitted.');
+  }
+
   let hydrated: SelectedPlanningProof | null;
   try {
     hydrated = hydratePlanningProofSelection(
