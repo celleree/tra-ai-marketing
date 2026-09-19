@@ -259,9 +259,27 @@ const materialPhrase = (tokens: ProofToken[]) => {
     || tokens.map(token => token.key).join('').replace(/[^a-z0-9]/g, '').length >= 12;
 };
 
+const addShortOutcomeFingerprints = (
+  tokens: readonly ProofToken[],
+  fingerprints: Set<string>
+) => {
+  for (let contextIndex = 0; contextIndex < tokens.length; contextIndex += 1) {
+    const context = tokens[contextIndex];
+    if (context.numeric || !MATERIAL_OUTCOME_CONTEXT_TOKENS.has(context.key)) continue;
+    const lastOutcomeIndex = Math.min(tokens.length - 1, contextIndex + 4);
+    for (let outcomeIndex = contextIndex + 1; outcomeIndex <= lastOutcomeIndex; outcomeIndex += 1) {
+      const outcome = tokens[outcomeIndex];
+      if (!outcome.numeric && SHORT_MATERIAL_OUTCOME_STATES.has(outcome.key)) {
+        fingerprints.add(`outcome:${context.key}:${outcome.key}`);
+      }
+    }
+  }
+};
+
 const materialFingerprintSet = (value: string) => {
   const tokens = proofTokens(value);
   const fingerprints = new Set<string>();
+  addShortOutcomeFingerprints(tokens, fingerprints);
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     const materialClaim = !token.numeric && MATERIAL_CLAIM_TOKENS.has(token.key);
