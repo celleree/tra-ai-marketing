@@ -68,17 +68,9 @@ beforeEach(() => {
     const plannerInput = JSON.parse(body.input[1].content[0].text);
     outbound.push(plannerInput); operations.push('Astra');
     const proof = plannerInput.proofCatalog?.[0];
-    const selectedText = proof
-      ? (proof.type === 'review' ? proof.originalReviewText : proof.approvedClaimWording)
-      : null;
     const creatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
-      copy: selectedText ? { ...c.copy, primaryText: selectedText } : c.copy,
-      adCopy: selectedText ? { ...c.adCopy, primaryText: selectedText } : c.adCopy,
-      imageCopy: proof?.type === 'case-study' && proof.requiredDisclaimer
-        ? { ...c.imageCopy, disclosure: proof.requiredDisclaimer }
-        : c.imageCopy,
       proofSelection: proof ? { type: proof.type, proofId: proof.id, proofUpdatedAt: proof.updatedAt,
-        selectedText,
+        selectedText: proof.type === 'review' ? proof.originalReviewText : proof.approvedClaimWording,
         ...(proof.type === 'review' ? { includeAttribution: false } : {}) } : null,
       strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${c.index}` },
         execution: { ...c.strategy.execution, taxDocumentReference: 'none' } }, referenceChoices: { angleSource: null, layoutSource: null } }));
