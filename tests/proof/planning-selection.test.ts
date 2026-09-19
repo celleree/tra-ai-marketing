@@ -220,6 +220,64 @@ describe('planning proof selection', () => {
       .toThrow('Material ad-facing Review text');
   });
 
+  it('rejects plain small-number reuse when the Proof source marks the number as currency', () => {
+    const source = review({ originalReviewText: 'They waived $500.' });
+    const copy = {
+      adCopy: { primaryText: '500', headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
+      .toThrow('Material ad-facing Review text');
+  });
+
+  it('rejects short outcome phrases that retain material Proof meaning', () => {
+    const source = review({ originalReviewText: 'The client was debt free.' });
+    const copy = {
+      adCopy: { primaryText: 'Debt free', headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(null, [source], copy))
+      .toThrow('Material ad-facing Review text');
+  });
+
+  it('rejects selected Review attribution outside proofAttribution when attribution was not selected', () => {
+    const source = review();
+    const selected = hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: 'Second exact line.',
+      includeAttribution: false,
+    }, [source]);
+    const copy = {
+      adCopy: { primaryText: 'Second exact line.', headline: 'Jane D.', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    };
+
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], copy))
+      .toThrow('attribution appears in ad-facing copy but was not selected');
+  });
+
+  it('does not mistake attribution text inside the selected Review excerpt for separate attribution', () => {
+    const source = review({
+      originalReviewText: 'Jane D. said the representative was patient.',
+    });
+    const selected = hydratePlanningProofSelection({
+      type: 'review',
+      proofId: source.id,
+      proofUpdatedAt: source.updatedAt,
+      selectedText: source.originalReviewText,
+      includeAttribution: false,
+    }, [source]);
+
+    expect(() => validatePlanningProofCopyConsistency(selected, [source], {
+      adCopy: { primaryText: source.originalReviewText, headline: 'Headline', description: '' },
+      imageCopy: { headline: 'Image headline' },
+    })).not.toThrow();
+  });
+
   it('rejects extra Proof-derived wording even when the valid selected Review text is present', () => {
     const source = review({ originalReviewText: 'I did not save $10,000.' });
     const selected = hydratePlanningProofSelection({

@@ -235,9 +235,25 @@ const MATERIAL_CLAIM_TOKENS = new Set([
   'saved', 'savings', 'settled', 'settlement', 'waived', 'waiver',
 ]);
 
-const materialPhrase = (tokens: ProofToken[]) =>
-  tokens.filter(token => token.numeric || !COMMON_TOKENS.has(token.key)).length >= 2
-  && tokens.map(token => token.key).join('').replace(/[^a-z0-9]/g, '').length >= 12;
+const MATERIAL_OUTCOME_CONTEXT_TOKENS = new Set([
+  'balance', 'balances', 'debt', 'debts', 'garnishment', 'garnishments',
+  'interest', 'irs', 'levies', 'levy', 'lien', 'liens', 'penalties', 'penalty',
+  'tax', 'taxes',
+]);
+
+const SHORT_MATERIAL_OUTCOME_STATES = new Set([
+  'clear', 'cleared', 'free', 'gone', 'removed', 'stopped',
+]);
+
+const materialPhrase = (tokens: ProofToken[]) => {
+  const nonCommon = tokens.filter(token => token.numeric || !COMMON_TOKENS.has(token.key));
+  if (nonCommon.length < 2) return false;
+  const keys = tokens.filter(token => !token.numeric).map(token => token.key);
+  const shortOutcome = keys.some(key => MATERIAL_OUTCOME_CONTEXT_TOKENS.has(key))
+    && keys.some(key => SHORT_MATERIAL_OUTCOME_STATES.has(key));
+  return shortOutcome
+    || tokens.map(token => token.key).join('').replace(/[^a-z0-9]/g, '').length >= 12;
+};
 
 const materialFingerprintSet = (value: string) => {
   const tokens = proofTokens(value);
@@ -276,6 +292,9 @@ const fieldOverlapsFingerprints = (
   field: string
 ) => {
   if (!sourceFingerprints.size) return false;
+  for (const token of proofTokens(field)) {
+    if (token.numeric && sourceFingerprints.has(`1:${token.key}`)) return true;
+  }
   for (const fingerprint of materialFingerprintSet(field)) {
     if (sourceFingerprints.has(fingerprint)) return true;
   }
@@ -340,6 +359,26 @@ export function validatePlanningProofCopyConsistency(
       proof.id === selectedProof.proofId && proof.type === selectedProof.type
     )
     : undefined;
+  const selectedReviewAttribution = selectedProof?.type === 'review'
+    && selectedRecord?.type === 'review'
+    && selectedRecord.attribution?.allowed === true
+    ? selectedRecord.attribution.display
+    : undefined;
+  if (
+    selectedReviewAttribution
+    && selectedProof?.type === 'review'
+    && selectedProof.attribution === undefined
+  ) {
+    const attributionResidualFields = fields.map(field =>
+      maskAuthorizedText(field, [selectedProof.selectedText])
+    );
+    if (attributionResidualFields.some(field =>
+      exactTextPresent(field, selectedReviewAttribution)
+    )) {
+      throw new Error('Review proof attribution appears in ad-facing copy but was not selected for inclusion.');
+    }
+  }
+
   const selectedFingerprints = selectedRecord
     ? proofFingerprints(selectedRecord)
     : new Set<string>();

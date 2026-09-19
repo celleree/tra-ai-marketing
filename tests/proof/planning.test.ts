@@ -275,6 +275,50 @@ describe('Proof planning retrieval', () => {
     }
   });
 
+  it('fails closed on small currency normalization, short outcomes, and unselected attribution', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const smallCurrency = review('a', { originalReviewText: 'They waived $500.' });
+    const shortOutcome = review('b', { originalReviewText: 'The client was debt free.' });
+    const attributed = review('c', {
+      originalReviewText: 'The representative was patient.',
+      attribution: { display: 'Jane D.', allowed: true },
+    });
+    listProofRecordsMock.mockResolvedValue([smallCurrency, shortOutcome, attributed]);
+
+    const selectedAttribution = {
+      ...concept(1),
+      adCopy: {
+        ...concept(1).adCopy,
+        primaryText: attributed.originalReviewText,
+        headline: attributed.attribution!.display,
+      },
+      proofSelection: {
+        type: 'review' as const,
+        proofId: attributed.id,
+        proofUpdatedAt: attributed.updatedAt,
+        selectedText: attributed.originalReviewText,
+        includeAttribution: false,
+      },
+    };
+    const variants = [
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: '500' } },
+      { ...concept(1), adCopy: { ...concept(1).adCopy, primaryText: 'Debt free' } },
+      selectedAttribution,
+    ];
+
+    for (const invalid of variants) {
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        okResponse({ creatives: [invalid, concept(2)] })));
+      await expect(requestCreativeBatch({
+        count: 2,
+        context: 'Planner context',
+        proofRetrievalQuery: 'bank levy debt proof',
+        analysis,
+        hasApprovedHumanSource: false,
+      })).rejects.toThrow('invalid creative batch plan concept');
+    }
+  });
+
   it('rejects selected Proof plus extra derived wording and normalized currency variants', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const source = review('a', { originalReviewText: 'I did not save $10,000.' });
