@@ -26,7 +26,10 @@ import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
-import { revalidateSelectedProofForPaidWork } from '@/lib/proof/provenance';
+import {
+  revalidateSelectedProofForPaidWork,
+  validateCreativeProofCopyConsistency,
+} from '@/lib/proof/provenance';
 
 export type CreativeRenderContext = {
   request: ValidGenerateCreativeRequest;
@@ -97,6 +100,14 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
 
   await options.assertCurrentWork?.();
   const proofProvenance = await revalidateSelectedProofForPaidWork(item.selectedProof);
+  if (proofProvenance) {
+    validateCreativeProofCopyConsistency(proofProvenance, {
+      copy,
+      ...(copyMode.kind === 'E2'
+        ? { adCopy: copyMode.adCopy, imageCopy: copyMode.imageCopy }
+        : {}),
+    });
+  }
   const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
     concept: item, companyProfile: request.companyProfile,
     brandColors: request.brandColors, brandFontNames: request.brandFontNames,

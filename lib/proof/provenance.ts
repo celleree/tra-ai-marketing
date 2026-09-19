@@ -1,12 +1,12 @@
 import type { CreativeAdCopy, CreativeCopy, CreativeImageCopy } from '@/lib/creatives/generated';
-import type { SelectedPlanningProof } from '@/lib/proof/planning-selection';
+import {
+  formatPlanningProofPrimaryTextBlock,
+  hydratePlanningProofSelection,
+  type SelectedPlanningProof,
+} from '@/lib/proof/planning-selection';
 import { listProofRecords } from '@/lib/proof/storage';
 import type { ProofRecord } from '@/lib/proof/types';
-import {
-  isApprovedCaseStudyClaim,
-  isProofId,
-  isVerbatimReviewExcerpt,
-} from '@/lib/proof/validation';
+import { isProofId } from '@/lib/proof/validation';
 
 export type CreativeReviewProofProvenance = {
   version: 1;
@@ -156,26 +156,49 @@ function validateCurrentProof(
     return ineligible('the Proof version changed.');
   }
 
+  let hydrated: SelectedPlanningProof | null;
+  try {
+    hydrated = hydratePlanningProofSelection(
+      snapshot.type === 'review'
+        ? {
+            type: 'review',
+            proofId: snapshot.proofId,
+            proofUpdatedAt: snapshot.proofUpdatedAt,
+            selectedText: snapshot.selectedText,
+            includeAttribution: snapshot.attribution !== undefined,
+          }
+        : {
+            type: 'case-study',
+            proofId: snapshot.proofId,
+            proofUpdatedAt: snapshot.proofUpdatedAt,
+            selectedText: snapshot.selectedText,
+          },
+      [current]
+    );
+  } catch {
+    return ineligible('the selected Proof no longer satisfies the current D2 Proof contract.');
+  }
+  if (!hydrated || hydrated.type !== snapshot.type) {
+    return ineligible('the selected Proof no longer satisfies the current D2 Proof contract.');
+  }
+
   if (snapshot.type === 'review') {
-    if (current.type !== 'review') return ineligible('the Proof type changed.');
-    if (!isVerbatimReviewExcerpt(current.originalReviewText, snapshot.selectedText)) {
+    if (hydrated.type !== 'review' || hydrated.selectedText !== snapshot.selectedText) {
       return ineligible('the selected Review excerpt is no longer canonical.');
     }
-    if (snapshot.attribution !== undefined &&
-      (current.attribution?.allowed !== true || current.attribution.display !== snapshot.attribution)) {
+    if (hydrated.attribution !== snapshot.attribution) {
       return ineligible('the Review attribution is no longer permitted.');
     }
     return;
   }
 
-  if (current.type !== 'case-study') return ineligible('the Proof type changed.');
-  if (!isApprovedCaseStudyClaim(current.approvedClaimWording, snapshot.selectedText)) {
+  if (hydrated.type !== 'case-study' || hydrated.selectedText !== snapshot.selectedText) {
     return ineligible('the selected Case Study claim is no longer canonical.');
   }
-  if (current.usageRestrictions !== snapshot.usageRestrictions) {
+  if (hydrated.usageRestrictions !== snapshot.usageRestrictions) {
     return ineligible('the Case Study usage restrictions changed.');
   }
-  if (current.requiredDisclaimer !== snapshot.requiredDisclaimer) {
+  if (hydrated.requiredDisclaimer !== snapshot.requiredDisclaimer) {
     return ineligible('the Case Study required disclaimer changed.');
   }
 }
@@ -192,16 +215,11 @@ export function validateCreativeProofCopyConsistency(
 ) {
   const adCopy = creative.adCopy ?? creative.copy;
   const imageCopy = creative.imageCopy;
-  const proofBearingText = [
-    adCopy.primaryText,
-    adCopy.headline,
-    adCopy.description,
-    imageCopy?.headline,
-    imageCopy?.shortSupport,
-  ];
-  if (!proofBearingText.some((value) =>
-    typeof value === 'string' && value.includes(snapshot.selectedText))) {
-    return ineligible('the creative copy no longer contains the exact selected Proof text.');
+  const proofBlock = formatPlanningProofPrimaryTextBlock(
+    selectedProofFromProvenance(snapshot)
+  );
+  if (!adCopy.primaryText.endsWith(`\n\n${proofBlock}`)) {
+    return ineligible('the creative copy no longer preserves the exact D2-composed Proof block.');
   }
 
   if (snapshot.type === 'review') {

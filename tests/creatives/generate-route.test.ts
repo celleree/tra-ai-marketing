@@ -1183,13 +1183,24 @@ describe('progressive creative delivery', () => {
       attribution: { display: 'Verified TRA client', allowed: true as const },
     };
     mocks.listProofRecords.mockResolvedValue([currentProof]);
+    const selectedProof = {
+      type: 'review' as const, proofId: currentProof.id, proofUpdatedAt: currentProof.updatedAt,
+      selectedText: currentProof.originalReviewText, attribution: 'Verified TRA client',
+    };
+    const adCopy = {
+      ...context.batchPlan.creatives[0].adCopy!,
+      primaryText: [
+        context.batchPlan.creatives[0].adCopy!.primaryText,
+        selectedProof.selectedText,
+        selectedProof.attribution,
+      ].join('\n\n'),
+    };
     const item = {
       ...context.batchPlan.creatives[0],
-      selectedProof: {
-        type: 'review' as const, proofId: currentProof.id, proofUpdatedAt: currentProof.updatedAt,
-        selectedText: 'patient and explained every step clearly.', attribution: 'Verified TRA client',
-      },
-      imageCopy: { ...context.batchPlan.creatives[0].imageCopy!, proofAttribution: 'Verified TRA client' },
+      copy: adCopy,
+      adCopy,
+      selectedProof,
+      imageCopy: { ...context.batchPlan.creatives[0].imageCopy!, proofAttribution: selectedProof.attribution },
     };
 
     const result = await renderPlannedCreative(item, context);
@@ -1214,14 +1225,25 @@ describe('progressive creative delivery', () => {
       requiredDisclaimer: 'Results vary by circumstances.',
     };
     mocks.listProofRecords.mockResolvedValue([currentProof]);
+    const selectedProof = {
+      type: 'case-study' as const, proofId: currentProof.id, proofUpdatedAt: currentProof.updatedAt,
+      selectedText: currentProof.approvedClaimWording, usageRestrictions: currentProof.usageRestrictions,
+      requiredDisclaimer: currentProof.requiredDisclaimer,
+    };
+    const adCopy = {
+      ...context.batchPlan.creatives[0].adCopy!,
+      primaryText: [
+        context.batchPlan.creatives[0].adCopy!.primaryText,
+        selectedProof.selectedText,
+        selectedProof.requiredDisclaimer,
+      ].join('\n\n'),
+    };
     const item = {
       ...context.batchPlan.creatives[0],
-      selectedProof: {
-        type: 'case-study' as const, proofId: currentProof.id, proofUpdatedAt: currentProof.updatedAt,
-        selectedText: currentProof.approvedClaimWording, usageRestrictions: currentProof.usageRestrictions,
-        requiredDisclaimer: currentProof.requiredDisclaimer,
-      },
-      imageCopy: { ...context.batchPlan.creatives[0].imageCopy!, disclosure: currentProof.requiredDisclaimer },
+      copy: adCopy,
+      adCopy,
+      selectedProof,
+      imageCopy: { ...context.batchPlan.creatives[0].imageCopy!, disclosure: selectedProof.requiredDisclaimer },
     };
 
     const result = await renderPlannedCreative(item, context);
@@ -1232,12 +1254,38 @@ describe('progressive creative delivery', () => {
     expect(prompt).toContain(currentProof.requiredDisclaimer);
     expect(prompt).toContain(`"disclosure": "${currentProof.requiredDisclaimer}"`);
   });
+  it('rejects a resumed selected Proof whose saved copy predates final D2 composition before paid image work', async () => {
+    const context = await prepared();
+    const currentProof = {
+      id: `proof_${'c'.repeat(32)}`, type: 'review' as const, tags: ['clarity'], status: 'ACTIVE' as const,
+      advertisingUseApproved: true, createdAt: '2026-09-18T12:00:00.000Z', updatedAt: '2026-09-18T15:00:00.000Z',
+      originalReviewText: 'Exact approved Review line.',
+    };
+    mocks.listProofRecords.mockResolvedValue([currentProof]);
+    const selectedProof = {
+      type: 'review' as const, proofId: currentProof.id, proofUpdatedAt: currentProof.updatedAt,
+      selectedText: currentProof.originalReviewText,
+    };
+    vi.mocked(fetch).mockClear();
+    saveImage.mockClear();
+    mocks.saveCreativeBatch.mockClear();
+
+    await expect(renderPlannedCreative(
+      { ...context.batchPlan.creatives[0], selectedProof },
+      context
+    )).rejects.toThrow('exact D2-composed Proof block');
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(saveImage).not.toHaveBeenCalled();
+    expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();
+  });
+
   it('rejects stale selected Proof before any paid image provider or image save', async () => {
     const context = await prepared();
     const selectedProof = {
       type: 'review' as const, proofId: `proof_${'a'.repeat(32)}`,
       proofUpdatedAt: '2026-09-18T13:00:00.000Z',
-      selectedText: 'patient and explained every step clearly.',
+      selectedText: 'The representative was patient and explained every step clearly.',
     };
     mocks.listProofRecords.mockResolvedValue([{
       id: selectedProof.proofId, type: 'review', tags: ['clarity'], status: 'ACTIVE',

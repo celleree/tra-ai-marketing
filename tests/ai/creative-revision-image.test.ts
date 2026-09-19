@@ -88,7 +88,11 @@ describe('revision image provider', () => {
       usageRestrictions: 'Use only for bank-levy messaging.',
       requiredDisclaimer: 'Results vary by circumstances.',
     };
-    const adCopy = { primaryText: input.proofProvenance.selectedText, headline: 'Meta headline', description: '' };
+    const adCopy = {
+      primaryText: `Normal copy.\n\n${input.proofProvenance.selectedText}\n\n${input.proofProvenance.requiredDisclaimer}`,
+      headline: 'Meta headline',
+      description: '',
+    };
     input.concept = { ...input.concept, copy: adCopy, adCopy,
       imageCopy: { headline: 'Image headline', disclosure: input.proofProvenance.requiredDisclaimer } };
 

@@ -54,7 +54,7 @@ describe('creative Proof provenance', () => {
       type: 'review' as const,
       proofId: review().id,
       proofUpdatedAt: updatedAt,
-      selectedText: 'patient and explained every step clearly.',
+      selectedText: review().originalReviewText,
       attribution: 'Verified TRA client',
     };
     mocks.list.mockResolvedValue([review()]);
@@ -94,7 +94,7 @@ describe('creative Proof provenance', () => {
       type: 'review',
       proofId: review().id,
       proofUpdatedAt: updatedAt,
-      selectedText: 'patient and explained every step clearly.',
+      selectedText: review().originalReviewText,
       attribution: 'Verified TRA client',
     });
     mocks.list.mockResolvedValue([current()]);
@@ -110,7 +110,7 @@ describe('creative Proof provenance', () => {
       type: 'review',
       proofId: review().id,
       proofUpdatedAt: updatedAt,
-      selectedText: 'patient and explained every step clearly.',
+      selectedText: review().originalReviewText,
     });
 
     await expect(
@@ -126,7 +126,7 @@ describe('creative Proof provenance', () => {
       type: 'review',
       proofId: review().id,
       proofUpdatedAt: updatedAt,
-      selectedText: 'patient and explained every step clearly.',
+      selectedText: review().originalReviewText,
       attribution: 'Verified TRA client',
     });
 
@@ -165,7 +165,7 @@ describe('creative Proof provenance', () => {
       type: 'review',
       proofId: review().id,
       proofUpdatedAt: updatedAt,
-      selectedText: 'patient and explained every step clearly.',
+      selectedText: review().originalReviewText,
       attribution: 'Verified TRA client',
     };
     const historical = parseCreativeProofProvenance(raw);
@@ -181,11 +181,11 @@ describe('creative Proof provenance', () => {
   it('requires revised Review copy to retain exact text and attribution', () => {
     const snapshot = proofProvenanceFromSelectedProof({
       type: 'review', proofId: review().id, proofUpdatedAt: updatedAt,
-      selectedText: 'patient and explained every step clearly.', attribution: 'Verified TRA client',
+      selectedText: review().originalReviewText, attribution: 'Verified TRA client',
     });
     const valid = {
-      copy: { primaryText: 'The representative was patient and explained every step clearly.', headline: 'Clarity', description: '' },
-      adCopy: { primaryText: 'The representative was patient and explained every step clearly.', headline: 'Clarity', description: '' },
+      copy: { primaryText: `Normal copy.\n\n${snapshot.selectedText}\n\n${snapshot.attribution}`, headline: 'Clarity', description: '' },
+      adCopy: { primaryText: `Normal copy.\n\n${snapshot.selectedText}\n\n${snapshot.attribution}`, headline: 'Clarity', description: '' },
       imageCopy: { headline: 'Clarity', proofAttribution: 'Verified TRA client' },
     };
     expect(() => validateCreativeProofCopyConsistency(snapshot, valid)).not.toThrow();
@@ -196,17 +196,17 @@ describe('creative Proof provenance', () => {
       ...valid,
       copy: { ...valid.copy, primaryText: 'Rewritten testimonial.' },
       adCopy: { ...valid.adCopy, primaryText: 'Rewritten testimonial.' },
-    })).toThrow('no longer contains the exact selected Proof text');
+    })).toThrow('exact D2-composed Proof block');
   });
 
   it('rejects Review attribution introduced when the inherited snapshot has none', () => {
     const snapshot = proofProvenanceFromSelectedProof({
       type: 'review', proofId: review().id, proofUpdatedAt: updatedAt,
-      selectedText: 'patient and explained every step clearly.',
+      selectedText: review().originalReviewText,
     });
     expect(() => validateCreativeProofCopyConsistency(snapshot, {
-      copy: { primaryText: snapshot.selectedText, headline: 'Clarity', description: '' },
-      adCopy: { primaryText: snapshot.selectedText, headline: 'Clarity', description: '' },
+      copy: { primaryText: `Normal copy.\n\n${snapshot.selectedText}`, headline: 'Clarity', description: '' },
+      adCopy: { primaryText: `Normal copy.\n\n${snapshot.selectedText}`, headline: 'Clarity', description: '' },
       imageCopy: { headline: 'Clarity', proofAttribution: 'Invented attribution' },
     })).toThrow('introduced Review attribution');
   });
@@ -220,8 +220,8 @@ describe('creative Proof provenance', () => {
       requiredDisclaimer: current.requiredDisclaimer!,
     });
     const valid = {
-      copy: { primaryText: current.approvedClaimWording, headline: 'Understand the path', description: '' },
-      adCopy: { primaryText: current.approvedClaimWording, headline: 'Understand the path', description: '' },
+      copy: { primaryText: `Normal copy.\n\n${current.approvedClaimWording}\n\n${current.requiredDisclaimer}`, headline: 'Understand the path', description: '' },
+      adCopy: { primaryText: `Normal copy.\n\n${current.approvedClaimWording}\n\n${current.requiredDisclaimer}`, headline: 'Understand the path', description: '' },
       imageCopy: { headline: 'Understand the path', disclosure: current.requiredDisclaimer! },
     };
     expect(() => validateCreativeProofCopyConsistency(snapshot, valid)).not.toThrow();
@@ -232,7 +232,66 @@ describe('creative Proof provenance', () => {
       ...valid,
       copy: { ...valid.copy, primaryText: 'Broader rewritten claim.' },
       adCopy: { ...valid.adCopy, primaryText: 'Broader rewritten claim.' },
-    })).toThrow('no longer contains the exact selected Proof text');
+    })).toThrow('exact D2-composed Proof block');
+  });
+
+  it('keeps the selected Review valid when another catalog Review has overlapping text', async () => {
+    const selected = review();
+    const overlapping = {
+      ...review(),
+      id: proofId('c'),
+      originalReviewText: selected.originalReviewText,
+    };
+    const snapshot = proofProvenanceFromSelectedProof({
+      type: 'review',
+      proofId: selected.id,
+      proofUpdatedAt: selected.updatedAt,
+      selectedText: selected.originalReviewText,
+    });
+    mocks.list.mockResolvedValue([overlapping, selected]);
+
+    await expect(
+      revalidateCreativeProofProvenanceForPaidWork(snapshot)
+    ).resolves.toEqual(snapshot);
+  });
+
+  it.each([
+    'I did not save $10000.',
+    'I did not save 10000 dollars.',
+  ])('rejects normalized numeric/currency rewrites in place of exact selected Review text: %s', rewritten => {
+    const selectedText = 'I did not save $10,000.';
+    const snapshot = proofProvenanceFromSelectedProof({
+      type: 'review',
+      proofId: review().id,
+      proofUpdatedAt: updatedAt,
+      selectedText,
+    });
+    const invalid = {
+      copy: { primaryText: `Normal copy.\n\n${rewritten}`, headline: 'Clarity', description: '' },
+      adCopy: { primaryText: `Normal copy.\n\n${rewritten}`, headline: 'Clarity', description: '' },
+      imageCopy: { headline: 'Clarity' },
+    };
+
+    expect(() => validateCreativeProofCopyConsistency(snapshot, invalid))
+      .toThrow('exact D2-composed Proof block');
+  });
+
+  it('rejects extra wording appended after the application-owned Proof block', () => {
+    const snapshot = proofProvenanceFromSelectedProof({
+      type: 'review',
+      proofId: review().id,
+      proofUpdatedAt: updatedAt,
+      selectedText: review().originalReviewText,
+      attribution: 'Verified TRA client',
+    });
+    const primaryText =
+      `Normal copy.\n\n${snapshot.selectedText}\n\n${snapshot.attribution}\n\nExtra wording.`;
+
+    expect(() => validateCreativeProofCopyConsistency(snapshot, {
+      copy: { primaryText, headline: 'Clarity', description: '' },
+      adCopy: { primaryText, headline: 'Clarity', description: '' },
+      imageCopy: { headline: 'Clarity', proofAttribution: snapshot.attribution },
+    })).toThrow('exact D2-composed Proof block');
   });
 
   it('keeps no-Proof legacy work compatible', async () => {

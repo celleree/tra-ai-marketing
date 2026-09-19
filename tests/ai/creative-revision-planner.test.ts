@@ -115,7 +115,11 @@ describe('single-creative revision planning', () => {
 
   it('supplies inherited Proof provenance to Astra as an immutable revision constraint', async () => {
     const selectedText = 'Exact inherited review excerpt.';
-    const adCopy = { primaryText: selectedText, headline: 'Meta headline', description: '' };
+    const adCopy = {
+      primaryText: `Normal copy.\n\n${selectedText}\n\nVerified TRA client`,
+      headline: 'Meta headline',
+      description: '',
+    };
     const e2Parent = { ...parent, copy: adCopy, adCopy,
       imageCopy: { headline: 'Image headline', proofAttribution: 'Verified TRA client' } };
     const proofProvenance = {
@@ -132,7 +136,7 @@ describe('single-creative revision planning', () => {
     const request = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(JSON.parse(request.input[1].content[0].text).proofProvenance).toEqual(proofProvenance);
     expect(request.input[0].content[0].text).toContain('immutable, already revalidated Proof constraint');
-    expect(request.input[0].content[0].text).toContain('must remain verbatim');
+    expect(request.input[0].content[0].text).toContain('D2-composed Proof block');
     expect(request.input[0].content[0].text).toContain('D3 does not allow selecting, replacing');
   });
 

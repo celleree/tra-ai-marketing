@@ -62,7 +62,10 @@ const e2Parent = (): CreativeRecord => {
 const proofParent = (): CreativeRecord => {
   const record = e2Parent();
   const selectedText = 'The representative explained every step clearly.';
-  const adCopy = { ...record.adCopy!, primaryText: selectedText };
+  const adCopy = {
+    ...record.adCopy!,
+    primaryText: [record.adCopy!.primaryText, selectedText, 'Verified TRA client'].join('\n\n'),
+  };
   return {
     ...record, copy: adCopy, adCopy,
     imageCopy: { ...record.imageCopy!, proofAttribution: 'Verified TRA client' },
@@ -79,7 +82,10 @@ const proofParent = (): CreativeRecord => {
 const caseStudyProofParent = (): CreativeRecord => {
   const record = e2Parent();
   const selectedText = 'Approved source-bound claim wording.';
-  const adCopy = { ...record.adCopy!, primaryText: selectedText };
+  const adCopy = {
+    ...record.adCopy!,
+    primaryText: [record.adCopy!.primaryText, selectedText, 'Results vary by circumstances.'].join('\n\n'),
+  };
   return {
     ...record, copy: adCopy, adCopy,
     imageCopy: { ...record.imageCopy!, disclosure: 'Results vary by circumstances.' },
@@ -273,6 +279,29 @@ describe('saved creative revision API', () => {
     }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
 
     const response = await call({ operation, instruction: 'Rewrite the proof.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when text is appended after the inherited D2 Proof block', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    const adCopy = {
+      ...original.adCopy!,
+      primaryText: `${original.adCopy!.primaryText}\n\nExtra proof-derived wording.`,
+    };
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: adCopy, adCopy, imageCopy: original.imageCopy,
+      strategy: changed, selectionReason: 'Invalid proof expansion.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Expand the proof wording.' });
 
     expect(response.status).toBe(409);
     expect(mocks.generate).not.toHaveBeenCalled();
