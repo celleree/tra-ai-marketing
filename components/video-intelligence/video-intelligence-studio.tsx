@@ -37,6 +37,10 @@ const aborted = (reason: unknown, signal: AbortSignal) => signal.aborted || (rea
 
 export const videoPassageCandidatePayload = (locator: VideoIntelligenceJobLocator, startSegmentIndex: number, endSegmentIndex: number) => ({ locator, startSegmentIndex, endSegmentIndex });
 export const contiguousVideoPassageRange = (start: number, end: number) => ({ start, end: Math.max(start, end) });
+export const boundedVideoPassageRange = (start: number, end: number, segmentCount: number) => segmentCount < 1
+  ? null : contiguousVideoPassageRange(Math.min(start, segmentCount - 1), Math.min(end, segmentCount - 1));
+export const videoPassageSelectionKey = (locator: VideoIntelligenceJobLocator, library: Pick<VideoFrameLibrary, 'id'>) =>
+  `${locator.sourceVideoMediaId}:${locator.sourceVideoContentHash}:${locator.analyzerFingerprintSha256}:${library.id}`;
 export function VideoPassageCandidateFeedback({ message, failed }: { message: string; failed: boolean }) {
   return <p className={failed ? styles.error : styles.progress} role={failed ? 'alert' : 'status'} aria-live="polite">{message}</p>;
 }
@@ -47,11 +51,12 @@ export function VideoPassageCandidateSelection({ locator, segments }: { locator:
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [failed, setFailed] = useState(false);
-  const range = contiguousVideoPassageRange(start, end);
-  const selected = segments.slice(range.start, range.end + 1);
+  const range = boundedVideoPassageRange(start, end, segments.length);
+  const selected = range ? segments.slice(range.start, range.end + 1) : [];
   const submit = async () => {
     setPending(true); setFeedback(''); setFailed(false);
     try {
+      if (!range) throw new Error('The selected transcript range is no longer available.');
       const response = await fetch('/api/proof/video-passages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(videoPassageCandidatePayload(locator, range.start, range.end)) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Video passage candidate could not be created.');
@@ -59,6 +64,7 @@ export function VideoPassageCandidateSelection({ locator, segments }: { locator:
     } catch (cause) { setFailed(true); setFeedback(cause instanceof Error ? cause.message : 'Video passage candidate could not be created.'); }
     finally { setPending(false); }
   };
+  if (!range || !selected.length) return <section className={styles.passage} aria-label="Create video passage candidate"><h3>Create Proof candidate</h3><p className={styles.error} role="alert">No transcript passage is available for selection.</p></section>;
   return <section className={styles.passage} aria-label="Create video passage candidate">
     <h3>Create Proof candidate</h3><p className={styles.muted}>Select one contiguous timestamped transcript passage. Transcript text remains source evidence, not Proof.</p>
     <div className={styles.passageControls}><label>Start transcript segment<select aria-label="Start transcript segment" value={start} disabled={pending} onChange={(event) => { const next = Number(event.target.value); setStart(next); setEnd(current => Math.max(current, next)); }}>{segments.map((segment, index) => <option key={segment.segmentIndex} value={index}>{index + 1} · {formatTime(segment.startMs)}</option>)}</select></label><label>End transcript segment<select aria-label="End transcript segment" value={end} disabled={pending} onChange={(event) => setEnd(Math.max(start, Number(event.target.value)))}>{segments.map((segment, index) => <option key={segment.segmentIndex} value={index} disabled={index < start}>{index + 1} · {formatTime(segment.endMs)}</option>)}</select></label></div>
@@ -324,7 +330,7 @@ export function VideoIntelligenceStudio() {
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>3 · Semantic map</p><h2>Semantic groups</h2></div></div>
           <div className={styles.groups}>{[...library.semanticGroups.sceneTypes.map((group) => ({ label: group.sceneType, count: group.representativeFrameIds.length })), ...library.semanticGroups.topics.map((group) => ({ label: group.topic, count: group.representativeFrameIds.length }))].map((group) => <span key={group.label}>{group.label.replaceAll('_', ' ')} <b>{group.count}</b></span>)}</div>
-          <div className={styles.transcriptList}><h3>Timestamped transcript</h3>{library.transcript.segments.length ? <>{status?.phase === 'COMPLETE' && locator ? <VideoPassageCandidateSelection locator={locator} segments={library.transcript.segments} /> : null}{library.transcript.segments.map((segment) => <p key={segment.segmentIndex}><time>{formatTime(segment.startMs)}</time>{segment.text}</p>)}</> : <p className={styles.muted}>{library.transcript.status === 'SKIPPED_NO_AUDIO_TRACK' ? 'Transcription skipped: this video has no audio track.' : 'No speech segments were returned.'}</p>}</div>
+          <div className={styles.transcriptList}><h3>Timestamped transcript</h3>{library.transcript.segments.length ? <>{status?.phase === 'COMPLETE' && locator ? <VideoPassageCandidateSelection key={videoPassageSelectionKey(locator, library)} locator={locator} segments={library.transcript.segments} /> : null}{library.transcript.segments.map((segment) => <p key={segment.segmentIndex}><time>{formatTime(segment.startMs)}</time>{segment.text}</p>)}</> : <p className={styles.muted}>{library.transcript.status === 'SKIPPED_NO_AUDIO_TRACK' ? 'Transcription skipped: this video has no audio track.' : 'No speech segments were returned.'}</p>}</div>
         </section>
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>4 · Concept selection</p><h2>Compare distinct creative directions</h2></div></div>

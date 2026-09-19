@@ -26,6 +26,7 @@ export const createProofEditFields = (values: string[], empty: string): Editable
 export const proofEditValues = (fields: EditableField[]) => fields
   .filter(({ value }) => value.trim())
   .map(({ stored, value }) => stored === undefined ? value : normalizeProofTextareaEdit(stored, value));
+export const reloadProofSnapshotAfterMutation = (reload: () => Promise<void>) => reload();
 const nextFieldKey = (fields: EditableField[]) =>
   Math.max(...fields.map(({ key }) => key)) + 1;
 
@@ -128,7 +129,7 @@ export function VideoPassageCandidateCard({
   </article>;
 }
 
-export function ReviewCsvImport({ onImported }: { onImported: (records: ProofRecord[]) => void }) {
+export function ReviewCsvImport({ onImported }: { onImported: (records: ProofRecord[]) => void | Promise<void> }) {
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -157,7 +158,7 @@ export function ReviewCsvImport({ onImported }: { onImported: (records: ProofRec
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Reviews could not be imported.');
-      onImported(payload.items);
+      await onImported(payload.items);
       input.current?.form?.reset();
       setSuccess(`${payload.items.length} review${payload.items.length === 1 ? '' : 's'} imported.`);
     } catch (cause) {
@@ -184,7 +185,7 @@ export function ReviewCsvImport({ onImported }: { onImported: (records: ProofRec
 function ProofForm({ type, record, onSaved, onCancel }: {
   type: ProofTab;
   record: ProofRecord | null;
-  onSaved: (record: ProofRecord) => void;
+  onSaved: (record: ProofRecord) => void | Promise<void>;
   onCancel: () => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -271,7 +272,7 @@ function ProofForm({ type, record, onSaved, onCancel }: {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Proof record could not be saved.');
-      onSaved(matching ? payload.item : payload.items[0]);
+      await onSaved(matching ? payload.item : payload.items[0]);
       if (!matching) {
         form.reset();
         setFacts(createProofEditFields([], ''));
@@ -328,8 +329,8 @@ export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord
   const [candidateFailed, setCandidateFailed] = useState(false);
   const [candidatePending, setCandidatePending] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError('');
     try {
       const response = await fetch('/api/proof');
@@ -342,7 +343,7 @@ export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord
       setLoaded(false);
       setError(proofLibraryLoadFailureMessage);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
@@ -350,15 +351,11 @@ export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord
     void load();
   }, [load]);
 
-  const saved = (record: ProofRecord) => {
-    setItems((current) => current.some(({ id }) => id === record.id)
-      ? current.map((item) => item.id === record.id ? record : item)
-      : [record, ...current]);
+  const saved = async (record: ProofRecord) => {
     setEditing((current) => current?.id === record.id ? null : current);
+    await reloadProofSnapshotAfterMutation(() => load(false));
   };
-  const imported = (records: ProofRecord[]) => {
-    setItems((current) => [...records, ...current]);
-  };
+  const imported = async (_records: ProofRecord[]) => reloadProofSnapshotAfterMutation(() => load(false));
   const toggle = async (record: ProofRecord) => {
     setError('');
     try {
@@ -368,7 +365,7 @@ export function ProofLibrary({ initialItems = [] }: { initialItems?: ProofRecord
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Proof status could not be updated.');
-      saved(payload.item);
+      await reloadProofSnapshotAfterMutation(() => load(false));
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Proof status could not be updated.'); }
   };
   const visible = items.filter(({ type }) => type === activeTab);

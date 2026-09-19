@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { contiguousVideoPassageRange, VideoPassageCandidateFeedback, VideoPassageCandidateSelection, videoPassageCandidatePayload } from '@/components/video-intelligence/video-intelligence-studio';
+import { boundedVideoPassageRange, contiguousVideoPassageRange, VideoPassageCandidateFeedback, VideoPassageCandidateSelection, videoPassageCandidatePayload, videoPassageSelectionKey } from '@/components/video-intelligence/video-intelligence-studio';
 
 const locator = { version: 1 as const, sourceVideoMediaId: 'media', sourceVideoContentHash: 'a'.repeat(64), analyzerFingerprintSha256: 'b'.repeat(64) };
 const segments = [{ segmentIndex: 4, startMs: 1_000, endMs: 2_000, text: 'First exact transcript segment.' }, { segmentIndex: 9, startMs: 2_100, endMs: 3_500, text: 'Second exact transcript segment.' }];
@@ -26,5 +26,19 @@ describe('Video passage candidate UI', () => {
   it('announces API errors accessibly', () => {
     const html = renderToStaticMarkup(createElement(VideoPassageCandidateFeedback, { message: 'Video passage candidate request is invalid.', failed: true }));
     expect(html).toContain('role="alert"'); expect(html).toContain('aria-live="polite"');
+  });
+
+  it('resets keyed selection for a shorter completed source and renders a valid range', () => {
+    const firstLibrary = { id: 'video-library:first' };
+    const nextLocator = { ...locator, sourceVideoMediaId: 'next-media', sourceVideoContentHash: 'c'.repeat(64) };
+    const nextLibrary = { id: 'video-library:next' };
+    const laterSelection = boundedVideoPassageRange(1, 1, segments.length);
+    expect(laterSelection).toEqual({ start: 1, end: 1 });
+    expect(videoPassageSelectionKey(locator, firstLibrary)).not.toBe(videoPassageSelectionKey(nextLocator, nextLibrary));
+    expect(boundedVideoPassageRange(laterSelection!.start, laterSelection!.end, 1)).toEqual({ start: 0, end: 0 });
+    expect(() => renderToStaticMarkup(createElement(VideoPassageCandidateSelection, { key: videoPassageSelectionKey(nextLocator, nextLibrary), locator: nextLocator, segments: segments.slice(0, 1) }))).not.toThrow();
+    const html = renderToStaticMarkup(createElement(VideoPassageCandidateSelection, { key: videoPassageSelectionKey(nextLocator, nextLibrary), locator: nextLocator, segments: segments.slice(0, 1) }));
+    expect(html).toContain('Selected passage: 00:01.000–00:02.000');
+    expect(renderToStaticMarkup(createElement(VideoPassageCandidateSelection, { locator: nextLocator, segments: [] }))).toContain('No transcript passage is available for selection.');
   });
 });

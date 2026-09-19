@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { eligibleVideoPassageProof, ProofLibraryError, ProofRecordCard, ReviewCsvImport, VideoPassageCandidateCard, proofLibraryLoadFailureMessage } from '@/components/proof-library/proof-library';
+import { eligibleVideoPassageProof, ProofLibraryError, ProofRecordCard, reloadProofSnapshotAfterMutation, ReviewCsvImport, VideoPassageCandidateCard, proofLibraryLoadFailureMessage } from '@/components/proof-library/proof-library';
 import { createProofEditFields, normalizeProofTextareaEdit, proofEditValues } from '@/components/proof-library/proof-library';
 import type { ProofRecord } from '@/lib/proof/types';
 
@@ -86,5 +86,13 @@ describe('Proof Library UI', () => {
 
   it('filters eligible Proof to active, explicitly advertising-approved records', () => {
     expect(eligibleVideoPassageProof([{ ...base, id: 'active-approved', type: 'review', advertisingUseApproved: true, originalReviewText: 'Yes' }, { ...base, id: 'active-unapproved', type: 'review', originalReviewText: 'No' }, { ...base, id: 'inactive-approved', type: 'review', status: 'INACTIVE', advertisingUseApproved: true, originalReviewText: 'No' }])).toMatchObject([{ id: 'active-approved' }]);
+  });
+
+  it('reloads the authoritative Proof snapshot after a successful mutation', async () => {
+    let displayed = { items: ['old Proof'], candidates: [{ linkHealth: 'CURRENT' }] };
+    await reloadProofSnapshotAfterMutation(async () => {
+      displayed = { items: ['updated Proof'], candidates: [{ linkHealth: 'CHANGED' }] };
+    });
+    expect(displayed).toEqual({ items: ['updated Proof'], candidates: [{ linkHealth: 'CHANGED' }] });
   });
 });
