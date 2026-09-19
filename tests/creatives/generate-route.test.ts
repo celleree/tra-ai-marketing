@@ -1238,12 +1238,15 @@ describe('progressive creative delivery', () => {
         selectedProof.requiredDisclaimer,
       ].join('\n\n'),
     };
+    const imageCopy = { ...context.batchPlan.creatives[0].imageCopy! };
+    delete imageCopy.proofAttribution;
+    imageCopy.disclosure = selectedProof.requiredDisclaimer;
     const item = {
       ...context.batchPlan.creatives[0],
       copy: adCopy,
       adCopy,
       selectedProof,
-      imageCopy: { ...context.batchPlan.creatives[0].imageCopy!, disclosure: selectedProof.requiredDisclaimer },
+      imageCopy,
     };
 
     const result = await renderPlannedCreative(item, context);
