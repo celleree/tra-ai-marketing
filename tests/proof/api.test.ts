@@ -3,6 +3,7 @@ import type { ReviewProofRecord } from '@/lib/proof/types';
 
 const mocks = vi.hoisted(() => ({
   addProofRecords: vi.fn(),
+  getProofLibrarySnapshot: vi.fn(),
   listProofRecords: vi.fn(),
   requireOperatorAccess: vi.fn(),
   updateProofRecord: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess: mocks.requireOperatorAccess }));
 vi.mock('@/lib/proof/storage', () => ({
   addProofRecords: mocks.addProofRecords,
+  getProofLibrarySnapshot: mocks.getProofLibrarySnapshot,
   listProofRecords: mocks.listProofRecords,
   updateProofRecord: mocks.updateProofRecord,
 }));
@@ -37,6 +39,7 @@ beforeEach(() => {
   vi.useRealTimers();
   mocks.requireOperatorAccess.mockResolvedValue(null);
   mocks.listProofRecords.mockResolvedValue([]);
+  mocks.getProofLibrarySnapshot.mockResolvedValue({ items: [], candidates: [] });
   mocks.addProofRecords.mockImplementation(async (items) => items);
   mocks.updateProofRecord.mockImplementation(async (item) => item);
 });
@@ -56,10 +59,10 @@ describe('Proof Library API', () => {
   });
 
   it('lists persisted records for an authorized operator', async () => {
-    mocks.listProofRecords.mockResolvedValue([review()]);
+    mocks.getProofLibrarySnapshot.mockResolvedValue({ items: [review()], candidates: [] });
     const response = await route.GET();
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ items: [review()] });
+    await expect(response.json()).resolves.toEqual({ items: [review()], candidates: [] });
   });
 
   it('creates server-owned IDs and leaves new active reviews unapproved for advertising', async () => {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { requireOperatorAccess } from '@/lib/auth/require-operator';
-import { addProofRecords, listProofRecords, updateProofRecord } from '@/lib/proof/storage';
+import { addProofRecords, getProofLibrarySnapshot, listProofRecords, updateProofRecord } from '@/lib/proof/storage';
 import type { ProofRecord, ProofStatus } from '@/lib/proof/types';
 import {
   isProofId,
@@ -64,7 +64,7 @@ export async function GET() {
   const denied = await requireOperatorAccess();
   if (denied) return denied;
   try {
-    return NextResponse.json({ items: await listProofRecords() });
+    return NextResponse.json(await getProofLibrarySnapshot());
   } catch (error) {
     console.error('Could not load Proof Library', error);
     return NextResponse.json({ error: 'Proof Library could not be loaded.' }, { status: 500 });

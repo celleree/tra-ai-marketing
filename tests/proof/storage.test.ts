@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProofRecord, ReviewProofRecord } from '@/lib/proof/types';
+import type { ProofRecord, ReviewProofRecord, VideoPassageCandidate } from '@/lib/proof/types';
 
 const { mkdirMock, readFileMock, sendMock, writeFileMock } = vi.hoisted(() => ({
   mkdirMock: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock('@aws-sdk/client-s3', async (importOriginal) => {
   return { ...actual, S3Client: vi.fn(function MockS3Client() { return { send: sendMock }; }) };
 });
 
-import { addProofRecords, listProofRecords, updateProofRecord } from '@/lib/proof/storage';
+import { addProofRecords, getProofLibrarySnapshot, listProofRecords, mutateVideoPassageCandidate, updateProofRecord, upsertVideoPassageCandidate, videoPassageCandidateId } from '@/lib/proof/storage';
 
 const review = (
   hex = 'a',
@@ -29,6 +30,13 @@ const review = (
   updatedAt,
 });
 const index = (items: ProofRecord[]) => JSON.stringify({ version: 1, items });
+const candidate = (): VideoPassageCandidate => {
+  const source = { locator: { version: 1 as const, sourceVideoMediaId: `media_${'b'.repeat(32)}`, sourceVideoContentHash: 'c'.repeat(64), analyzerFingerprintSha256: 'd'.repeat(64) }, library: { id: `video-library:${'e'.repeat(64)}`, version: 1 as const } };
+  source.library.id = `video-library:${createHash('sha256').update(`${source.locator.sourceVideoMediaId}:${source.locator.sourceVideoContentHash}`).digest('hex')}`;
+  const passage = { startSegmentIndex: 1, endSegmentIndex: 2, startMs: 100, endMs: 400, segments: [{ segmentIndex: 1, startMs: 100, endMs: 200, text: 'Exact source sentence.' }, { segmentIndex: 2, startMs: 300, endMs: 400, text: 'Second source sentence.' }] };
+  return { version: 1, id: videoPassageCandidateId(source, passage), status: 'PENDING', source, passage, createdAt: '2026-09-10T12:00:00.000Z', updatedAt: '2026-09-10T12:00:00.000Z' };
+};
+const candidateIndex = (items: ProofRecord[], candidates: VideoPassageCandidate[]) => JSON.stringify({ version: 2, items, candidates: { version: 1, items: candidates } });
 const configureR2 = () => {
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('R2_ACCOUNT_ID', 'account');
@@ -55,6 +63,30 @@ describe('Proof Library storage', () => {
     expect(loaded.status).toBe('ACTIVE');
     expect(loaded.advertisingUseApproved).toBeUndefined();
     expect(loaded.advertisingUseApproved === true).toBe(false);
+  });
+
+  it('preserves legacy reads, persists source-bound candidates, and derives lifecycle link health', async () => {
+    let stored = index([review()]);
+    readFileMock.mockImplementation(async () => stored);
+    writeFileMock.mockImplementation(async (_path, raw) => { stored = raw as string; });
+    await expect(getProofLibrarySnapshot()).resolves.toMatchObject({ candidates: [] });
+    expect(writeFileMock).not.toHaveBeenCalled();
+    const first = candidate();
+    await expect(upsertVideoPassageCandidate(first)).resolves.toMatchObject({ created: true, candidate: first });
+    expect(JSON.parse(stored)).toMatchObject({ version: 2, candidates: { version: 1, items: [first] } });
+    await expect(upsertVideoPassageCandidate({ ...first, status: 'DISMISSED' })).resolves.toMatchObject({ created: false, candidate: first });
+    const approved = { ...review(), advertisingUseApproved: true };
+    stored = candidateIndex([approved], [first]);
+    const linked = await mutateVideoPassageCandidate(first.id, 'link', approved.id);
+    expect(linked).toMatchObject({ status: 'LINKED', link: { proofId: approved.id, proofType: 'review', proofUpdatedAt: approved.updatedAt } });
+    expect(JSON.parse(stored).items[0]).toEqual(approved);
+    stored = candidateIndex([{ ...approved, advertisingUseApproved: false, updatedAt: '2026-09-10T13:00:00.000Z' }], [linked]);
+    await expect(getProofLibrarySnapshot()).resolves.toMatchObject({ candidates: [{ id: first.id, linkHealth: 'UNAPPROVED' }] });
+    stored = candidateIndex([{ ...approved, status: 'INACTIVE', updatedAt: '2026-09-10T13:00:00.000Z' }], [linked]);
+    await expect(getProofLibrarySnapshot()).resolves.toMatchObject({ candidates: [{ id: first.id, linkHealth: 'INACTIVE' }] });
+    await expect(mutateVideoPassageCandidate(first.id, 'dismiss')).resolves.toMatchObject({ status: 'DISMISSED' });
+    await expect(mutateVideoPassageCandidate(first.id, 'reopen')).resolves.toMatchObject({ status: 'PENDING' });
+    await expect(mutateVideoPassageCandidate(first.id, 'link', approved.id)).rejects.toThrow('not currently eligible');
   });
 
   it('persists exact review text without inventing optional metadata', async () => {
