@@ -17,6 +17,11 @@ import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-par
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: vi.fn(async (concepts: unknown[]) => portfolioAudit(concepts.length)) }));
+const proofMocks = vi.hoisted(() => ({ load: vi.fn() }));
+vi.mock('@/lib/proof/planning', async original => ({
+  ...await original<typeof import('@/lib/proof/planning')>(),
+  loadPlanningProofCatalog: proofMocks.load,
+}));
 
 const analysis = {
   summary: 'Clear visual hierarchy', visibleText: [], visualStructure: 'Headline over image',
@@ -67,7 +72,7 @@ const sourceProjection = (): PlanningSourceAnalysisState => ({ version: 1, entri
       contextSha256: result.kind === 'LAYOUT_BLUEPRINT' ? null : 'a'.repeat(64) }, evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION' as const, result }));
   }) });
 
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); proofMocks.load.mockReset(); });
 
 describe('creative batch planner', () => {
   it('sends every source-labelled sentinel to Astra and retains initial/audit/repair arguments and snapshots on save/reload', async () => {
@@ -435,6 +440,52 @@ describe('creative batch planner', () => {
   ])('rejects %s output', async (_name, value, hasApprovedHumanSource) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key'); vi.stubGlobal('fetch', vi.fn(async () => okResponse(value)));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource })).rejects.toThrow(/invalid creative batch plan/i);
+  });
+
+  it('accepts a 999-character composed Review with an unchanged shorter exact excerpt', async () => {
+    const proof = {
+      id: `proof_${'a'.repeat(32)}`, type: 'review' as const,
+      updatedAt: '2026-09-19T00:00:00.000Z', tags: ['tax'],
+      originalReviewText: 'Short exact review.\nA longer exact review line that is not selected.',
+      attribution: { display: 'Reviewer', allowed: true },
+    };
+    const selectedText = 'Short exact review.';
+    const suffix = `\n\n${selectedText}\n\nReviewer`;
+    const first = concept(1) as any;
+    first.adCopy.primaryText = 'x'.repeat(999 - suffix.length);
+    first.proofSelection = {
+      type: 'review', proofId: proof.id, proofUpdatedAt: proof.updatedAt,
+      selectedText, includeAttribution: true,
+    };
+    proofMocks.load.mockResolvedValue([proof]);
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [first, concept(2)] })));
+
+    const result = await planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false, proofRetrievalQuery: 'tax' });
+    expect(result.creatives[0].copy.primaryText).toHaveLength(999);
+    expect(result.creatives[0].copy.primaryText).toBe(`${first.adCopy.primaryText}${suffix}`);
+    expect(result.creatives[0].imageCopy?.proofAttribution).toBe('Reviewer');
+  });
+
+  it('rejects a 1,001-character composition that includes exact Proof, separators, and a required disclaimer', async () => {
+    const proof = {
+      id: `proof_${'b'.repeat(32)}`, type: 'case-study' as const,
+      updatedAt: '2026-09-19T00:00:00.000Z', tags: ['tax'], title: 'Case study',
+      approvedClaimWording: 'Exact approved Proof.', requiredDisclaimer: 'Required disclaimer.',
+    };
+    const suffix = `\n\n${proof.approvedClaimWording}\n\n${proof.requiredDisclaimer}`;
+    const first = concept(1) as any;
+    first.adCopy.primaryText = 'x'.repeat(1001 - suffix.length);
+    first.proofSelection = {
+      type: 'case-study', proofId: proof.id, proofUpdatedAt: proof.updatedAt,
+      selectedText: proof.approvedClaimWording,
+    };
+    proofMocks.load.mockResolvedValue([proof]);
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [first, concept(2)] })));
+
+    await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false, proofRetrievalQuery: 'tax' }))
+      .rejects.toThrow(/invalid creative batch plan/i);
   });
 
   it('surfaces provider refusal and non-OK errors', async () => {

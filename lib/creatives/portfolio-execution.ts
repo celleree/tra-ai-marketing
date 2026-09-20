@@ -10,6 +10,7 @@ import { hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames } from 
 import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelligence-planning';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
+import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { checkpointPortfolioPreparation, checkpointPortfolioVideoSelectionAttempt, claimCreativePortfolio,
@@ -28,6 +29,17 @@ import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalizat
 import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
+
+class InvalidPlannedCreativeCopyError extends CreativeGenerationPreparationError {}
+
+const assertValidPlannedCreativeCopy = (concept: Parameters<typeof classifyCreativeCopyContract>[0]) => {
+  if (classifyCreativeCopyContract(concept).kind === 'INVALID') {
+    throw new InvalidPlannedCreativeCopyError(
+      'Creative plan has an invalid separated ad/image copy contract and cannot be rendered.',
+      409,
+    );
+  }
+};
 
 /** One persisted provider-capable planning step OR one image; no background loop or automatic failed-provider retry. */
 export async function advanceCreativePortfolio(
@@ -156,9 +168,10 @@ export async function advanceCreativePortfolio(
         const checkpoint = { snapshot: snapshotCreativePortfolio(prepared), plannerArgs: structuredClone(prepared.plannerArgs) };
         return { job: await updateCreativePortfolio(id, current => finishPortfolioInitialPlan(current, token, checkpoint), storage) };
       }
-      providerWorkStarted = true;
       if (job.planning.phase === 'DIVERSITY_AUDIT') {
         const { checkpoint, repairAttempted } = job.planning;
+        checkpoint.snapshot.batchPlan.creatives.forEach(assertValidPlannedCreativeCopy);
+        providerWorkStarted = true;
         const audit = await auditCreativePortfolio(checkpoint.snapshot.batchPlan.creatives);
         const issue = getCreativeDiversityIssue(checkpoint.snapshot.batchPlan.creatives, audit);
         if (!issue) {
@@ -175,6 +188,8 @@ export async function advanceCreativePortfolio(
       }
       if (job.planning.phase === 'TARGETED_REPAIR') {
         const { checkpoint } = job.planning;
+        checkpoint.snapshot.batchPlan.creatives.forEach(assertValidPlannedCreativeCopy);
+        providerWorkStarted = true;
         const audit = checkpoint.snapshot.batchPlan.portfolioAudit!;
         const issue = getCreativeDiversityIssue(checkpoint.snapshot.batchPlan.creatives, audit);
         if (!issue) throw new Error('Portfolio repair was requested without a diversity issue.');
@@ -188,6 +203,7 @@ export async function advanceCreativePortfolio(
     const context = await restoreCreativePortfolio(job.snapshot!);
     const slot = job.slots[slotIndex - 1];
     const concept = context.batchPlan.creatives[slotIndex - 1];
+    assertValidPlannedCreativeCopy(concept);
     const automaticVideoSelection = job.videoPreparationVersion === 1
       && !job.request.videoFrameSelection
       && !concept.strategy.approvedHumanId
@@ -268,7 +284,9 @@ export async function advanceCreativePortfolio(
     const current = await updateCreativePortfolio(id, value => {
       if (value.lease?.id !== token) return value;
       if (value.lease.expiresAtMs <= Date.now()) return claimCreativePortfolio(value).job;
-      return providerWorkStarted ? failPortfolioWork(value, token, message) : releasePortfolioWork(value, token);
+      return providerWorkStarted || error instanceof InvalidPlannedCreativeCopyError
+        ? failPortfolioWork(value, token, message)
+        : releasePortfolioWork(value, token);
     }, storage);
     return { job: current, error: message, status: error instanceof OperatorQuotaUnavailableError ? 503
       : error instanceof CreativeGenerationPreparationError ? error.status : 500 };

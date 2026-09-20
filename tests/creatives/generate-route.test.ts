@@ -189,10 +189,8 @@ const plannedCreative = (
     adCopy: { ...copy },
     imageCopy: {
       headline: `Headline ${index}`,
-      shortSupport: index === 1 ? 'Short support' : '',
-      proofAttribution: '',
+      ...(index === 1 ? { shortSupport: 'Short support' } : {}),
       cta: 'Talk with TRA',
-      disclosure: '',
     },
     strategy: {
       category: 'customer-problems' as const,

@@ -131,6 +131,19 @@ describe('creative copy contract', () => {
     }
   });
 
+  it.each([
+    ['Review proofAttribution', 'proofAttribution'],
+    ['Case Study disclosure', 'disclosure'],
+  ] as const)('keeps the %s field within the canonical 1,000-character limit', (_label, field) => {
+    const accepted = modernE2();
+    (accepted.imageCopy as Record<string, unknown>)[field] = 'x'.repeat(1000);
+    expect(parseCreativeCopyContract(accepted)).not.toBeNull();
+
+    const rejected = modernE2();
+    (rejected.imageCopy as Record<string, unknown>)[field] = overlong;
+    expectInvalid(rejected);
+  });
+
   it('rejects unexpected keys in copy, adCopy, and imageCopy', () => {
     for (const field of ['copy', 'adCopy', 'imageCopy'] as const) {
       const modern = modernE2();
