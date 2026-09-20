@@ -11,6 +11,7 @@ Keep normal AI/Codex context small. Read only what the current task requires.
 - Merge completed feature work into `staging`; promote `staging` to `main` only with explicit production approval.
 - Preserve intended work from parallel branches when resolving conflicts; do not silently overwrite another agent's work.
 - Prefer ChatGPT/the coordinator for work that connected tools can complete safely without a local checkout, including GitHub state/check/log inspection, PR metadata, merge execution, and supported repository administration. Spend Codex/local-agent credits primarily on work that actually requires local repository edits, local tests/builds, or runtime interaction.
+- Any coordinator repository write must explicitly target the intended dedicated feature branch and follow the normal PR/review path. Never let a repository write fall through to the default branch, and never write directly to `staging` or `main` unless an existing rule explicitly authorizes that action.
 
 ## Current product scope
 
