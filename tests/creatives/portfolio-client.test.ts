@@ -6,7 +6,7 @@ import { portfolioRequest } from '../fixtures/creative-portfolio';
 
 const initial = (): PortfolioResponse => ({ job: portfolioProgress(newCreativePortfolio(portfolioRequest())), creatives: [] });
 const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED'>): PortfolioResponse => ({
-  job: { ...value.job, planReady: true, planningPhase: 'READY_TO_RENDER', lease: null,
+  job: { ...value.job, planReady: true, planningPhase: 'READY_TO_RENDER', preparationFingerprint: undefined, lease: null,
     slots: value.job.slots.map((slot, index) => ({ ...slot, status: statuses[index] })) },
   creatives: value.job.slots.filter((_, index) => statuses[index] === 'SAVED').map(slot => ({
     id: slot.creativeId, index: slot.index, category: 'customer-problems', format: 'direct-response',
@@ -83,6 +83,18 @@ describe('resumable portfolio browser controller', () => {
     expect(completed.job).toMatchObject({ planningPhase: 'INITIAL_PLAN', planningCheckpoint: 2 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance']);
+  });
+  it('accepts durable preparation progress when the coarse checkpoint count stays the same', async () => {
+    const value = initial();
+    const first = { ...value, job: { ...value.job, preparationFingerprint: 'a'.repeat(64) } };
+    const second = { ...value, job: { ...value.job, preparationFingerprint: 'b'.repeat(64) } };
+    expect(first.job.planningCheckpoint).toBe(second.job.planningCheckpoint);
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(first)).mockResolvedValueOnce(Response.json(second));
+    vi.stubGlobal('fetch', fetchMock);
+    let updates = 0;
+    const completed = await runPortfolio(value, () => { updates += 1; }, () => updates === 2);
+    expect(completed.job.preparationFingerprint).toBe('b'.repeat(64));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
   it('waits for shared child video work, then probes it without treating GET as progress', async () => {
     const value = initial();
