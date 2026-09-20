@@ -68,6 +68,7 @@ Keep the fields in `.github/pull_request_template.md` current throughout the PR 
 Live GitHub state is authoritative for current PR HEAD/base/diff/checks. Historical PR-body metadata is not.
 
 - Independent review is a final quality gate, not the normal implementation/debugging loop. Request it only after the implementer completion audit and green exact-HEAD CI.
+- Independence is about fresh reviewer context, not a specific execution product. A fresh ChatGPT/coordinator review session with live GitHub access can satisfy the independent-review gate when it can inspect the exact HEAD/base/diff, relevant source/tests, and required verification; do not spend Codex credits solely to create reviewer independence.
 - Reviewer context must be fresh and independent of the implementer.
 - Give the reviewer acceptance criteria, relevant canonical requirements, final diff or exact reviewed commit, and verification results.
 - Review requirement alignment, realistic regressions/edge cases, tests, security, data integrity, spend/publishing, compliance, risk classification, and weakened safeguards; return findings/conclusion rather than implementing fixes.
