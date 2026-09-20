@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { CreativePortfolioJob, PortfolioPlanningPhase, PortfolioSlot } from '@/lib/creatives/portfolio-job';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
@@ -24,9 +23,16 @@ const planningCheckpoint = (job: CreativePortfolioJob) => {
     + (preparation.referenceCatalog?.length ?? 0);
 };
 
-const preparationFingerprint = (job: CreativePortfolioJob) => job.planning.phase === 'INITIAL_PLAN'
-  ? createHash('sha256').update(JSON.stringify(job.planning.preparation)).digest('hex')
-  : undefined;
+const preparationFingerprint = (job: CreativePortfolioJob) => {
+  if (job.planning.phase !== 'INITIAL_PLAN') return undefined;
+  // Browser-safe FNV-1a 64 checksum: this is a progress identity, not a security primitive.
+  let hash = 0xcbf29ce484222325n;
+  for (const char of JSON.stringify(job.planning.preparation)) {
+    hash ^= BigInt(char.codePointAt(0)!);
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, '0');
+};
 
 const videoPreparation = (job: CreativePortfolioJob): PortfolioProgress['videoPreparation'] => {
   if (job.videoPreparationVersion !== 1) return undefined;
@@ -56,7 +62,7 @@ export function parsePortfolioProgress(value: unknown): PortfolioProgress | null
   if (!job || !/^portfolio_[a-f0-9]{32}$/.test(job.id) || typeof job.planReady !== 'boolean'
     || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planningPhase)
     || !Number.isSafeInteger(job.planningCheckpoint) || job.planningCheckpoint < 0
-    || (job.preparationFingerprint !== undefined && (!/^[a-f0-9]{64}$/.test(job.preparationFingerprint)
+    || (job.preparationFingerprint !== undefined && (!/^[a-f0-9]{16}$/.test(job.preparationFingerprint)
       || job.planningPhase !== 'INITIAL_PLAN'))
     || job.planReady !== (job.planningPhase === 'READY_TO_RENDER')
     || !Number.isInteger(job.requestedCount) || job.requestedCount < 2 || job.requestedCount > MAX_PORTFOLIO_CREATIVES
