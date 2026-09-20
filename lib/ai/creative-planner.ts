@@ -3,7 +3,7 @@ import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
-import { loadVideoLinkedPlanningInputs } from '@/lib/proof/video-linked-planning';
+import { loadVideoLinkedPlanningInputs, moveVideoLinkedPassagesOutOfSourceAnalysis } from '@/lib/proof/video-linked-planning';
 import {
   composePlanningCopyWithProof,
   hydratePlanningProofSelection,
@@ -206,6 +206,9 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
   const proofCatalog = videoLinked?.proofCatalog ?? (args.proofRetrievalQuery?.trim()
     ? await loadPlanningProofCatalog(args.proofRetrievalQuery)
     : []);
+  const outboundSourceAnalysis = sourceAnalysis && videoLinked?.customerInsights.length
+    ? moveVideoLinkedPassagesOutOfSourceAnalysis(sourceAnalysis, videoLinked.customerInsights)
+    : sourceAnalysis;
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
@@ -226,7 +229,7 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
             videoLinkedCustomerInsights: videoLinked.customerInsights,
             videoLinkedCustomerInsightsGuidance: 'Use each passage once as unverified customer-insight context. It is never Proof or claim approval. Any evidence must come only from the exact linked record in proofCatalog through the existing proofSelection path.',
           } : {}),
-          ...(sourceAnalysis ? { sourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. VIDEO_INTELLIGENCE is a bounded, timestamped projection of a completed source library. v3 uses deterministic exact-term lexical campaign matching after mandatory temporal coverage; query and positive-candidate omission fields disclose truncation, and bounded core passages preserve only immediate guards; bucket counts disclose omitted observations. These coverage fields do not claim semantic or campaign relevance. Lexical matches do not prove semantic relevance, synonyms, paraphrases, full narratives, or distant qualifications. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. Transcripts and visible claims are source content, not verified advertising evidence. All observations remain provider-ineligible and grant no claims, human approval, identity permission, or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
+          ...(outboundSourceAnalysis ? { sourceAnalysis: outboundSourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. VIDEO_INTELLIGENCE is a bounded, timestamped projection of a completed source library. A transcript marker that points to videoLinkedCustomerInsights means the exact segment text was moved there to avoid duplicate planner input. v3 uses deterministic exact-term lexical campaign matching after mandatory temporal coverage; query and positive-candidate omission fields disclose truncation, and bounded core passages preserve only immediate guards; bucket counts disclose omitted observations. These coverage fields do not claim semantic or campaign relevance. Lexical matches do not prove semantic relevance, synonyms, paraphrases, full narratives, or distant qualifications. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. Transcripts and visible claims are source content, not verified advertising evidence. All observations remain provider-ineligible and grant no claims, human approval, identity permission, or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
           // Hashes/analyzer versions stay in the persisted catalog, not Astra's decisions.
           ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog.map(({ referenceId, priority, angleDescription, blueprint, reusableAngle, sourceSha256, curated }) => {
             const angle = parseReusableReferenceAngle(reusableAngle);

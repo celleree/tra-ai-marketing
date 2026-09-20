@@ -125,3 +125,58 @@ export async function loadVideoLinkedPlanningInputs(
     proofCatalog,
   };
 }
+
+export function moveVideoLinkedPassagesOutOfSourceAnalysis(
+  sourceAnalysis: PlanningSourceAnalysisState,
+  customerInsights: readonly VideoLinkedCustomerInsight[]
+): PlanningSourceAnalysisState {
+  const moved = new Map<string, string>();
+  for (const insight of customerInsights) {
+    for (const segment of insight.passage.segments) {
+      moved.set(JSON.stringify([
+        insight.source.mediaId,
+        insight.source.sha256,
+        insight.source.analyzerFingerprintSha256,
+        insight.source.libraryId,
+        segment.segmentIndex,
+        segment.startMs,
+        segment.endMs,
+        segment.text,
+      ]), insight.candidateId);
+    }
+  }
+  if (!moved.size) return sourceAnalysis;
+  const outbound = structuredClone(sourceAnalysis);
+  for (const entry of outbound.entries) {
+    if (entry.result?.kind !== 'VIDEO_INTELLIGENCE') continue;
+    const intelligence = entry.result.intelligence;
+    const redact = (segment: { segmentIndex: number; startMs: number; endMs: number; text: string }) => {
+      const candidateId = moved.get(JSON.stringify([
+        entry.source.mediaId,
+        entry.source.sha256,
+        intelligence.locator.analyzerFingerprintSha256,
+        intelligence.library.id,
+        segment.segmentIndex,
+        segment.startMs,
+        segment.endMs,
+        segment.text,
+      ]));
+      return candidateId
+        ? { ...segment, text: `[SEE videoLinkedCustomerInsights candidateId=${candidateId}]` }
+        : segment;
+    };
+    if ('excerpts' in intelligence.transcript) {
+      intelligence.transcript.excerpts = intelligence.transcript.excerpts.map(redact);
+    } else {
+      intelligence.transcript.windows = intelligence.transcript.windows.map((window) => ({
+        ...window,
+        segments: window.segments.map(redact),
+      }));
+    }
+    intelligence.observations = intelligence.observations.map((observation) => ({
+      ...observation,
+      transcriptSegments: observation.transcriptSegments.map(redact),
+    }));
+  }
+  return outbound;
+}

@@ -178,7 +178,11 @@ it('projects multiple completed libraries with explicit bounded timeline coverag
   expect(outbound.proofCatalog[0]).toMatchObject({ id: linkedProof.id, approvedClaimWording: linkedProof.approvedClaimWording });
   expect(JSON.stringify(outbound.proofCatalog)).not.toContain('NEVER_SEND_THIS');
   expect(outbound.videoLinkedCustomerInsightsGuidance).toContain('never Proof or claim approval');
-  expect(outbound.sourceAnalysis).toEqual(projected);
+  expect(outbound.sourceAnalysis).not.toEqual(projected);
+  expect(JSON.stringify(outbound).match(/Outcome statement/g)).toHaveLength(1);
+  expect(JSON.stringify(outbound).match(/Qualification that must stay adjacent/g)).toHaveLength(1);
+  expect(JSON.stringify(outbound.sourceAnalysis)).toContain(`candidateId=video-passage_${'f'.repeat(64)}`);
+  expect(projected.entries[0].result).toEqual({ kind: 'VIDEO_INTELLIGENCE', intelligence: linkedIntelligence });
   expect(JSON.stringify(outbound)).not.toContain('thumbnailDataUrl');
   expect(outbound.sourceAnalysisGuidance).toContain('not verified advertising evidence');
   expect(outbound.sourceAnalysisGuidance).toContain('grant no claims, human approval');
