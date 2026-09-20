@@ -10,6 +10,7 @@ Keep normal AI/Codex context small. Read only what the current task requires.
 - Do not build multi-file app changes directly on `staging` or `main`.
 - Merge completed feature work into `staging`; promote `staging` to `main` only with explicit production approval.
 - Preserve intended work from parallel branches when resolving conflicts; do not silently overwrite another agent's work.
+- Prefer ChatGPT/the coordinator for work that connected tools can complete safely without a local checkout, including GitHub state/check/log inspection, PR metadata, merge execution, and supported repository administration. Spend Codex/local-agent credits primarily on work that actually requires local repository edits, local tests/builds, or runtime interaction.
 
 ## Current product scope
 
@@ -78,6 +79,8 @@ By default:
 - Repository CI provides the full typecheck + test suite + production build regression pass.
 - Run the full local suite/build before CI only when the change is cross-cutting/high-risk, changes build/dependencies, CI is unavailable, or focused evidence indicates it is necessary.
 - Stop after the first correct verified fix; do not refactor or improve unrelated code.
+- Before implementation handoff, perform a proportional completion audit: reread the acceptance criteria, inspect the complete diff, exercise realistic edge cases/state transitions, and fix issues found. Keep this lightweight for mechanical changes; it is not an independent review.
+- Do not request a required independent review until implementation is stable, the PR is in its intended final review state, and exact-HEAD CI is green.
 
 ## Risk and review
 
@@ -95,6 +98,7 @@ When review is required:
 - one qualifying review of the final exact HEAD is sufficient unless a second opinion is explicitly justified;
 - any subsequent commit, rebase, or base sync that changes HEAD invalidates the prior review;
 - live GitHub state, not stale PR-body metadata, is authoritative for current HEAD/base/diff/checks.
+- use independent review as a final gate, not as the normal debugging loop; when a review returns multiple material findings, collect them and repair them together where practical before requesting the next fresh exact-HEAD review.
 
 Each PR must keep the fields in `.github/pull_request_template.md` current, including acceptance criteria, verification, risk, required independent-review status, and reusable-learning outcome.
 
@@ -105,8 +109,8 @@ Detailed planning/implementation-cycle/review/handoff rules live in `docs/agent-
 Optimize for the lowest expected total cost of a correct, verified result, including retries and rework. Choose model and reasoning effort independently.
 
 Starting points:
-- Luna: mechanical/repetitive work, extraction/classification, targeted inspection, very easy tasks.
-- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation.
+- Luna: mechanical/repetitive work, extraction/classification, targeted inspection, very easy tasks, and obvious narrow repairs.
+- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation, and known bounded UI/runtime repairs.
 - Sol: difficult but bounded planning, debugging, unfamiliar subsystems, complex implementation, substantial review.
 - Astra: architecture, cross-phase decisions, difficult root-cause debugging, high-risk review, large-context orchestration, repeated failures, expensive mistakes.
 
@@ -115,6 +119,7 @@ Reasoning: Low for straightforward/local work, Medium for normal implementation/
 Before using very high reasoning on a lower-tier model, compare the next model tier at Low/Medium and choose the route with lower expected total cost. If a preferred route is unavailable, use the next-cheapest configuration likely to succeed. Repeated repository-specific evidence may override these defaults.
 
 Do not retry a failed model/reasoning configuration unchanged without new evidence. Escalate only when difficulty, ambiguity, context, risk, or failed verification warrants it.
+Do not escalate model tier merely because a reviewer found a defect. Route the repair by the remaining diagnosis/implementation difficulty: known mechanical fixes stay Luna/Terra; Sol/Astra are reserved for genuinely harder reasoning, integration, architecture, or risk.
 
 The coordinating agent owns the concrete Codex route; detailed launch/handoff format lives in `docs/agent-workflow.md`.
 
