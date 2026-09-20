@@ -26,6 +26,8 @@ Prefer ChatGPT/the coordinator with connected tools for work those tools can com
 - planning, routing, diagnosis, handoff preparation, and read-only review support;
 - supported narrow repository/documentation changes that do not require local execution.
 
+For any coordinator repository write, explicitly target the intended dedicated feature branch and keep the normal PR/review workflow. Never rely on the repository default branch for a write, and never write directly to `staging` or `main` unless an existing rule explicitly authorizes it.
+
 Use Codex/local agents when the work requires repository edits or execution that connected coordinator tools cannot safely perform, or when local tests/builds/runtime behavior are part of completion. Do not spend Codex credits merely to repeat repository administration or read-only inspection the coordinator can already do.
 
 ## Task handoff
