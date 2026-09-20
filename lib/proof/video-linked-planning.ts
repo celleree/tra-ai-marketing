@@ -5,10 +5,7 @@ import {
   type PlanningProofReference,
 } from '@/lib/proof/planning';
 import { getProofLibrarySnapshot } from '@/lib/proof/storage';
-import type {
-  ProofRecord,
-  VideoPassageCandidateView,
-} from '@/lib/proof/types';
+import type { ProofRecord, VideoPassageCandidateView } from '@/lib/proof/types';
 
 export const MAX_VIDEO_LINKED_CUSTOMER_INSIGHTS = 8;
 export const MAX_VIDEO_LINKED_CUSTOMER_INSIGHT_CHARS = 16_000;

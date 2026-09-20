@@ -4,10 +4,7 @@ import {
   MAX_VIDEO_LINKED_CUSTOMER_INSIGHTS,
   projectVideoLinkedCustomerInsights,
 } from '@/lib/proof/video-linked-planning';
-import type {
-  ProofRecord,
-  VideoPassageCandidateView,
-} from '@/lib/proof/types';
+import type { ProofRecord, VideoPassageCandidateView } from '@/lib/proof/types';
 
 const mediaId = `media_${'a'.repeat(32)}`;
 const sourceHash = 'b'.repeat(64);

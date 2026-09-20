@@ -31,10 +31,7 @@ export type PlanningProofRecord =
   | PlanningReviewProof
   | PlanningCaseStudyProof;
 
-export type PlanningProofReference = Pick<
-  ProofRecord,
-  'id' | 'type' | 'updatedAt'
->;
+export type PlanningProofReference = Pick<ProofRecord, 'id' | 'type' | 'updatedAt'>;
 
 const STOP_WORDS = new Set([
   'about', 'after', 'also', 'and', 'are', 'company', 'context', 'creative',
