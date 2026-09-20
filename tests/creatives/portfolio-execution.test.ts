@@ -136,6 +136,21 @@ const reachDiversityAudit = async (storage: MemoryPortfolioStorage) => {
   return job;
 };
 
+const reachTerminalSecondAudit = async (storage: MemoryPortfolioStorage) => {
+  const job = await reachDiversityAudit(storage);
+  mocks.audit.mockResolvedValueOnce(repeatedAudit()).mockResolvedValueOnce(repeatedAudit());
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(failed.job).toMatchObject({
+    planning: { phase: 'DIVERSITY_AUDIT', repairAttempted: true, checkpoint: {
+      snapshot: { batchPlan: { portfolioAudit: expect.any(Object) } },
+    } },
+    planningError: expect.any(String),
+  });
+  return job;
+};
+
 describe('bounded resumable portfolio execution', () => {
   it.each([
     ['1,000-character modern Review Proof', (concept: any) => composeD2Proof(concept, 1000)],
@@ -187,6 +202,52 @@ describe('bounded resumable portfolio execution', () => {
     expect(JSON.stringify((retried.job.planning as any).checkpoint)).toBe(checkpoint);
     expect(mocks.audit).not.toHaveBeenCalled(); expect(mocks.plan).not.toHaveBeenCalled();
     expect(mocks.selectVideo).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled(); expect(records).toHaveLength(0);
+  });
+
+  it('keeps a serialized invalid terminal second-audit checkpoint frozen across repeated explicit Retry', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await reachTerminalSecondAudit(storage);
+    const restored = await persistHistoricalCheckpoint(storage, job.id);
+    expect(restored).not.toBeNull();
+    expect(restored?.planning).toMatchObject({
+      phase: 'DIVERSITY_AUDIT', repairAttempted: true,
+      checkpoint: { snapshot: { batchPlan: { portfolioAudit: expect.any(Object) } } },
+    });
+    const checkpoint = JSON.stringify((restored!.planning as any).checkpoint);
+    vi.clearAllMocks();
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const rejected = await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+      expect(rejected).toMatchObject({
+        planning: { phase: 'DIVERSITY_AUDIT', repairAttempted: true },
+        planningError: expect.stringContaining('invalid separated ad/image copy contract'),
+        lease: null,
+      });
+      expect(JSON.stringify((rejected.planning as any).checkpoint)).toBe(checkpoint);
+    }
+
+    expect(mocks.prepareStep).not.toHaveBeenCalled(); expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled(); expect(mocks.videoStep).not.toHaveBeenCalled();
+    expect(mocks.sourceAnalysisStep).not.toHaveBeenCalled(); expect(mocks.selectVideo).not.toHaveBeenCalled();
+    expect(mocks.render).not.toHaveBeenCalled(); expect(records).toHaveLength(0);
+  });
+
+  it('still resets and replans a valid terminal second-audit quality failure on explicit Retry', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await reachTerminalSecondAudit(storage);
+    vi.clearAllMocks();
+
+    const authorized = await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+    expect(authorized).toMatchObject({
+      planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true } },
+      snapshot: null,
+    });
+    expect(authorized.planningError).toBeUndefined();
+
+    const replanned = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(replanned.job.planning.phase).toBe('DIVERSITY_AUDIT');
+    expect(mocks.prepareStep).toHaveBeenCalledOnce(); expect(mocks.plan).toHaveBeenCalledOnce();
+    expect(mocks.audit).not.toHaveBeenCalled(); expect(mocks.videoStep).not.toHaveBeenCalled();
+    expect(mocks.selectVideo).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
+    expect(records).toHaveLength(0);
   });
 
   it('rejects an invalid restored modern plan before automatic video selection, including explicit retry', async () => {
