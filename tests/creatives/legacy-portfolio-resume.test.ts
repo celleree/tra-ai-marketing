@@ -138,7 +138,7 @@ describe('legacy copy-only portfolio resume', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await advanceCreativePortfolio(saved.id, 'operator', 'http://localhost', storage);
-    expect(result.status).toBe(500);
+    expect(result.status).toBe(409);
     expect(result.job.slots[0].status).toBe('RETRY_REQUIRED');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(persistence.records).toHaveLength(0);

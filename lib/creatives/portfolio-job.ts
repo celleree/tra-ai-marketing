@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
+import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import type { CreativeBatchPlan } from '@/lib/creatives/planned';
@@ -270,23 +271,31 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
   const job = structuredClone(current);
   if (slotIndex === null) {
     if (job.snapshot || !job.planningError) throw new Error('Portfolio planning does not require a retry.');
-    delete job.planningError;
-    if (job.planning.phase === 'INITIAL_PLAN' && job.planning.preparation.videoProgress?.retryState) {
-      job.planning.preparation.videoRetryAuthorization = structuredClone(job.planning.preparation.videoProgress.retryState);
-    }
-    // A completed second audit is a known quality failure. Restart planning explicitly without re-reserving portfolio quota.
-    if (job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
-      && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) {
-      const { plannerArgs, snapshot } = job.planning.checkpoint;
-      job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true,
-        ...(job.sourceCompositionVersion === 2 && plannerArgs.sourceAnalysis ? {
-          sourceAnalysis: plannerArgs.sourceAnalysis, selectedReferences: snapshot.selectedReferences,
-          referenceCatalog: snapshot.referenceCatalog,
-          ...(job.videoPreparationVersion === 1 ? {
-            videoDependencies: videoDependenciesFromPlanningSourceAnalysis(plannerArgs.sourceAnalysis),
+    const invalidTerminalAudit = job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
+      && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit
+      && job.planning.checkpoint.snapshot.batchPlan.creatives.some(concept =>
+        classifyCreativeCopyContract(concept).kind === 'INVALID');
+    if (invalidTerminalAudit) {
+      job.planningError = 'Creative plan has an invalid separated ad/image copy contract and cannot be rendered.';
+    } else {
+      delete job.planningError;
+      if (job.planning.phase === 'INITIAL_PLAN' && job.planning.preparation.videoProgress?.retryState) {
+        job.planning.preparation.videoRetryAuthorization = structuredClone(job.planning.preparation.videoProgress.retryState);
+      }
+      // A completed second audit is a known quality failure. Restart planning explicitly without re-reserving portfolio quota.
+      if (job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
+        && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) {
+        const { plannerArgs, snapshot } = job.planning.checkpoint;
+        job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true,
+          ...(job.sourceCompositionVersion === 2 && plannerArgs.sourceAnalysis ? {
+            sourceAnalysis: plannerArgs.sourceAnalysis, selectedReferences: snapshot.selectedReferences,
+            referenceCatalog: snapshot.referenceCatalog,
+            ...(job.videoPreparationVersion === 1 ? {
+              videoDependencies: videoDependenciesFromPlanningSourceAnalysis(plannerArgs.sourceAnalysis),
+            } : {}),
           } : {}),
-        } : {}),
-      } };
+        } };
+      }
     }
   } else {
     const slot = job.slots.find(slot => slot.index === slotIndex);

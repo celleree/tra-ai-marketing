@@ -108,4 +108,27 @@ describe('render planned video provenance', () => {
     expect(mocks.resolveHuman).not.toHaveBeenCalled();
     expect(mocks.generate).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['overlong modern copy', (item: any) => {
+      item.copy.primaryText = 'x'.repeat(1001);
+      item.adCopy.primaryText = 'x'.repeat(1001);
+    }],
+    ['partial modern copy', (item: any) => { delete item.imageCopy; }],
+  ])('rejects restored %s before provider or persistence work, including explicit retry', async (_name, corrupt) => {
+    const request = portfolioRequest() as any;
+    const snapshot = portfolioSnapshot(newCreativePortfolio(request));
+    const item = structuredClone(snapshot.batchPlan.creatives[0]);
+    corrupt(item);
+    const renderInvalid = () => renderPlannedCreative(item, {
+      request, batchPlan: snapshot.batchPlan, referenceCatalog: [], selectedReferences: [], requestedSources: [], analysisSources: [],
+      reserveLogoArea: false, brandLogo: null, providerImageSource: undefined, videoFrameSet: frameSet, storage,
+    }, { creativeId: `creative_${'4'.repeat(32)}` });
+
+    await expect(renderInvalid()).rejects.toThrow('invalid separated ad/image copy contract');
+    await expect(renderInvalid()).rejects.toThrow('invalid separated ad/image copy contract');
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(storage.saveImage).not.toHaveBeenCalled();
+    expect(mocks.saveBatch).not.toHaveBeenCalled();
+  });
 });

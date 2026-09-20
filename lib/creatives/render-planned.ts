@@ -14,6 +14,7 @@ import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
+import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import type { CreativeAdCopy, CreativeImageCopy, GeneratedCreative } from '@/lib/creatives/generated';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
@@ -48,24 +49,17 @@ export type CreativeRenderContext = {
 };
 const sha256 = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
 
-const copyMatchesAdCopy = (item: PlannedCreativeConcept) =>
-  Boolean(item.adCopy)
-  && item.copy.primaryText === item.adCopy!.primaryText
-  && item.copy.headline === item.adCopy!.headline
-  && item.copy.description === item.adCopy!.description;
-
 type PlannedCopyMode =
   | { kind: 'LEGACY' }
   | { kind: 'E2'; adCopy: CreativeAdCopy; imageCopy: CreativeImageCopy };
 
 const classifyPlannedCopy = (item: PlannedCreativeConcept): PlannedCopyMode => {
-  const hasAdCopy = item.adCopy !== undefined;
-  const hasImageCopy = item.imageCopy !== undefined;
-  if (!hasAdCopy && !hasImageCopy) return { kind: 'LEGACY' };
-  if (!hasAdCopy || !hasImageCopy || !copyMatchesAdCopy(item)) {
+  const contract = classifyCreativeCopyContract(item);
+  if (contract.kind === 'LEGACY') return { kind: 'LEGACY' };
+  if (contract.kind === 'INVALID') {
     throw new Error('Creative plan has an invalid separated ad/image copy contract and cannot be rendered.');
   }
-  return { kind: 'E2', adCopy: item.adCopy!, imageCopy: item.imageCopy! };
+  return { kind: 'E2', adCopy: contract.adCopy, imageCopy: contract.imageCopy };
 };
 
 /** The shared one-ad provider, validation, branding and persistence path. */

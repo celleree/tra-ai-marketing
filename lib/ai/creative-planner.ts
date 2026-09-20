@@ -2,6 +2,7 @@ import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
+import { parseCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
 import { loadVideoLinkedPlanningInputs, moveVideoLinkedPassagesOutOfSourceAnalysis } from '@/lib/proof/video-linked-planning';
 import {
@@ -42,7 +43,7 @@ Plan globally distinct problem/outcome framings, objections, emotions, awareness
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
-proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Write the normal adCopy and imageCopy around the idea; do not rewrite, paraphrase, or manually place Proof wording. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. The application inserts the selected Proof text after the normal primaryText and fills approved attribution or required Case Study disclaimer deterministically. Review selectedText must use exact source wording bounded by whole review-line boundaries. Set includeAttribution true only when that Review record includes approved attribution. For Case Studies, selectedText must exactly equal approvedClaimWording. Obey usageRestrictions. Set imageCopy.proofAttribution to null; the application owns approved Review attribution. If a Case Study has a requiredDisclaimer, the application owns that exact disclosure. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
+proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Write the normal adCopy and imageCopy around the idea; do not rewrite, paraphrase, or manually place Proof wording. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. The application inserts the selected Proof text after the normal primaryText and fills approved attribution or required Case Study disclaimer deterministically. Budget ordinary text, exact selected Proof, separators, approved attribution and required disclaimer within every final 1,000-character field limit. A shorter permitted exact whole-line Review excerpt or no Proof is allowed when needed. Never truncate or rewrite Proof, omit required disclaimers, silently remove selected Proof, or increase those limits. Review selectedText must use exact source wording bounded by whole review-line boundaries. Set includeAttribution true only when that Review record includes approved attribution. For Case Studies, selectedText must exactly equal approvedClaimWording. Obey usageRestrictions. Set imageCopy.proofAttribution to null; the application owns approved Review attribution. If a Case Study has a requiredDisclaimer, the application owns that exact disclosure. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
 videoLinkedCustomerInsights, when supplied, are source-intelligence/customer-insight context only. They are not Proof, verified claims, approved quotes, or authority to use their wording. A linkedProofReference only identifies the separately supplied exact proofCatalog record; use only that record through proofSelection for evidence.
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, proof attribution, or other evidence.
 Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
@@ -164,6 +165,11 @@ const parseConcept = (
     return null;
   }
   const composed = composePlanningCopyWithProof(selectedProof, adCopy, imageCopy);
+  if (!parseCreativeCopyContract({
+    copy: composed.adCopy,
+    adCopy: composed.adCopy,
+    imageCopy: composed.imageCopy,
+  })) return null;
   return {
     index: expectedIndex,
     format: value.format,

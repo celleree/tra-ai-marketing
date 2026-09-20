@@ -11,9 +11,10 @@ import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-poli
 import { createVideoIntelligenceAnalyzerFingerprint } from '@/lib/video/intelligence-preparation';
 import { videoIntelligenceJobId } from '@/lib/video/intelligence-job';
 import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
+import { composePlanningCopyWithProof } from '@/lib/proof/planning-selection';
 
 const mocks = vi.hoisted(() => ({ prepareStep: vi.fn(), plan: vi.fn(), audit: vi.fn(), restore: vi.fn(), render: vi.fn(), list: vi.fn(),
-  videoStep: vi.fn(), sourceAnalysisStep: vi.fn(), projectVideo: vi.fn(), loadVideo: vi.fn() }));
+  videoStep: vi.fn(), sourceAnalysisStep: vi.fn(), projectVideo: vi.fn(), loadVideo: vi.fn(), selectVideo: vi.fn() }));
 vi.mock('@/lib/creatives/portfolio-preparation', () => ({ advancePortfolioPreparation: mocks.prepareStep }));
 vi.mock('@/lib/creatives/portfolio-video-adapter', () => ({ stepPortfolioVideoDependency: mocks.videoStep }));
 vi.mock('@/lib/creatives/planning-source-composition', async original => ({
@@ -31,6 +32,10 @@ vi.mock('@/lib/ai/creative-planner', () => ({
 }));
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: mocks.audit }));
 vi.mock('@/lib/creatives/render-planned', () => ({ renderPlannedCreative: mocks.render }));
+vi.mock('@/lib/creatives/portfolio-video-selection', async original => ({
+  ...await original<typeof import('@/lib/creatives/portfolio-video-selection')>(),
+  selectPortfolioVideoFrames: mocks.selectVideo,
+}));
 vi.mock('@/lib/creatives/storage', () => ({ listCreatives: mocks.list }));
 vi.mock('@/lib/creatives/portfolio-snapshot', async original => ({
   ...await original<typeof import('@/lib/creatives/portfolio-snapshot')>(), restoreCreativePortfolio: mocks.restore,
@@ -61,7 +66,7 @@ const videoDependency = (mediaId: string, complete = false) => {
 beforeEach(() => {
   records = []; mocks.prepareStep.mockReset(); mocks.plan.mockReset(); mocks.audit.mockReset(); mocks.restore.mockReset(); mocks.render.mockReset();
   mocks.list.mockReset().mockImplementation(async () => records);
-  mocks.videoStep.mockReset(); mocks.sourceAnalysisStep.mockReset(); mocks.projectVideo.mockReset(); mocks.loadVideo.mockReset();
+  mocks.videoStep.mockReset(); mocks.sourceAnalysisStep.mockReset(); mocks.projectVideo.mockReset(); mocks.loadVideo.mockReset(); mocks.selectVideo.mockReset();
   mocks.plan.mockImplementation(async args => unAuditedPlan(portfolioRequest(args.count)));
   mocks.audit.mockImplementation(async concepts => portfolioAudit(concepts.length));
   mocks.prepareStep.mockImplementation(async (request, _url, _state, onProviderStart) => {
@@ -84,7 +89,213 @@ beforeEach(() => {
   });
 });
 
+const readyPortfolio = async (
+  storage: MemoryPortfolioStorage,
+  request: Parameters<typeof createCreativePortfolio>[0] = portfolioRequest(),
+  prepareSnapshot: (snapshot: ReturnType<typeof portfolioSnapshot>) => void = () => {},
+) => {
+  const job = await createCreativePortfolio(request, storage);
+  const snapshot = portfolioSnapshot(job);
+  prepareSnapshot(snapshot);
+  return updateCreativePortfolio(job.id, current => ({
+    ...current, snapshot, planning: { phase: 'READY_TO_RENDER' as const }, lease: null,
+  }), storage);
+};
+
+const composeD2Proof = (concept: any, length: number) => {
+  const selectedProof = {
+    type: 'review' as const, proofId: `proof_${'b'.repeat(32)}`,
+    proofUpdatedAt: '2026-09-19T00:00:00.000Z', selectedText: 'Exact historical Review.', attribution: 'Approved reviewer',
+  };
+  const empty = composePlanningCopyWithProof(selectedProof, { ...concept.adCopy, primaryText: '' }, concept.imageCopy);
+  const composed = composePlanningCopyWithProof(selectedProof, {
+    ...concept.adCopy,
+    primaryText: 'x'.repeat(length - empty.adCopy.primaryText.length),
+  }, concept.imageCopy);
+  Object.assign(concept, { copy: composed.adCopy, adCopy: composed.adCopy, imageCopy: composed.imageCopy, selectedProof });
+};
+
+const persistHistoricalCheckpoint = async (
+  storage: MemoryPortfolioStorage,
+  id: string,
+  mutate: (concept: any) => void = concept => composeD2Proof(concept, 1001),
+) => {
+  const key = `creative-portfolios/v1/${id}.json`;
+  const stored = await storage.read(key);
+  if (!stored) throw new Error('Expected a saved portfolio checkpoint.');
+  const historical = JSON.parse(stored.bytes.toString());
+  mutate(historical.planning.checkpoint.snapshot.batchPlan.creatives[0]);
+  await storage.write(key, Buffer.from(JSON.stringify(historical)), stored.etag);
+  return readCreativePortfolio(id, storage);
+};
+
+const reachDiversityAudit = async (storage: MemoryPortfolioStorage) => {
+  const job = await createCreativePortfolio(portfolioRequest(), storage);
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  return job;
+};
+
+const reachTerminalSecondAudit = async (storage: MemoryPortfolioStorage) => {
+  const job = await reachDiversityAudit(storage);
+  mocks.audit.mockResolvedValueOnce(repeatedAudit()).mockResolvedValueOnce(repeatedAudit());
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(failed.job).toMatchObject({
+    planning: { phase: 'DIVERSITY_AUDIT', repairAttempted: true, checkpoint: {
+      snapshot: { batchPlan: { portfolioAudit: expect.any(Object) } },
+    } },
+    planningError: expect.any(String),
+  });
+  return job;
+};
+
 describe('bounded resumable portfolio execution', () => {
+  it.each([
+    ['1,000-character modern Review Proof', (concept: any) => composeD2Proof(concept, 1000)],
+    ['legacy copy-only', (concept: any) => { delete concept.adCopy; delete concept.imageCopy; }],
+  ])('allows a serialized valid %s checkpoint through its audit', async (_name, mutate) => {
+    const storage = new MemoryPortfolioStorage(), job = await reachDiversityAudit(storage);
+    await persistHistoricalCheckpoint(storage, job.id, mutate);
+    vi.clearAllMocks();
+    mocks.audit.mockResolvedValue(portfolioAudit(2));
+
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.job.planning.phase).toBe('READY_TO_RENDER');
+    expect(mocks.audit).toHaveBeenCalledOnce();
+    expect(mocks.plan).not.toHaveBeenCalled(); expect(mocks.selectVideo).not.toHaveBeenCalled();
+    expect(mocks.render).not.toHaveBeenCalled(); expect(records).toHaveLength(0);
+  });
+
+  it.each([
+    ['first DIVERSITY_AUDIT', async (storage: MemoryPortfolioStorage) => reachDiversityAudit(storage)],
+    ['repaired DIVERSITY_AUDIT', async (storage: MemoryPortfolioStorage) => {
+      const job = await reachDiversityAudit(storage);
+      mocks.audit.mockResolvedValueOnce(repeatedAudit());
+      await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+      await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+      return job;
+    }],
+    ['TARGETED_REPAIR', async (storage: MemoryPortfolioStorage) => {
+      const job = await reachDiversityAudit(storage);
+      mocks.audit.mockResolvedValueOnce(repeatedAudit());
+      await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+      return job;
+    }],
+  ])('rejects a serialized pre-G1 invalid checkpoint before %s provider work, including explicit retry', async (_name, setup) => {
+    const storage = new MemoryPortfolioStorage(), job = await setup(storage);
+    const restored = await persistHistoricalCheckpoint(storage, job.id);
+    const checkpoint = JSON.stringify((restored!.planning as any).checkpoint);
+    vi.clearAllMocks();
+
+    const first = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(first).toMatchObject({ status: 409, error: expect.stringContaining('invalid separated ad/image copy contract') });
+    expect(first.job).toMatchObject({ planningError: expect.stringContaining('invalid separated ad/image copy contract'), lease: null });
+    expect(JSON.stringify((first.job.planning as any).checkpoint)).toBe(checkpoint);
+    expect(mocks.audit).not.toHaveBeenCalled(); expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.selectVideo).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled(); expect(records).toHaveLength(0);
+
+    await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+    const retried = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(retried).toMatchObject({ status: 409, error: expect.stringContaining('invalid separated ad/image copy contract') });
+    expect(JSON.stringify((retried.job.planning as any).checkpoint)).toBe(checkpoint);
+    expect(mocks.audit).not.toHaveBeenCalled(); expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.selectVideo).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled(); expect(records).toHaveLength(0);
+  });
+
+  it('keeps a serialized invalid terminal second-audit checkpoint frozen across repeated explicit Retry', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await reachTerminalSecondAudit(storage);
+    const restored = await persistHistoricalCheckpoint(storage, job.id);
+    expect(restored).not.toBeNull();
+    expect(restored?.planning).toMatchObject({
+      phase: 'DIVERSITY_AUDIT', repairAttempted: true,
+      checkpoint: { snapshot: { batchPlan: { portfolioAudit: expect.any(Object) } } },
+    });
+    const checkpoint = JSON.stringify((restored!.planning as any).checkpoint);
+    vi.clearAllMocks();
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const rejected = await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+      expect(rejected).toMatchObject({
+        planning: { phase: 'DIVERSITY_AUDIT', repairAttempted: true },
+        planningError: expect.stringContaining('invalid separated ad/image copy contract'),
+        lease: null,
+      });
+      expect(JSON.stringify((rejected.planning as any).checkpoint)).toBe(checkpoint);
+    }
+
+    expect(mocks.prepareStep).not.toHaveBeenCalled(); expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled(); expect(mocks.videoStep).not.toHaveBeenCalled();
+    expect(mocks.sourceAnalysisStep).not.toHaveBeenCalled(); expect(mocks.selectVideo).not.toHaveBeenCalled();
+    expect(mocks.render).not.toHaveBeenCalled(); expect(records).toHaveLength(0);
+  });
+
+  it('still resets and replans a valid terminal second-audit quality failure on explicit Retry', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await reachTerminalSecondAudit(storage);
+    vi.clearAllMocks();
+
+    const authorized = await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+    expect(authorized).toMatchObject({
+      planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true } },
+      snapshot: null,
+    });
+    expect(authorized.planningError).toBeUndefined();
+
+    const replanned = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(replanned.job.planning.phase).toBe('DIVERSITY_AUDIT');
+    expect(mocks.prepareStep).toHaveBeenCalledOnce(); expect(mocks.plan).toHaveBeenCalledOnce();
+    expect(mocks.audit).not.toHaveBeenCalled(); expect(mocks.videoStep).not.toHaveBeenCalled();
+    expect(mocks.selectVideo).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
+    expect(records).toHaveLength(0);
+  });
+
+  it('rejects an invalid restored modern plan before automatic video selection, including explicit retry', async () => {
+    const storage = new MemoryPortfolioStorage(), ready = await readyPortfolio(storage, videoRequest(), snapshot => {
+      const invalid = snapshot.batchPlan.creatives[0];
+      invalid.copy.primaryText = 'x'.repeat(1001);
+      invalid.adCopy!.primaryText = 'x'.repeat(1001);
+    });
+    mocks.restore.mockImplementation(async saved => ({ ...saved, providerImageSource: null, videoFrameSet: {} }));
+
+    const first = await advanceCreativePortfolio(ready.id, 'operator', 'http://localhost', storage);
+    expect(first).toMatchObject({ status: 409, error: expect.stringContaining('invalid separated ad/image copy contract') });
+    expect(first.job.slots[0].status).toBe('RETRY_REQUIRED');
+    expect(mocks.selectVideo).not.toHaveBeenCalled();
+    expect(mocks.render).not.toHaveBeenCalled();
+    expect(records).toHaveLength(0);
+
+    await updateCreativePortfolio(ready.id, current => retryPortfolioWork(current, 1), storage);
+    const retried = await advanceCreativePortfolio(ready.id, 'operator', 'http://localhost', storage);
+    expect(retried).toMatchObject({ status: 409, error: expect.stringContaining('invalid separated ad/image copy contract') });
+    expect(mocks.selectVideo).not.toHaveBeenCalled();
+    expect(mocks.render).not.toHaveBeenCalled();
+    expect(records).toHaveLength(0);
+    const quotas = [...storage.data.keys()].filter(key => key.includes('/VIDEO_SELECTION.json') || key.includes('/CREATIVE_GENERATION.json'));
+    expect(quotas).toEqual([]);
+  });
+
+  it('allows a 1,000-character modern restored plan through normal rendering', async () => {
+    const storage = new MemoryPortfolioStorage(), ready = await readyPortfolio(storage, portfolioRequest(), snapshot => {
+      const concept = snapshot.batchPlan.creatives[0];
+      const selectedText = 'Exact Review Proof.';
+      const attribution = 'Approved reviewer';
+      const primaryText = `${'x'.repeat(1000 - selectedText.length - attribution.length - 4)}\n\n${selectedText}\n\n${attribution}`;
+      concept.copy.primaryText = primaryText;
+      concept.adCopy!.primaryText = primaryText;
+      concept.imageCopy!.proofAttribution = attribution;
+      concept.selectedProof = {
+        type: 'review', proofId: `proof_${'a'.repeat(32)}`,
+        proofUpdatedAt: '2026-09-19T00:00:00.000Z', selectedText, attribution,
+      };
+    });
+
+    const result = await advanceCreativePortfolio(ready.id, 'operator', 'http://localhost', storage);
+    expect(result.job.slots[0].status).toBe('SAVED');
+    expect(mocks.render).toHaveBeenCalledOnce();
+    expect(records).toHaveLength(1);
+  });
+
   it('prepares multiple marked videos durably before layout/source analysis and never calls representative preparation early', async () => {
     const storage = new MemoryPortfolioStorage(), request = videoRequest(2);
     const job = await createCreativePortfolio(request, storage);
