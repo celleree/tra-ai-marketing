@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import type { CreativePortfolioJob, PortfolioPlanningPhase, PortfolioSlot } from '@/lib/creatives/portfolio-job';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 export type PortfolioProgress = {
   id: string; requestedCount: number; planReady: boolean; planningPhase: PortfolioPlanningPhase; planningCheckpoint: number;
+  preparationFingerprint?: string;
   videoPreparation?: { total: number; completed: number; phase: import('@/lib/video/intelligence-job').VideoIntelligenceJob['phase']; busy: boolean };
   slots: PortfolioSlot[]; planningError: string | null;
   lease: { slotIndex: number | null; expiresAtMs: number } | null;
@@ -22,6 +24,10 @@ const planningCheckpoint = (job: CreativePortfolioJob) => {
     + (preparation.referenceCatalog?.length ?? 0);
 };
 
+const preparationFingerprint = (job: CreativePortfolioJob) => job.planning.phase === 'INITIAL_PLAN'
+  ? createHash('sha256').update(JSON.stringify(job.planning.preparation)).digest('hex')
+  : undefined;
+
 const videoPreparation = (job: CreativePortfolioJob): PortfolioProgress['videoPreparation'] => {
   if (job.videoPreparationVersion !== 1) return undefined;
   const total = job.request.sourceAssets.filter(source => source.role === 'TRA_VIDEO').length;
@@ -33,18 +39,25 @@ const videoPreparation = (job: CreativePortfolioJob): PortfolioProgress['videoPr
 };
 
 /** The client needs progress and saved creatives, not the broad planning snapshot or lease token. */
-export const portfolioProgress = (job: CreativePortfolioJob): PortfolioProgress => ({
-  id: job.id, requestedCount: job.slots.length, planReady: Boolean(job.snapshot), planningPhase: job.planning.phase,
-  planningCheckpoint: planningCheckpoint(job), ...(videoPreparation(job) ? { videoPreparation: videoPreparation(job) } : {}),
-  slots: job.slots, planningError: job.planningError ?? null,
-  lease: job.lease ? { slotIndex: job.lease.slotIndex, expiresAtMs: job.lease.expiresAtMs } : null,
-});
+export const portfolioProgress = (job: CreativePortfolioJob): PortfolioProgress => {
+  const fingerprint = preparationFingerprint(job);
+  const video = videoPreparation(job);
+  return {
+    id: job.id, requestedCount: job.slots.length, planReady: Boolean(job.snapshot), planningPhase: job.planning.phase,
+    planningCheckpoint: planningCheckpoint(job), ...(fingerprint ? { preparationFingerprint: fingerprint } : {}),
+    ...(video ? { videoPreparation: video } : {}),
+    slots: job.slots, planningError: job.planningError ?? null,
+    lease: job.lease ? { slotIndex: job.lease.slotIndex, expiresAtMs: job.lease.expiresAtMs } : null,
+  };
+};
 
 export function parsePortfolioProgress(value: unknown): PortfolioProgress | null {
   const job = value as PortfolioProgress;
   if (!job || !/^portfolio_[a-f0-9]{32}$/.test(job.id) || typeof job.planReady !== 'boolean'
     || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planningPhase)
     || !Number.isSafeInteger(job.planningCheckpoint) || job.planningCheckpoint < 0
+    || (job.preparationFingerprint !== undefined && (!/^[a-f0-9]{64}$/.test(job.preparationFingerprint)
+      || job.planningPhase !== 'INITIAL_PLAN'))
     || job.planReady !== (job.planningPhase === 'READY_TO_RENDER')
     || !Number.isInteger(job.requestedCount) || job.requestedCount < 2 || job.requestedCount > MAX_PORTFOLIO_CREATIVES
     || !Array.isArray(job.slots) || job.slots.length !== job.requestedCount
