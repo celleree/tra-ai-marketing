@@ -31,6 +31,11 @@ export type PlanningProofRecord =
   | PlanningReviewProof
   | PlanningCaseStudyProof;
 
+export type PlanningProofReference = Pick<
+  ProofRecord,
+  'id' | 'type' | 'updatedAt'
+>;
+
 const STOP_WORDS = new Set([
   'about', 'after', 'also', 'and', 'are', 'company', 'context', 'creative',
   'creatives', 'direction', 'for', 'from', 'have', 'image', 'images', 'into',
@@ -101,14 +106,30 @@ const toPlanningRecord = (record: ProofRecord): PlanningProofRecord =>
 
 export function selectProofForPlanning(
   records: ProofRecord[],
-  query: string
+  query: string,
+  preferred: readonly PlanningProofReference[] = []
 ): PlanningProofRecord[] {
   const queryTerms = new Set(terms(query));
+  const eligible = records.filter(
+    (record) =>
+      record.status === 'ACTIVE' && record.advertisingUseApproved === true
+  );
+  const preferredRecords: ProofRecord[] = [];
+  const preferredIds = new Set<string>();
+  for (const reference of preferred) {
+    if (preferredIds.has(reference.id)) continue;
+    const record = eligible.find(
+      (item) =>
+        item.id === reference.id &&
+        item.type === reference.type &&
+        item.updatedAt === reference.updatedAt
+    );
+    if (!record) continue;
+    preferredIds.add(record.id);
+    preferredRecords.push(record);
+  }
   const ranked = records
-    .filter(
-      (record) =>
-        record.status === 'ACTIVE' && record.advertisingUseApproved === true
-    )
+    .filter((record) => eligible.includes(record) && !preferredIds.has(record.id))
     .map((record) => ({
       record,
       score: relevanceScore(record, query, queryTerms),
@@ -123,7 +144,10 @@ export function selectProofForPlanning(
 
   const selected: PlanningProofRecord[] = [];
   let serializedChars = 0;
-  for (const { record } of ranked) {
+  for (const record of [
+    ...preferredRecords,
+    ...ranked.map((item) => item.record),
+  ]) {
     if (selected.length >= MAX_PLANNING_PROOF_RECORDS) break;
     const planningRecord = toPlanningRecord(record);
     const recordChars = JSON.stringify(planningRecord).length;

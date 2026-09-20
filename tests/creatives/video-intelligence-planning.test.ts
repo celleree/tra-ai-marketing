@@ -11,6 +11,7 @@ import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser'
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import type { PlanningSourceAnalysisState, VideoPlanningContextV1,
   VideoPlanningContextV2, VideoPlanningContextV3 } from '@/lib/creatives/planning-source-packet';
+import type { ProofRecord, VideoPassageCandidateView } from '@/lib/proof/types';
 import type { PortfolioVideoDependency } from '@/lib/creatives/portfolio-video-dependency';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
@@ -20,6 +21,15 @@ import { referenceCandidate } from '../fixtures/reference-catalog';
 import { MemoryPortfolioStorage, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
+
+const proofStorage = vi.hoisted(() => ({ snapshot: vi.fn(async (): Promise<{
+  items: ProofRecord[];
+  candidates: VideoPassageCandidateView[];
+}> => ({ items: [], candidates: [] })) }));
+vi.mock('@/lib/proof/storage', () => ({
+  getProofLibrarySnapshot: proofStorage.snapshot,
+  listProofRecords: vi.fn(async () => []),
+}));
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const jpeg = (await sharp({ create: { width: 1, height: 1, channels: 3, background: '#888' } }).jpeg().toBuffer()).toString('base64');
@@ -114,7 +124,12 @@ const legacyContext = (source: ReturnType<typeof videoSource>, value = library(s
       coverage: observations.length === value.representativeFrames.length ? 'COMPLETE' : 'UNIFORM_TIMELINE_V1' }, observations };
 };
 
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  proofStorage.snapshot.mockReset();
+  proofStorage.snapshot.mockResolvedValue({ items: [], candidates: [] });
+});
 
 it('projects multiple completed libraries with explicit bounded timeline coverage and sends them beside layout data to Astra', async () => {
   const sources = [videoSource('a'), videoSource('b')], dependencies = sources.map(dependency);
@@ -137,12 +152,32 @@ it('projects multiple completed libraries with explicit bounded timeline coverag
   expect(intelligence[1].transcript).toMatchObject({ status: 'NO_AUDIO_TRACK', totalSegmentCount: 0, includedSegmentCount: 0, coverage: 'COMPLETE', windows: [] });
   expect(JSON.stringify(projected)).not.toContain('thumbnailDataUrl');
   expect(projected.entries.slice(-2)).toEqual(baseState(sources).entries.slice(-2));
+  const linkedProof = { id: `proof_${'e'.repeat(32)}`, type: 'case-study' as const,
+    title: 'Linked customer outcome', verifiedFacts: ['NEVER_SEND_THIS'], approvedClaimWording: 'Approved linked wording.',
+    sourceNote: 'Internal.', tags: ['otherwise unrelated'], status: 'ACTIVE' as const, advertisingUseApproved: true,
+    createdAt: '2026-09-19T10:00:00.000Z', updatedAt: '2026-09-19T10:00:00.000Z' };
+  const linkedIntelligence = intelligence[0];
+  proofStorage.snapshot.mockResolvedValue({ items: [linkedProof], candidates: [{ version: 1,
+    id: `video-passage_${'f'.repeat(64)}`, status: 'LINKED', source: { locator: linkedIntelligence.locator,
+      library: { id: linkedIntelligence.library.id, version: linkedIntelligence.library.version } },
+    passage: { startSegmentIndex: 1, endSegmentIndex: 2, startMs: 50_000, endMs: 85_400,
+      segments: [{ segmentIndex: 1, startMs: 50_000, endMs: 50_400, text: 'Outcome statement' },
+        { segmentIndex: 2, startMs: 85_000, endMs: 85_400, text: 'Qualification that must stay adjacent' }] },
+    link: { proofId: linkedProof.id, proofType: linkedProof.type, proofUpdatedAt: linkedProof.updatedAt },
+    linkHealth: 'CURRENT', createdAt: '2026-09-19T10:00:00.000Z', updatedAt: '2026-09-19T10:00:00.000Z' }] });
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => ok()); vi.stubGlobal('fetch', fetchMock);
   await requestCreativeBatch({ count: 2, context: 'TRA', analysis, sourceAnalysis: projected, hasApprovedHumanSource: false });
   expect(fetchMock).toHaveBeenCalledOnce();
   const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
   const outbound = JSON.parse(request.input[1].content[0].text);
+  expect(outbound.videoLinkedCustomerInsights).toEqual([expect.objectContaining({
+    evidenceStatus: 'UNVERIFIED_SOURCE_PASSAGE',
+    linkedProofReference: { id: linkedProof.id, type: linkedProof.type, updatedAt: linkedProof.updatedAt },
+  })]);
+  expect(outbound.proofCatalog[0]).toMatchObject({ id: linkedProof.id, approvedClaimWording: linkedProof.approvedClaimWording });
+  expect(JSON.stringify(outbound.proofCatalog)).not.toContain('NEVER_SEND_THIS');
+  expect(outbound.videoLinkedCustomerInsightsGuidance).toContain('never Proof or claim approval');
   expect(outbound.sourceAnalysis).toEqual(projected);
   expect(JSON.stringify(outbound)).not.toContain('thumbnailDataUrl');
   expect(outbound.sourceAnalysisGuidance).toContain('not verified advertising evidence');

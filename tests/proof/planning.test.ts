@@ -166,6 +166,27 @@ describe('Proof planning retrieval', () => {
       .toBeLessThanOrEqual(MAX_PLANNING_PROOF_SERIALIZED_CHARS);
   });
 
+  it('prefers exact current linked references before lexical retrieval and deduplicates them', () => {
+    const linked = review('a', {
+      tags: ['unrelated'],
+      originalReviewText: 'Exact linked review.',
+    });
+    const lexical = caseStudy('b');
+    const result = selectProofForPlanning(
+      [lexical, linked],
+      'bank levy',
+      [
+        { id: linked.id, type: linked.type, updatedAt: linked.updatedAt },
+        { id: linked.id, type: linked.type, updatedAt: linked.updatedAt },
+      ]
+    );
+
+    expect(result.map((item) => item.id)).toEqual([linked.id, lexical.id]);
+    expect(selectProofForPlanning([linked], '', [
+      { id: linked.id, type: linked.type, updatedAt: '2026-09-10T12:00:01.000Z' },
+    ])).toEqual([]);
+  });
+
   it('returns no Proof when nothing eligible is relevant', () => {
     expect(selectProofForPlanning([
       review('a', { tags: ['professional'], originalReviewText: 'Clear and patient service.' }),
