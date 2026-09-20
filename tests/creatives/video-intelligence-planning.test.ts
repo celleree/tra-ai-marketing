@@ -145,6 +145,7 @@ it('projects multiple completed libraries with explicit bounded timeline coverag
   expect(intelligence[0].observations).toHaveLength(MAX_PLANNING_VIDEO_OBSERVATIONS);
   expect(intelligence[0].observations.find(item => item.representativeOrdinal === 1)).toMatchObject({
     timestampMs: 50100, selectionReasons: ['MIDDLE'] });
+  intelligence[0].observations.find(item => item.representativeOrdinal === 1)!.observation.visibleText = ['Outcome statement'];
   const segments = intelligence[0].transcript.windows.flatMap(window => window.segments);
   expect(segments.find(segment => segment.segmentIndex === 1)?.text).toBe('Outcome statement');
   expect(segments.find(segment => segment.segmentIndex === 2)?.text).toBe('Qualification that must stay adjacent');

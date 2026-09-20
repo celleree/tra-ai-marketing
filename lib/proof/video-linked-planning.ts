@@ -11,17 +11,10 @@ export const MAX_VIDEO_LINKED_CUSTOMER_INSIGHTS = 8;
 export const MAX_VIDEO_LINKED_CUSTOMER_INSIGHT_CHARS = 16_000;
 
 export type VideoLinkedCustomerInsight = {
-  candidateId: string;
-  evidenceStatus: 'UNVERIFIED_SOURCE_PASSAGE';
-  source: {
-    mediaId: string;
-    sha256: string;
-    analyzerFingerprintSha256: string;
-    libraryId: string;
-    libraryVersion: 1;
-  };
-  passage: VideoPassageCandidateView['passage'];
-  linkedProofReference: PlanningProofReference;
+  candidateId: string; evidenceStatus: 'UNVERIFIED_SOURCE_PASSAGE';
+  source: { mediaId: string; sha256: string; analyzerFingerprintSha256: string;
+    libraryId: string; libraryVersion: 1 };
+  passage: VideoPassageCandidateView['passage']; linkedProofReference: PlanningProofReference;
 };
 
 const exactCurrentProof = (
@@ -56,11 +49,8 @@ const matchesCurrentVideoIntelligence = (
     intelligence.library.version === candidate.source.library.version;
 });
 
-export function projectVideoLinkedCustomerInsights(
-  sourceAnalysis: PlanningSourceAnalysisState,
-  records: readonly ProofRecord[],
-  candidates: readonly VideoPassageCandidateView[]
-): VideoLinkedCustomerInsight[] {
+export function projectVideoLinkedCustomerInsights(sourceAnalysis: PlanningSourceAnalysisState,
+  records: readonly ProofRecord[], candidates: readonly VideoPassageCandidateView[]): VideoLinkedCustomerInsight[] {
   const selected: VideoLinkedCustomerInsight[] = [];
   let serializedChars = 0;
   const ordered = [...candidates].sort((a, b) =>
@@ -128,6 +118,7 @@ export function moveVideoLinkedPassagesOutOfSourceAnalysis(
   customerInsights: readonly VideoLinkedCustomerInsight[]
 ): PlanningSourceAnalysisState {
   const moved = new Map<string, string>();
+  const movedVisibleText = new Map<string, string>();
   for (const insight of customerInsights) {
     for (const segment of insight.passage.segments) {
       moved.set(JSON.stringify([
@@ -140,6 +131,8 @@ export function moveVideoLinkedPassagesOutOfSourceAnalysis(
         segment.endMs,
         segment.text,
       ]), insight.candidateId);
+      movedVisibleText.set(JSON.stringify([insight.source.mediaId, insight.source.sha256,
+        insight.source.analyzerFingerprintSha256, insight.source.libraryId, segment.text]), insight.candidateId);
     }
   }
   if (!moved.size) return sourceAnalysis;
@@ -172,6 +165,11 @@ export function moveVideoLinkedPassagesOutOfSourceAnalysis(
     }
     intelligence.observations = intelligence.observations.map((observation) => ({
       ...observation,
+      observation: { ...observation.observation, visibleText: observation.observation.visibleText.map((text) => {
+        const candidateId = movedVisibleText.get(JSON.stringify([entry.source.mediaId, entry.source.sha256,
+          intelligence.locator.analyzerFingerprintSha256, intelligence.library.id, text]));
+        return candidateId ? `[SEE videoLinkedCustomerInsights candidateId=${candidateId}]` : text;
+      }) },
       transcriptSegments: observation.transcriptSegments.map(redact),
     }));
   }
