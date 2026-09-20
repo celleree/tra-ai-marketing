@@ -16,6 +16,20 @@ PARALLEL: YES | NO — <reason>
 
 Every value must be concrete. Codex should execute the selected route but not echo this launch block unless asked.
 
+## Coordinator-first execution boundary
+
+Before launching Codex, ask whether the task actually requires a local checkout, local source edits, local tests/builds, or runtime interaction.
+
+Prefer ChatGPT/the coordinator with connected tools for work those tools can complete safely, including:
+- live GitHub state, SHA, PR, check, CI/log, diff, and file inspection;
+- PR metadata/workflow-state updates and merge execution;
+- planning, routing, diagnosis, handoff preparation, and read-only review support;
+- supported narrow repository/documentation changes that do not require local execution.
+
+For any coordinator repository write, explicitly target the intended dedicated feature branch and keep the normal PR/review workflow. Never rely on the repository default branch for a write, and never write directly to `staging` or `main` unless an existing rule explicitly authorizes it.
+
+Use Codex/local agents when the work requires repository edits or execution that connected coordinator tools cannot safely perform, or when local tests/builds/runtime behavior are part of completion. Do not spend Codex credits merely to repeat repository administration or read-only inspection the coordinator can already do.
+
 ## Task handoff
 
 Keep copyable handoffs compact and task-local. The coordinator-owned routing block stays outside the prompt.
@@ -39,21 +53,24 @@ Default target: about 200-400 words or less. Use one short source-of-truth remin
 
 ## Implementation cycle
 
-1. Inspect the smallest relevant file set and plan the smallest coherent change.
-2. For meaningful non-mechanical work, return the plan to the coordinator and resolve material scope/design questions before editing. Trivial mechanical work may combine planning and implementation when no meaningful decision or review boundary exists.
-3. Implement only the approved plan.
-4. Run focused verification while iterating.
-5. Let CI perform the full regression/typecheck/build pass by default.
-6. Use one fresh independent review of the final exact HEAD when policy requires it.
-7. Repair findings in the implementation session and reverify. Any subsequent commit, rebase, or base sync that changes HEAD invalidates an exact-HEAD review and requires a fresh review when policy requires review.
-8. Merge only with current required verification/review.
+1. Inspect the smallest relevant file set and choose the smallest coherent change.
+2. If the task is already bounded and the implementation direction is clear, plan and implement in the same session. Use a separate mapping/plan-only pass only when architecture, scope, sequencing, or a consequential decision is materially uncertain.
+3. Implement the bounded change and run focused verification while iterating.
+4. Before handoff, perform a proportional implementer completion audit: reread the acceptance criteria, inspect the complete diff, check realistic edge cases/state transitions, and run the targeted tests needed to catch ordinary implementation mistakes. Repair findings before handoff. This audit is not independent review and should be lightweight for mechanical changes.
+5. Keep the PR draft while implementation/audit is unstable. Once stable, move it into its intended final review state before the final check/review cycle so a later draft-to-ready transition does not create avoidable duplicate CI after review.
+6. Let CI perform the full regression/typecheck/build pass by default. Do not request required independent review while exact-HEAD CI is failing or still pending.
+7. After exact-HEAD CI is green, use one fresh independent review of the final exact HEAD when policy requires it.
+8. If review returns findings, collect all material findings first and repair them in one coherent pass where practical. Then rerun the implementer completion audit and CI before requesting one fresh exact-HEAD review. Any commit, rebase, or base sync that changes HEAD invalidates the prior exact-HEAD review.
+9. Merge only with current required verification/review.
 
-Keep implementation PRs draft until implementation and focused checks are stable, then mark ready for final review. Keep the fields in `.github/pull_request_template.md` current throughout the PR lifecycle.
+Keep the fields in `.github/pull_request_template.md` current throughout the PR lifecycle.
 
 ## Review freshness and proportionality
 
 Live GitHub state is authoritative for current PR HEAD/base/diff/checks. Historical PR-body metadata is not.
 
+- Independent review is a final quality gate, not the normal implementation/debugging loop. Request it only after the implementer completion audit and green exact-HEAD CI.
+- Independence is about fresh reviewer context, not a specific execution product. A fresh ChatGPT/coordinator review session with live GitHub access can satisfy the independent-review gate when it can inspect the exact HEAD/base/diff, relevant source/tests, and required verification; do not spend Codex credits solely to create reviewer independence.
 - Reviewer context must be fresh and independent of the implementer.
 - Give the reviewer acceptance criteria, relevant canonical requirements, final diff or exact reviewed commit, and verification results.
 - Review requirement alignment, realistic regressions/edge cases, tests, security, data integrity, spend/publishing, compliance, risk classification, and weakened safeguards; return findings/conclusion rather than implementing fixes.
