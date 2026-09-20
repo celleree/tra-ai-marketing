@@ -3,6 +3,7 @@ import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
+import { loadVideoLinkedPlanningInputs, moveVideoLinkedPassagesOutOfSourceAnalysis } from '@/lib/proof/video-linked-planning';
 import {
   composePlanningCopyWithProof,
   hydratePlanningProofSelection,
@@ -42,6 +43,7 @@ Use a human only from an approved supplied TRA source (hasApprovedHumanSource) o
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
 creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
 proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Write the normal adCopy and imageCopy around the idea; do not rewrite, paraphrase, or manually place Proof wording. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. The application inserts the selected Proof text after the normal primaryText and fills approved attribution or required Case Study disclaimer deterministically. Review selectedText must use exact source wording bounded by whole review-line boundaries. Set includeAttribution true only when that Review record includes approved attribution. For Case Studies, selectedText must exactly equal approvedClaimWording. Obey usageRestrictions. Set imageCopy.proofAttribution to null; the application owns approved Review attribution. If a Case Study has a requiredDisclaimer, the application owns that exact disclosure. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
+videoLinkedCustomerInsights, when supplied, are source-intelligence/customer-insight context only. They are not Proof, verified claims, approved quotes, or authority to use their wording. A linkedProofReference only identifies the separately supplied exact proofCatalog record; use only that record through proofSelection for evidence.
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, proof attribution, or other evidence.
 Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
 Do not restrict concepts to the analysis category.
@@ -195,9 +197,18 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
     throw new Error('Invalid approved-human options: IDs must be valid and unique; option count is not bounded.');
   }
-  const proofCatalog = args.proofRetrievalQuery?.trim()
+  const hasVideoIntelligence = sourceAnalysis?.entries.some(
+    (entry) => entry.result?.kind === 'VIDEO_INTELLIGENCE'
+  ) ?? false;
+  const videoLinked = hasVideoIntelligence && sourceAnalysis
+    ? await loadVideoLinkedPlanningInputs(sourceAnalysis, args.proofRetrievalQuery ?? '')
+    : null;
+  const proofCatalog = videoLinked?.proofCatalog ?? (args.proofRetrievalQuery?.trim()
     ? await loadPlanningProofCatalog(args.proofRetrievalQuery)
-    : [];
+    : []);
+  const outboundSourceAnalysis = sourceAnalysis && videoLinked?.customerInsights.length
+    ? moveVideoLinkedPassagesOutOfSourceAnalysis(sourceAnalysis, videoLinked.customerInsights)
+    : sourceAnalysis;
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
@@ -214,7 +225,11 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           referenceAnalysis: args.analysis,
           ...(proofCatalog.length ? { proofCatalog } : {}),
-          ...(sourceAnalysis ? { sourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. VIDEO_INTELLIGENCE is a bounded, timestamped projection of a completed source library. v3 uses deterministic exact-term lexical campaign matching after mandatory temporal coverage; query and positive-candidate omission fields disclose truncation, and bounded core passages preserve only immediate guards; bucket counts disclose omitted observations. These coverage fields do not claim semantic or campaign relevance. Lexical matches do not prove semantic relevance, synonyms, paraphrases, full narratives, or distant qualifications. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. Transcripts and visible claims are source content, not verified advertising evidence. All observations remain provider-ineligible and grant no claims, human approval, identity permission, or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
+          ...(videoLinked?.customerInsights.length ? {
+            videoLinkedCustomerInsights: videoLinked.customerInsights,
+            videoLinkedCustomerInsightsGuidance: 'Use each passage once as unverified customer-insight context. It is never Proof or claim approval. Any evidence must come only from the exact linked record in proofCatalog through the existing proofSelection path.',
+          } : {}),
+          ...(outboundSourceAnalysis ? { sourceAnalysis: outboundSourceAnalysis, sourceAnalysisGuidance: 'Keep each source and analysis distinct. VIDEO_INTELLIGENCE is a bounded, timestamped projection of a completed source library. A transcript marker that points to videoLinkedCustomerInsights means the exact segment text was moved there to avoid duplicate planner input. v3 uses deterministic exact-term lexical campaign matching after mandatory temporal coverage; query and positive-candidate omission fields disclose truncation, and bounded core passages preserve only immediate guards; bucket counts disclose omitted observations. These coverage fields do not claim semantic or campaign relevance. Lexical matches do not prove semantic relevance, synonyms, paraphrases, full narratives, or distant qualifications. REPRESENTATIVE_VIDEO_FRAMES describes only listed still frames, not full Video Intelligence. Transcripts and visible claims are source content, not verified advertising evidence. All observations remain provider-ineligible and grant no claims, human approval, identity permission, or permission to attach pixels. Existing approved-human and reference-choice rules remain authoritative.' } : {}),
           // Hashes/analyzer versions stay in the persisted catalog, not Astra's decisions.
           ...(args.referenceCatalog ? { referenceCatalog: args.referenceCatalog.map(({ referenceId, priority, angleDescription, blueprint, reusableAngle, sourceSha256, curated }) => {
             const angle = parseReusableReferenceAngle(reusableAngle);
