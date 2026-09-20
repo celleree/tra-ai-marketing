@@ -86,14 +86,14 @@ describe('resumable portfolio browser controller', () => {
   });
   it('accepts durable preparation progress when the coarse checkpoint count stays the same', async () => {
     const value = initial();
-    const first = { ...value, job: { ...value.job, preparationFingerprint: 'a'.repeat(16) } };
-    const second = { ...value, job: { ...value.job, preparationFingerprint: 'b'.repeat(16) } };
+    const first = { ...value, job: { ...value.job, preparationFingerprint: 'a'.repeat(8) } };
+    const second = { ...value, job: { ...value.job, preparationFingerprint: 'b'.repeat(8) } };
     expect(first.job.planningCheckpoint).toBe(second.job.planningCheckpoint);
     const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(first)).mockResolvedValueOnce(Response.json(second));
     vi.stubGlobal('fetch', fetchMock);
     let updates = 0;
     const completed = await runPortfolio(value, () => { updates += 1; }, () => updates === 2);
-    expect(completed.job.preparationFingerprint).toBe('b'.repeat(16));
+    expect(completed.job.preparationFingerprint).toBe('b'.repeat(8));
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
   it('waits for shared child video work, then probes it without treating GET as progress', async () => {
