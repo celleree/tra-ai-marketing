@@ -25,13 +25,13 @@ const planningCheckpoint = (job: CreativePortfolioJob) => {
 
 const preparationFingerprint = (job: CreativePortfolioJob) => {
   if (job.planning.phase !== 'INITIAL_PLAN') return undefined;
-  // Browser-safe FNV-1a 64 checksum: this is a progress identity, not a security primitive.
-  let hash = 0xcbf29ce484222325n;
+  // Browser-safe FNV-1a 32 checksum: this is a progress identity, not a security primitive.
+  let hash = 0x811c9dc5;
   for (const char of JSON.stringify(job.planning.preparation)) {
-    hash ^= BigInt(char.codePointAt(0)!);
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+    hash ^= char.codePointAt(0)!;
+    hash = Math.imul(hash, 0x01000193);
   }
-  return hash.toString(16).padStart(16, '0');
+  return (hash >>> 0).toString(16).padStart(8, '0');
 };
 
 const videoPreparation = (job: CreativePortfolioJob): PortfolioProgress['videoPreparation'] => {
@@ -62,7 +62,7 @@ export function parsePortfolioProgress(value: unknown): PortfolioProgress | null
   if (!job || !/^portfolio_[a-f0-9]{32}$/.test(job.id) || typeof job.planReady !== 'boolean'
     || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planningPhase)
     || !Number.isSafeInteger(job.planningCheckpoint) || job.planningCheckpoint < 0
-    || (job.preparationFingerprint !== undefined && (!/^[a-f0-9]{16}$/.test(job.preparationFingerprint)
+    || (job.preparationFingerprint !== undefined && (!/^[a-f0-9]{8}$/.test(job.preparationFingerprint)
       || job.planningPhase !== 'INITIAL_PLAN'))
     || job.planReady !== (job.planningPhase === 'READY_TO_RENDER')
     || !Number.isInteger(job.requestedCount) || job.requestedCount < 2 || job.requestedCount > MAX_PORTFOLIO_CREATIVES
