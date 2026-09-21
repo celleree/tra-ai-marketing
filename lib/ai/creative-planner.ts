@@ -199,6 +199,8 @@ export type CreativeRepairRequest = {
   existingPortfolio: PlannedCreativeConcept[];
   lockedConcepts: PlannedCreativeConcept[];
   portfolioAudit: PortfolioAudit;
+  diversityIssue: string;
+  plannerModel: string;
 };
 
 export async function requestCreativeBatch(
@@ -208,6 +210,8 @@ export async function requestCreativeBatch(
   const replacementIndexes = repair?.replacementIndexes;
   const lockedIndexes = repair?.lockedConcepts.map(concept => concept.index) ?? [];
   const existingIndexes = repair?.existingPortfolio.map(concept => concept.index) ?? [];
+  const repairIssue = repair?.diversityIssue.trim();
+  const repairModel = repair?.plannerModel.trim();
   if (replacementIndexes && (!replacementIndexes.length
     || replacementIndexes.some(index => !Number.isInteger(index) || index < 1 || index > args.count)
     || new Set(replacementIndexes).size !== replacementIndexes.length
@@ -216,7 +220,9 @@ export async function requestCreativeBatch(
     || lockedIndexes.length + replacementIndexes.length !== args.count
     || new Set([...lockedIndexes, ...replacementIndexes]).size !== args.count
     || existingIndexes.length !== args.count
-    || existingIndexes.some((index, position) => index !== position + 1))) {
+    || existingIndexes.some((index, position) => index !== position + 1)
+    || !repairIssue
+    || !repairModel)) {
     throw new Error('Creative repair targets do not cover the portfolio exactly.');
   }
   const expectedIndexes = replacementIndexes ?? Array.from({ length: args.count }, (_, index) => index + 1);
@@ -224,7 +230,7 @@ export async function requestCreativeBatch(
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
     throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
   }
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  const model = repairModel ?? (process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra');
   if (args.approvedHumanOptions && (args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
     throw new Error('Invalid approved-human options: IDs must be valid and unique; option count is not bounded.');
@@ -260,7 +266,8 @@ export async function requestCreativeBatch(
             existingPortfolio: repair.existingPortfolio,
             lockedConcepts: repair.lockedConcepts,
             repairAudit: repair.portfolioAudit,
-            repairGuidance: 'existingPortfolio is the complete failed portfolio. Replace only replacementIndexes. Treat lockedConcepts as immutable accepted concepts. Avoid the original targeted propositions as well as every locked proposition; do not relabel or paraphrase duplicates.',
+            repairIssue: repairIssue,
+            repairGuidance: `existingPortfolio is the complete failed portfolio. Replace only replacementIndexes. The exact blocking diversity defect is: ${repairIssue} Treat lockedConcepts as immutable accepted concepts. Fix that exact defect while avoiding every locked proposition and the original targeted proposition; do not relabel or paraphrase duplicates.`,
           } : {}),
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           referenceAnalysis: args.analysis,
@@ -370,6 +377,8 @@ export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise
     existingPortfolio: initialPlan.creatives,
     lockedConcepts,
     portfolioAudit: initialAudit,
+    diversityIssue: initialIssue,
+    plannerModel: initialPlan.plannerModel,
   });
   const replacementMap = new Map(replacements.creatives.map(concept => [concept.index, concept]));
   const repairedPlan: CreativeBatchPlan = {
