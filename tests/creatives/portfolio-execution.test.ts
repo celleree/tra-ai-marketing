@@ -70,7 +70,7 @@ beforeEach(() => {
   mocks.plan.mockImplementation(async (args, repair) => {
     const plan = unAuditedPlan(portfolioRequest(args.count));
     if (!repair) return plan;
-    return { ...plan, creatives: repair.replacementIndexes.map((index: number) => {
+    return { ...plan, creatives: repair.repairPlan.replacementIndexes.map((index: number) => {
       const concept = structuredClone(plan.creatives[index - 1]);
       concept.index = index;
       concept.copy.headline = `Repaired headline ${index}`;
