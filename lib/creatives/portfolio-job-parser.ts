@@ -201,11 +201,17 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
         if (!validPreparation(job.planning.preparation, job)) throw new Error();
       } else if (job.planning.phase === 'TARGETED_REPAIR') {
         const audit = job.planning.checkpoint?.snapshot?.batchPlan?.portfolioAudit;
+        const expectedReplacementIndexes = audit
+          ? getCreativeDiversityRepairIndexes(job.planning.checkpoint.snapshot.batchPlan.creatives, audit)
+          : [];
+        const savedRepair = job.planning as typeof job.planning & { replacementIndexes?: unknown };
+        if (savedRepair.replacementIndexes === undefined && expectedReplacementIndexes.length) {
+          job.planning = { ...job.planning, replacementIndexes: expectedReplacementIndexes };
+        }
         if (!validCheckpoint(job.planning.checkpoint, job, 'required') || !audit
           || !getCreativeDiversityIssue(job.planning.checkpoint.snapshot.batchPlan.creatives, audit)
           || !Array.isArray(job.planning.replacementIndexes)
-          || !isDeepStrictEqual(job.planning.replacementIndexes,
-            getCreativeDiversityRepairIndexes(job.planning.checkpoint.snapshot.batchPlan.creatives, audit))) throw new Error();
+          || !isDeepStrictEqual(job.planning.replacementIndexes, expectedReplacementIndexes)) throw new Error();
       } else {
         if (typeof job.planning.repairAttempted !== 'boolean') throw new Error();
         const hasAudit = job.planning.checkpoint?.snapshot?.batchPlan?.portfolioAudit !== undefined;
