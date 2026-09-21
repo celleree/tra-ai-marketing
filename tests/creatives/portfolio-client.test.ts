@@ -89,7 +89,7 @@ describe('resumable portfolio browser controller', () => {
     if (firstJob.planning.phase !== 'INITIAL_PLAN') throw new Error('Expected initial planning state.');
     firstJob.planning.preparation.analysis = {
       summary: 'Initial analysis', visibleText: [], visualStructure: 'Structure', hookOrAngle: 'Angle',
-      offerOrCta: 'CTA', styleNotes: 'Style', preserve: [], avoid: [],
+      offerOrCta: 'CTA', styleNotes: 'Style', preserve: [], avoid: [], unknowns: [], dominantCategory: 'customer-problems',
     };
     const secondJob = structuredClone(firstJob);
     if (secondJob.planning.phase !== 'INITIAL_PLAN') throw new Error('Expected initial planning state.');
