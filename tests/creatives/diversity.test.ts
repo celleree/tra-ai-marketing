@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCreativeDiversityIssue, getCreativeDiversityRepairIndexes } from '@/lib/creatives/diversity';
+import { getCreativeDiversityIssue, getCreativeDiversityRepairIndexes, getCreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { parsePortfolioAudit } from '@/lib/creatives/portfolio-audit';
@@ -103,4 +103,58 @@ describe('getCreativeDiversityRepairIndexes', () => {
     const right = concept(' same   HEADLINE ');
     expect(getCreativeDiversityRepairIndexes([left, right], portfolioAudit())).toEqual([2]);
   });
+  it('builds one repair plan for multiple independent deterministic defects', () => {
+    const concepts = [
+      concept('Same headline', { soWhat: { surfaceMessage: 'First message', functionalConsequence: 'First consequence', meaningfulOutcome: 'First outcome' } }),
+      concept(' same   HEADLINE ', { soWhat: { surfaceMessage: 'Second message', functionalConsequence: 'Second consequence', meaningfulOutcome: 'Second outcome' } }),
+      concept('Third headline', { soWhat: { surfaceMessage: 'Same SO WHAT', functionalConsequence: 'Third consequence', meaningfulOutcome: 'Third outcome' } }),
+      concept('Fourth headline', { soWhat: { surfaceMessage: ' same   so what ', functionalConsequence: 'Fourth consequence', meaningfulOutcome: 'Fourth outcome' } }),
+    ];
+    expect(getCreativeDiversityRepairPlan(concepts, portfolioAudit(4))).toEqual({
+      replacementIndexes: [2, 4],
+      defects: [
+        {
+          replacementIndex: 2, type: 'DUPLICATE_HEADLINE', relatedIndexes: [1, 2],
+          description: 'Variations 1 and 2 have duplicate headlines.',
+        },
+        {
+          replacementIndex: 4, type: 'DUPLICATE_SO_WHAT', relatedIndexes: [3, 4],
+          description: 'Variations 3 and 4 have duplicate SO WHAT surface messages.',
+        },
+      ],
+    });
+  });
+
+  it('retains every deterministic defect affecting the same replacement target', () => {
+    const first = concept('Repeated headline');
+    const second = concept(' repeated   HEADLINE ');
+    const plan = getCreativeDiversityRepairPlan([first, second], portfolioAudit(2));
+    expect(plan.replacementIndexes).toEqual([2]);
+    expect(plan.defects.filter(defect => defect.replacementIndex === 2).map(defect => defect.type))
+      .toEqual(['DUPLICATE_HEADLINE', 'DUPLICATE_SO_WHAT']);
+  });
+
+  it('describes each target in a semantic duplicate group while preserving the earliest anchor', () => {
+    const concepts = [
+      concept('One', { soWhat: { surfaceMessage: 'Message one', functionalConsequence: 'One', meaningfulOutcome: 'One' } }),
+      concept('Two', { soWhat: { surfaceMessage: 'Message two', functionalConsequence: 'Two', meaningfulOutcome: 'Two' } }),
+      concept('Three', { soWhat: { surfaceMessage: 'Message three', functionalConsequence: 'Three', meaningfulOutcome: 'Three' } }),
+    ];
+    const audit = { ...portfolioAudit(3), groups: [
+      { conceptIndexes: [1, 2, 3], proposition: 'Same strategic proposition', distinction: 'Paraphrases' },
+    ] };
+    const plan = getCreativeDiversityRepairPlan(concepts, audit);
+    expect(plan.replacementIndexes).toEqual([2, 3]);
+    expect(plan.defects).toEqual([
+      {
+        replacementIndex: 2, type: 'SEMANTIC_DUPLICATE', relatedIndexes: [1, 2, 3],
+        description: 'Concepts 1, 2, 3 repeat a strategic proposition: Same strategic proposition',
+      },
+      {
+        replacementIndex: 3, type: 'SEMANTIC_DUPLICATE', relatedIndexes: [1, 2, 3],
+        description: 'Concepts 1, 2, 3 repeat a strategic proposition: Same strategic proposition',
+      },
+    ]);
+  });
+
 });
