@@ -330,15 +330,32 @@ describe('creative batch planner', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('repairs a repeated semantic group once before returning the audited portfolio', async () => {
+  it('repairs only the later concept in a repeated semantic group before returning the audited portfolio', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const repeated = { ...portfolioAudit(), groups: [{ conceptIndexes: [1, 2], proposition: 'Conversation leads to next steps', distinction: 'Paraphrases of the same idea' }] };
     vi.mocked(auditCreativePortfolio).mockResolvedValueOnce(repeated);
-    const fetchMock = vi.fn(async () => okResponse({ creatives: [concept(1), concept(2)] }));
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const input = JSON.parse(body.input[1].content[0].text);
+      return okResponse({ creatives: input.replacementIndexes ? [concept(2)] : [concept(1), concept(2)] });
+    });
     vi.stubGlobal('fetch', fetchMock);
     const result = await planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.creatives[0]).toMatchObject({ index: 1, selectionReason: 'Distinct reason 1' });
+    const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    const repairInput = JSON.parse(repairBody.input[1].content[0].text);
+    expect(repairInput).toMatchObject({
+      requestedCount: 1,
+      portfolioCount: 2,
+      replacementIndexes: [2],
+      lockedConcepts: [expect.objectContaining({ index: 1 })],
+      repairAudit: repeated,
+    });
+    expect(repairBody.text.format.schema.properties.creatives).toMatchObject({ minItems: 1, maxItems: 1 });
+    expect(repairBody.text.format.schema.properties.creatives.items.properties.index).toEqual({ type: 'integer', enum: [2] });
     expect(result.portfolioAudit?.groups).toHaveLength(2);
+
     vi.mocked(auditCreativePortfolio).mockResolvedValueOnce(repeated).mockResolvedValueOnce(repeated);
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow('after one planning repair');
     expect(fetchMock).toHaveBeenCalledTimes(4);
