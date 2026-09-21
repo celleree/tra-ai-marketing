@@ -170,6 +170,8 @@ export function finishPortfolioRepair(
   const replacementIndexes = current.planning.phase === 'TARGETED_REPAIR' ? current.planning.replacementIndexes : undefined;
   if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'TARGETED_REPAIR'
     || !replacementIndexes || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
+    || batchPlan.plannerModel !== current.planning.checkpoint.snapshot.batchPlan.plannerModel
+    || batchPlan.reasoningEffort !== current.planning.checkpoint.snapshot.batchPlan.reasoningEffort
     || batchPlan.creatives.length !== replacementIndexes.length
     || batchPlan.creatives.some((concept, index) => concept.index !== replacementIndexes[index])) {
     throw new Error('Portfolio repair does not match the current audited plan.');
@@ -178,8 +180,8 @@ export function finishPortfolioRepair(
   const replacements = new Map(batchPlan.creatives.map(concept => [concept.index, structuredClone(concept)] as const));
   const repairedBatchPlan: CreativeBatchPlan = {
     creatives: checkpoint.snapshot.batchPlan.creatives.map(concept => replacements.get(concept.index) ?? structuredClone(concept)),
-    plannerModel: batchPlan.plannerModel,
-    reasoningEffort: batchPlan.reasoningEffort,
+    plannerModel: checkpoint.snapshot.batchPlan.plannerModel,
+    reasoningEffort: checkpoint.snapshot.batchPlan.reasoningEffort,
   };
   const job = structuredClone(current);
   job.planning = { phase: 'DIVERSITY_AUDIT', checkpoint: { ...checkpoint,
