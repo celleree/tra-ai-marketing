@@ -211,7 +211,7 @@ export async function requestCreativeBatch(
   const lockedIndexes = repair?.lockedConcepts.map(concept => concept.index) ?? [];
   const existingIndexes = repair?.existingPortfolio.map(concept => concept.index) ?? [];
   const repairIssue = repair?.diversityIssue.trim();
-  const repairModel = repair?.plannerModel.trim();
+  const repairModel = repair?.plannerModel;
   if (replacementIndexes && (!replacementIndexes.length
     || replacementIndexes.some(index => !Number.isInteger(index) || index < 1 || index > args.count)
     || new Set(replacementIndexes).size !== replacementIndexes.length
@@ -222,7 +222,7 @@ export async function requestCreativeBatch(
     || existingIndexes.length !== args.count
     || existingIndexes.some((index, position) => index !== position + 1)
     || !repairIssue
-    || !repairModel)) {
+    || !repairModel?.trim())) {
     throw new Error('Creative repair targets do not cover the portfolio exactly.');
   }
   const expectedIndexes = replacementIndexes ?? Array.from({ length: args.count }, (_, index) => index + 1);
@@ -383,8 +383,8 @@ export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise
   const replacementMap = new Map(replacements.creatives.map(concept => [concept.index, concept]));
   const repairedPlan: CreativeBatchPlan = {
     creatives: initialPlan.creatives.map(concept => replacementMap.get(concept.index) ?? concept),
-    plannerModel: replacements.plannerModel,
-    reasoningEffort: replacements.reasoningEffort,
+    plannerModel: initialPlan.plannerModel,
+    reasoningEffort: initialPlan.reasoningEffort,
   };
   const repairedAudit = await auditCreativePortfolio(repairedPlan.creatives);
   const repairedIssue = getCreativeDiversityIssue(repairedPlan.creatives, repairedAudit);
