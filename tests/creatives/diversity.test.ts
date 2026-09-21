@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
+import { getCreativeDiversityIssue, getCreativeDiversityRepairIndexes } from '@/lib/creatives/diversity';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { parsePortfolioAudit } from '@/lib/creatives/portfolio-audit';
@@ -84,5 +84,23 @@ describe('getCreativeDiversityIssue', () => {
       soWhat: { surfaceMessage: 'Second message', functionalConsequence: 'Know the next step', meaningfulOutcome: 'Move forward' },
     });
     expect(getCreativeDiversityIssue([concept('First message'), second, different()])).toBe('Variations 1 and 2 need a different category or awareness stage.');
+  });
+});
+
+
+describe('getCreativeDiversityRepairIndexes', () => {
+  it('keeps the first concept in each semantic duplicate group and replaces only later duplicates', () => {
+    const concepts = [concept('One'), different(), concept('Three'), different()];
+    const audit = { ...portfolioAudit(4), groups: [
+      { conceptIndexes: [1, 3], proposition: 'Same proposition', distinction: 'Paraphrases' },
+      { conceptIndexes: [2, 4], proposition: 'Another repeated proposition', distinction: 'Paraphrases' },
+    ] };
+    expect(getCreativeDiversityRepairIndexes(concepts, audit)).toEqual([3, 4]);
+  });
+
+  it('also targets later exact duplicates even when semantic groups are singletons', () => {
+    const left = concept('Same headline');
+    const right = concept(' same   HEADLINE ');
+    expect(getCreativeDiversityRepairIndexes([left, right], portfolioAudit())).toEqual([2]);
   });
 });
