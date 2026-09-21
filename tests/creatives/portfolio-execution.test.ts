@@ -465,6 +465,8 @@ describe('bounded resumable portfolio execution', () => {
       existingPortfolio: initialConcepts,
       lockedConcepts: [initialConcepts[0]],
       portfolioAudit: repeatedAudit(),
+      diversityIssue: 'Concepts 1, 2 repeat a strategic proposition: Same reason to act',
+      plannerModel: 'gpt-6-astra',
     });
 
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
