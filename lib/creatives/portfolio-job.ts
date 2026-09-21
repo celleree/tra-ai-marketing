@@ -4,7 +4,7 @@ import type { CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
-import { getCreativeDiversityRepairIndexes } from '@/lib/creatives/diversity';
+import { getCreativeDiversityRepairPlan, type CreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
 import type { CreativeBatchPlan } from '@/lib/creatives/planned';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
 import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
@@ -28,7 +28,7 @@ export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot;
 export type PortfolioPlanningState =
   | { phase: 'INITIAL_PLAN'; preparation: PortfolioPreparationState }
   | { phase: 'DIVERSITY_AUDIT'; checkpoint: PortfolioPlanningCheckpoint; repairAttempted: boolean }
-  | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint; replacementIndexes?: number[] }
+  | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint; repairPlan?: CreativeDiversityRepairPlan; replacementIndexes?: number[] }
   | { phase: 'READY_TO_RENDER' };
 export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;
@@ -154,10 +154,10 @@ export function finishPortfolioAuditForRepair(
     || current.planning.repairAttempted || current.planning.checkpoint.snapshot.batchPlan.portfolioAudit
     || audit.conceptCount !== current.slots.length) throw new Error('Portfolio audit does not match the current initial plan.');
   const checkpoint = structuredClone(current.planning.checkpoint);
-  const replacementIndexes = getCreativeDiversityRepairIndexes(checkpoint.snapshot.batchPlan.creatives, audit);
-  if (!replacementIndexes.length) throw new Error('Portfolio audit did not identify repairable concept indexes.');
+  const repairPlan = getCreativeDiversityRepairPlan(checkpoint.snapshot.batchPlan.creatives, audit);
+  if (!repairPlan.replacementIndexes.length) throw new Error('Portfolio audit did not identify repairable concept indexes.');
   const job = structuredClone(current);
-  job.planning = { phase: 'TARGETED_REPAIR', replacementIndexes, checkpoint: { ...checkpoint,
+  job.planning = { phase: 'TARGETED_REPAIR', repairPlan, checkpoint: { ...checkpoint,
     snapshot: { ...checkpoint.snapshot, batchPlan: { ...checkpoint.snapshot.batchPlan, portfolioAudit: structuredClone(audit) } } } };
   job.lease = null; job.updatedAtMs = now;
   return job;
@@ -167,9 +167,10 @@ export function finishPortfolioRepair(
   current: CreativePortfolioJob, leaseId: string, batchPlan: CreativeBatchPlan, now = Date.now(),
 ) {
   const lease = requireLease(current, leaseId, now);
-  const replacementIndexes = current.planning.phase === 'TARGETED_REPAIR' ? current.planning.replacementIndexes : undefined;
+  const repairPlan = current.planning.phase === 'TARGETED_REPAIR' ? current.planning.repairPlan : undefined;
+  const replacementIndexes = repairPlan?.replacementIndexes;
   if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'TARGETED_REPAIR'
-    || !replacementIndexes || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
+    || !replacementIndexes?.length || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
     || batchPlan.plannerModel !== current.planning.checkpoint.snapshot.batchPlan.plannerModel
     || batchPlan.reasoningEffort !== current.planning.checkpoint.snapshot.batchPlan.reasoningEffort
     || batchPlan.creatives.length !== replacementIndexes.length
