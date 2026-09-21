@@ -59,7 +59,8 @@ describe('durable creative portfolio storage', () => {
     const repair = await updateCreativePortfolio(job.id, current => finishPortfolioAuditForRepair(current, 'audit', repeated, now + 6), storage);
     expect(await readCreativePortfolio(job.id, storage)).toEqual(repair);
     await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, now + 7, 'repair').job, storage);
-    await updateCreativePortfolio(job.id, current => finishPortfolioRepair(current, 'repair', batchPlan, now + 8), storage);
+    const targetedRepair = { ...batchPlan, creatives: [batchPlan.creatives[1]] };
+    await updateCreativePortfolio(job.id, current => finishPortfolioRepair(current, 'repair', targetedRepair, now + 8), storage);
     await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, now + 9, 'final-audit').job, storage);
     await updateCreativePortfolio(job.id, current => finishPortfolioPlan(current, 'final-audit', planned, now + 10), storage);
     await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, now + 11, 'render').job, storage);
