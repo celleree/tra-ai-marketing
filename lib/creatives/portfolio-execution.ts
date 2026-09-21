@@ -201,6 +201,8 @@ export async function advanceCreativePortfolio(
           existingPortfolio: checkpoint.snapshot.batchPlan.creatives,
           lockedConcepts,
           portfolioAudit: audit,
+          diversityIssue: issue,
+          plannerModel: checkpoint.snapshot.batchPlan.plannerModel,
         });
         return { job: await updateCreativePortfolio(id, current => finishPortfolioRepair(current, token, batchPlan), storage) };
       }
