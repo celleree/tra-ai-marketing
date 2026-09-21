@@ -374,9 +374,14 @@ describe('creative batch planner', () => {
       ],
       lockedConcepts: [expect.objectContaining({ index: 1 })],
       repairAudit: repeated,
-      repairIssue: 'Concepts 1, 2 repeat a strategic proposition: Conversation leads to next steps',
+      repairDefects: [{
+        replacementIndex: 2,
+        type: 'SEMANTIC_DUPLICATE',
+        relatedIndexes: [1, 2],
+        description: 'Concepts 1, 2 repeat a strategic proposition: Conversation leads to next steps',
+      }],
     });
-    expect(repairInput.repairGuidance).toContain(repairInput.repairIssue);
+    expect(repairInput.repairGuidance).toContain('fix every listed repairDefect');
     expect(repairBody.model).toBe('gpt-6-astra');
     expect(repairBody.text.format.schema.properties.creatives).toMatchObject({ minItems: 1, maxItems: 1 });
     expect(repairBody.text.format.schema.properties.creatives.items.properties.index).toEqual({ type: 'integer', enum: [2] });
@@ -419,9 +424,44 @@ describe('creative batch planner', () => {
       expect(result.creatives).toHaveLength(2);
       const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
       const repairInput = JSON.parse(repairBody.input[1].content[0].text);
-      expect(repairInput).toMatchObject({ replacementIndexes: [2], requestedCount: 1, repairIssue: scenario.issue });
-      expect(repairInput.repairGuidance).toContain(scenario.issue);
+      expect(repairInput).toMatchObject({ replacementIndexes: [2], requestedCount: 1 });
+      expect(repairInput.repairDefects).toEqual([expect.objectContaining({
+        replacementIndex: 2,
+        description: scenario.issue,
+      })]);
+      expect(repairInput.repairGuidance).toContain('fix every listed repairDefect');
     }
+  });
+
+  it('sends every independent deterministic defect in one targeted repair request', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const concepts = [concept(1), concept(2), concept(3), concept(4)];
+    concepts[1].adCopy.headline = concepts[0].adCopy.headline;
+    concepts[3].strategy.soWhat.surfaceMessage = concepts[2].strategy.soWhat.surfaceMessage;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const input = JSON.parse(body.input[1].content[0].text);
+      return okResponse({ creatives: input.replacementIndexes ? [concept(2), concept(4)] : concepts });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await planCreativeBatch({ count: 4, context: '', analysis, hasApprovedHumanSource: false });
+    const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    const repairInput = JSON.parse(repairBody.input[1].content[0].text);
+    expect(repairInput.replacementIndexes).toEqual([2, 4]);
+    expect(repairInput.repairDefects).toEqual([
+      expect.objectContaining({
+        replacementIndex: 2,
+        type: 'DUPLICATE_HEADLINE',
+        description: 'Variations 1 and 2 have duplicate headlines.',
+      }),
+      expect.objectContaining({
+        replacementIndex: 4,
+        type: 'DUPLICATE_SO_WHAT',
+        description: 'Variations 3 and 4 have duplicate SO WHAT surface messages.',
+      }),
+    ]);
+    expect(repairInput.repairGuidance).toContain('For each replacement index, fix every listed repairDefect');
   });
 
   it('pins resumed targeted repair to the persisted initial planner model when environment configuration changes', async () => {
@@ -449,17 +489,16 @@ describe('creative batch planner', () => {
       },
     };
     const resumed = parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id);
-    if (resumed.planning.phase !== 'TARGETED_REPAIR' || !resumed.planning.replacementIndexes) throw new Error('Missing targeted repair checkpoint');
+    if (resumed.planning.phase !== 'TARGETED_REPAIR' || !resumed.planning.repairPlan) throw new Error('Missing targeted repair checkpoint');
 
     vi.stubEnv('OPENAI_TEXT_MODEL', 'planner-model-b');
-    const replacementIndexes = resumed.planning.replacementIndexes;
+    const { repairPlan } = resumed.planning;
     const existingPortfolio = resumed.planning.checkpoint.snapshot.batchPlan.creatives;
     const repaired = await requestCreativeBatch(resumed.planning.checkpoint.plannerArgs, {
-      replacementIndexes,
+      repairPlan,
       existingPortfolio,
-      lockedConcepts: existingPortfolio.filter(item => !replacementIndexes.includes(item.index)),
+      lockedConcepts: existingPortfolio.filter(item => !repairPlan.replacementIndexes.includes(item.index)),
       portfolioAudit: audit,
-      diversityIssue: 'Variations 1 and 2 have duplicate headlines.',
       plannerModel: resumed.planning.checkpoint.snapshot.batchPlan.plannerModel,
     });
 
