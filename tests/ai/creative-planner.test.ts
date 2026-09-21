@@ -452,11 +452,12 @@ describe('creative batch planner', () => {
     if (resumed.planning.phase !== 'TARGETED_REPAIR' || !resumed.planning.replacementIndexes) throw new Error('Missing targeted repair checkpoint');
 
     vi.stubEnv('OPENAI_TEXT_MODEL', 'planner-model-b');
+    const replacementIndexes = resumed.planning.replacementIndexes;
     const existingPortfolio = resumed.planning.checkpoint.snapshot.batchPlan.creatives;
     const repaired = await requestCreativeBatch(resumed.planning.checkpoint.plannerArgs, {
-      replacementIndexes: resumed.planning.replacementIndexes,
+      replacementIndexes,
       existingPortfolio,
-      lockedConcepts: existingPortfolio.filter(item => !resumed.planning.replacementIndexes!.includes(item.index)),
+      lockedConcepts: existingPortfolio.filter(item => !replacementIndexes.includes(item.index)),
       portfolioAudit: audit,
       diversityIssue: 'Variations 1 and 2 have duplicate headlines.',
       plannerModel: resumed.planning.checkpoint.snapshot.batchPlan.plannerModel,
