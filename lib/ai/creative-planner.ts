@@ -13,7 +13,7 @@ import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-par
 import { approvedHumanSourceId, isApprovedHumanId, parseApprovedHumanSourceId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
-import { getCreativeDiversityIssue, getCreativeDiversityRepairIndexes } from '@/lib/creatives/diversity';
+import { getCreativeDiversityIssue, getCreativeDiversityRepairPlan, type CreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
@@ -195,11 +195,10 @@ export type CreativeBatchPlannerArgs = {
 };
 
 export type CreativeRepairRequest = {
-  replacementIndexes: number[];
+  repairPlan: CreativeDiversityRepairPlan;
   existingPortfolio: PlannedCreativeConcept[];
   lockedConcepts: PlannedCreativeConcept[];
   portfolioAudit: PortfolioAudit;
-  diversityIssue: string;
   plannerModel: string;
 };
 
@@ -207,10 +206,10 @@ export async function requestCreativeBatch(
   args: CreativeBatchPlannerArgs,
   repair?: CreativeRepairRequest,
 ): Promise<CreativeBatchPlan> {
-  const replacementIndexes = repair?.replacementIndexes;
+  const replacementIndexes = repair?.repairPlan.replacementIndexes;
   const lockedIndexes = repair?.lockedConcepts.map(concept => concept.index) ?? [];
   const existingIndexes = repair?.existingPortfolio.map(concept => concept.index) ?? [];
-  const repairIssue = repair?.diversityIssue.trim();
+  const repairDefects = repair?.repairPlan.defects ?? [];
   const repairModel = repair?.plannerModel;
   if (replacementIndexes && (!replacementIndexes.length
     || replacementIndexes.some(index => !Number.isInteger(index) || index < 1 || index > args.count)
@@ -221,7 +220,11 @@ export async function requestCreativeBatch(
     || new Set([...lockedIndexes, ...replacementIndexes]).size !== args.count
     || existingIndexes.length !== args.count
     || existingIndexes.some((index, position) => index !== position + 1)
-    || !repairIssue
+    || !repairDefects.length
+    || repairDefects.some(defect => !replacementIndexes.includes(defect.replacementIndex)
+      || !defect.relatedIndexes.includes(defect.replacementIndex)
+      || !defect.description.trim())
+    || replacementIndexes.some(index => !repairDefects.some(defect => defect.replacementIndex === index))
     || !repairModel?.trim())) {
     throw new Error('Creative repair targets do not cover the portfolio exactly.');
   }
@@ -266,8 +269,8 @@ export async function requestCreativeBatch(
             existingPortfolio: repair.existingPortfolio,
             lockedConcepts: repair.lockedConcepts,
             repairAudit: repair.portfolioAudit,
-            repairIssue: repairIssue,
-            repairGuidance: `existingPortfolio is the complete failed portfolio. Replace only replacementIndexes. The exact blocking diversity defect is: ${repairIssue} Treat lockedConcepts as immutable accepted concepts. Fix that exact defect while avoiding every locked proposition and the original targeted proposition; do not relabel or paraphrase duplicates.`,
+            repairDefects,
+            repairGuidance: 'existingPortfolio is the complete failed portfolio. Replace only replacementIndexes. Treat lockedConcepts as immutable accepted concepts. For each replacement index, fix every listed repairDefect for that index while preserving locked concepts. Do not relabel or paraphrase duplicates.',
           } : {}),
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           referenceAnalysis: args.analysis,
@@ -369,15 +372,14 @@ export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise
   const initialIssue = getCreativeDiversityIssue(initialPlan.creatives, initialAudit);
   if (!initialIssue) return { ...initialPlan, portfolioAudit: initialAudit };
 
-  const replacementIndexes = getCreativeDiversityRepairIndexes(initialPlan.creatives, initialAudit);
-  if (!replacementIndexes.length) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${initialIssue}. No images were generated.`);
-  const lockedConcepts = initialPlan.creatives.filter(concept => !replacementIndexes.includes(concept.index));
+  const repairPlan = getCreativeDiversityRepairPlan(initialPlan.creatives, initialAudit);
+  if (!repairPlan.replacementIndexes.length) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${initialIssue}. No images were generated.`);
+  const lockedConcepts = initialPlan.creatives.filter(concept => !repairPlan.replacementIndexes.includes(concept.index));
   const replacements = await requestCreativeBatch(args, {
-    replacementIndexes,
+    repairPlan,
     existingPortfolio: initialPlan.creatives,
     lockedConcepts,
     portfolioAudit: initialAudit,
-    diversityIssue: initialIssue,
     plannerModel: initialPlan.plannerModel,
   });
   const replacementMap = new Map(replacements.creatives.map(concept => [concept.index, concept]));
