@@ -197,6 +197,7 @@ export async function advanceCreativePortfolio(
           .filter(concept => !replacementIndexes.includes(concept.index));
         const batchPlan = await requestCreativeBatch(checkpoint.plannerArgs, {
           replacementIndexes,
+          existingPortfolio: checkpoint.snapshot.batchPlan.creatives,
           lockedConcepts,
           portfolioAudit: audit,
         });
