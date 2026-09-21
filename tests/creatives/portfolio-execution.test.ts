@@ -67,7 +67,20 @@ beforeEach(() => {
   records = []; mocks.prepareStep.mockReset(); mocks.plan.mockReset(); mocks.audit.mockReset(); mocks.restore.mockReset(); mocks.render.mockReset();
   mocks.list.mockReset().mockImplementation(async () => records);
   mocks.videoStep.mockReset(); mocks.sourceAnalysisStep.mockReset(); mocks.projectVideo.mockReset(); mocks.loadVideo.mockReset(); mocks.selectVideo.mockReset();
-  mocks.plan.mockImplementation(async args => unAuditedPlan(portfolioRequest(args.count)));
+  mocks.plan.mockImplementation(async (args, repair) => {
+    const plan = unAuditedPlan(portfolioRequest(args.count));
+    if (!repair) return plan;
+    return { ...plan, creatives: repair.repairPlan.replacementIndexes.map((index: number) => {
+      const concept = structuredClone(plan.creatives[index - 1]);
+      concept.index = index;
+      concept.copy.headline = `Repaired headline ${index}`;
+      if (concept.adCopy) concept.adCopy.headline = concept.copy.headline;
+      if (concept.imageCopy) concept.imageCopy.headline = `Repaired image headline ${index}`;
+      if (concept.strategy.conceptDetails) concept.strategy.conceptDetails.proposition = `Distinct repaired proposition ${index}`;
+      concept.strategy.soWhat.surfaceMessage = `Distinct repaired outcome ${index}`;
+      return concept;
+    }) };
+  });
   mocks.audit.mockImplementation(async concepts => portfolioAudit(concepts.length));
   mocks.prepareStep.mockImplementation(async (request, _url, _state, onProviderStart) => {
     onProviderStart();
@@ -428,19 +441,44 @@ describe('bounded resumable portfolio execution', () => {
     expect(mocks.plan).toHaveBeenCalledOnce();
   });
 
-  it('saves audit and repair boundaries and performs only the next provider operation on resume', async () => {
+  it('targets only duplicate concepts, preserves locked concepts, and globally re-audits the repaired portfolio', async () => {
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
     mocks.audit.mockResolvedValueOnce(repeatedAudit()).mockResolvedValueOnce(portfolioAudit(2));
     let result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning.phase).toBe('INITIAL_PLAN');
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning.phase).toBe('DIVERSITY_AUDIT');
+    const initialConcepts = structuredClone((result.job.planning as any).checkpoint.snapshot.batchPlan.creatives);
+
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
-    expect(result.job.planning.phase).toBe('TARGETED_REPAIR');
+    expect(result.job.planning).toMatchObject({ phase: 'TARGETED_REPAIR', repairPlan: { replacementIndexes: [2] } });
+    const persistedRepair = await readCreativePortfolio(job.id, storage);
+    expect(persistedRepair?.planning).toMatchObject({ phase: 'TARGETED_REPAIR', repairPlan: { replacementIndexes: [2] } });
+
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning).toMatchObject({ phase: 'DIVERSITY_AUDIT', repairAttempted: true });
+    const repairedConcepts = (result.job.planning as any).checkpoint.snapshot.batchPlan.creatives;
+    expect(repairedConcepts[0]).toEqual(initialConcepts[0]);
+    expect(repairedConcepts[1]).not.toEqual(initialConcepts[1]);
+    expect(mocks.plan.mock.calls[1][1]).toMatchObject({
+      repairPlan: {
+        replacementIndexes: [2],
+        defects: [{
+          replacementIndex: 2,
+          type: 'SEMANTIC_DUPLICATE',
+          relatedIndexes: [1, 2],
+          description: 'Concepts 1, 2 repeat a strategic proposition: Same reason to act',
+        }],
+      },
+      existingPortfolio: initialConcepts,
+      lockedConcepts: [initialConcepts[0]],
+      portfolioAudit: repeatedAudit(),
+      plannerModel: 'gpt-6-astra',
+    });
+
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning.phase).toBe('READY_TO_RENDER');
+    expect(mocks.audit.mock.calls[1][0]).toEqual(repairedConcepts);
     expect(mocks.prepareStep).toHaveBeenCalledOnce();
     expect(mocks.plan).toHaveBeenCalledTimes(2);
     expect(mocks.audit).toHaveBeenCalledTimes(2);

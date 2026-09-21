@@ -110,6 +110,10 @@ describe('creative batch planner', () => {
     expect(loaded.planning.checkpoint.snapshot.sourceAnalysis).toEqual(sourceAnalysis);
     const repeated = { ...portfolioAudit(2), groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] };
     const repair = await updateCreativePortfolio(job.id, current => ({ ...current, planning: { phase: 'TARGETED_REPAIR',
+      repairPlan: { replacementIndexes: [2], defects: [{
+        replacementIndex: 2, type: 'SEMANTIC_DUPLICATE' as const, relatedIndexes: [1, 2],
+        description: 'Concepts 1, 2 repeat a strategic proposition: Same',
+      }] },
       checkpoint: { plannerArgs, snapshot: { ...snapshot, batchPlan: { ...batchPlan, portfolioAudit: repeated } } } } }), storage);
     expect(await readCreativePortfolio(job.id, storage)).toEqual(repair);
     await requestCreativeBatch({ ...loaded.planning.checkpoint.plannerArgs, context: `${plannerArgs.context}\nRepair feedback` });
@@ -236,6 +240,30 @@ describe('creative batch planner', () => {
     });
   });
 
+  it('migrates an older saved TARGETED_REPAIR checkpoint to a complete deterministic repair plan', () => {
+    const job = newCreativePortfolio(portfolioRequest());
+    const snapshot = portfolioSnapshot(job);
+    snapshot.batchPlan.portfolioAudit = {
+      ...portfolioAudit(2),
+      groups: [{ conceptIndexes: [1, 2], proposition: 'Same proposition', distinction: 'Paraphrases' }],
+    };
+    (job as any).planning = {
+      phase: 'TARGETED_REPAIR',
+      checkpoint: {
+        plannerArgs: { count: 2, context: 'Saved planning context', analysis, hasApprovedHumanSource: false, referenceCatalog: [] },
+        snapshot,
+      },
+    };
+    const reloaded = parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id);
+    expect(reloaded.planning).toMatchObject({ phase: 'TARGETED_REPAIR', repairPlan: {
+      replacementIndexes: [2],
+      defects: [{
+        replacementIndex: 2, type: 'SEMANTIC_DUPLICATE', relatedIndexes: [1, 2],
+        description: 'Concepts 1, 2 repeat a strategic proposition: Same proposition',
+      }],
+    } });
+  });
+
   it('parses sparse and complete optional image-copy fields without inventing omitted text', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const first = { ...concept(1), imageCopy: { headline: 'Only image headline', shortSupport: null, proofAttribution: null, cta: null, disclosure: null } };
@@ -330,19 +358,164 @@ describe('creative batch planner', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('repairs a repeated semantic group once before returning the audited portfolio', async () => {
+  it('repairs only the later concept in a repeated semantic group before returning the audited portfolio', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const repeated = { ...portfolioAudit(), groups: [{ conceptIndexes: [1, 2], proposition: 'Conversation leads to next steps', distinction: 'Paraphrases of the same idea' }] };
     vi.mocked(auditCreativePortfolio).mockResolvedValueOnce(repeated);
-    const fetchMock = vi.fn(async () => okResponse({ creatives: [concept(1), concept(2)] }));
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const input = JSON.parse(body.input[1].content[0].text);
+      return okResponse({ creatives: input.replacementIndexes ? [concept(2)] : [concept(1), concept(2)] });
+    });
     vi.stubGlobal('fetch', fetchMock);
     const result = await planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.creatives[0]).toMatchObject({ index: 1, selectionReason: 'Distinct reason 1' });
+    const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    const repairInput = JSON.parse(repairBody.input[1].content[0].text);
+    expect(repairInput).toMatchObject({
+      requestedCount: 1,
+      portfolioCount: 2,
+      replacementIndexes: [2],
+      existingPortfolio: [
+        expect.objectContaining({ index: 1 }),
+        expect.objectContaining({ index: 2 }),
+      ],
+      lockedConcepts: [expect.objectContaining({ index: 1 })],
+      repairAudit: repeated,
+      repairDefects: [{
+        replacementIndex: 2,
+        type: 'SEMANTIC_DUPLICATE',
+        relatedIndexes: [1, 2],
+        description: 'Concepts 1, 2 repeat a strategic proposition: Conversation leads to next steps',
+      }],
+    });
+    expect(repairInput.repairGuidance).toContain('fix every listed repairDefect');
+    expect(repairBody.model).toBe('gpt-6-astra');
+    expect(repairBody.text.format.schema.properties.creatives).toMatchObject({ minItems: 1, maxItems: 1 });
+    expect(repairBody.text.format.schema.properties.creatives.items.properties.index).toEqual({ type: 'integer', enum: [2] });
     expect(result.portfolioAudit?.groups).toHaveLength(2);
+
     vi.mocked(auditCreativePortfolio).mockResolvedValueOnce(repeated).mockResolvedValueOnce(repeated);
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow('after one planning repair');
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
+  it('passes the exact deterministic duplicate defect to targeted repair even when audit groups are singletons', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const scenarios = [
+      {
+        issue: 'Variations 1 and 2 have duplicate headlines.',
+        mutate: (item: ReturnType<typeof concept>, first: ReturnType<typeof concept>) => { item.adCopy.headline = first.adCopy.headline; },
+      },
+      {
+        issue: 'Variations 1 and 2 have duplicate SO WHAT surface messages.',
+        mutate: (item: ReturnType<typeof concept>, first: ReturnType<typeof concept>) => { item.strategy.soWhat.surfaceMessage = first.strategy.soWhat.surfaceMessage; },
+      },
+      {
+        issue: 'Variations 1 and 2 have duplicate propositions.',
+        mutate: (item: ReturnType<typeof concept>, first: ReturnType<typeof concept>) => {
+          item.strategy.conceptDetails = { ...item.strategy.conceptDetails, proposition: first.strategy.conceptDetails.proposition };
+        },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const first = concept(1), second = structuredClone(concept(2));
+      scenario.mutate(second, first);
+      const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        const input = JSON.parse(body.input[1].content[0].text);
+        return okResponse({ creatives: input.replacementIndexes ? [concept(2)] : [first, second] });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
+      expect(result.creatives).toHaveLength(2);
+      const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+      const repairInput = JSON.parse(repairBody.input[1].content[0].text);
+      expect(repairInput).toMatchObject({ replacementIndexes: [2], requestedCount: 1 });
+      expect(repairInput.repairDefects).toEqual([expect.objectContaining({
+        replacementIndex: 2,
+        description: scenario.issue,
+      })]);
+      expect(repairInput.repairGuidance).toContain('fix every listed repairDefect');
+    }
+  });
+
+  it('sends every independent deterministic defect in one targeted repair request', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const concepts = [concept(1), concept(2), concept(3), concept(4)];
+    concepts[1].adCopy.headline = concepts[0].adCopy.headline;
+    concepts[3].strategy.soWhat.surfaceMessage = concepts[2].strategy.soWhat.surfaceMessage;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const input = JSON.parse(body.input[1].content[0].text);
+      return okResponse({ creatives: input.replacementIndexes ? [concept(2), concept(4)] : concepts });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await planCreativeBatch({ count: 4, context: '', analysis, hasApprovedHumanSource: false });
+    const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    const repairInput = JSON.parse(repairBody.input[1].content[0].text);
+    expect(repairInput.replacementIndexes).toEqual([2, 4]);
+    expect(repairInput.repairDefects).toEqual([
+      expect.objectContaining({
+        replacementIndex: 2,
+        type: 'DUPLICATE_HEADLINE',
+        description: 'Variations 1 and 2 have duplicate headlines.',
+      }),
+      expect.objectContaining({
+        replacementIndex: 4,
+        type: 'DUPLICATE_SO_WHAT',
+        description: 'Variations 3 and 4 have duplicate SO WHAT surface messages.',
+      }),
+    ]);
+    expect(repairInput.repairGuidance).toContain('For each replacement index, fix every listed repairDefect');
+  });
+
+  it('pins resumed targeted repair to the persisted initial planner model when environment configuration changes', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    vi.stubEnv('OPENAI_TEXT_MODEL', 'planner-model-a');
+    const job = newCreativePortfolio(portfolioRequest());
+    const plannerArgs = { count: 2, context: job.request.context, analysis, hasApprovedHumanSource: false };
+    const first = concept(1), duplicate = structuredClone(concept(2));
+    duplicate.adCopy.headline = first.adCopy.headline;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const input = JSON.parse(body.input[1].content[0].text);
+      return okResponse({ creatives: input.replacementIndexes ? [concept(2)] : [first, duplicate] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const initialPlan = await requestCreativeBatch(plannerArgs);
+    const audit = portfolioAudit(2);
+    job.planning = {
+      phase: 'TARGETED_REPAIR',
+      replacementIndexes: [2],
+      checkpoint: {
+        plannerArgs,
+        snapshot: { ...portfolioSnapshot(job), batchPlan: { ...initialPlan, portfolioAudit: audit } },
+      },
+    };
+    const resumed = parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id);
+    if (resumed.planning.phase !== 'TARGETED_REPAIR' || !resumed.planning.repairPlan) throw new Error('Missing targeted repair checkpoint');
+
+    vi.stubEnv('OPENAI_TEXT_MODEL', 'planner-model-b');
+    const { repairPlan } = resumed.planning;
+    const existingPortfolio = resumed.planning.checkpoint.snapshot.batchPlan.creatives;
+    const repaired = await requestCreativeBatch(resumed.planning.checkpoint.plannerArgs, {
+      repairPlan,
+      existingPortfolio,
+      lockedConcepts: existingPortfolio.filter(item => !repairPlan.replacementIndexes.includes(item.index)),
+      portfolioAudit: audit,
+      plannerModel: resumed.planning.checkpoint.snapshot.batchPlan.plannerModel,
+    });
+
+    expect(initialPlan.plannerModel).toBe('planner-model-a');
+    expect(repaired.plannerModel).toBe('planner-model-a');
+    expect(fetchMock.mock.calls.map(call => JSON.parse(String(call[1]?.body)).model)).toEqual(['planner-model-a', 'planner-model-a']);
+  });
+
   it('lets Astra choose all independent combinations and resolves known IDs deterministically', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const referenceCatalog = [referenceCandidate('a'), referenceCandidate('b')];

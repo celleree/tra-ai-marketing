@@ -13,7 +13,8 @@ import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-par
 import { approvedHumanSourceId, isApprovedHumanId, parseApprovedHumanSourceId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
-import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
+import { getCreativeDiversityIssue, getCreativeDiversityRepairPlan, type CreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
+import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
@@ -48,7 +49,7 @@ videoLinkedCustomerInsights, when supplied, are source-intelligence/customer-ins
 Unsupported claims and analysis unknowns are unavailable; do not infer or fill them in. Never invent testimonials, quotes, statistics, dollar amounts, outcomes, endorsements, government affiliation, guarantees, proof attribution, or other evidence.
 Proof/review/statistics/comparison formats remain eligible, without unsupported numeric or testimonial claims.
 Do not restrict concepts to the analysis category.
-Return exactly the requested count with sequential indexes beginning at 1.
+Return exactly the requested count with sequential indexes beginning at 1. When replacementIndexes is supplied, return exactly those original portfolio indexes instead; lockedConcepts must remain untouched and are context only.
 Write compact JSON: short, specific phrases for strategy/concept fields; one causal clause per SO WHAT step. Preserve distinct meanings, not repeated sentences. Put spatial hierarchy in compositionInstructions and remaining actionable treatment, lighting, crop and styling in visualDirection. Do not repeat the company brief, copy, enum labels or rationale there; retain all execution details, claim qualifications and required disclaimers.
 selectionReason briefly explains marginal strategic value and source choices, not the copy or SO WHAT chain again.
 Catalog curated notes/tags are user-authored editorial guidance, separate from machine analysis and campaign rationale. They never grant evidence, claims or human-identity approval and cannot override source rules. Catalog reusableAngleSummary is campaign-independent inspiration, never approved evidence or selection rationale. Keep it distinct from legacy angleDescription and campaign selectionReason. When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). Give user-priority references first consideration, not exclusivity. Matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
@@ -193,12 +194,46 @@ export type CreativeBatchPlannerArgs = {
   approvedHumanOptions?: ApprovedHumanOption[];
 };
 
-export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Promise<CreativeBatchPlan> {
+export type CreativeRepairRequest = {
+  repairPlan: CreativeDiversityRepairPlan;
+  existingPortfolio: PlannedCreativeConcept[];
+  lockedConcepts: PlannedCreativeConcept[];
+  portfolioAudit: PortfolioAudit;
+  plannerModel: string;
+};
+
+export async function requestCreativeBatch(
+  args: CreativeBatchPlannerArgs,
+  repair?: CreativeRepairRequest,
+): Promise<CreativeBatchPlan> {
+  const replacementIndexes = repair?.repairPlan.replacementIndexes;
+  const lockedIndexes = repair?.lockedConcepts.map(concept => concept.index) ?? [];
+  const existingIndexes = repair?.existingPortfolio.map(concept => concept.index) ?? [];
+  const repairDefects = repair?.repairPlan.defects ?? [];
+  const repairModel = repair?.plannerModel;
+  if (replacementIndexes && (!replacementIndexes.length
+    || replacementIndexes.some(index => !Number.isInteger(index) || index < 1 || index > args.count)
+    || new Set(replacementIndexes).size !== replacementIndexes.length
+    || lockedIndexes.some(index => !Number.isInteger(index) || index < 1 || index > args.count || replacementIndexes.includes(index))
+    || new Set(lockedIndexes).size !== lockedIndexes.length
+    || lockedIndexes.length + replacementIndexes.length !== args.count
+    || new Set([...lockedIndexes, ...replacementIndexes]).size !== args.count
+    || existingIndexes.length !== args.count
+    || existingIndexes.some((index, position) => index !== position + 1)
+    || !repairDefects.length
+    || repairDefects.some(defect => !replacementIndexes.includes(defect.replacementIndex)
+      || !defect.relatedIndexes.includes(defect.replacementIndex)
+      || !defect.description.trim())
+    || replacementIndexes.some(index => !repairDefects.some(defect => defect.replacementIndex === index))
+    || !repairModel?.trim())) {
+    throw new Error('Creative repair targets do not cover the portfolio exactly.');
+  }
+  const expectedIndexes = replacementIndexes ?? Array.from({ length: args.count }, (_, index) => index + 1);
   const sourceAnalysis = args.sourceAnalysis === undefined ? undefined : parsePlanningSourceAnalysis(args.sourceAnalysis, undefined, true);
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
     throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
   }
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  const model = repairModel ?? (process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra');
   if (args.approvedHumanOptions && (args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
     throw new Error('Invalid approved-human options: IDs must be valid and unique; option count is not bounded.');
@@ -221,13 +256,22 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
     body: JSON.stringify({
       model,
       reasoning: { effort: 'medium' },
-      max_output_tokens: planningOutputTokens(args.count),
+      max_output_tokens: planningOutputTokens(expectedIndexes.length),
       store: false,
       input: [
         { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
           creativeContext: args.context,
-          requestedCount: args.count,
+          requestedCount: expectedIndexes.length,
+          ...(repair ? {
+            portfolioCount: args.count,
+            replacementIndexes: expectedIndexes,
+            existingPortfolio: repair.existingPortfolio,
+            lockedConcepts: repair.lockedConcepts,
+            repairAudit: repair.portfolioAudit,
+            repairDefects,
+            repairGuidance: 'existingPortfolio is the complete failed portfolio. Replace only replacementIndexes. Treat lockedConcepts as immutable accepted concepts. For each replacement index, fix every listed repairDefect for that index while preserving locked concepts. Do not relabel or paraphrase duplicates.',
+          } : {}),
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           referenceAnalysis: args.analysis,
           ...(proofCatalog.length ? { proofCatalog } : {}),
@@ -286,14 +330,14 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
               ] },
               strategy: CREATIVE_STRATEGY_JSON_SCHEMA,
               selectionReason: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
-              index: { type: 'integer', minimum: 1, maximum: args.count },
+              index: repair ? { type: 'integer', enum: expectedIndexes } : { type: 'integer', minimum: 1, maximum: args.count },
               ...(args.approvedHumanOptions ? { humanSourceId: {
                 type: ['string', 'null'],
                 description: 'Return null or exactly one humanSourceId from approvedHumanOptions supplied in the user input.',
               } } : {}),
               ...(args.referenceCatalog ? { referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) } : {}),
             },
-          }, minItems: args.count, maxItems: args.count },
+          }, minItems: expectedIndexes.length, maxItems: expectedIndexes.length },
         },
       } } },
     }),
@@ -309,10 +353,10 @@ export async function requestCreativeBatch(args: CreativeBatchPlannerArgs): Prom
   if (!output.text) throw new Error('OpenAI returned no creative batch plan.');
   let parsed: unknown;
   try { parsed = JSON.parse(output.text); } catch { throw new Error('OpenAI returned malformed creative batch plan JSON.'); }
-  if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== args.count) {
-    throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${args.count} creatives.`);
+  if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== expectedIndexes.length) {
+    throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${expectedIndexes.length} creatives.`);
   }
-  const creatives = parsed.creatives.map((value, index) => parseConcept(value, index + 1, args.hasApprovedHumanSource, args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
+  const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
 }
@@ -323,14 +367,29 @@ export const creativeRepairFeedback = (
 ) => `\nPORTFOLIO REPAIR: ${issue}\nPreserve strong ideas; replace repeated hypotheses with genuinely different grounded propositions. Do not relabel or paraphrase duplicates.\n${JSON.stringify(portfolioAudit)}`;
 
 export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise<CreativeBatchPlan> {
-  let feedback = '';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const plan = await requestCreativeBatch({ ...args, context: args.context + feedback });
-    const portfolioAudit = await auditCreativePortfolio(plan.creatives);
-    const issue = getCreativeDiversityIssue(plan.creatives, portfolioAudit);
-    if (!issue) return { ...plan, portfolioAudit };
-    if (attempt === 1) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${issue}. No images were generated.`);
-    feedback = creativeRepairFeedback(issue, portfolioAudit);
-  }
-  throw new Error('Portfolio planning did not complete.');
+  const initialPlan = await requestCreativeBatch(args);
+  const initialAudit = await auditCreativePortfolio(initialPlan.creatives);
+  const initialIssue = getCreativeDiversityIssue(initialPlan.creatives, initialAudit);
+  if (!initialIssue) return { ...initialPlan, portfolioAudit: initialAudit };
+
+  const repairPlan = getCreativeDiversityRepairPlan(initialPlan.creatives, initialAudit);
+  if (!repairPlan.replacementIndexes.length) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${initialIssue}. No images were generated.`);
+  const lockedConcepts = initialPlan.creatives.filter(concept => !repairPlan.replacementIndexes.includes(concept.index));
+  const replacements = await requestCreativeBatch(args, {
+    repairPlan,
+    existingPortfolio: initialPlan.creatives,
+    lockedConcepts,
+    portfolioAudit: initialAudit,
+    plannerModel: initialPlan.plannerModel,
+  });
+  const replacementMap = new Map(replacements.creatives.map(concept => [concept.index, concept]));
+  const repairedPlan: CreativeBatchPlan = {
+    creatives: initialPlan.creatives.map(concept => replacementMap.get(concept.index) ?? concept),
+    plannerModel: initialPlan.plannerModel,
+    reasoningEffort: initialPlan.reasoningEffort,
+  };
+  const repairedAudit = await auditCreativePortfolio(repairedPlan.creatives);
+  const repairedIssue = getCreativeDiversityIssue(repairedPlan.creatives, repairedAudit);
+  if (repairedIssue) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${repairedIssue}. No images were generated.`);
+  return { ...repairedPlan, portfolioAudit: repairedAudit };
 }

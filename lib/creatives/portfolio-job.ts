@@ -4,6 +4,7 @@ import type { CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
+import { getCreativeDiversityRepairPlan, type CreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
 import type { CreativeBatchPlan } from '@/lib/creatives/planned';
 import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
 import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
@@ -27,7 +28,7 @@ export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot;
 export type PortfolioPlanningState =
   | { phase: 'INITIAL_PLAN'; preparation: PortfolioPreparationState }
   | { phase: 'DIVERSITY_AUDIT'; checkpoint: PortfolioPlanningCheckpoint; repairAttempted: boolean }
-  | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint }
+  | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint; repairPlan?: CreativeDiversityRepairPlan; replacementIndexes?: number[] }
   | { phase: 'READY_TO_RENDER' };
 export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;
@@ -153,8 +154,10 @@ export function finishPortfolioAuditForRepair(
     || current.planning.repairAttempted || current.planning.checkpoint.snapshot.batchPlan.portfolioAudit
     || audit.conceptCount !== current.slots.length) throw new Error('Portfolio audit does not match the current initial plan.');
   const checkpoint = structuredClone(current.planning.checkpoint);
+  const repairPlan = getCreativeDiversityRepairPlan(checkpoint.snapshot.batchPlan.creatives, audit);
+  if (!repairPlan.replacementIndexes.length) throw new Error('Portfolio audit did not identify repairable concept indexes.');
   const job = structuredClone(current);
-  job.planning = { phase: 'TARGETED_REPAIR', checkpoint: { ...checkpoint,
+  job.planning = { phase: 'TARGETED_REPAIR', repairPlan, checkpoint: { ...checkpoint,
     snapshot: { ...checkpoint.snapshot, batchPlan: { ...checkpoint.snapshot.batchPlan, portfolioAudit: structuredClone(audit) } } } };
   job.lease = null; job.updatedAtMs = now;
   return job;
@@ -164,16 +167,26 @@ export function finishPortfolioRepair(
   current: CreativePortfolioJob, leaseId: string, batchPlan: CreativeBatchPlan, now = Date.now(),
 ) {
   const lease = requireLease(current, leaseId, now);
+  const repairPlan = current.planning.phase === 'TARGETED_REPAIR' ? current.planning.repairPlan : undefined;
+  const replacementIndexes = repairPlan?.replacementIndexes;
   if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'TARGETED_REPAIR'
-    || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
-    || batchPlan.creatives.length !== current.slots.length
-    || batchPlan.creatives.some((concept, index) => concept.index !== current.slots[index].index)) {
+    || !replacementIndexes?.length || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
+    || batchPlan.plannerModel !== current.planning.checkpoint.snapshot.batchPlan.plannerModel
+    || batchPlan.reasoningEffort !== current.planning.checkpoint.snapshot.batchPlan.reasoningEffort
+    || batchPlan.creatives.length !== replacementIndexes.length
+    || batchPlan.creatives.some((concept, index) => concept.index !== replacementIndexes[index])) {
     throw new Error('Portfolio repair does not match the current audited plan.');
   }
   const checkpoint = structuredClone(current.planning.checkpoint);
+  const replacements = new Map(batchPlan.creatives.map(concept => [concept.index, structuredClone(concept)] as const));
+  const repairedBatchPlan: CreativeBatchPlan = {
+    creatives: checkpoint.snapshot.batchPlan.creatives.map(concept => replacements.get(concept.index) ?? structuredClone(concept)),
+    plannerModel: checkpoint.snapshot.batchPlan.plannerModel,
+    reasoningEffort: checkpoint.snapshot.batchPlan.reasoningEffort,
+  };
   const job = structuredClone(current);
   job.planning = { phase: 'DIVERSITY_AUDIT', checkpoint: { ...checkpoint,
-    snapshot: { ...checkpoint.snapshot, batchPlan: structuredClone(batchPlan) } }, repairAttempted: true };
+    snapshot: { ...checkpoint.snapshot, batchPlan: repairedBatchPlan } }, repairAttempted: true };
   job.lease = null; job.updatedAtMs = now;
   return job;
 }

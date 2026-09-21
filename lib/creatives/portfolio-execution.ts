@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
-import { creativeRepairFeedback, requestCreativeBatch } from '@/lib/ai/creative-planner';
+import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { advancePortfolioPreparation } from '@/lib/creatives/portfolio-preparation';
 import { advancePlanningSourceAnalysis } from '@/lib/creatives/planning-source-composition';
@@ -187,14 +187,22 @@ export async function advanceCreativePortfolio(
           error: message, status: 502 };
       }
       if (job.planning.phase === 'TARGETED_REPAIR') {
-        const { checkpoint } = job.planning;
+        const { checkpoint, repairPlan } = job.planning;
+        if (!repairPlan?.replacementIndexes.length) throw new Error('Portfolio repair targets are missing.');
         checkpoint.snapshot.batchPlan.creatives.forEach(assertValidPlannedCreativeCopy);
         providerWorkStarted = true;
         const audit = checkpoint.snapshot.batchPlan.portfolioAudit!;
         const issue = getCreativeDiversityIssue(checkpoint.snapshot.batchPlan.creatives, audit);
         if (!issue) throw new Error('Portfolio repair was requested without a diversity issue.');
-        const batchPlan = await requestCreativeBatch({ ...checkpoint.plannerArgs,
-          context: checkpoint.plannerArgs.context + creativeRepairFeedback(issue, audit) });
+        const lockedConcepts = checkpoint.snapshot.batchPlan.creatives
+          .filter(concept => !repairPlan.replacementIndexes.includes(concept.index));
+        const batchPlan = await requestCreativeBatch(checkpoint.plannerArgs, {
+          repairPlan,
+          existingPortfolio: checkpoint.snapshot.batchPlan.creatives,
+          lockedConcepts,
+          portfolioAudit: audit,
+          plannerModel: checkpoint.snapshot.batchPlan.plannerModel,
+        });
         return { job: await updateCreativePortfolio(id, current => finishPortfolioRepair(current, token, batchPlan), storage) };
       }
       throw new Error('Portfolio planning phase is not executable.');
