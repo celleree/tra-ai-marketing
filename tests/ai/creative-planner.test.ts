@@ -110,7 +110,10 @@ describe('creative batch planner', () => {
     expect(loaded.planning.checkpoint.snapshot.sourceAnalysis).toEqual(sourceAnalysis);
     const repeated = { ...portfolioAudit(2), groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] };
     const repair = await updateCreativePortfolio(job.id, current => ({ ...current, planning: { phase: 'TARGETED_REPAIR',
-      replacementIndexes: [2],
+      repairPlan: { replacementIndexes: [2], defects: [{
+        replacementIndex: 2, type: 'SEMANTIC_DUPLICATE' as const, relatedIndexes: [1, 2],
+        description: 'Concepts 1, 2 repeat a strategic proposition: Same',
+      }] },
       checkpoint: { plannerArgs, snapshot: { ...snapshot, batchPlan: { ...batchPlan, portfolioAudit: repeated } } } } }), storage);
     expect(await readCreativePortfolio(job.id, storage)).toEqual(repair);
     await requestCreativeBatch({ ...loaded.planning.checkpoint.plannerArgs, context: `${plannerArgs.context}\nRepair feedback` });
@@ -237,7 +240,7 @@ describe('creative batch planner', () => {
     });
   });
 
-  it('migrates an older saved TARGETED_REPAIR checkpoint to deterministic replacement indexes', () => {
+  it('migrates an older saved TARGETED_REPAIR checkpoint to a complete deterministic repair plan', () => {
     const job = newCreativePortfolio(portfolioRequest());
     const snapshot = portfolioSnapshot(job);
     snapshot.batchPlan.portfolioAudit = {
@@ -252,7 +255,13 @@ describe('creative batch planner', () => {
       },
     };
     const reloaded = parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id);
-    expect(reloaded.planning).toMatchObject({ phase: 'TARGETED_REPAIR', replacementIndexes: [2] });
+    expect(reloaded.planning).toMatchObject({ phase: 'TARGETED_REPAIR', repairPlan: {
+      replacementIndexes: [2],
+      defects: [{
+        replacementIndex: 2, type: 'SEMANTIC_DUPLICATE', relatedIndexes: [1, 2],
+        description: 'Concepts 1, 2 repeat a strategic proposition: Same proposition',
+      }],
+    } });
   });
 
   it('parses sparse and complete optional image-copy fields without inventing omitted text', async () => {
