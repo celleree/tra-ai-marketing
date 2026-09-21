@@ -69,37 +69,81 @@ export function getCreativeDiversityIssue(concepts: ReadonlyArray<CreativeConcep
 }
 
 
-/**
- * Return the exact concept indexes that should be replaced after an audited
- * diversity failure. The earliest concept in each semantic duplicate group is
- * kept as the accepted anchor; later duplicates are replaceable. Exact-copy
- * duplicates outside those groups are also repaired without touching their
- * earliest occurrence.
- */
+export type CreativeDiversityRepairDefectType =
+  | 'SEMANTIC_DUPLICATE'
+  | 'DUPLICATE_HEADLINE'
+  | 'DUPLICATE_SO_WHAT'
+  | 'DUPLICATE_PROPOSITION';
+
+export type CreativeDiversityRepairDefect = {
+  replacementIndex: number;
+  type: CreativeDiversityRepairDefectType;
+  relatedIndexes: number[];
+  description: string;
+};
+
+export type CreativeDiversityRepairPlan = {
+  replacementIndexes: number[];
+  defects: CreativeDiversityRepairDefect[];
+};
+
+const formatIndexes = (indexes: number[]) => indexes.length === 2
+  ? `${indexes[0]} and ${indexes[1]}`
+  : `${indexes.slice(0, -1).join(', ')}, and ${indexes.at(-1)}`;
+
+export function getCreativeDiversityRepairPlan(
+  concepts: ReadonlyArray<CreativeConcept>,
+  audit: PortfolioAudit,
+): CreativeDiversityRepairPlan {
+  if (!parsePortfolioAudit(audit) || audit.conceptCount !== concepts.length) return { replacementIndexes: [], defects: [] };
+
+  const defects: CreativeDiversityRepairDefect[] = [];
+  for (const group of [...audit.groups].sort((left, right) => Math.min(...left.conceptIndexes) - Math.min(...right.conceptIndexes))) {
+    const relatedIndexes = [...group.conceptIndexes].sort((left, right) => left - right);
+    if (relatedIndexes.length < 2) continue;
+    for (const replacementIndex of relatedIndexes.slice(1)) defects.push({
+      replacementIndex, type: 'SEMANTIC_DUPLICATE', relatedIndexes,
+      description: `Concepts ${relatedIndexes.join(', ')} repeat a strategic proposition: ${group.proposition}`,
+    });
+  }
+
+  const exactChecks = [
+    { type: 'DUPLICATE_HEADLINE' as const, label: 'headlines',
+      value: (concept: CreativeConcept) => normalizeMessage(concept.copy.headline) },
+    { type: 'DUPLICATE_SO_WHAT' as const, label: 'SO WHAT surface messages',
+      value: (concept: CreativeConcept) => normalizeMessage(concept.strategy.soWhat.surfaceMessage) },
+    { type: 'DUPLICATE_PROPOSITION' as const, label: 'propositions',
+      value: (concept: CreativeConcept) => concept.strategy.conceptDetails?.proposition
+        ? normalizeMessage(concept.strategy.conceptDetails.proposition) : null },
+  ];
+  for (const check of exactChecks) {
+    const groups = new Map<string, number[]>();
+    concepts.forEach((concept, index) => {
+      const value = check.value(concept);
+      if (value !== null) groups.set(value, [...(groups.get(value) ?? []), index + 1]);
+    });
+    for (const relatedIndexes of groups.values()) {
+      if (relatedIndexes.length < 2) continue;
+      for (const replacementIndex of relatedIndexes.slice(1)) defects.push({
+        replacementIndex, type: check.type, relatedIndexes,
+        description: `Variations ${formatIndexes(relatedIndexes)} have duplicate ${check.label}.`,
+      });
+    }
+  }
+
+  const order: CreativeDiversityRepairDefectType[] = [
+    'SEMANTIC_DUPLICATE', 'DUPLICATE_HEADLINE', 'DUPLICATE_SO_WHAT', 'DUPLICATE_PROPOSITION',
+  ];
+  defects.sort((left, right) => left.replacementIndex - right.replacementIndex || order.indexOf(left.type) - order.indexOf(right.type));
+  return {
+    replacementIndexes: [...new Set(defects.map(defect => defect.replacementIndex))].sort((left, right) => left - right),
+    defects,
+  };
+}
+
 export function getCreativeDiversityRepairIndexes(
   concepts: ReadonlyArray<CreativeConcept>,
   audit: PortfolioAudit,
 ): number[] {
-  if (!parsePortfolioAudit(audit) || audit.conceptCount !== concepts.length) return [];
-
-  const replace = new Set<number>();
-  for (const group of audit.groups) {
-    if (group.conceptIndexes.length < 2) continue;
-    const sorted = [...group.conceptIndexes].sort((left, right) => left - right);
-    sorted.slice(1).forEach(index => replace.add(index));
-  }
-
-  for (let first = 0; first < concepts.length; first += 1) {
-    for (let second = first + 1; second < concepts.length; second += 1) {
-      const left = concepts[first];
-      const right = concepts[second];
-      const exactDuplicate = normalizeMessage(left.copy.headline) === normalizeMessage(right.copy.headline)
-        || normalizeMessage(left.strategy.soWhat.surfaceMessage) === normalizeMessage(right.strategy.soWhat.surfaceMessage)
-        || Boolean(left.strategy.conceptDetails && right.strategy.conceptDetails
-          && normalizeMessage(left.strategy.conceptDetails.proposition) === normalizeMessage(right.strategy.conceptDetails.proposition));
-      if (exactDuplicate) replace.add(second + 1);
-    }
-  }
-
-  return [...replace].sort((left, right) => left - right);
+  return getCreativeDiversityRepairPlan(concepts, audit).replacementIndexes;
 }
