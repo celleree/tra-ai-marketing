@@ -349,6 +349,10 @@ describe('creative batch planner', () => {
       requestedCount: 1,
       portfolioCount: 2,
       replacementIndexes: [2],
+      existingPortfolio: [
+        expect.objectContaining({ index: 1 }),
+        expect.objectContaining({ index: 2 }),
+      ],
       lockedConcepts: [expect.objectContaining({ index: 1 })],
       repairAudit: repeated,
     });
