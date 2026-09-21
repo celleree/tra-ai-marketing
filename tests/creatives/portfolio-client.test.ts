@@ -93,7 +93,7 @@ describe('resumable portfolio browser controller', () => {
     };
     const secondJob = structuredClone(firstJob);
     if (secondJob.planning.phase !== 'INITIAL_PLAN') throw new Error('Expected initial planning state.');
-    secondJob.planning.preparation.analysis.summary = 'Updated persisted analysis';
+    secondJob.planning.preparation.analysis!.summary = 'Updated persisted analysis';
     const first: PortfolioResponse = { job: portfolioProgress(firstJob), creatives: [] };
     const second: PortfolioResponse = { job: portfolioProgress(secondJob), creatives: [] };
     expect(first.job.planningCheckpoint).toBe(second.job.planningCheckpoint);
