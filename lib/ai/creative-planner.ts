@@ -13,7 +13,7 @@ import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-par
 import { approvedHumanSourceId, isApprovedHumanId, parseApprovedHumanSourceId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
-import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
+import { getCreativeDiversityIssue, getCreativeDiversityRepairIndexes } from '@/lib/creatives/diversity';
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
@@ -205,11 +205,14 @@ export async function requestCreativeBatch(
   repair?: CreativeRepairRequest,
 ): Promise<CreativeBatchPlan> {
   const replacementIndexes = repair?.replacementIndexes;
+  const lockedIndexes = repair?.lockedConcepts.map(concept => concept.index) ?? [];
   if (replacementIndexes && (!replacementIndexes.length
     || replacementIndexes.some(index => !Number.isInteger(index) || index < 1 || index > args.count)
     || new Set(replacementIndexes).size !== replacementIndexes.length
-    || repair.lockedConcepts.some(concept => replacementIndexes.includes(concept.index))
-    || repair.lockedConcepts.length + replacementIndexes.length !== args.count)) {
+    || lockedIndexes.some(index => !Number.isInteger(index) || index < 1 || index > args.count || replacementIndexes.includes(index))
+    || new Set(lockedIndexes).size !== lockedIndexes.length
+    || lockedIndexes.length + replacementIndexes.length !== args.count
+    || new Set([...lockedIndexes, ...replacementIndexes]).size !== args.count)) {
     throw new Error('Creative repair targets do not cover the portfolio exactly.');
   }
   const expectedIndexes = replacementIndexes ?? Array.from({ length: args.count }, (_, index) => index + 1);
@@ -349,14 +352,23 @@ export const creativeRepairFeedback = (
 ) => `\nPORTFOLIO REPAIR: ${issue}\nPreserve strong ideas; replace repeated hypotheses with genuinely different grounded propositions. Do not relabel or paraphrase duplicates.\n${JSON.stringify(portfolioAudit)}`;
 
 export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise<CreativeBatchPlan> {
-  let feedback = '';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const plan = await requestCreativeBatch({ ...args, context: args.context + feedback });
-    const portfolioAudit = await auditCreativePortfolio(plan.creatives);
-    const issue = getCreativeDiversityIssue(plan.creatives, portfolioAudit);
-    if (!issue) return { ...plan, portfolioAudit };
-    if (attempt === 1) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${issue}. No images were generated.`);
-    feedback = creativeRepairFeedback(issue, portfolioAudit);
-  }
-  throw new Error('Portfolio planning did not complete.');
+  const initialPlan = await requestCreativeBatch(args);
+  const initialAudit = await auditCreativePortfolio(initialPlan.creatives);
+  const initialIssue = getCreativeDiversityIssue(initialPlan.creatives, initialAudit);
+  if (!initialIssue) return { ...initialPlan, portfolioAudit: initialAudit };
+
+  const replacementIndexes = getCreativeDiversityRepairIndexes(initialPlan.creatives, initialAudit);
+  if (!replacementIndexes.length) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${initialIssue}. No images were generated.`);
+  const lockedConcepts = initialPlan.creatives.filter(concept => !replacementIndexes.includes(concept.index));
+  const replacements = await requestCreativeBatch(args, { replacementIndexes, lockedConcepts, portfolioAudit: initialAudit });
+  const replacementMap = new Map(replacements.creatives.map(concept => [concept.index, concept]));
+  const repairedPlan: CreativeBatchPlan = {
+    creatives: initialPlan.creatives.map(concept => replacementMap.get(concept.index) ?? concept),
+    plannerModel: replacements.plannerModel,
+    reasoningEffort: replacements.reasoningEffort,
+  };
+  const repairedAudit = await auditCreativePortfolio(repairedPlan.creatives);
+  const repairedIssue = getCreativeDiversityIssue(repairedPlan.creatives, repairedAudit);
+  if (repairedIssue) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${repairedIssue}. No images were generated.`);
+  return { ...repairedPlan, portfolioAudit: repairedAudit };
 }
