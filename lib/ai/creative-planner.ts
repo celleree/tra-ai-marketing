@@ -319,7 +319,7 @@ export async function requestCreativeBatch(
               } } : {}),
               ...(args.referenceCatalog ? { referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) } : {}),
             },
-          }, minItems: args.count, maxItems: args.count },
+          }, minItems: expectedIndexes.length, maxItems: expectedIndexes.length },
         },
       } } },
     }),
