@@ -188,6 +188,7 @@ export async function advanceCreativePortfolio(
       }
       if (job.planning.phase === 'TARGETED_REPAIR') {
         const { checkpoint, replacementIndexes } = job.planning;
+        if (!replacementIndexes?.length) throw new Error('Portfolio repair targets are missing.');
         checkpoint.snapshot.batchPlan.creatives.forEach(assertValidPlannedCreativeCopy);
         providerWorkStarted = true;
         const audit = checkpoint.snapshot.batchPlan.portfolioAudit!;
