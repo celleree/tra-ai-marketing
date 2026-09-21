@@ -98,12 +98,12 @@ describe('resumable portfolio browser controller', () => {
     const second: PortfolioResponse = { job: portfolioProgress(secondJob), creatives: [] };
     expect(first.job.planningCheckpoint).toBe(second.job.planningCheckpoint);
     expect(first.job.preparationFingerprint).not.toBe(second.job.preparationFingerprint);
-    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(first)).mockResolvedValueOnce(Response.json(second));
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(second));
     vi.stubGlobal('fetch', fetchMock);
     let updates = 0;
-    const completed = await runPortfolio(first, () => { updates += 1; }, () => updates === 2);
+    const completed = await runPortfolio(first, () => { updates += 1; }, () => updates === 1);
     expect(completed.job.preparationFingerprint).toBe(second.job.preparationFingerprint);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
   it('waits for shared child video work, then probes it without treating GET as progress', async () => {
     const value = initial();
