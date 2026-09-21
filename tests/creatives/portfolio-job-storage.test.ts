@@ -60,6 +60,8 @@ describe('durable creative portfolio storage', () => {
     expect(await readCreativePortfolio(job.id, storage)).toEqual(repair);
     await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, now + 7, 'repair').job, storage);
     const targetedRepair = { ...batchPlan, creatives: [batchPlan.creatives[1]] };
+    await expect(updateCreativePortfolio(job.id, current => finishPortfolioRepair(current, 'repair',
+      { ...targetedRepair, plannerModel: 'different-model' }, now + 8), storage)).rejects.toThrow('does not match');
     await updateCreativePortfolio(job.id, current => finishPortfolioRepair(current, 'repair', targetedRepair, now + 8), storage);
     await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, now + 9, 'final-audit').job, storage);
     await updateCreativePortfolio(job.id, current => finishPortfolioPlan(current, 'final-audit', planned, now + 10), storage);
