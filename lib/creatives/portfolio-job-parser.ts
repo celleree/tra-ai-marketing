@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { CREATIVE_CATEGORIES } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
-import { getCreativeDiversityIssue, getCreativeDiversityRepairIndexes } from '@/lib/creatives/diversity';
+import { getCreativeDiversityIssue, getCreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parsePortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { MAX_PORTFOLIO_CREATIVES, MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH,
@@ -201,17 +201,19 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
         if (!validPreparation(job.planning.preparation, job)) throw new Error();
       } else if (job.planning.phase === 'TARGETED_REPAIR') {
         const audit = job.planning.checkpoint?.snapshot?.batchPlan?.portfolioAudit;
-        const expectedReplacementIndexes = audit
-          ? getCreativeDiversityRepairIndexes(job.planning.checkpoint.snapshot.batchPlan.creatives, audit)
-          : [];
-        const savedRepair = job.planning as typeof job.planning & { replacementIndexes?: unknown };
-        if (savedRepair.replacementIndexes === undefined && expectedReplacementIndexes.length) {
-          job.planning = { ...job.planning, replacementIndexes: expectedReplacementIndexes };
+        const expectedRepairPlan = audit
+          ? getCreativeDiversityRepairPlan(job.planning.checkpoint.snapshot.batchPlan.creatives, audit)
+          : { replacementIndexes: [], defects: [] };
+        const savedRepair = job.planning as typeof job.planning & { repairPlan?: unknown; replacementIndexes?: unknown };
+        if (savedRepair.repairPlan === undefined && expectedRepairPlan.replacementIndexes.length) {
+          if (savedRepair.replacementIndexes !== undefined
+            && !isDeepStrictEqual(savedRepair.replacementIndexes, expectedRepairPlan.replacementIndexes)) throw new Error();
+          job.planning = { phase: 'TARGETED_REPAIR', checkpoint: job.planning.checkpoint, repairPlan: expectedRepairPlan };
         }
         if (!validCheckpoint(job.planning.checkpoint, job, 'required') || !audit
           || !getCreativeDiversityIssue(job.planning.checkpoint.snapshot.batchPlan.creatives, audit)
-          || !Array.isArray(job.planning.replacementIndexes)
-          || !isDeepStrictEqual(job.planning.replacementIndexes, expectedReplacementIndexes)) throw new Error();
+          || !job.planning.repairPlan
+          || !isDeepStrictEqual(job.planning.repairPlan, expectedRepairPlan)) throw new Error();
       } else {
         if (typeof job.planning.repairAttempted !== 'boolean') throw new Error();
         const hasAudit = job.planning.checkpoint?.snapshot?.batchPlan?.portfolioAudit !== undefined;
