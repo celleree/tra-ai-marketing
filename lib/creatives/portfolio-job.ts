@@ -174,7 +174,7 @@ export function finishPortfolioRepair(
     throw new Error('Portfolio repair does not match the current audited plan.');
   }
   const checkpoint = structuredClone(current.planning.checkpoint);
-  const replacements = new Map(batchPlan.creatives.map(concept => [concept.index, structuredClone(concept)]));
+  const replacements = new Map(batchPlan.creatives.map(concept => [concept.index, structuredClone(concept)] as const));
   const repairedBatchPlan: CreativeBatchPlan = {
     creatives: checkpoint.snapshot.batchPlan.creatives.map(concept => replacements.get(concept.index) ?? structuredClone(concept)),
     plannerModel: batchPlan.plannerModel,
