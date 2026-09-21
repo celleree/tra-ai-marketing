@@ -67,3 +67,39 @@ export function getCreativeDiversityIssue(concepts: ReadonlyArray<CreativeConcep
 
   return null;
 }
+
+
+/**
+ * Return the exact concept indexes that should be replaced after an audited
+ * diversity failure. The earliest concept in each semantic duplicate group is
+ * kept as the accepted anchor; later duplicates are replaceable. Exact-copy
+ * duplicates outside those groups are also repaired without touching their
+ * earliest occurrence.
+ */
+export function getCreativeDiversityRepairIndexes(
+  concepts: ReadonlyArray<CreativeConcept>,
+  audit: PortfolioAudit,
+): number[] {
+  if (!parsePortfolioAudit(audit) || audit.conceptCount !== concepts.length) return [];
+
+  const replace = new Set<number>();
+  for (const group of audit.groups) {
+    if (group.conceptIndexes.length < 2) continue;
+    const sorted = [...group.conceptIndexes].sort((left, right) => left - right);
+    sorted.slice(1).forEach(index => replace.add(index));
+  }
+
+  for (let first = 0; first < concepts.length; first += 1) {
+    for (let second = first + 1; second < concepts.length; second += 1) {
+      const left = concepts[first];
+      const right = concepts[second];
+      const exactDuplicate = normalizeMessage(left.copy.headline) === normalizeMessage(right.copy.headline)
+        || normalizeMessage(left.strategy.soWhat.surfaceMessage) === normalizeMessage(right.strategy.soWhat.surfaceMessage)
+        || Boolean(left.strategy.conceptDetails && right.strategy.conceptDetails
+          && normalizeMessage(left.strategy.conceptDetails.proposition) === normalizeMessage(right.strategy.conceptDetails.proposition));
+      if (exactDuplicate) replace.add(second + 1);
+    }
+  }
+
+  return [...replace].sort((left, right) => left - right);
+}
