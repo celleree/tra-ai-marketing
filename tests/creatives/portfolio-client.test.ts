@@ -6,7 +6,7 @@ import { portfolioRequest } from '../fixtures/creative-portfolio';
 
 const initial = (): PortfolioResponse => ({ job: portfolioProgress(newCreativePortfolio(portfolioRequest())), creatives: [] });
 const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED'>): PortfolioResponse => ({
-  job: { ...value.job, planReady: true, planningPhase: 'READY_TO_RENDER', lease: null,
+  job: { ...value.job, planReady: true, planningPhase: 'READY_TO_RENDER', preparationFingerprint: undefined, lease: null,
     slots: value.job.slots.map((slot, index) => ({ ...slot, status: statuses[index] })) },
   creatives: value.job.slots.filter((_, index) => statuses[index] === 'SAVED').map(slot => ({
     id: slot.creativeId, index: slot.index, category: 'customer-problems', format: 'direct-response',
@@ -83,6 +83,27 @@ describe('resumable portfolio browser controller', () => {
     expect(completed.job).toMatchObject({ planningPhase: 'INITIAL_PLAN', planningCheckpoint: 2 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance']);
+  });
+  it('accepts durable preparation progress when the coarse checkpoint count stays the same', async () => {
+    const firstJob = newCreativePortfolio(portfolioRequest());
+    if (firstJob.planning.phase !== 'INITIAL_PLAN') throw new Error('Expected initial planning state.');
+    firstJob.planning.preparation.analysis = {
+      summary: 'Initial analysis', visibleText: [], visualStructure: 'Structure', hookOrAngle: 'Angle',
+      offerOrCta: 'CTA', styleNotes: 'Style', preserve: [], avoid: [], unknowns: [], dominantCategory: 'customer-problems',
+    };
+    const secondJob = structuredClone(firstJob);
+    if (secondJob.planning.phase !== 'INITIAL_PLAN') throw new Error('Expected initial planning state.');
+    secondJob.planning.preparation.analysis!.summary = 'Updated persisted analysis';
+    const first: PortfolioResponse = { job: portfolioProgress(firstJob), creatives: [] };
+    const second: PortfolioResponse = { job: portfolioProgress(secondJob), creatives: [] };
+    expect(first.job.planningCheckpoint).toBe(second.job.planningCheckpoint);
+    expect(first.job.preparationFingerprint).not.toBe(second.job.preparationFingerprint);
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(second));
+    vi.stubGlobal('fetch', fetchMock);
+    let updates = 0;
+    const completed = await runPortfolio(first, () => { updates += 1; }, () => updates === 1);
+    expect(completed.job.preparationFingerprint).toBe(second.job.preparationFingerprint);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
   it('waits for shared child video work, then probes it without treating GET as progress', async () => {
     const value = initial();
