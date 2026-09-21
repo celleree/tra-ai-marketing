@@ -68,12 +68,15 @@ beforeEach(() => {
     const plannerInput = JSON.parse(body.input[1].content[0].text);
     outbound.push(plannerInput); operations.push('Astra');
     const proof = plannerInput.proofCatalog?.[0];
-    const creatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
+    const allCreatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
       proofSelection: proof ? { type: proof.type, proofId: proof.id, proofUpdatedAt: proof.updatedAt,
         selectedText: proof.type === 'review' ? proof.originalReviewText : proof.approvedClaimWording,
         ...(proof.type === 'review' ? { includeAttribution: false } : {}) } : null,
       strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${c.index}` },
         execution: { ...c.strategy.execution, taxDocumentReference: 'none' } }, referenceChoices: { angleSource: null, layoutSource: null } }));
+    const creatives = plannerInput.replacementIndexes
+      ? allCreatives.filter(c => plannerInput.replacementIndexes.includes(c.index))
+      : allCreatives;
     return Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ creatives }) }] }] });
   }));
 });
@@ -107,11 +110,14 @@ describe('real preparation to Astra with composed sources', () => {
     expect(parsed.data.proofRetrievalQuery).toBe(userDirection);
     const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
     expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection, context: expect.stringContaining('IRS tax professionalism patience reassurance.') });
-    expect(outbound).toHaveLength(2); expect(outbound[1].creativeContext).toContain('PORTFOLIO REPAIR:');
+    expect(outbound).toHaveLength(2);
+    expect(outbound[1].creativeContext).toBe(outbound[0].creativeContext);
+    expect(outbound[1]).toMatchObject({ replacementIndexes: [2], portfolioCount: 2, requestedCount: 1 });
     expect(outbound[0].proofCatalog).toEqual([expect.objectContaining({ id: relevantId, updatedAt: firstRelevant.updatedAt })]);
     expect(outbound[1].proofCatalog).toEqual([expect.objectContaining({ id: relevantId, updatedAt: repairedRelevant.updatedAt })]);
     expect(JSON.stringify(outbound[0].proofCatalog)).not.toContain(unrelatedId);
-    expect(prepared.batchPlan.creatives.every(creative => creative.selectedProof?.proofUpdatedAt === repairedRelevant.updatedAt)).toBe(true);
+    expect(prepared.batchPlan.creatives.map(creative => creative.selectedProof?.proofUpdatedAt))
+      .toEqual([firstRelevant.updatedAt, repairedRelevant.updatedAt]);
   });
 
   it.each([false, true])('checkpoints mixed/repeated sources before Astra, ordering=%s and stop/resume', async reversed => {
