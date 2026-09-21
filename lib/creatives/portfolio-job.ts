@@ -28,7 +28,7 @@ export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot;
 export type PortfolioPlanningState =
   | { phase: 'INITIAL_PLAN'; preparation: PortfolioPreparationState }
   | { phase: 'DIVERSITY_AUDIT'; checkpoint: PortfolioPlanningCheckpoint; repairAttempted: boolean }
-  | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint; replacementIndexes: number[] }
+  | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint; replacementIndexes?: number[] }
   | { phase: 'READY_TO_RENDER' };
 export type CreativePortfolioJob = {
   version: 1; id: string; createdAtMs: number; updatedAtMs: number;
@@ -167,10 +167,11 @@ export function finishPortfolioRepair(
   current: CreativePortfolioJob, leaseId: string, batchPlan: CreativeBatchPlan, now = Date.now(),
 ) {
   const lease = requireLease(current, leaseId, now);
+  const replacementIndexes = current.planning.phase === 'TARGETED_REPAIR' ? current.planning.replacementIndexes : undefined;
   if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'TARGETED_REPAIR'
-    || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
-    || batchPlan.creatives.length !== current.planning.replacementIndexes.length
-    || batchPlan.creatives.some((concept, index) => concept.index !== current.planning.replacementIndexes[index])) {
+    || !replacementIndexes || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
+    || batchPlan.creatives.length !== replacementIndexes.length
+    || batchPlan.creatives.some((concept, index) => concept.index !== replacementIndexes[index])) {
     throw new Error('Portfolio repair does not match the current audited plan.');
   }
   const checkpoint = structuredClone(current.planning.checkpoint);
