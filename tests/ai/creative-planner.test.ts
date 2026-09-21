@@ -110,6 +110,7 @@ describe('creative batch planner', () => {
     expect(loaded.planning.checkpoint.snapshot.sourceAnalysis).toEqual(sourceAnalysis);
     const repeated = { ...portfolioAudit(2), groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] };
     const repair = await updateCreativePortfolio(job.id, current => ({ ...current, planning: { phase: 'TARGETED_REPAIR',
+      replacementIndexes: [2],
       checkpoint: { plannerArgs, snapshot: { ...snapshot, batchPlan: { ...batchPlan, portfolioAudit: repeated } } } } }), storage);
     expect(await readCreativePortfolio(job.id, storage)).toEqual(repair);
     await requestCreativeBatch({ ...loaded.planning.checkpoint.plannerArgs, context: `${plannerArgs.context}\nRepair feedback` });
