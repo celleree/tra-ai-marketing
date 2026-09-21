@@ -462,6 +462,7 @@ describe('bounded resumable portfolio execution', () => {
     expect(repairedConcepts[1]).not.toEqual(initialConcepts[1]);
     expect(mocks.plan.mock.calls[1][1]).toMatchObject({
       replacementIndexes: [2],
+      existingPortfolio: initialConcepts,
       lockedConcepts: [initialConcepts[0]],
       portfolioAudit: repeatedAudit(),
     });
