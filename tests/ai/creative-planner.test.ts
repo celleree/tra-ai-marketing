@@ -236,6 +236,24 @@ describe('creative batch planner', () => {
     });
   });
 
+  it('migrates an older saved TARGETED_REPAIR checkpoint to deterministic replacement indexes', () => {
+    const job = newCreativePortfolio(portfolioRequest());
+    const snapshot = portfolioSnapshot(job);
+    snapshot.batchPlan.portfolioAudit = {
+      ...portfolioAudit(2),
+      groups: [{ conceptIndexes: [1, 2], proposition: 'Same proposition', distinction: 'Paraphrases' }],
+    };
+    (job as any).planning = {
+      phase: 'TARGETED_REPAIR',
+      checkpoint: {
+        plannerArgs: { count: 2, context: 'Saved planning context', analysis, hasApprovedHumanSource: false, referenceCatalog: [] },
+        snapshot,
+      },
+    };
+    const reloaded = parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id);
+    expect(reloaded.planning).toMatchObject({ phase: 'TARGETED_REPAIR', replacementIndexes: [2] });
+  });
+
   it('parses sparse and complete optional image-copy fields without inventing omitted text', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const first = { ...concept(1), imageCopy: { headline: 'Only image headline', shortSupport: null, proofAttribution: null, cta: null, disclosure: null } };
