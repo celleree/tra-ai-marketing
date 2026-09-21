@@ -451,9 +451,9 @@ describe('bounded resumable portfolio execution', () => {
     const initialConcepts = structuredClone((result.job.planning as any).checkpoint.snapshot.batchPlan.creatives);
 
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
-    expect(result.job.planning).toMatchObject({ phase: 'TARGETED_REPAIR', replacementIndexes: [2] });
+    expect(result.job.planning).toMatchObject({ phase: 'TARGETED_REPAIR', repairPlan: { replacementIndexes: [2] } });
     const persistedRepair = await readCreativePortfolio(job.id, storage);
-    expect(persistedRepair?.planning).toMatchObject({ phase: 'TARGETED_REPAIR', replacementIndexes: [2] });
+    expect(persistedRepair?.planning).toMatchObject({ phase: 'TARGETED_REPAIR', repairPlan: { replacementIndexes: [2] } });
 
     result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning).toMatchObject({ phase: 'DIVERSITY_AUDIT', repairAttempted: true });
@@ -461,11 +461,18 @@ describe('bounded resumable portfolio execution', () => {
     expect(repairedConcepts[0]).toEqual(initialConcepts[0]);
     expect(repairedConcepts[1]).not.toEqual(initialConcepts[1]);
     expect(mocks.plan.mock.calls[1][1]).toMatchObject({
-      replacementIndexes: [2],
+      repairPlan: {
+        replacementIndexes: [2],
+        defects: [{
+          replacementIndex: 2,
+          type: 'SEMANTIC_DUPLICATE',
+          relatedIndexes: [1, 2],
+          description: 'Concepts 1, 2 repeat a strategic proposition: Same reason to act',
+        }],
+      },
       existingPortfolio: initialConcepts,
       lockedConcepts: [initialConcepts[0]],
       portfolioAudit: repeatedAudit(),
-      diversityIssue: 'Concepts 1, 2 repeat a strategic proposition: Same reason to act',
       plannerModel: 'gpt-6-astra',
     });
 
