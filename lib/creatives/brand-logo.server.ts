@@ -4,17 +4,26 @@ import {
   resolveCreativeLogoGeometry,
   type CreativeLogoAnchor,
   type CreativeLogoGeometry,
+  type CreativeLogoPlacementContext,
 } from '@/lib/creatives/logo-placement';
+
+export async function resolveCreativeBrandLogoPlacementContext(
+  logo: Buffer,
+  placement: CreativePlacement,
+): Promise<CreativeLogoPlacementContext> {
+  const orientedLogo = await sharp(logo).rotate().png().toBuffer();
+  const metadata = await sharp(orientedLogo).metadata();
+  if (!metadata.width || !metadata.height) throw new Error('The TRA logo has invalid dimensions.');
+  return { placement, sourceWidth: metadata.width, sourceHeight: metadata.height };
+}
 
 export async function resolveCreativeBrandLogoGeometry(
   logo: Buffer,
   placement: CreativePlacement,
   anchor: CreativeLogoAnchor,
 ): Promise<CreativeLogoGeometry> {
-  const orientedLogo = await sharp(logo).rotate().png().toBuffer();
-  const metadata = await sharp(orientedLogo).metadata();
-  if (!metadata.width || !metadata.height) throw new Error('The TRA logo has invalid dimensions.');
-  return resolveCreativeLogoGeometry(placement, anchor, metadata.width, metadata.height);
+  const context = await resolveCreativeBrandLogoPlacementContext(logo, placement);
+  return resolveCreativeLogoGeometry(placement, anchor, context.sourceWidth, context.sourceHeight);
 }
 
 // Place original artwork inside the placement-safe area. Other image content still needs human review.

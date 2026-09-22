@@ -1,4 +1,4 @@
-import { CREATIVE_PLACEMENT_SPECS, type CreativePlacement } from '@/lib/creatives/placements';
+import { CREATIVE_PLACEMENT_SPECS, isCreativePlacement, type CreativePlacement } from '@/lib/creatives/placements';
 import { getCreativeSafeRect } from '@/lib/creatives/safe-zones';
 import type { LayoutBlueprint, LayoutRegion } from '@/lib/layouts/blueprint';
 
@@ -18,9 +18,21 @@ export type CreativeLogoGeometry = {
   panel: CreativeLogoRect;
   artwork: CreativeLogoRect;
 };
+export type CreativeLogoPlacementContext = {
+  placement: CreativePlacement;
+  sourceWidth: number;
+  sourceHeight: number;
+};
 
 export const isCreativeLogoAnchor = (value: unknown): value is CreativeLogoAnchor =>
   typeof value === 'string' && CREATIVE_LOGO_ANCHORS.includes(value as CreativeLogoAnchor);
+export const isCreativeLogoPlacementContext = (value: unknown): value is CreativeLogoPlacementContext => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const context = value as Record<string, unknown>;
+  return Object.keys(context).length === 3 && isCreativePlacement(context.placement)
+    && Number.isSafeInteger(context.sourceWidth) && (context.sourceWidth as number) > 0
+    && Number.isSafeInteger(context.sourceHeight) && (context.sourceHeight as number) > 0;
+};
 
 const anchorForRegion = (region: LayoutRegion): CreativeLogoAnchor => {
   const centerX = region.xPct + region.widthPct / 2;
@@ -31,7 +43,7 @@ const anchorForRegion = (region: LayoutRegion): CreativeLogoAnchor => {
   return 'top-center';
 };
 
-const CANDIDATE_RECTS: Record<CreativeLogoAnchor, CreativeLogoRect> = {
+const FALLBACK_CANDIDATE_RECTS: Record<CreativeLogoAnchor, CreativeLogoRect> = {
   'top-left': { left: 3, top: 3, width: 26, height: 11 },
   'top-center': { left: 37, top: 3, width: 26, height: 11 },
   'top-right': { left: 71, top: 3, width: 26, height: 11 },
@@ -47,15 +59,30 @@ const overlapArea = (left: CreativeLogoRect, right: LayoutRegion) =>
 export function resolveLayoutAwareLogoAnchor(
   plannerAnchor: CreativeLogoAnchor,
   blueprint?: LayoutBlueprint,
+  context?: CreativeLogoPlacementContext,
 ): CreativeLogoAnchor {
   if (!blueprint) return plannerAnchor;
   const placeholder = blueprint.regions.find(region => region.role === 'LOGO_PLACEHOLDER');
   if (placeholder) return anchorForRegion(placeholder);
   const blockers = blueprint.regions.filter(region => BLOCKING_ROLES.has(region.role));
   if (!blockers.length) return plannerAnchor;
+  const candidateRects = context
+    ? Object.fromEntries(CREATIVE_LOGO_ANCHORS.map(anchor => {
+        const panel = resolveCreativeLogoGeometry(
+          context.placement, anchor, context.sourceWidth, context.sourceHeight,
+        ).panel;
+        const canvas = CREATIVE_PLACEMENT_SPECS[context.placement];
+        return [anchor, {
+          left: panel.left * 100 / canvas.width,
+          top: panel.top * 100 / canvas.height,
+          width: panel.width * 100 / canvas.width,
+          height: panel.height * 100 / canvas.height,
+        }];
+      })) as Record<CreativeLogoAnchor, CreativeLogoRect>
+    : FALLBACK_CANDIDATE_RECTS;
   const scores = CREATIVE_LOGO_ANCHORS.map(anchor => ({
     anchor,
-    score: blockers.reduce((total, region) => total + overlapArea(CANDIDATE_RECTS[anchor], region), 0),
+    score: blockers.reduce((total, region) => total + overlapArea(candidateRects[anchor], region), 0),
   }));
   const minimum = Math.min(...scores.map(candidate => candidate.score));
   return scores.some(candidate => candidate.anchor === plannerAnchor && candidate.score === minimum)

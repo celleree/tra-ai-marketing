@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   humanOptions: vi.fn(),
   resolveHuman: vi.fn(),
   compositeCreativeBrandLogo: vi.fn(),
-  resolveCreativeBrandLogoGeometry: vi.fn(),
+  resolveCreativeBrandLogoPlacementContext: vi.fn(),
   saveCreativeBatch: vi.fn(),
   validateGeneratedCreativeImage: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
@@ -54,7 +54,7 @@ vi.mock('@/lib/quotas/require-quota', () => ({
 
 vi.mock('@/lib/creatives/brand-logo.server', () => ({
   compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo,
-  resolveCreativeBrandLogoGeometry: mocks.resolveCreativeBrandLogoGeometry,
+  resolveCreativeBrandLogoPlacementContext: mocks.resolveCreativeBrandLogoPlacementContext,
 }));
 vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveCreativeBatch }));
 vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.listProofRecords }));
@@ -460,8 +460,8 @@ beforeEach(() => {
   mocks.requireOperatorQuota.mockResolvedValue(null);
   mocks.listProofRecords.mockResolvedValue([]);
   mocks.compositeCreativeBrandLogo.mockReset().mockImplementation(async (buffer) => buffer);
-  mocks.resolveCreativeBrandLogoGeometry.mockImplementation(async (_logo, placement, anchor) =>
-    resolveCreativeLogoGeometry(placement, anchor, 200, 100));
+  mocks.resolveCreativeBrandLogoPlacementContext.mockImplementation(async (_logo, placement) =>
+    ({ placement, sourceWidth: 200, sourceHeight: 100 }));
   mocks.saveCreativeBatch.mockReset().mockImplementation(async (records) => records);
   mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
@@ -1335,6 +1335,10 @@ describe('progressive creative delivery', () => {
     const response = await POST(generationRequest([], undefined, 2, undefined, 'PORTRAIT_4_5', { brandLogoMediaId: mediaId('7') }));
     const events = await readStreamEvents(response);
     const geometry = resolveCreativeLogoGeometry('PORTRAIT_4_5', 'top-left', 200, 100);
+    expect(mocks.planCreativeBatch).toHaveBeenCalledWith(expect.objectContaining({
+      hasBrandLogo: true,
+      logoPlacement: { placement: 'PORTRAIT_4_5', sourceWidth: 200, sourceHeight: 100 },
+    }));
     expect(mocks.compositeCreativeBrandLogo).toHaveBeenCalledTimes(2);
     expect(mocks.compositeCreativeBrandLogo).toHaveBeenCalledWith(PNG, PNG, geometry);
     for (const [, init] of vi.mocked(fetch).mock.calls) {

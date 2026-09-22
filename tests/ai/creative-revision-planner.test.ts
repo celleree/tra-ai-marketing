@@ -26,7 +26,8 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('single-creative revision planning', () => {
   it('returns a validated composition-aware logo anchor for logo-bearing edits', async () => {
-    const logoArgs = { ...args, hasBrandLogo: true, parent: { ...parent, logoAnchor: 'top-left' as const } };
+    const logoArgs = { ...args, hasBrandLogo: true, parent: { ...parent, logoAnchor: 'top-left' as const },
+      logoPlacement: { placement: 'PORTRAIT_4_5' as const, sourceWidth: 200, sourceHeight: 100 } };
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload({ ...plan(), logoAnchor: 'bottom-right' }))));
     const result = await planCreativeRevision(logoArgs);
     expect(result.concept.logoAnchor).toBe('bottom-right');
@@ -34,6 +35,7 @@ describe('single-creative revision planning', () => {
     expect(request.text.format.schema.properties.logoAnchor.enum)
       .toEqual(['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-right']);
     expect(request.input[0].content[0].text).toContain('Preserve the parent anchor for an EDIT');
+    expect(JSON.parse(request.input[1].content[0].text).parent.logoAnchor).toBe('top-left');
 
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload({ ...plan(), logoAnchor: 'middle' }))));
     await expect(planCreativeRevision(logoArgs)).rejects.toThrow('invalid revision logo anchor');

@@ -10,8 +10,8 @@ import {
 import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
-import { compositeCreativeBrandLogo, resolveCreativeBrandLogoGeometry } from '@/lib/creatives/brand-logo.server';
-import { resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
+import { compositeCreativeBrandLogo, resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
+import { resolveCreativeLogoGeometry, resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
 import { selectedLayout } from '@/lib/references/planning';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
@@ -94,11 +94,14 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   const layoutBlueprint = item.strategy.referenceSelection
     ? selectedLayout(item.strategy.referenceSelection, referenceCatalog)
     : undefined;
-  const logoAnchor = brandLogo
-    ? resolveLayoutAwareLogoAnchor(item.logoAnchor ?? 'top-left', layoutBlueprint)
+  const logoPlacement = brandLogo
+    ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, request.placement)
     : undefined;
-  const logoGeometry = brandLogo && logoAnchor
-    ? await resolveCreativeBrandLogoGeometry(brandLogo.buffer, request.placement, logoAnchor)
+  const logoAnchor = logoPlacement
+    ? resolveLayoutAwareLogoAnchor(item.logoAnchor ?? 'top-left', layoutBlueprint, logoPlacement)
+    : undefined;
+  const logoGeometry = logoPlacement && logoAnchor
+    ? resolveCreativeLogoGeometry(request.placement, logoAnchor, logoPlacement.sourceWidth, logoPlacement.sourceHeight)
     : undefined;
   let imageResult: ImageGenerationResult;
   let providerFrames: ApprovedTraVideoFrame[] | undefined;

@@ -21,7 +21,7 @@ vi.mock('@/lib/ai/creative-revision-planner', () => ({ planCreativeRevision: moc
 vi.mock('@/lib/ai/creative-revision-image', () => ({ generateCreativeRevisionImage: mocks.generate }));
 vi.mock('@/lib/creatives/brand-logo.server', () => ({
   compositeCreativeBrandLogo: mocks.logo,
-  resolveCreativeBrandLogoGeometry: mocks.logoGeometry,
+  resolveCreativeBrandLogoPlacementContext: mocks.logoGeometry,
   eraseCreativeBrandLogo: mocks.eraseLogo,
 }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({ saveImage: mocks.saveImage }) }));
@@ -120,7 +120,7 @@ beforeEach(() => {
     routing: { operationType: operation, preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false, fallbackFromModel: null, fallbackReason: null },
   }));
   mocks.validate.mockResolvedValue(undefined); mocks.logo.mockResolvedValue(Buffer.from('final branded'));
-  mocks.logoGeometry.mockImplementation(async (_logo, placement, anchor) => resolveCreativeLogoGeometry(placement, anchor, 200, 100));
+  mocks.logoGeometry.mockImplementation(async (_logo, placement) => ({ placement, sourceWidth: 200, sourceHeight: 100 }));
   mocks.eraseLogo.mockResolvedValue(Buffer.from('debranded canvas'));
   mocks.saveImage.mockResolvedValue({ ...record.image, id: `media_${'d'.repeat(32)}`, fileName: `media_${'d'.repeat(32)}.png` });
   mocks.save.mockImplementation(async records => records);
@@ -164,6 +164,12 @@ describe('saved creative revision API', () => {
     });
     expect(mocks.logo).toHaveBeenCalledWith(Buffer.from('raw'), Buffer.from('logo'), expected);
     expect(creative.planning.logoAnchor).toBe(expectedAnchor);
+    if (operation === 'EDIT' || operation === 'VARIATION') {
+      expect(mocks.plan.mock.calls[0][0]).toMatchObject({
+        parent: { logoAnchor: 'bottom-right' },
+        logoPlacement: { placement: 'SQUARE_1_1', sourceWidth: 200, sourceHeight: 100 },
+      });
+    }
   });
 
   it('drops a removed library human and prevents later reuse after deactivation', async () => {

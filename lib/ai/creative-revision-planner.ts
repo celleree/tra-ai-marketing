@@ -7,7 +7,8 @@ import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generate
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { CREATIVE_STRATEGY_JSON_SCHEMA, parseCreativeStrategy } from '@/lib/creatives/strategy';
 import type { CreativeProofProvenance } from '@/lib/proof/provenance';
-import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
+import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, resolveLayoutAwareLogoAnchor,
+  type CreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 
 type RevisionParentConcept = Omit<PlannedCreativeConcept, 'index' | 'selectionReason'>;
 export type CreativeRevisionPlan = {
@@ -102,6 +103,7 @@ export async function planCreativeRevision(args: {
   companyContext: string;
   hasApprovedHumanSource: boolean;
   hasBrandLogo?: boolean;
+  logoPlacement?: CreativeLogoPlacementContext;
   proofProvenance?: CreativeProofProvenance;
   referenceCatalog?: ReferencePlanningCandidate[];
 }): Promise<CreativeRevisionPlan> {
@@ -154,7 +156,7 @@ export async function planCreativeRevision(args: {
     ? selectedLayout(strategy.referenceSelection, args.referenceCatalog)
     : undefined;
   const logoAnchor = args.hasBrandLogo
-    ? resolveLayoutAwareLogoAnchor(value.logoAnchor as typeof CREATIVE_LOGO_ANCHORS[number], layout)
+    ? resolveLayoutAwareLogoAnchor(value.logoAnchor as typeof CREATIVE_LOGO_ANCHORS[number], layout, args.logoPlacement)
     : undefined;
 
   let concept: PlannedCreativeConcept;

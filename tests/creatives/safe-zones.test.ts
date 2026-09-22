@@ -28,6 +28,13 @@ describe('Stories composition boundaries', () => {
       { ...base, role: 'SUPPORTING_TEXT' as const, xPct: 0, yPct: 80, widthPct: 40, heightPct: 20 },
     ] };
     expect(resolveLayoutAwareLogoAnchor('top-left', occupiedTopAndBottomLeft)).toBe('bottom-right');
+
+    const storiesCta = { ...referenceCandidate().blueprint, regions: [
+      { ...base, role: 'CTA' as const, xPct: 0, yPct: 50, widthPct: 40, heightPct: 15 },
+    ] };
+    expect(resolveLayoutAwareLogoAnchor('bottom-left', storiesCta, {
+      placement: 'VERTICAL_9_16', sourceWidth: 200, sourceHeight: 100,
+    })).toBe('top-left');
   });
   it.each(['SQUARE_1_1', 'PORTRAIT_4_5'] as const)('does not impose Stories exclusions on %s', placement => {
     const spec = CREATIVE_PLACEMENT_SPECS[placement];

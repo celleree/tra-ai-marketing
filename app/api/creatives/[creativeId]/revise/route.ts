@@ -6,8 +6,8 @@ import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import { generateCreativeRevisionImage } from '@/lib/ai/creative-revision-image';
 import { buildCreativeCompanyContext, formatCreativeCompanyContext } from '@/lib/company/creative-context';
-import { compositeCreativeBrandLogo, eraseCreativeBrandLogo, resolveCreativeBrandLogoGeometry } from '@/lib/creatives/brand-logo.server';
-import { resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
+import { compositeCreativeBrandLogo, eraseCreativeBrandLogo, resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
+import { resolveCreativeLogoGeometry, resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
 import { selectedLayout } from '@/lib/references/planning';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
@@ -57,8 +57,11 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const parentLayout = planning.strategy.referenceSelection && planning.referenceCatalog
       ? selectedLayout(planning.strategy.referenceSelection, planning.referenceCatalog)
       : undefined;
+    const parentLogoPlacement = sources.logoOverlay
+      ? await resolveCreativeBrandLogoPlacementContext(sources.logoOverlay.buffer, parent.placement!)
+      : undefined;
     const parentLogoAnchor = sources.logoOverlay
-      ? resolveLayoutAwareLogoAnchor(planning.logoAnchor ?? 'top-left', parentLayout)
+      ? resolveLayoutAwareLogoAnchor(planning.logoAnchor ?? 'top-left', parentLayout, parentLogoPlacement)
       : undefined;
     const companyContext = formatCreativeCompanyContext(buildCreativeCompanyContext(revision.companyProfile));
     let concept: PlannedCreativeConcept = {
@@ -71,10 +74,12 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       const plan = await planCreativeRevision({
         parent: { format: concept.format, copy: concept.copy,
           ...(concept.adCopy ? { adCopy: concept.adCopy } : {}),
-          ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}), strategy: concept.strategy },
+          ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}),
+          ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}), strategy: concept.strategy },
         operation: revision.operation, instruction: revision.instruction, companyContext,
         hasApprovedHumanSource: sources.originalApprovedSource !== null,
         hasBrandLogo: sources.logoOverlay !== null,
+        ...(parentLogoPlacement ? { logoPlacement: parentLogoPlacement } : {}),
         ...(proofProvenance ? { proofProvenance } : {}),
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}),
       });
@@ -109,11 +114,16 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       : buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent });
     const removedLibraryHuman = !!(planning.strategy.humanSourceId || planning.strategy.approvedHumanId)
       && concept.strategy.execution.subjectSource === 'non-human';
-    const logoGeometry = sources.logoOverlay && concept.logoAnchor
-      ? await resolveCreativeBrandLogoGeometry(sources.logoOverlay.buffer, placement, concept.logoAnchor)
+    const logoPlacement = sources.logoOverlay
+      ? placement === parent.placement ? parentLogoPlacement!
+        : await resolveCreativeBrandLogoPlacementContext(sources.logoOverlay.buffer, placement)
       : undefined;
-    const parentLogoGeometry = sources.logoOverlay && parentLogoAnchor
-      ? await resolveCreativeBrandLogoGeometry(sources.logoOverlay.buffer, parent.placement!, parentLogoAnchor)
+    const logoGeometry = logoPlacement && concept.logoAnchor
+      ? resolveCreativeLogoGeometry(placement, concept.logoAnchor, logoPlacement.sourceWidth, logoPlacement.sourceHeight)
+      : undefined;
+    const parentLogoGeometry = parentLogoPlacement && parentLogoAnchor
+      ? resolveCreativeLogoGeometry(parent.placement!, parentLogoAnchor,
+          parentLogoPlacement.sourceWidth, parentLogoPlacement.sourceHeight)
       : undefined;
     const sourceSelection = removedLibraryHuman ? { ...sources, originalApprovedSource: null } : sources;
     const revisionSources = parentLogoGeometry

@@ -18,6 +18,7 @@ import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selecti
 import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY,
   canonicalizeVideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 import { isSelectedPlanningProof } from '@/lib/proof/planning-selection';
+import { isCreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
@@ -172,6 +173,8 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
     || typeof args.hasApprovedHumanSource !== 'boolean'
     || (args.hasBrandLogo !== undefined && typeof args.hasBrandLogo !== 'boolean')
     || (args.hasBrandLogo !== undefined && args.hasBrandLogo !== Boolean(job.request.brandLogoMediaId))
+    || (args.logoPlacement !== undefined && (!isCreativeLogoPlacementContext(args.logoPlacement)
+      || args.logoPlacement.placement !== job.request.placement || !args.hasBrandLogo))
     || !isDeepStrictEqual(args.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)
     || !isDeepStrictEqual(args.sourceAnalysis, checkpoint.snapshot.sourceAnalysis)
     || (args.sourceAnalysis !== undefined && !validVideoSelectorBindings(args.sourceAnalysis, job.request.context))) return false;

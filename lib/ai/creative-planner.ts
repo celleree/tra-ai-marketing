@@ -17,7 +17,8 @@ import { getCreativeDiversityIssue, getCreativeDiversityRepairPlan, type Creativ
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { referenceSelectionSchema, resolveReferenceSelection, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
-import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
+import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, isCreativeLogoPlacementContext,
+  resolveLayoutAwareLogoAnchor, type CreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import { MAX_PORTFOLIO_CREATIVES, type CreativeBatchPlan, type PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
@@ -116,6 +117,7 @@ const parseConcept = (
   expectedIndex: number,
   hasApprovedHumanSource: boolean,
   hasBrandLogo: boolean,
+  logoPlacement: CreativeLogoPlacementContext | undefined,
   referenceCatalog?: ReferencePlanningCandidate[],
   approvedHumanOptions?: ApprovedHumanOption[],
   proofCatalog: readonly PlanningProofRecord[] = []
@@ -159,7 +161,7 @@ const parseConcept = (
     ? selectedLayout(strategy.referenceSelection, referenceCatalog)
     : undefined;
   const logoAnchor = hasBrandLogo
-    ? resolveLayoutAwareLogoAnchor(value.logoAnchor as typeof CREATIVE_LOGO_ANCHORS[number], layout)
+    ? resolveLayoutAwareLogoAnchor(value.logoAnchor as typeof CREATIVE_LOGO_ANCHORS[number], layout, logoPlacement)
     : undefined;
   const adCopy: CreativeAdCopy = { primaryText, headline, description: value.adCopy.description.trim() };
   const imageCopy: CreativeImageCopy = {
@@ -203,6 +205,7 @@ export type CreativeBatchPlannerArgs = {
   hasApprovedHumanSource: boolean;
   /** Optional only for restoring historical planning checkpoints. */
   hasBrandLogo?: boolean;
+  logoPlacement?: CreativeLogoPlacementContext;
   referenceCatalog?: ReferencePlanningCandidate[];
   approvedHumanOptions?: ApprovedHumanOption[];
 };
@@ -251,6 +254,9 @@ export async function requestCreativeBatch(
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
     throw new Error('Invalid approved-human options: IDs must be valid and unique; option count is not bounded.');
   }
+  if (args.logoPlacement !== undefined && !isCreativeLogoPlacementContext(args.logoPlacement)) {
+    throw new Error('Invalid logo placement context.');
+  }
   const hasVideoIntelligence = sourceAnalysis?.entries.some(
     (entry) => entry.result?.kind === 'VIDEO_INTELLIGENCE'
   ) ?? false;
@@ -287,6 +293,7 @@ export async function requestCreativeBatch(
           } : {}),
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           hasBrandLogo: Boolean(args.hasBrandLogo),
+          ...(args.logoPlacement ? { logoTargetPlacement: args.logoPlacement.placement } : {}),
           referenceAnalysis: args.analysis,
           ...(proofCatalog.length ? { proofCatalog } : {}),
           ...(videoLinked?.customerInsights.length ? {
@@ -371,7 +378,7 @@ export async function requestCreativeBatch(
   if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== expectedIndexes.length) {
     throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${expectedIndexes.length} creatives.`);
   }
-  const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
+  const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
 }
