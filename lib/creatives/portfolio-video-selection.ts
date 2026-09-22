@@ -5,8 +5,11 @@ import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/vid
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { videoSourceHash } from '@/lib/video/library-service';
-import { selectVideoFramesFromPoolWithCache, type VideoSelectionCacheDependencies } from '@/lib/video/selection-cache';
+import { selectVideoFramesFromPoolWithCache, selectVideoHumanFrameFromPoolWithCache,
+  type VideoSelectionCacheDependencies } from '@/lib/video/selection-cache';
 import { extractVideoSelectionFrames, loadSavedVideoSelectionContext, type VideoSelectionContext } from '@/lib/video/selection-context';
+import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY, createVideoFrameReuseContext,
+  type AutomaticVideoSelectionPolicy, type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 
 const MAX_CONCEPT_EXCERPT = 160;
 const normalizeText = (value: unknown) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
@@ -17,7 +20,16 @@ type Restored = { source: HydratedTraVideoSource; context: VideoSelectionContext
 export type PortfolioVideoSelectionResult =
   | { status: 'BUSY' }
   | { status: 'RETRY_REQUIRED'; reason: 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME' }
+  | { status: 'NO_SUITABLE_HUMAN' }
   | { status: 'COMPLETE'; selection: GenerateVideoFrameSelection };
+
+export const portfolioVideoSelectionPolicy = (concept: PlannedCreativeConcept): AutomaticVideoSelectionPolicy =>
+  concept.strategy.execution?.subjectSource === 'approved-tra-human'
+    ? HUMAN_FRAME_SELECTION_POLICY
+    : METADATA_FRAME_SELECTION_POLICY;
+
+export const portfolioVideoFrameReuseContext = (selections: readonly GenerateVideoFrameSelection[]): VideoFrameReuseContext =>
+  createVideoFrameReuseContext(selections);
 
 /** Canonical identity for frame choice. Caller supplies the final frozen planned concept. */
 export function createPortfolioVideoSelectionConcept(concept: PlannedCreativeConcept) {
@@ -67,11 +79,32 @@ const restoreOne = async (
 
 export async function selectPortfolioVideoFrames(
   input: { sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
-    finalConcept: PlannedCreativeConcept; cache: VideoSelectionCacheDependencies },
+    finalConcept: PlannedCreativeConcept; selectionPolicy?: AutomaticVideoSelectionPolicy;
+    reuseContext?: VideoFrameReuseContext; cache: VideoSelectionCacheDependencies },
 ): Promise<PortfolioVideoSelectionResult> {
   const restored = await Promise.all(completedDependencies(input.sourceAnalysis).map((dependency) => restoreOne(input.sources, dependency)));
+  const expectedPolicy = portfolioVideoSelectionPolicy(input.finalConcept);
+  const selectionPolicy = input.selectionPolicy ?? expectedPolicy;
+  const reuseContext = input.reuseContext ?? { version: 1 as const, frames: [] };
+  if (selectionPolicy !== expectedPolicy) throw new Error('Frozen automatic video selection policy does not match the final concept.');
+  const concept = createPortfolioVideoSelectionConcept(input.finalConcept);
+  if (selectionPolicy === HUMAN_FRAME_SELECTION_POLICY) {
+    const result = await selectVideoHumanFrameFromPoolWithCache(restored.map(({ context, librarySha256 }) => {
+      if (!context.representativeImages) {
+        throw new Error('Automatic human-frame selection requires source-bound preparation images; reanalyze the uploaded video.');
+      }
+      return { library: context.library, librarySha256, representativeImages: context.representativeImages };
+    }), concept, reuseContext, input.cache);
+    if (result.status !== 'COMPLETE') return result;
+    if (result.outcome.status === 'NO_SUITABLE_HUMAN') return { status: 'NO_SUITABLE_HUMAN' };
+    const selection = parseGenerateVideoFrameSelection({ libraryId: result.outcome.selection.libraryId,
+      sourceVideoContentHash: result.outcome.selection.sourceVideoContentHash,
+      frameIds: result.outcome.selection.frames.map((frame) => frame.frameId) });
+    if (!selection) throw new Error('Cached visual human-frame selection cannot be persisted for generation.');
+    return { status: 'COMPLETE', selection };
+  }
   const result = await selectVideoFramesFromPoolWithCache(restored.map(({ context, librarySha256 }) => ({ library: context.library, librarySha256 })),
-    createPortfolioVideoSelectionConcept(input.finalConcept), input.cache);
+    concept, input.cache);
   if (result.status !== 'COMPLETE') return result;
   const selection = parseGenerateVideoFrameSelection({ libraryId: result.selection.libraryId,
     sourceVideoContentHash: result.selection.sourceVideoContentHash, frameIds: result.selection.frames.map((frame) => frame.frameId) });

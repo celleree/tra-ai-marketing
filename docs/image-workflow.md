@@ -122,6 +122,10 @@ Current invariants:
 - legacy prototype endpoints and local filesystem fallback remain development-only; Preview uses validated private persisted jobs and artifacts, with explicit retry after uncertain paid work;
 - unchanged source analysis should be cached/reused rather than repeating provider work.
 
+Automatic human-frame selection uses policy `human-frame-visual-quality-v1`. A cold decision sends every admitted, source-bound representative JPEG from the validated preparation bundle at `detail: high`; the 280px library thumbnail is not used as facial-quality evidence. The selector must assess every candidate, and application code rejects closed/blinking eyes, severe blur/occlusion, awkward expression geometry, insufficient facial detail and unusable framing before ranking. Same-portfolio reuse is only a tiebreak among comparably suitable frames. The analysis JPEGs remain provider-ineligible and never become final generation inputs; selected IDs still require fresh approved-PNG extraction.
+
+The Responses API currently documents a 1,500-image and 512 MB request limit, with image tokens also counting against model context and TPM ([OpenAI image-input requirements](https://developers.openai.com/api/docs/guides/images-vision#image-input-requirements)). The application never truncates the candidate pool: it rejects the whole decision with an actionable error above those provider limits or above its 240,000 estimated high-detail image-token cold-call budget. That application budget leaves headroom below the default `gpt-5.6-terra` long-context pricing threshold; at the documented standard $2/M input rate it caps image-input cost at about $0.48 per cold selection, excluding text/reasoning/output. One cold automatic decision remains one provider call; exact-policy warm cache reuse remains zero calls. Model overrides may have different pricing and must be measured separately.
+
 The layout and video preprocessing systems remain separate:
 
 - `TRA_VIDEO -> approved human/reference frames`;

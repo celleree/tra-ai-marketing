@@ -3,8 +3,12 @@ import { canonicalizeVideoSelectionPool, parsePooledVideoConceptSelection, parse
   selectVideoFramesForConceptPool, VIDEO_SELECTION_TIMEOUT_MS, type VideoConceptSelection, type VideoSelectionPoolBinding } from '@/lib/video/concept-selection';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
+import { HUMAN_FRAME_SELECTION_POLICY, canonicalizeVideoFrameReuseContext, canonicalizeVideoHumanSelectionPool,
+  parseVideoHumanFrameSelectionOutcome, selectVideoHumanFrameFromPool, type VideoFrameReuseContext,
+  type VideoHumanFrameSelectionOutcome, type VideoHumanSelectionPoolBinding } from '@/lib/video/human-frame-selection';
 
 const MAX_RECORD_BYTES = 64 * 1024;
+const MAX_VISUAL_RECORD_BYTES = 2 * 1024 * 1024;
 const LEASE_MS = 5 * 60 * 1000;
 type RetryReason = 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME';
 type CacheRecord = { version: 1; librarySha256: string; model: string; concept: string } & (
@@ -18,9 +22,21 @@ type PoolCacheRecord = { version: 2; libraries: PoolIdentityEntry[]; model: stri
   | { status: 'RETRY_REQUIRED'; reason: RetryReason }
   | { status: 'COMPLETE'; selection: VideoConceptSelection }
 );
+type VisualPoolIdentityEntry = PoolIdentityEntry & { frames: Array<{
+  frameId: string; candidateIndex: number; timestampMs: number; frameSha256: string; width: number; height: number;
+}> };
+type VisualPoolCacheRecord = { version: 3; policy: typeof HUMAN_FRAME_SELECTION_POLICY; libraries: VisualPoolIdentityEntry[];
+  reuseContext: VideoFrameReuseContext; model: string; concept: string } & (
+  | { status: 'RUNNING'; lease: { id: string; expiresAtMs: number } }
+  | { status: 'RETRY_REQUIRED'; reason: RetryReason }
+  | { status: 'COMPLETE'; outcome: VideoHumanFrameSelectionOutcome }
+);
 export type CachedVideoSelectionResult = { status: 'BUSY' }
   | { status: 'RETRY_REQUIRED'; reason: RetryReason }
   | { status: 'COMPLETE'; selection: VideoConceptSelection };
+export type CachedVideoHumanSelectionResult = { status: 'BUSY' }
+  | { status: 'RETRY_REQUIRED'; reason: RetryReason }
+  | { status: 'COMPLETE'; outcome: VideoHumanFrameSelectionOutcome };
 export interface VideoSelectionCacheDependencies {
   model: string;
   deadlineAtMs: number;
@@ -169,4 +185,83 @@ export const selectVideoFramesFromPoolWithCache = async (
   catch { return checkpoint({ ...identity, status: 'RETRY_REQUIRED', reason: 'PROVIDER_FAILED' }); }
   // Post-provider checkpoint failures propagate; never automatically repeat paid work.
   return checkpoint({ ...identity, status: 'COMPLETE', selection });
+};
+
+/** Versioned visual policy cache. Every admitted representative image and same-portfolio reuse count is identity-bound. */
+export const selectVideoHumanFrameFromPoolWithCache = async (
+  bindings: readonly VideoHumanSelectionPoolBinding[],
+  concept: string,
+  reuseContext: VideoFrameReuseContext,
+  dependencies: VideoSelectionCacheDependencies,
+): Promise<CachedVideoHumanSelectionResult> => {
+  const brief = concept.trim(); const model = dependencies.model.trim();
+  if (!brief || brief.length > 2_000 || !model || !Number.isSafeInteger(dependencies.deadlineAtMs)) {
+    throw new Error('Video selection cache input is invalid.');
+  }
+  const canonical = canonicalizeVideoHumanSelectionPool(bindings).pool;
+  const reuse = canonicalizeVideoFrameReuseContext(reuseContext);
+  const libraries: VisualPoolIdentityEntry[] = canonical.map(({ library, librarySha256, representativeImages }) => ({
+    libraryId: library.id, sourceVideoMediaId: library.sourceVideoMediaId,
+    sourceVideoContentHash: library.sourceVideoContentHash, librarySha256,
+    frames: representativeImages.map(({ bytes: _bytes, ...identity }) => identity),
+  }));
+  const storage = dependencies.storage ?? getVideoIntelligenceStorage(); const now = dependencies.now ?? Date.now;
+  const identity = { version: 3 as const, policy: HUMAN_FRAME_SELECTION_POLICY, libraries, reuseContext: reuse, model, concept: brief };
+  const digest = createHash('sha256').update(JSON.stringify([3, HUMAN_FRAME_SELECTION_POLICY, libraries, reuse, brief, model])).digest('hex');
+  const key = `selections/sha256/${digest}.json`;
+  const read = async () => {
+    const stored = await storage.read(key); if (!stored) return null;
+    if (stored.bytes.length > MAX_VISUAL_RECORD_BYTES) throw new Error('Visual video selection cache exceeds its size limit.');
+    const value = JSON.parse(stored.bytes.toString('utf8')) as VisualPoolCacheRecord;
+    if (!value || value.version !== 3 || value.policy !== HUMAN_FRAME_SELECTION_POLICY || value.model !== model
+      || value.concept !== brief || JSON.stringify(value.libraries) !== JSON.stringify(libraries)
+      || JSON.stringify(value.reuseContext) !== JSON.stringify(reuse)) {
+      throw new Error('Visual video selection cache identity is invalid.');
+    }
+    if (value.status === 'COMPLETE') value.outcome = parseVideoHumanFrameSelectionOutcome(
+      { assessments: value.outcome.assessments }, canonical, brief, reuse,
+    );
+    else if (value.status === 'RUNNING') {
+      if (!value.lease || typeof value.lease.id !== 'string' || !value.lease.id
+        || !Number.isSafeInteger(value.lease.expiresAtMs)) throw new Error('Video selection cache lease is invalid.');
+    } else if (value.status !== 'RETRY_REQUIRED' || !['LEASE_EXPIRED', 'PROVIDER_FAILED', 'INSUFFICIENT_TIME'].includes(value.reason)) {
+      throw new Error('Video selection cache state is invalid.');
+    }
+    return { value, etag: stored.etag };
+  };
+  const write = (value: VisualPoolCacheRecord, etag: string | null) => {
+    const bytes = Buffer.from(JSON.stringify(value));
+    if (bytes.length > MAX_VISUAL_RECORD_BYTES) throw new Error('Visual video selection cache exceeds its size limit.');
+    return storage.write(key, bytes, etag);
+  };
+  let owned: Extract<VisualPoolCacheRecord, { status: 'RUNNING' }> | undefined;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = await read(); const value = current?.value;
+    if (value?.status === 'COMPLETE') return { status: 'COMPLETE', outcome: value.outcome };
+    if (value?.status === 'RUNNING' && value.lease.expiresAtMs > now()) return { status: 'BUSY' };
+    if (value?.status === 'RETRY_REQUIRED' && !dependencies.retry) return { status: value.status, reason: value.reason };
+    if (value?.status === 'RUNNING' && !dependencies.retry) {
+      const failed = { ...identity, status: 'RETRY_REQUIRED' as const, reason: 'LEASE_EXPIRED' as const };
+      if (await write(failed, current!.etag)) return { status: failed.status, reason: failed.reason };
+      continue;
+    }
+    const next = { ...identity, status: 'RUNNING' as const, lease: {
+      id: (dependencies.newLeaseId ?? randomUUID)(), expiresAtMs: now() + LEASE_MS,
+    } };
+    if (await write(next, current?.etag ?? null)) { owned = next; break; }
+  }
+  if (!owned) throw new Error('Video selection cache contention while claiming work.');
+  const checkpoint = async (next: Exclude<VisualPoolCacheRecord, { status: 'RUNNING' }>): Promise<CachedVideoHumanSelectionResult> => {
+    const current = await read();
+    if (current?.value.status !== 'RUNNING' || current.value.lease.id !== owned!.lease.id
+      || !await write(next, current.etag)) throw new Error('Video selection lease is no longer current.');
+    return next.status === 'COMPLETE' ? { status: next.status, outcome: next.outcome } : { status: next.status, reason: next.reason };
+  };
+  if (Math.min(dependencies.deadlineAtMs, owned.lease.expiresAtMs) - now() < VIDEO_SELECTION_TIMEOUT_MS + 65_000) {
+    return checkpoint({ ...identity, status: 'RETRY_REQUIRED', reason: 'INSUFFICIENT_TIME' });
+  }
+  let outcome: VideoHumanFrameSelectionOutcome;
+  try { outcome = await selectVideoHumanFrameFromPool(canonical, brief, reuse, { model, request: dependencies.request }); }
+  catch { return checkpoint({ ...identity, status: 'RETRY_REQUIRED', reason: 'PROVIDER_FAILED' }); }
+  return checkpoint({ ...identity, status: 'COMPLETE', outcome });
 };

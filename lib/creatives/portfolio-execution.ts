@@ -6,7 +6,8 @@ import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { advancePortfolioPreparation } from '@/lib/creatives/portfolio-preparation';
 import { advancePlanningSourceAnalysis } from '@/lib/creatives/planning-source-composition';
 import { stepPortfolioVideoDependency } from '@/lib/creatives/portfolio-video-adapter';
-import { hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
+import { hydratePortfolioVideoFrameSelection, portfolioVideoFrameReuseContext, portfolioVideoSelectionPolicy,
+  selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelligence-planning';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
@@ -230,8 +231,14 @@ export async function advanceCreativePortfolio(
       if (!slot.videoSelection?.selection) {
         let attempt: ReturnType<typeof checkpointPortfolioVideoSelectionAttempt> | undefined;
         await updateCreativePortfolio(id, current => {
+          const completedSelections = current.slots.flatMap((candidate) => candidate.videoSelection?.selection
+            ? [candidate.videoSelection.selection] : []);
           attempt = checkpointPortfolioVideoSelectionAttempt(
-            current, token, (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra').trim(),
+            current, token, {
+              selectionModel: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra').trim(),
+              selectionPolicy: portfolioVideoSelectionPolicy(concept),
+              reuseContext: portfolioVideoFrameReuseContext(completedSelections),
+            },
           );
           return attempt.job;
         }, storage);
@@ -242,6 +249,8 @@ export async function advanceCreativePortfolio(
           sourceAnalysis: context.sourceAnalysis,
           sources: videoSources,
           finalConcept: concept,
+          selectionPolicy: attempt.selectionPolicy,
+          reuseContext: attempt.reuseContext,
           cache: { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}) },
         });
         if (selected.status === 'BUSY') return {
@@ -252,6 +261,11 @@ export async function advanceCreativePortfolio(
         if (selected.status === 'RETRY_REQUIRED') {
           return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token,
             `Video frame selection requires explicit Retry (${selected.reason}).`), storage) };
+        }
+        if (selected.status === 'NO_SUITABLE_HUMAN') {
+          const message = 'No suitable human frame was found. Upload or select a clearer TRA video frame with open eyes, usable framing, and sufficient facial detail, then create a new portfolio.';
+          return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token, message), storage),
+            error: message, status: 409 };
         }
         return { job: await updateCreativePortfolio(id, current =>
           finishPortfolioVideoFrameSelection(current, token, selected.selection), storage) };

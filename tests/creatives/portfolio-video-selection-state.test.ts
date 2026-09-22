@@ -13,6 +13,7 @@ import {
 } from '@/lib/creatives/portfolio-job';
 import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import type { GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY } from '@/lib/video/human-frame-selection';
 import { portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 
 const videoRequest = () => ({
@@ -31,16 +32,56 @@ const selection: GenerateVideoFrameSelection = {
   frameIds: [`video-frame:${'d'.repeat(64)}`],
 };
 const parse = (job: CreativePortfolioJob) => parseCreativePortfolioJob(Buffer.from(JSON.stringify(job)), job.id);
+const emptyReuse = { version: 1 as const, frames: [] };
+const checkpoint = (job: CreativePortfolioJob, leaseId: string, selectionModel: string, now: number) =>
+  checkpointPortfolioVideoSelectionAttempt(job, leaseId, {
+    selectionModel, selectionPolicy: METADATA_FRAME_SELECTION_POLICY, reuseContext: emptyReuse,
+  }, now);
+const metadataState = (selectionModel: string, extra: Record<string, unknown> = {}) => ({
+  version: 2, selectionModel, selectionPolicy: METADATA_FRAME_SELECTION_POLICY, reuseContext: emptyReuse, ...extra,
+});
 const completed = () => {
-  const frozen = checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', 'selection-model-a', 4_100).job;
+  const frozen = checkpoint(leased(), 'slot', 'selection-model-a', 4_100).job;
   return finishPortfolioVideoFrameSelection(frozen, 'slot', selection, 4_200);
 };
 const frozenFailure = () => {
-  const frozen = checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', 'selection-model-a', 4_100).job;
+  const frozen = checkpoint(leased(), 'slot', 'selection-model-a', 4_100).job;
   return failPortfolioWork(frozen, 'slot', 'Selection outcome uncertain', 4_200);
 };
 
 describe('portfolio video selection persistence', () => {
+  it('freezes visual policy and same-portfolio reuse inputs across reload and explicit retry', () => {
+    const reuseContext = { version: 1 as const, frames: [{ libraryId: selection.libraryId,
+      frameId: selection.frameIds[0], useCount: 1 }] };
+    const attempted = checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', {
+      selectionModel: 'selection-model-a', selectionPolicy: HUMAN_FRAME_SELECTION_POLICY, reuseContext,
+    }, 4_100);
+    expect(attempted.job.slots[0].videoSelection).toEqual({ version: 2, selectionModel: 'selection-model-a',
+      selectionPolicy: HUMAN_FRAME_SELECTION_POLICY, reuseContext });
+    expect(parse(attempted.job)).toEqual(attempted.job);
+    const failed = failPortfolioWork(attempted.job, 'slot', 'Selection outcome uncertain', 4_200);
+    const retried = retryPortfolioWork(failed, 1, 5_000);
+    const claimed = claimCreativePortfolio(retried, 5_100, 'retry-slot').job;
+    const resumed = checkpointPortfolioVideoSelectionAttempt(claimed, 'retry-slot', {
+      selectionModel: 'changed-model', selectionPolicy: 'metadata-frame-selection-v1', reuseContext: { version: 1, frames: [] },
+    }, 5_200);
+    expect(resumed.retry).toBe(true);
+    expect(resumed.selectionModel).toBe('selection-model-a');
+    expect(resumed.selectionPolicy).toBe(HUMAN_FRAME_SELECTION_POLICY);
+    expect(resumed.reuseContext).toEqual(reuseContext);
+    expect(parse(resumed.job)).toEqual(resumed.job);
+  });
+
+  it('loads an incomplete legacy v1 attempt and upgrades it without losing its frozen model', () => {
+    const legacy = leased();
+    legacy.slots[0].videoSelection = { version: 1, selectionModel: 'legacy-model' };
+    expect(parse(legacy)).toEqual(legacy);
+    const upgraded = checkpoint(legacy, 'slot', 'environment-model', 4_100);
+    expect(upgraded.selectionModel).toBe('legacy-model');
+    expect(upgraded.job.slots[0].videoSelection).toEqual(metadataState('legacy-model'));
+    expect(parse(upgraded.job)).toEqual(upgraded.job);
+  });
+
   it('keeps legacy video portfolios without slot selection state valid', () => {
     const job = ready();
     expect(parse(job)).toEqual(job);
@@ -57,13 +98,13 @@ describe('portfolio video selection persistence', () => {
 
   it('freezes the first valid selection model, retains the lease, and ignores later model changes', () => {
     const current = leased();
-    const first = checkpointPortfolioVideoSelectionAttempt(current, 'slot', 'selection-model-a', 4_100);
+    const first = checkpoint(current, 'slot', 'selection-model-a', 4_100);
     expect(first.selectionModel).toBe('selection-model-a');
     expect(first.retry).toBe(false);
     expect(first.job.lease).toEqual(current.lease);
-    expect(first.job.slots[0].videoSelection).toEqual({ version: 1, selectionModel: 'selection-model-a' });
+    expect(first.job.slots[0].videoSelection).toEqual(metadataState('selection-model-a'));
 
-    const later = checkpointPortfolioVideoSelectionAttempt(first.job, 'slot', 'selection-model-b', 4_200);
+    const later = checkpoint(first.job, 'slot', 'selection-model-b', 4_200);
     expect(later.selectionModel).toBe('selection-model-a');
     expect(later.job.slots[0].videoSelection?.selectionModel).toBe('selection-model-a');
     expect(later.job.lease).toEqual(current.lease);
@@ -71,8 +112,8 @@ describe('portfolio video selection persistence', () => {
   });
 
   it('rejects an invalid selection model on the first attempt', () => {
-    expect(() => checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', '   ', 4_100)).toThrow('model is invalid');
-    expect(() => checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', 'x'.repeat(201), 4_100)).toThrow('model is invalid');
+    expect(() => checkpoint(leased(), 'slot', '   ', 4_100)).toThrow('model is invalid');
+    expect(() => checkpoint(leased(), 'slot', 'x'.repeat(201), 4_100)).toThrow('model is invalid');
   });
 
   it('persists a COMPLETE selection, releases the lease, leaves the slot PENDING, and survives reload', () => {
@@ -80,19 +121,19 @@ describe('portfolio video selection persistence', () => {
     expect(job.lease).toBeNull();
     expect(job.slots[0].status).toBe('PENDING');
     expect(job.slots[0].videoSelection).toEqual({
-      version: 1, selectionModel: 'selection-model-a', selection,
+      ...metadataState('selection-model-a'), selection,
     });
     expect(parse(job).slots[0].videoSelection).toEqual(job.slots[0].videoSelection);
   });
 
   it('cannot save a slot after selection starts until COMPLETE selection is persisted', () => {
-    const frozen = checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', 'selection-model-a', 4_100).job;
+    const frozen = checkpoint(leased(), 'slot', 'selection-model-a', 4_100).job;
     expect(() => finishPortfolioSlot(frozen, 'slot', frozen.slots[0].creativeId, 4_200))
       .toThrow('Completed video frame selection is required');
   });
 
   it('rejects serialized SAVED slots with incomplete video selection state', () => {
-    const frozen = checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', 'selection-model-a', 4_100).job;
+    const frozen = checkpoint(leased(), 'slot', 'selection-model-a', 4_100).job;
     const modelOnly = structuredClone(frozen) as any;
     modelOnly.slots[0].status = 'SAVED';
     modelOnly.lease = null;
@@ -109,7 +150,7 @@ describe('portfolio video selection persistence', () => {
     const saved = finishPortfolioSlot(generation, 'generation', generation.slots[0].creativeId, 5_100);
     expect(saved.slots[0].status).toBe('SAVED');
     expect(saved.slots[0].videoSelection).toEqual({
-      version: 1, selectionModel: 'selection-model-a', selection,
+      ...metadataState('selection-model-a'), selection,
     });
     expect(parse(saved).slots[0].videoSelection).toEqual(saved.slots[0].videoSelection);
   });
@@ -117,13 +158,13 @@ describe('portfolio video selection persistence', () => {
   it('preserves the frozen model on selection failure and grants retry only after explicit operator retry', () => {
     const failed = frozenFailure();
     expect(failed.slots[0].status).toBe('RETRY_REQUIRED');
-    expect(failed.slots[0].videoSelection).toEqual({ version: 1, selectionModel: 'selection-model-a' });
+    expect(failed.slots[0].videoSelection).toEqual(metadataState('selection-model-a'));
     expect(parse(failed)).toEqual(failed);
 
     const retried = retryPortfolioWork(failed, 1, 5_000);
     expect(retried.slots[0].status).toBe('PENDING');
     expect(retried.slots[0].videoSelection).toEqual({
-      version: 1, selectionModel: 'selection-model-a', retryAuthorization: { version: 1 },
+      ...metadataState('selection-model-a'), retryAuthorization: { version: 1 },
     });
     expect(parse(retried)).toEqual(retried);
   });
@@ -131,14 +172,14 @@ describe('portfolio video selection persistence', () => {
   it('consumes retry authorization in the attempt checkpoint before provider work and cannot replay it', () => {
     const retried = retryPortfolioWork(frozenFailure(), 1, 5_000);
     const claimed = claimCreativePortfolio(retried, 5_100, 'retry-slot').job;
-    const attempt = checkpointPortfolioVideoSelectionAttempt(claimed, 'retry-slot', 'environment-model-changed', 5_200);
+    const attempt = checkpoint(claimed, 'retry-slot', 'environment-model-changed', 5_200);
     expect(attempt.retry).toBe(true);
     expect(attempt.selectionModel).toBe('selection-model-a');
     expect(attempt.job.lease).toEqual(claimed.lease);
-    expect(attempt.job.slots[0].videoSelection).toEqual({ version: 1, selectionModel: 'selection-model-a' });
+    expect(attempt.job.slots[0].videoSelection).toEqual(metadataState('selection-model-a'));
     expect(parse(attempt.job)).toEqual(attempt.job);
 
-    const second = checkpointPortfolioVideoSelectionAttempt(attempt.job, 'retry-slot', 'another-model', 5_300);
+    const second = checkpoint(attempt.job, 'retry-slot', 'another-model', 5_300);
     expect(second.retry).toBe(false);
     expect(second.job.slots[0].videoSelection?.retryAuthorization).toBeUndefined();
   });
@@ -146,7 +187,7 @@ describe('portfolio video selection persistence', () => {
   it('requires another explicit operator retry after a retried selection becomes uncertain again', () => {
     const authorized = retryPortfolioWork(frozenFailure(), 1, 5_000);
     const claimed = claimCreativePortfolio(authorized, 5_100, 'retry-slot').job;
-    const consumed = checkpointPortfolioVideoSelectionAttempt(claimed, 'retry-slot', 'selection-model-b', 5_200).job;
+    const consumed = checkpoint(claimed, 'retry-slot', 'selection-model-b', 5_200).job;
     const failedAgain = failPortfolioWork(consumed, 'retry-slot', 'Uncertain again', 5_300);
     expect(failedAgain.slots[0].status).toBe('RETRY_REQUIRED');
     expect(failedAgain.slots[0].videoSelection?.retryAuthorization).toBeUndefined();
