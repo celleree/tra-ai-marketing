@@ -7,8 +7,7 @@ import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import { generateCreativeRevisionImage } from '@/lib/ai/creative-revision-image';
 import { buildCreativeCompanyContext, formatCreativeCompanyContext } from '@/lib/company/creative-context';
 import { compositeCreativeBrandLogo, eraseCreativeBrandLogo, resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
-import { resolveCreativeLogoGeometry, resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
-import { selectedLayout } from '@/lib/references/planning';
+import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
@@ -54,14 +53,13 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const { planning, provenance } = sources.parent;
     const revision = parsed.data;
     const placement = revision.operation === 'PLACEMENT' ? revision.placement : parent.placement!;
-    const parentLayout = planning.strategy.referenceSelection && planning.referenceCatalog
-      ? selectedLayout(planning.strategy.referenceSelection, planning.referenceCatalog)
-      : undefined;
     const parentLogoPlacement = sources.logoOverlay
       ? await resolveCreativeBrandLogoPlacementContext(sources.logoOverlay.buffer, parent.placement!)
       : undefined;
+    // Records created before logo anchors were persisted used the legacy top-left overlay.
+    // Do not retroactively apply layout avoidance when locating the pixels to erase.
     const parentLogoAnchor = sources.logoOverlay
-      ? resolveLayoutAwareLogoAnchor(planning.logoAnchor ?? 'top-left', parentLayout, parentLogoPlacement)
+      ? planning.logoAnchor ?? 'top-left'
       : undefined;
     const companyContext = formatCreativeCompanyContext(buildCreativeCompanyContext(revision.companyProfile));
     let concept: PlannedCreativeConcept = {

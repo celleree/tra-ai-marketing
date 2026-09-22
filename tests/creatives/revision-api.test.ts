@@ -8,6 +8,7 @@ import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
+import { referenceCandidate } from '../fixtures/reference-catalog';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), logoGeometry: vi.fn(), eraseLogo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn(), proof: vi.fn() }));
 vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
@@ -170,6 +171,39 @@ describe('saved creative revision API', () => {
         logoPlacement: { placement: 'SQUARE_1_1', sourceWidth: 200, sourceHeight: 100 },
       });
     }
+  });
+
+  it('erases the legacy top-left overlay when historical planning has no persisted anchor', async () => {
+    const record = parent();
+    const reference = referenceCandidate();
+    reference.blueprint.regions = [{
+      ...reference.blueprint.regions[0], role: 'LOGO_PLACEHOLDER',
+      xPct: 75, yPct: 80, widthPct: 20, heightPct: 10,
+    }];
+    record.planning = {
+      ...record.planning!,
+      strategy: {
+        ...record.planning!.strategy,
+        referenceSelection: {
+          angleSource: null,
+          layoutSource: reference.referenceId,
+          referenceRelationship: 'mixed',
+        },
+      },
+      referenceCatalog: [reference],
+    };
+    mocks.list.mockResolvedValue([record]);
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), logoOverlay: { buffer: Buffer.from('logo') } });
+
+    const response = await call({ operation: 'REGENERATE' });
+    const { creative } = await response.json();
+    const legacyGeometry = resolveCreativeLogoGeometry('SQUARE_1_1', 'top-left', 200, 100);
+
+    expect(response.status).toBe(201);
+    expect(mocks.eraseLogo.mock.calls[0][1]).toEqual(legacyGeometry);
+    expect(mocks.generate.mock.calls[0][0]).toMatchObject({ logoGeometry: legacyGeometry });
+    expect(mocks.logo).toHaveBeenCalledWith(Buffer.from('raw'), Buffer.from('logo'), legacyGeometry);
+    expect(creative.planning.logoAnchor).toBe('top-left');
   });
 
   it('drops a removed library human and prevents later reuse after deactivation', async () => {
