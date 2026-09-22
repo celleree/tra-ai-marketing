@@ -4,10 +4,12 @@ import {
 } from '@/lib/creatives/strategy';
 import { parseReferenceCatalog, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { parsePortfolioAudit, type PortfolioAudit } from '@/lib/creatives/portfolio-audit';
+import { isCreativeLogoAnchor, type CreativeLogoAnchor } from '@/lib/creatives/logo-placement';
 
 export type CreativePlanningMetadata = {
   portfolioAudit?: PortfolioAudit;
   referenceCatalog?: ReferencePlanningCandidate[];
+  logoAnchor?: CreativeLogoAnchor;
   strategy: CreativeStrategy;
   selectionReason: string;
   model: string;
@@ -29,7 +31,7 @@ const parseText = (value: unknown, maximumLength: number) => {
 export const parseCreativePlanning = (
   value: unknown
 ): CreativePlanningMetadata | null => {
-  if (!isRecord(value) || !hasOnly(value, ['strategy', 'selectionReason', 'model', 'reasoningEffort', ...('referenceCatalog' in value ? ['referenceCatalog'] : []), ...('portfolioAudit' in value ? ['portfolioAudit'] : [])])) {
+  if (!isRecord(value) || !hasOnly(value, ['strategy', 'selectionReason', 'model', 'reasoningEffort', ...('logoAnchor' in value ? ['logoAnchor'] : []), ...('referenceCatalog' in value ? ['referenceCatalog'] : []), ...('portfolioAudit' in value ? ['portfolioAudit'] : [])])) {
     return null;
   }
 
@@ -37,7 +39,9 @@ export const parseCreativePlanning = (
   const strategy = parseCreativeStrategy(value.strategy, true);
   const selectionReason = parseText(value.selectionReason, 1000);
   const model = parseText(value.model, 200);
-  if (!strategy || !selectionReason || !model || value.reasoningEffort !== 'medium') {
+  const logoAnchor = 'logoAnchor' in value ? value.logoAnchor : undefined;
+  if (!strategy || !selectionReason || !model || value.reasoningEffort !== 'medium'
+    || (logoAnchor !== undefined && !isCreativeLogoAnchor(logoAnchor))) {
     return null;
   }
 
@@ -49,5 +53,5 @@ export const parseCreativePlanning = (
   }
   const portfolioAudit = 'portfolioAudit' in value ? parsePortfolioAudit(value.portfolioAudit) : undefined;
   if (portfolioAudit === null) return null;
-  return { strategy, selectionReason, model, reasoningEffort: 'medium', ...(referenceCatalog ? { referenceCatalog } : {}), ...(portfolioAudit ? { portfolioAudit } : {}) };
+  return { strategy, selectionReason, model, reasoningEffort: 'medium', ...(logoAnchor ? { logoAnchor } : {}), ...(referenceCatalog ? { referenceCatalog } : {}), ...(portfolioAudit ? { portfolioAudit } : {}) };
 };

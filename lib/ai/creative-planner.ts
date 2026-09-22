@@ -15,8 +15,9 @@ import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { getCreativeDiversityIssue, getCreativeDiversityRepairPlan, type CreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
-import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
+import { referenceSelectionSchema, resolveReferenceSelection, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
+import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
 import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import { MAX_PORTFOLIO_CREATIVES, type CreativeBatchPlan, type PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
@@ -43,6 +44,7 @@ Prefer approved TRA humans when they strengthen the proposition, without a fixed
 Plan globally distinct problem/outcome framings, objections, emotions, awareness and propositions. Strong ideas may share a category or layout. Compare mechanisms, subjects, archetypes and CTAs separately; headline/person swaps, recolors or rearrangements are not new ideas.
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
+When logoAnchor is requested, choose one allowed anchor for the supplied official TRA overlay before rendering. Keep the complete logo and backing panel away from planned image text, CTA, approved people and essential imagery. Do not rotate choices by index. Selected layout geometry may deterministically override this fallback choice.
 creativeContext separates USER CREATIVE DIRECTION from APPROVED TRA COMPANY CONTEXT. User direction and source/reference analysis are creative inputs, not factual approval. Only claims or proof explicitly present in approved company claims/proof fields support factual statements.
 proofCatalog, when supplied, contains only ACTIVE Proof Library records explicitly approved for advertising use. Write the normal adCopy and imageCopy around the idea; do not rewrite, paraphrase, or manually place Proof wording. Every creative must return proofSelection: null when no Proof is selected, or exactly one supplied Review/Case Study selection. The application inserts the selected Proof text after the normal primaryText and fills approved attribution or required Case Study disclaimer deterministically. Budget ordinary text, exact selected Proof, separators, approved attribution and required disclaimer within every final 1,000-character field limit. A shorter permitted exact whole-line Review excerpt or no Proof is allowed when needed. Never truncate or rewrite Proof, omit required disclaimers, silently remove selected Proof, or increase those limits. Review selectedText must use exact source wording bounded by whole review-line boundaries. Set includeAttribution true only when that Review record includes approved attribution. For Case Studies, selectedText must exactly equal approvedClaimWording. Obey usageRestrictions. Set imageCopy.proofAttribution to null; the application owns approved Review attribution. If a Case Study has a requiredDisclaimer, the application owns that exact disclosure. verifiedFacts are intentionally unavailable and must not be inferred. If proofCatalog is absent, proofSelection must be null.
 videoLinkedCustomerInsights, when supplied, are source-intelligence/customer-insight context only. They are not Proof, verified claims, approved quotes, or authority to use their wording. A linkedProofReference only identifies the separately supplied exact proofCatalog record; use only that record through proofSelection for evidence.
@@ -113,11 +115,12 @@ const parseConcept = (
   value: unknown,
   expectedIndex: number,
   hasApprovedHumanSource: boolean,
+  hasBrandLogo: boolean,
   referenceCatalog?: ReferencePlanningCandidate[],
   approvedHumanOptions?: ApprovedHumanOption[],
   proofCatalog: readonly PlanningProofRecord[] = []
 ): PlannedCreativeConcept | null => {
-  const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['humanSourceId'] : [])];
+  const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(hasBrandLogo ? ['logoAnchor'] : []), ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['humanSourceId'] : [])];
   if (!isRecord(value) || (!hasOnly(value, expectedKeys) && !hasOnly(value, [...expectedKeys, 'copy']))) return null;
   if (value.index !== expectedIndex || typeof value.format !== 'string' || !isCreativeFormat(value.format)) return null;
   if (!isRecord(value.adCopy) || !hasOnly(value.adCopy, ['primaryText', 'headline', 'description'])) return null;
@@ -151,6 +154,13 @@ const parseConcept = (
   if (referenceCatalog) {
     try { strategy.referenceSelection = resolveReferenceSelection(value.referenceChoices, referenceCatalog); } catch { return null; }
   }
+  if (hasBrandLogo && !isCreativeLogoAnchor(value.logoAnchor)) return null;
+  const layout = strategy.referenceSelection && referenceCatalog
+    ? selectedLayout(strategy.referenceSelection, referenceCatalog)
+    : undefined;
+  const logoAnchor = hasBrandLogo
+    ? resolveLayoutAwareLogoAnchor(value.logoAnchor as typeof CREATIVE_LOGO_ANCHORS[number], layout)
+    : undefined;
   const adCopy: CreativeAdCopy = { primaryText, headline, description: value.adCopy.description.trim() };
   const imageCopy: CreativeImageCopy = {
     headline: imageHeadline,
@@ -178,6 +188,7 @@ const parseConcept = (
     adCopy: composed.adCopy,
     imageCopy: composed.imageCopy,
     selectedProof,
+    ...(logoAnchor ? { logoAnchor } : {}),
     strategy,
     selectionReason,
   };
@@ -190,6 +201,8 @@ export type CreativeBatchPlannerArgs = {
   analysis: CreativeReferenceAnalysis;
   sourceAnalysis?: PlanningSourceAnalysisState;
   hasApprovedHumanSource: boolean;
+  /** Optional only for restoring historical planning checkpoints. */
+  hasBrandLogo?: boolean;
   referenceCatalog?: ReferencePlanningCandidate[];
   approvedHumanOptions?: ApprovedHumanOption[];
 };
@@ -273,6 +286,7 @@ export async function requestCreativeBatch(
             repairGuidance: 'existingPortfolio is the complete failed portfolio. Replace only replacementIndexes. Treat lockedConcepts as immutable accepted concepts. For each replacement index, fix every listed repairDefect for that index while preserving locked concepts. Do not relabel or paraphrase duplicates.',
           } : {}),
           hasApprovedHumanSource: args.hasApprovedHumanSource,
+          hasBrandLogo: Boolean(args.hasBrandLogo),
           referenceAnalysis: args.analysis,
           ...(proofCatalog.length ? { proofCatalog } : {}),
           ...(videoLinked?.customerInsights.length ? {
@@ -296,7 +310,7 @@ export async function requestCreativeBatch(
         type: 'object', additionalProperties: false, required: ['creatives'], properties: {
           creatives: { type: 'array', items: {
             type: 'object', additionalProperties: false,
-            required: ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['humanSourceId'] : [])],
+            required: ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(args.hasBrandLogo ? ['logoAnchor'] : []), ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['humanSourceId'] : [])],
             properties: {
               format: { type: 'string', enum: CREATIVE_FORMATS },
               adCopy: { type: 'object', additionalProperties: false, required: ['primaryText', 'headline', 'description'], properties: {
@@ -330,6 +344,7 @@ export async function requestCreativeBatch(
               ] },
               strategy: CREATIVE_STRATEGY_JSON_SCHEMA,
               selectionReason: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
+              ...(args.hasBrandLogo ? { logoAnchor: { type: 'string', enum: CREATIVE_LOGO_ANCHORS } } : {}),
               index: repair ? { type: 'integer', enum: expectedIndexes } : { type: 'integer', minimum: 1, maximum: args.count },
               ...(args.approvedHumanOptions ? { humanSourceId: {
                 type: ['string', 'null'],
@@ -356,7 +371,7 @@ export async function requestCreativeBatch(
   if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== expectedIndexes.length) {
     throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${expectedIndexes.length} creatives.`);
   }
-  const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
+  const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
 }

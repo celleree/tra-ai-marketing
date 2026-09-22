@@ -171,6 +171,7 @@ export async function prepareCreativeGeneration(
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis, sourceAnalysis,
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
+    hasBrandLogo: reserveLogoArea,
     referenceCatalog,
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
   };

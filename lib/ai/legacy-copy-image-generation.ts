@@ -13,6 +13,7 @@ import {
   type CreativePlacement,
 } from '@/lib/creatives/placements';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
+import type { CreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
@@ -81,12 +82,12 @@ export const generateLegacyPromptOnlyCreativeImage = async (args: {
   placement: CreativePlacement;
   context: string;
   copy: CreativeCopy;
-  reserveLogoArea: boolean;
+  logoGeometry?: CreativeLogoGeometry;
   operationType?: Extract<CreativeImageOperationType, 'PROMPT_GENERATION' | 'LAYOUT_REFERENCE_GENERATION'>;
 }): Promise<ImageGenerationResult> => {
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
   const document = await prepareTaxDocumentReference(args.taxDocumentReference);
-  const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
+  const logoDirection = args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : '';
   const prompt = `
 Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
@@ -148,7 +149,7 @@ export async function generateLegacyApprovedTraReferenceCreativeImage(args: {
   placement?: CreativePlacement;
   context: string;
   copy: CreativeCopy;
-  reserveLogoArea?: boolean;
+  logoGeometry?: CreativeLogoGeometry;
 }): Promise<ImageGenerationResult> {
   const placement = args.placement ?? 'SQUARE_1_1';
   const placementSpec = CREATIVE_PLACEMENT_SPECS[placement];
@@ -176,7 +177,7 @@ Approved-source rules:
 - Do not recreate the attached image verbatim or depend on its old layout unless the text direction explicitly asks for a high-level structural cue.
 - Make the result clearly original and specific to TRA.
 ${formatCreativeSafeZoneRules(placement)}
-${args.reserveLogoArea ? formatCreativeLogoReservation(placement) : ''}
+${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''}
 TRA guardrails:
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
@@ -201,13 +202,13 @@ export async function generateLegacyApprovedTraVideoFrameCreativeImage(args: {
   placement?: CreativePlacement;
   context: string;
   copy: CreativeCopy;
-  reserveLogoArea?: boolean;
+  logoGeometry?: CreativeLogoGeometry;
 }): Promise<VideoImageGenerationResult> {
   const frames = selectProviderVideoFrames(args.frames);
   const placementId = args.placement ?? 'SQUARE_1_1';
   const placement = CREATIVE_PLACEMENT_SPECS[placementId];
   const document = await prepareTaxDocumentReference(args.taxDocumentReference);
-  const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attachments named approved-tra-video-* are server-extracted still frames from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels or third-party people are attached. ${document?.prompt ?? ''} Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. One-ad render brief: ${args.context}. Headline: ${args.copy.headline}. Primary text: ${args.copy.primaryText}. Description: ${args.copy.description}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.reserveLogoArea ? formatCreativeLogoReservation(placementId) : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(placementId)}`;
+  const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attachments named approved-tra-video-* are server-extracted still frames from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels or third-party people are attached. ${document?.prompt ?? ''} Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. One-ad render brief: ${args.context}. Headline: ${args.copy.headline}. Primary text: ${args.copy.primaryText}. Description: ${args.copy.description}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(placementId)}`;
   const result = await runImageEdit({
     operationType: 'TRA_VIDEO_FRAME_GENERATION',
     prompt,

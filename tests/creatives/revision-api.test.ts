@@ -7,8 +7,9 @@ import { ProofRevalidationError } from '@/lib/proof/provenance';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
+import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn(), proof: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), logoGeometry: vi.fn(), eraseLogo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn(), proof: vi.fn() }));
 vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.getOperatorAccess }));
 vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.requireOperatorQuota }));
@@ -18,7 +19,11 @@ vi.mock('@/lib/creatives/revision-source-hydration', async importOriginal => ({ 
 vi.mock('@/lib/creatives/generated-image-validation', async importOriginal => ({ ...await importOriginal<object>(), validateGeneratedCreativeImage: mocks.validate }));
 vi.mock('@/lib/ai/creative-revision-planner', () => ({ planCreativeRevision: mocks.plan }));
 vi.mock('@/lib/ai/creative-revision-image', () => ({ generateCreativeRevisionImage: mocks.generate }));
-vi.mock('@/lib/creatives/brand-logo.server', () => ({ compositeCreativeBrandLogo: mocks.logo }));
+vi.mock('@/lib/creatives/brand-logo.server', () => ({
+  compositeCreativeBrandLogo: mocks.logo,
+  resolveCreativeBrandLogoGeometry: mocks.logoGeometry,
+  eraseCreativeBrandLogo: mocks.eraseLogo,
+}));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({ saveImage: mocks.saveImage }) }));
 
 const parentId = `creative_${'a'.repeat(32)}`;
@@ -115,12 +120,52 @@ beforeEach(() => {
     routing: { operationType: operation, preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false, fallbackFromModel: null, fallbackReason: null },
   }));
   mocks.validate.mockResolvedValue(undefined); mocks.logo.mockResolvedValue(Buffer.from('final branded'));
+  mocks.logoGeometry.mockImplementation(async (_logo, placement, anchor) => resolveCreativeLogoGeometry(placement, anchor, 200, 100));
+  mocks.eraseLogo.mockResolvedValue(Buffer.from('debranded canvas'));
   mocks.saveImage.mockResolvedValue({ ...record.image, id: `media_${'d'.repeat(32)}`, fileName: `media_${'d'.repeat(32)}.png` });
   mocks.save.mockImplementation(async records => records);
   mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: { ...record.copy, headline: 'Edited headline' }, strategy, selectionReason: 'Requested edit' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
 });
 
 describe('saved creative revision API', () => {
+  it.each([
+    ['EDIT', 'top-center'],
+    ['VARIATION', 'top-center'],
+    ['PLACEMENT', 'bottom-right'],
+    ['REGENERATE', 'bottom-right'],
+  ] as const)('%s revisions remove the known old panel, use one target geometry, and persist %s', async (operation, expectedAnchor) => {
+    const record = parent();
+    record.planning = { ...record.planning!, logoAnchor: 'bottom-right' };
+    mocks.list.mockResolvedValue([record]);
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), logoOverlay: { buffer: Buffer.from('logo') } });
+    if (operation === 'EDIT' || operation === 'VARIATION') {
+      const revisedStrategy = operation === 'VARIATION'
+        ? { ...strategy, awarenessStage: 'solution-aware' as const,
+            execution: { ...strategy.execution, composition: 'split' as const, imageTreatment: 'illustrative' as const } }
+        : strategy;
+      mocks.plan.mockResolvedValueOnce({ concept: { index: 1, format: record.format, copy: record.copy,
+        logoAnchor: 'top-center', strategy: revisedStrategy, selectionReason: 'Reflow around the revised composition.' },
+        plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    }
+    const body = operation === 'PLACEMENT'
+      ? { operation, placement: 'VERTICAL_9_16' }
+      : operation === 'EDIT' || operation === 'VARIATION'
+        ? { operation, instruction: 'Use a different composition.' }
+        : { operation };
+
+    const response = await call(body);
+    const { creative } = await response.json();
+    const targetPlacement = operation === 'PLACEMENT' ? 'VERTICAL_9_16' : 'SQUARE_1_1';
+    const expected = resolveCreativeLogoGeometry(targetPlacement, expectedAnchor, 200, 100);
+    expect(response.status).toBe(201);
+    expect(mocks.generate.mock.calls[0][0]).toMatchObject({
+      logoGeometry: expected,
+      sources: { canvas: { buffer: Buffer.from('debranded canvas'), mimeType: 'image/png' } },
+    });
+    expect(mocks.logo).toHaveBeenCalledWith(Buffer.from('raw'), Buffer.from('logo'), expected);
+    expect(creative.planning.logoAnchor).toBe(expectedAnchor);
+  });
+
   it('drops a removed library human and prevents later reuse after deactivation', async () => {
     const record = parent();
     record.planning!.strategy = { ...strategy, approvedHumanId: `human_${'a'.repeat(64)}`, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' } };

@@ -25,6 +25,20 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('single-creative revision planning', () => {
+  it('returns a validated composition-aware logo anchor for logo-bearing edits', async () => {
+    const logoArgs = { ...args, hasBrandLogo: true, parent: { ...parent, logoAnchor: 'top-left' as const } };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload({ ...plan(), logoAnchor: 'bottom-right' }))));
+    const result = await planCreativeRevision(logoArgs);
+    expect(result.concept.logoAnchor).toBe('bottom-right');
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.text.format.schema.properties.logoAnchor.enum)
+      .toEqual(['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-right']);
+    expect(request.input[0].content[0].text).toContain('Preserve the parent anchor for an EDIT');
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload({ ...plan(), logoAnchor: 'middle' }))));
+    await expect(planCreativeRevision(logoArgs)).rejects.toThrow('invalid revision logo anchor');
+  });
+
   it('preserves a curated identity for human revisions and drops the choice for a graphic edit', async () => {
     const approvedHumanId = `human_${'a'.repeat(64)}`;
     const humanStrategy = { ...strategy, approvedHumanId, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' as const } };

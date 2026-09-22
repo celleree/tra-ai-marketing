@@ -75,6 +75,33 @@ const sourceProjection = (): PlanningSourceAnalysisState => ({ version: 1, entri
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); proofMocks.load.mockReset(); });
 
 describe('creative batch planner', () => {
+  it('validates planner logo anchors and lets selected layout geometry override the fallback before persistence', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const referenceCatalog = [referenceCandidate('f')];
+    referenceCatalog[0].blueprint.regions = [{
+      ...referenceCatalog[0].blueprint.regions[0], role: 'LOGO_PLACEHOLDER',
+      xPct: 75, yPct: 80, widthPct: 20, heightPct: 10,
+    }];
+    const creatives = [1, 2].map(index => ({
+      ...concept(index), logoAnchor: 'top-left',
+      referenceChoices: { angleSource: null, layoutSource: referenceCatalog[0].referenceId },
+    }));
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: 'Approved context', analysis, hasApprovedHumanSource: false,
+      hasBrandLogo: true, referenceCatalog };
+
+    const plan = await requestCreativeBatch(args);
+
+    expect(plan.creatives.map(item => item.logoAnchor)).toEqual(['bottom-right', 'bottom-right']);
+    const request = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(request.text.format.schema.properties.creatives.items.properties.logoAnchor.enum)
+      .toEqual(['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-right']);
+    expect(JSON.parse(request.input[1].content[0].text).hasBrandLogo).toBe(true);
+    creatives[0].logoAnchor = 'middle' as never;
+    await expect(requestCreativeBatch(args)).rejects.toThrow('invalid creative batch plan concept');
+  });
+
   it('sends every source-labelled sentinel to Astra and retains initial/audit/repair arguments and snapshots on save/reload', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives: [concept(1), concept(2)] }));

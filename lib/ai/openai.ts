@@ -19,6 +19,7 @@ import type { PlannedCreativeFormat } from '@/lib/creatives/generate-request';
 import type { CreativeCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
+import type { CreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import type { StoredMediaFile } from '@/lib/media/types';
 
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
@@ -396,7 +397,7 @@ const buildApprovedTraSourceImagePrompt = (
   placement: CreativePlacement,
   context: string,
   copy: CreativeImageCopy,
-  reserveLogoArea: boolean,
+  logoGeometry: CreativeLogoGeometry | undefined,
   documentPrompt = ''
 ) => {
   const placementSpec = CREATIVE_PLACEMENT_SPECS[placement];
@@ -425,7 +426,7 @@ Approved-source rules:
 - Do not recreate the attached image verbatim or depend on its old layout unless the text direction explicitly asks for a high-level structural cue.
 - Make the result clearly original and specific to TRA.
 ${formatCreativeSafeZoneRules(placement)}
-${reserveLogoArea ? formatCreativeLogoReservation(placement) : ''}
+${logoGeometry ? formatCreativeLogoReservation(logoGeometry) : ''}
 TRA guardrails:
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
@@ -492,7 +493,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
   placement?: CreativePlacement;
   context: string;
   copy: CreativeImageCopy;
-  reserveLogoArea?: boolean;
+  logoGeometry?: CreativeLogoGeometry;
 }): Promise<ImageGenerationResult> {
   const document = await prepareTaxDocumentReference(args.taxDocumentReference);
   const prompt = buildApprovedTraSourceImagePrompt(
@@ -501,7 +502,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
       args.placement ?? 'SQUARE_1_1',
       args.context,
       args.copy,
-      Boolean(args.reserveLogoArea),
+      args.logoGeometry,
       document?.prompt
     );
   return generateImageEdit(

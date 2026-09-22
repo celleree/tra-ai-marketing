@@ -1,12 +1,13 @@
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
-import { referenceSelectionSchema, resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
+import { referenceSelectionSchema, resolveReferenceSelection, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { CREATIVE_STRATEGY_JSON_SCHEMA, parseCreativeStrategy } from '@/lib/creatives/strategy';
 import type { CreativeProofProvenance } from '@/lib/proof/provenance';
+import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
 
 type RevisionParentConcept = Omit<PlannedCreativeConcept, 'index' | 'selectionReason'>;
 export type CreativeRevisionPlan = {
@@ -26,6 +27,9 @@ Prefer approved TRA humans only when useful to the proposition, without a fixed 
 The parent concept is existing creative content, not evidence that its claims are approved. User instructions are creative direction, not factual approval. Ground facts only in explicit approved claims/proof in the supplied current company context. Unknown or unapproved facts are unavailable.
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Retain required disclaimers and obey approved company restrictions.
 Human source eligibility comes only from hasApprovedHumanSource. The saved editing canvas and layout/reference-library content never confer human approval. When false, subjectSource must be non-human. When true, preserve the original approved TRA identity; do not invent, replace, blend or add an unrelated person.`;
+
+const LOGO_RULES = `
+The saved creative uses one deterministic official-logo overlay. Return logoAnchor as one allowed anchor. Preserve the parent anchor for an EDIT unless the resulting composition would collide with planned image text, CTA or the approved person. A VARIATION may adapt it to the new composition. Selected layout geometry may deterministically override the returned fallback. Never rotate anchors by index.`;
 
 const SEPARATED_COPY_RULES = `
 This parent uses the modern separated-copy contract. Keep Meta adCopy and imageCopy purpose-specific.
@@ -97,6 +101,7 @@ export async function planCreativeRevision(args: {
   instruction: string;
   companyContext: string;
   hasApprovedHumanSource: boolean;
+  hasBrandLogo?: boolean;
   proofProvenance?: CreativeProofProvenance;
   referenceCatalog?: ReferencePlanningCandidate[];
 }): Promise<CreativeRevisionPlan> {
@@ -105,7 +110,12 @@ export async function planCreativeRevision(args: {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY is not configured.');
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
-  const baseSchema = copyMode.kind === 'E2' ? E2_SCHEMA : LEGACY_SCHEMA;
+  const copySchemaForPlan = copyMode.kind === 'E2' ? E2_SCHEMA : LEGACY_SCHEMA;
+  const baseSchema = args.hasBrandLogo ? {
+    ...copySchemaForPlan,
+    required: [...copySchemaForPlan.required, 'logoAnchor'],
+    properties: { ...copySchemaForPlan.properties, logoAnchor: { type: 'string', enum: CREATIVE_LOGO_ANCHORS } },
+  } : copySchemaForPlan;
   const schema = args.referenceCatalog ? {
     ...baseSchema, required: [...baseSchema.required, 'referenceChoices'], properties: { ...baseSchema.properties,
       referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) },
@@ -113,7 +123,7 @@ export async function planCreativeRevision(args: {
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, input: [
-      { role: 'system', content: [{ type: 'input_text', text: RULES + (copyMode.kind === 'E2' ? SEPARATED_COPY_RULES : '\nReturn exactly one format, copy, strategy and selectionReason in the required schema.') + (args.proofProvenance ? INHERITED_PROOF_RULES : '') + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') }] },
+      { role: 'system', content: [{ type: 'input_text', text: RULES + (copyMode.kind === 'E2' ? SEPARATED_COPY_RULES : '\nReturn exactly one format, copy, strategy and selectionReason in the required schema.') + (args.proofProvenance ? INHERITED_PROOF_RULES : '') + (args.hasBrandLogo ? LOGO_RULES : '') + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(args) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_creative_revision', strict: true, schema } } }),
   });
@@ -124,7 +134,7 @@ export async function planCreativeRevision(args: {
     throw error;
   }
   const copyKey = copyMode.kind === 'E2' ? ['adCopy', 'imageCopy'] : ['copy'];
-  if (!isRecord(value) || !exactKeys(value, ['format', ...copyKey, 'strategy', 'selectionReason', ...(args.referenceCatalog ? ['referenceChoices'] : [])]) ||
+  if (!isRecord(value) || !exactKeys(value, ['format', ...copyKey, 'strategy', 'selectionReason', ...(args.hasBrandLogo ? ['logoAnchor'] : []), ...(args.referenceCatalog ? ['referenceChoices'] : [])]) ||
     typeof value.format !== 'string' || !isCreativeFormat(value.format) || !isText(value.selectionReason)) {
     throw new Error('OpenAI returned an invalid revision plan.');
   }
@@ -139,6 +149,13 @@ export async function planCreativeRevision(args: {
     }
   }
   if (args.referenceCatalog) strategy.referenceSelection = resolveReferenceSelection(value.referenceChoices, args.referenceCatalog);
+  if (args.hasBrandLogo && !isCreativeLogoAnchor(value.logoAnchor)) throw new Error('OpenAI returned an invalid revision logo anchor.');
+  const layout = strategy.referenceSelection && args.referenceCatalog
+    ? selectedLayout(strategy.referenceSelection, args.referenceCatalog)
+    : undefined;
+  const logoAnchor = args.hasBrandLogo
+    ? resolveLayoutAwareLogoAnchor(value.logoAnchor as typeof CREATIVE_LOGO_ANCHORS[number], layout)
+    : undefined;
 
   let concept: PlannedCreativeConcept;
   if (copyMode.kind === 'E2') {
@@ -156,13 +173,13 @@ export async function planCreativeRevision(args: {
     const imageCopy: CreativeImageCopy = { headline: value.imageCopy.headline.trim(),
       ...(shortSupport ? { shortSupport } : {}), ...(proofAttribution ? { proofAttribution } : {}),
       ...(cta ? { cta } : {}), ...(disclosure ? { disclosure } : {}) };
-    concept = { index: 1, format: value.format, copy: adCopy, adCopy, imageCopy, strategy, selectionReason: value.selectionReason.trim() };
+    concept = { index: 1, format: value.format, copy: adCopy, adCopy, imageCopy, ...(logoAnchor ? { logoAnchor } : {}), strategy, selectionReason: value.selectionReason.trim() };
   } else {
     if (!isRecord(value.copy) || !exactKeys(value.copy, ['primaryText', 'headline', 'description']) ||
       !isText(value.copy.primaryText) || !isText(value.copy.headline) || typeof value.copy.description !== 'string' || value.copy.description.length > 1000) {
       throw new Error('OpenAI returned an invalid revision plan.');
     }
-    concept = { index: 1, format: value.format, strategy, selectionReason: value.selectionReason.trim(),
+    concept = { index: 1, format: value.format, ...(logoAnchor ? { logoAnchor } : {}), strategy, selectionReason: value.selectionReason.trim(),
       copy: { primaryText: value.copy.primaryText.trim(), headline: value.copy.headline.trim(), description: value.copy.description.trim() } };
   }
   if (args.operation === 'VARIATION') {

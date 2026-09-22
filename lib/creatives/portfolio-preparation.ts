@@ -274,6 +274,7 @@ export async function advancePortfolioPreparation(
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
+    hasBrandLogo: reserveLogoArea,
     referenceCatalog: state.referenceCatalog,
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
   };

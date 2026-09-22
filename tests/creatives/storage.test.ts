@@ -4,6 +4,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CreativeRecord } from '@/lib/creatives/generated';
+import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 
 const { mkdirMock, readFileMock, sendMock, writeFileMock } = vi.hoisted(() => ({
   mkdirMock: vi.fn(),
@@ -99,7 +100,7 @@ const planning: NonNullable<CreativeRecord['planning']> = {
     category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Busy taxpayer', painPoint: 'Growing notices', desiredOutcome: 'A clear resolution path', emotion: 'Relief', hook: 'Open the letter with confidence', cta: 'Get a consultation', offer: null,
     soWhat: { surfaceMessage: 'We help organize your tax case', functionalConsequence: 'You understand the next step', meaningfulOutcome: 'You can move forward with confidence' },
     execution: { subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'photographic', textDensity: 'low', ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'A clean desk and organized documents',
-  }, selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium' as const,
+  }, logoAnchor: 'bottom-right', selectionReason: 'Distinct strategic fit', model: 'planner-model', reasoningEffort: 'medium' as const,
 };
 
 const proofProvenance: NonNullable<CreativeRecord['proofProvenance']> = {
@@ -196,12 +197,15 @@ describe('TRA creative storage', () => {
       persisted(generated),
       { ...legacy, source: 'generated' },
     ]);
+    const { logoAnchor: _historicalMissing, ...historicalPlanning } = planning;
+    expect(parseCreativePlanning(historicalPlanning)).toEqual(historicalPlanning);
   });
 
   it.each([
     ['format', { format: 'unsupported' }],
     ['placement', { placement: 'LANDSCAPE_16_9' }],
     ['planning', { planning: { ...planning, reasoningEffort: 'high' } }],
+    ['logo anchor', { planning: { ...planning, logoAnchor: 'middle' } }],
     ['generation provenance', { generationProvenance: { ...generationProvenance, version: 2 } }],
     ['proof provenance', { proofProvenance: { ...proofProvenance, proofId: 'proof_bad' } }],
     ['null generation provenance', { generationProvenance: null }],

@@ -10,7 +10,9 @@ import {
 import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
-import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
+import { compositeCreativeBrandLogo, resolveCreativeBrandLogoGeometry } from '@/lib/creatives/brand-logo.server';
+import { resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
+import { selectedLayout } from '@/lib/references/planning';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
@@ -65,7 +67,7 @@ const classifyPlannedCopy = (item: PlannedCreativeConcept): PlannedCopyMode => {
 /** The shared one-ad provider, validation, branding and persistence path. */
 export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   request, batchPlan, referenceCatalog, selectedReferences, requestedSources, analysisSources, logoOverlaySource,
-  reserveLogoArea, brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage,
+  brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage,
 }: CreativeRenderContext, options: { creativeId?: string; assertCurrentWork?: () => Promise<void> } = {}): Promise<GeneratedCreative> {
   const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
   if (!/^creative_[a-f0-9]{32}$/.test(creativeId)) throw new Error('Invalid reserved creative ID.');
@@ -89,6 +91,15 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   });
   const copy = item.copy;
   const selectedReference = selectedReferences.find(reference => reference.item.id === item.strategy.referenceSelection?.layoutSource);
+  const layoutBlueprint = item.strategy.referenceSelection
+    ? selectedLayout(item.strategy.referenceSelection, referenceCatalog)
+    : undefined;
+  const logoAnchor = brandLogo
+    ? resolveLayoutAwareLogoAnchor(item.logoAnchor ?? 'top-left', layoutBlueprint)
+    : undefined;
+  const logoGeometry = brandLogo && logoAnchor
+    ? await resolveCreativeBrandLogoGeometry(brandLogo.buffer, request.placement, logoAnchor)
+    : undefined;
   let imageResult: ImageGenerationResult;
   let providerFrames: ApprovedTraVideoFrame[] | undefined;
 
@@ -118,7 +129,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
           placement: request.placement,
           context: itemContext,
           copy,
-          reserveLogoArea,
+          logoGeometry,
         })
       : await generateApprovedTraReferenceCreativeImage({
           taxDocumentReference: item.strategy.execution.taxDocumentReference,
@@ -127,7 +138,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
           placement: request.placement,
           context: itemContext,
           copy: copyMode.imageCopy,
-          reserveLogoArea,
+          logoGeometry,
         });
   } else if (itemVideoFrames) {
     const videoImageResult = copyMode.kind === 'LEGACY'
@@ -138,7 +149,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
           placement: request.placement,
           context: itemContext,
           copy,
-          reserveLogoArea,
+          logoGeometry,
         })
       : await generateApprovedTraVideoFrameCreativeImage({
           taxDocumentReference: item.strategy.execution.taxDocumentReference,
@@ -147,7 +158,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
           placement: request.placement,
           context: itemContext,
           copy: copyMode.imageCopy,
-          reserveLogoArea,
+          logoGeometry,
         });
     imageResult = videoImageResult;
     providerFrames = videoImageResult.providerFrames;
@@ -159,7 +170,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
           placement: request.placement,
           context: itemContext,
           copy,
-          reserveLogoArea,
+          logoGeometry,
           operationType: item.strategy.referenceSelection?.layoutSource ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
         })
       : await generatePromptOnlyCreativeImage({
@@ -168,14 +179,14 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
           placement: request.placement,
           context: itemContext,
           copy: copyMode.imageCopy,
-          reserveLogoArea,
+          logoGeometry,
           operationType: item.strategy.referenceSelection?.layoutSource ? 'LAYOUT_REFERENCE_GENERATION' : 'PROMPT_GENERATION',
         });
   }
 
   await validateGeneratedCreativeImage(imageResult.buffer, request.placement);
   const finalImage = brandLogo
-    ? await compositeCreativeBrandLogo(imageResult.buffer, brandLogo.buffer, request.placement)
+    ? await compositeCreativeBrandLogo(imageResult.buffer, brandLogo.buffer, logoGeometry!)
     : imageResult.buffer;
   const generatedFile = new File(
     [new Uint8Array(finalImage)],
@@ -234,6 +245,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     identity,
     planning: {
       strategy: item.strategy,
+      ...(logoAnchor ? { logoAnchor } : {}),
       selectionReason: item.selectionReason,
       model: batchPlan.plannerModel,
       reasoningEffort: batchPlan.reasoningEffort,

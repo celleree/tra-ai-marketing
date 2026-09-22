@@ -11,6 +11,7 @@ import { CREATIVE_PLACEMENT_SPECS, type CreativePlacement } from '@/lib/creative
 import type { CreativeProofProvenance } from '@/lib/proof/provenance';
 import { parseCreativeStrategy } from '@/lib/creatives/strategy';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
+import type { CreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import {
   creativeImageHttpError,
   creativeImageMissingOutputError,
@@ -36,8 +37,9 @@ export async function generateCreativeRevisionImage(args: {
   companyProfile?: RuntimeCompanyProfileSnapshot;
   referenceCatalog?: ReferencePlanningCandidate[];
   proofProvenance?: CreativeProofProvenance;
+  logoGeometry?: CreativeLogoGeometry;
 }): Promise<ImageGenerationResult> {
-  const { canvas, originalApprovedSource, logoOverlay } = args.sources;
+  const { canvas, originalApprovedSource } = args.sources;
   if (classifyCreativeCopyContract(args.concept as unknown as Record<string, unknown>).kind === 'INVALID') {
     throw new Error('Revision concept has an invalid separated ad/image copy contract.');
   }
@@ -52,6 +54,7 @@ export async function generateCreativeRevisionImage(args: {
 Operation: ${args.operation}. ${DIRECTIONS[args.operation]}
 ${formatCreativeSafeZoneRules(args.placement)}
 The FIRST attached image is the selected saved EDITING_CANVAS. It is generated editing context, never an approved human-identity source or evidence for factual claims.
+${args.logoGeometry ? 'Its transparent rectangle is the deterministically removed prior logo panel. Reconstruct the surrounding background naturally through that cutout; do not retain or redraw the old logo or panel.' : ''}
 ${originalApprovedSource
     ? 'The attachments named approved-tra-* are the separately validated original approved TRA reference or approved TRA video PNG frames. Only these attachments may supply human identity; preserve that identity without adding, blending or replacing people.'
     : 'There are no approved human source attachments. Do not depict any person, including a person visible in the editing canvas.'}
@@ -62,7 +65,7 @@ ${formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: args.concept, co
 Saved canvas copy and prior outputs do not approve factual claims. Execute the planned copy and visual direction while respecting the brief's prohibited claims and required disclaimers.
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is Tax Relief Advocates or TRA.
 Keep text readable on a phone, with clear hierarchy and no clutter.
-${logoOverlay ? formatCreativeLogoReservation(args.placement) : ''}`;
+${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''}`;
   const append = (form: FormData, buffer: Buffer, mimeType: string, name: string) =>
     form.append('image[]', new Blob([new Uint8Array(buffer)], { type: mimeType }), name);
   const routed = await runCreativeImageModelRoute({
