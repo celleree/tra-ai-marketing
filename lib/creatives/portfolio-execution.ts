@@ -9,6 +9,7 @@ import { stepPortfolioVideoDependency } from '@/lib/creatives/portfolio-video-ad
 import { hydratePortfolioVideoFrameSelection, portfolioVideoFrameReuseContext, portfolioVideoSelectionPolicy,
   selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelligence-planning';
+import { VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
@@ -302,6 +303,7 @@ export async function advanceCreativePortfolio(
   } catch (error) {
     console.error('Portfolio work failed', error);
     const message = error instanceof CreativeGenerationPreparationError || error instanceof GeneratedImageValidationError
+      || error instanceof VideoHumanSelectionAdmissionError
       ? error.message : 'Portfolio work could not be completed. Review its status before retrying.';
     const current = await updateCreativePortfolio(id, value => {
       if (value.lease?.id !== token) return value;
@@ -311,6 +313,7 @@ export async function advanceCreativePortfolio(
         : releasePortfolioWork(value, token);
     }, storage);
     return { job: current, error: message, status: error instanceof OperatorQuotaUnavailableError ? 503
-      : error instanceof CreativeGenerationPreparationError ? error.status : 500 };
+      : error instanceof CreativeGenerationPreparationError ? error.status
+        : error instanceof VideoHumanSelectionAdmissionError ? 409 : 500 };
   }
 }

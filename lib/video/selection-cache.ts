@@ -4,7 +4,7 @@ import { canonicalizeVideoSelectionPool, parsePooledVideoConceptSelection, parse
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import { HUMAN_FRAME_SELECTION_POLICY, canonicalizeVideoFrameReuseContext, canonicalizeVideoHumanSelectionPool,
-  parseVideoHumanFrameSelectionOutcome, selectVideoHumanFrameFromPool, type VideoFrameReuseContext,
+  parseVideoHumanFrameSelectionOutcome, requireVisualSelectionOutputBudget, selectVideoHumanFrameFromPool, type VideoFrameReuseContext,
   type VideoHumanFrameSelectionOutcome, type VideoHumanSelectionPoolBinding } from '@/lib/video/human-frame-selection';
 
 const MAX_RECORD_BYTES = 64 * 1024;
@@ -198,7 +198,7 @@ export const selectVideoHumanFrameFromPoolWithCache = async (
   if (!brief || brief.length > 2_000 || !model || !Number.isSafeInteger(dependencies.deadlineAtMs)) {
     throw new Error('Video selection cache input is invalid.');
   }
-  const canonical = canonicalizeVideoHumanSelectionPool(bindings).pool;
+  const { pool: canonical, imageCount } = canonicalizeVideoHumanSelectionPool(bindings);
   const reuse = canonicalizeVideoFrameReuseContext(reuseContext);
   const libraries: VisualPoolIdentityEntry[] = canonical.map(({ library, librarySha256, representativeImages }) => ({
     libraryId: library.id, sourceVideoMediaId: library.sourceVideoMediaId,
@@ -245,6 +245,8 @@ export const selectVideoHumanFrameFromPoolWithCache = async (
       if (await write(failed, current!.etag)) return { status: failed.status, reason: failed.reason };
       continue;
     }
+    // Admit only outgoing work. Historical complete results remain readable even if a later policy tightens sizing.
+    requireVisualSelectionOutputBudget(imageCount);
     const next = { ...identity, status: 'RUNNING' as const, lease: {
       id: (dependencies.newLeaseId ?? randomUUID)(), expiresAtMs: now() + LEASE_MS,
     } };

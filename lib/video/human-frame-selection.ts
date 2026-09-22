@@ -11,8 +11,15 @@ export const MAX_VISUAL_SELECTION_PAYLOAD_BYTES = 512_000_000;
 export const MAX_VISUAL_SELECTION_IMAGE_TOKENS = 240_000;
 
 const MAX_REASON_LENGTH = 500;
-const MAX_OUTPUT_TOKENS = 128_000;
+export const MAX_VISUAL_SELECTION_OUTPUT_TOKENS = 128_000;
 const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
+
+export class VideoHumanSelectionAdmissionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'VideoHumanSelectionAdmissionError';
+  }
+}
 
 export type VideoFrameReuseContext = {
   version: 1;
@@ -120,6 +127,23 @@ export const createVideoFrameReuseContext = (
 
 const estimatedHighDetailTokens = (width: number, height: number) =>
   Math.ceil(Math.min(Math.ceil(width / 32) * Math.ceil(height / 32), 2_500) * 1.2);
+
+export const visualSelectionOutputTokens = (imageCount: number) => {
+  if (!Number.isSafeInteger(imageCount) || imageCount < 1) {
+    throw new Error('Visual human selection image count is invalid.');
+  }
+  return 2_048 + imageCount * 160;
+};
+
+export const requireVisualSelectionOutputBudget = (imageCount: number) => {
+  const required = visualSelectionOutputTokens(imageCount);
+  if (required > MAX_VISUAL_SELECTION_OUTPUT_TOKENS) {
+    throw new VideoHumanSelectionAdmissionError(
+      `Visual human selection requires ${required} output tokens for ${imageCount} images, above the supported ${MAX_VISUAL_SELECTION_OUTPUT_TOKENS}-token ceiling. Reduce the uploaded video pool; no candidates were truncated.`,
+    );
+  }
+  return required;
+};
 
 export const canonicalizeVideoHumanSelectionPool = (bindings: readonly VideoHumanSelectionPoolBinding[]) => {
   const pool = canonicalizeVideoSelectionPool(bindings);
@@ -232,6 +256,7 @@ export const selectVideoHumanFrameFromPool = async (
   const brief = concept.trim();
   if (!brief || brief.length > 2_000) throw new Error('Video concept must be between 1 and 2000 characters.');
   const { pool, imageCount } = canonicalizeVideoHumanSelectionPool(bindings);
+  const maxOutputTokens = requireVisualSelectionOutputBudget(imageCount);
   const reuse = canonicalizeVideoFrameReuseContext(reuseContext);
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured for video concept selection.');
@@ -249,7 +274,7 @@ export const selectVideoHumanFrameFromPool = async (
     content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${image.bytes.toString('base64')}`, detail: 'high' });
   }
   const body = JSON.stringify({ model, store: false, reasoning: { effort: 'low' },
-    max_output_tokens: Math.min(MAX_OUTPUT_TOKENS, 2_048 + imageCount * 160),
+    max_output_tokens: maxOutputTokens,
     input: [{ role: 'developer', content: [{ type: 'input_text', text: rules }] }, { role: 'user', content }],
     text: { format: { type: 'json_schema', name: 'tra_video_human_frame_quality', strict: true,
       schema: assessmentSchema(pool.map((entry) => entry.library.id),

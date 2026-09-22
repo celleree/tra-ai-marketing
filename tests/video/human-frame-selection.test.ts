@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
-import { selectVideoHumanFrameFromPool, type VideoHumanFrameAssessment,
-  type VideoHumanSelectionPoolBinding } from '@/lib/video/human-frame-selection';
+import { HUMAN_FRAME_SELECTION_POLICY, selectVideoHumanFrameFromPool, type VideoHumanFrameAssessment,
+  type VideoHumanSelectionPoolBinding, visualSelectionOutputTokens } from '@/lib/video/human-frame-selection';
 import { selectVideoFramesFromPoolWithCache, selectVideoHumanFrameFromPoolWithCache } from '@/lib/video/selection-cache';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 
@@ -34,6 +34,23 @@ const binding = (): VideoHumanSelectionPoolBinding => ({ library, librarySha256:
   { frameId: 'frame-sharp-blink', candidateIndex: 0, timestampMs: 1_000, frameSha256: sha(jpegA), width: 96, height: 96, bytes: jpegA },
   { frameId: 'frame-usable', candidateIndex: 1, timestampMs: 2_000, frameSha256: sha(jpegB), width: 96, height: 96, bytes: jpegB },
 ] });
+const lowResolutionBinding = (imageCount: number): VideoHumanSelectionPoolBinding => {
+  const frames = Array.from({ length: imageCount }, (_, index) => frame(`frame-${index}`, index, jpegA, index));
+  const lowResolutionLibrary = { ...library, candidates: frames.map((item, index) => ({ candidateIndex: index,
+    timestampMs: item.timestampMs, width: 96, height: 96, extractionReasons: ['INTERVAL'],
+    frameSha256: item.frameSha256, technical: {} })), representativeFrames: frames } as unknown as VideoFrameLibrary;
+  return { library: lowResolutionLibrary, librarySha256: sha(`low-resolution-${imageCount}`), representativeImages: frames.map((item) => ({
+    frameId: item.id, candidateIndex: item.candidateIndex, timestampMs: item.timestampMs, frameSha256: item.frameSha256,
+    width: 96, height: 96, bytes: jpegA,
+  })) };
+};
+const visualCacheIdentity = (input: VideoHumanSelectionPoolBinding, concept: string, model: string) => {
+  const libraries = [{ libraryId: input.library.id, sourceVideoMediaId: input.library.sourceVideoMediaId,
+    sourceVideoContentHash: input.library.sourceVideoContentHash, librarySha256: input.librarySha256,
+    frames: input.representativeImages.map(({ bytes: _bytes, ...identity }) => identity) }];
+  const digest = sha(JSON.stringify([3, HUMAN_FRAME_SELECTION_POLICY, libraries, emptyReuse, concept, model]));
+  return { libraries, key: `selections/sha256/${digest}.json` };
+};
 const assessment = (frameId: string, overrides: Partial<VideoHumanFrameAssessment> = {}): VideoHumanFrameAssessment => ({
   libraryId: library.id, frameId, humanPresence: 'CLEAR', facialDetail: 'SUFFICIENT', eyes: 'OPEN_OR_NOT_VISIBLE',
   blur: 'CLEAR', occlusion: 'NONE_OR_MINOR', expressionUsability: 'NATURAL_OR_NEUTRAL', framing: 'USABLE',
@@ -128,6 +145,55 @@ describe('visual human-frame selection', () => {
     })) };
     await expect(selectVideoHumanFrameFromPool([oversized], 'Portrait', emptyReuse, { request }))
       .rejects.toThrow('No candidates were truncated');
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('uses the calculated output allowance and rejects whole low-resolution pools above it before direct or cached work', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-only-dummy');
+    const admitted = lowResolutionBinding(787);
+    const request = vi.fn<typeof fetch>().mockResolvedValue(completed(admitted.library.representativeFrames.map((item) => assessment(item.id))));
+    await expect(selectVideoHumanFrameFromPool([admitted], 'Portrait', emptyReuse, { request })).resolves.toMatchObject({ status: 'SELECTED' });
+    expect(visualSelectionOutputTokens(787)).toBe(127_968);
+    expect(JSON.parse(request.mock.calls[0][1]!.body as string).max_output_tokens).toBe(127_968);
+
+    for (const [imageCount, required] of [[788, 128_128], [1_000, 162_048]] as const) {
+      const rejected = lowResolutionBinding(imageCount);
+      const storage = new MemoryStorage();
+      const deps = { storage, model: 'frozen-model', deadlineAtMs: 400_000, now: () => 1_000, request };
+      request.mockClear();
+      await expect(selectVideoHumanFrameFromPool([rejected], 'Portrait', emptyReuse, { request }))
+        .rejects.toThrow(`requires ${required} output tokens`);
+      await expect(selectVideoHumanFrameFromPoolWithCache([rejected], 'Portrait', emptyReuse, deps))
+        .rejects.toThrow(`requires ${required} output tokens`);
+      const retryStorage = new MemoryStorage();
+      const { libraries, key } = visualCacheIdentity(rejected, 'Portrait', 'frozen-model');
+      retryStorage.values.set(key, { etag: 'retry-required', bytes: Buffer.from(JSON.stringify({ version: 3,
+        policy: HUMAN_FRAME_SELECTION_POLICY, libraries, reuseContext: emptyReuse, model: 'frozen-model', concept: 'Portrait',
+        status: 'RETRY_REQUIRED', reason: 'PROVIDER_FAILED' })) });
+      await expect(selectVideoHumanFrameFromPoolWithCache([rejected], 'Portrait', emptyReuse, { ...deps, storage: retryStorage, retry: true }))
+        .rejects.toThrow(`requires ${required} output tokens`);
+      expect(request).not.toHaveBeenCalled();
+      expect(storage.values.size).toBe(0);
+      expect(JSON.parse(retryStorage.values.get(key)!.bytes.toString('utf8')).status).toBe('RETRY_REQUIRED');
+    }
+  });
+
+  it('keeps a completed historical visual cache result reusable when output admission later tightens', async () => {
+    const historical = lowResolutionBinding(788); const storage = new MemoryStorage();
+    const concept = 'Portrait', model = 'frozen-model';
+    const { libraries, key } = visualCacheIdentity(historical, concept, model);
+    storage.values.set(key, { etag: 'historical', bytes: Buffer.from(JSON.stringify({
+      version: 3, policy: HUMAN_FRAME_SELECTION_POLICY, libraries, reuseContext: emptyReuse, model, concept, status: 'COMPLETE',
+      outcome: { status: 'SELECTED', selection: { version: 1, libraryId: historical.library.id,
+        sourceVideoMediaId: historical.library.sourceVideoMediaId, sourceVideoContentHash: historical.library.sourceVideoContentHash,
+        concept, providerEligible: false, evidenceStatus: 'UNVERIFIED_MODEL_SELECTION',
+        frames: [{ frameId: historical.library.representativeFrames[0].id, reason: 'Historical completed assessment.' }] },
+      assessments: historical.library.representativeFrames.map((item) => assessment(item.id)) },
+    })) });
+    const request = vi.fn<typeof fetch>();
+    await expect(selectVideoHumanFrameFromPoolWithCache([historical], concept, emptyReuse, {
+      storage, model, deadlineAtMs: 400_000, now: () => 1_000, request,
+    })).resolves.toMatchObject({ status: 'COMPLETE', outcome: { status: 'SELECTED' } });
     expect(request).not.toHaveBeenCalled();
   });
 

@@ -3,7 +3,7 @@ import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioPlan, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
-import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY } from '@/lib/video/human-frame-selection';
+import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
 const mocks = vi.hoisted(() => ({
@@ -101,6 +101,17 @@ describe('durable portfolio B3 selection activation', () => {
     expect(result).toMatchObject({ status: 409, error: expect.stringContaining('No suitable human frame') });
     expect(result.job.slots[0]).toMatchObject({ status: 'RETRY_REQUIRED',
       videoSelection: { selectionPolicy: HUMAN_FRAME_SELECTION_POLICY } });
+    expect(mocks.render).not.toHaveBeenCalled();
+  });
+
+  it('propagates local visual-selection admission failure without rendering', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await ready(storage); const context = contextFor(job);
+    context.batchPlan.creatives[0].strategy.execution.subjectSource = 'approved-tra-human';
+    mocks.restore.mockResolvedValue(context);
+    mocks.select.mockRejectedValueOnce(new VideoHumanSelectionAdmissionError('Visual human selection requires 128128 output tokens for 788 images.'));
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result).toMatchObject({ status: 409, error: expect.stringContaining('requires 128128 output tokens') });
+    expect(result.job.slots[0].status).toBe('RETRY_REQUIRED');
     expect(mocks.render).not.toHaveBeenCalled();
   });
 
