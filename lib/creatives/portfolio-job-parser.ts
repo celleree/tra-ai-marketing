@@ -15,6 +15,8 @@ import { videoPlanningSelectorBinding } from '@/lib/creatives/video-intelligence
 import { parseReferenceCatalog } from '@/lib/references/planning';
 import { isApprovedHumanId } from '@/lib/video/approved-human';
 import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY,
+  canonicalizeVideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 import { isSelectedPlanningProof } from '@/lib/proof/planning-selection';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
@@ -23,6 +25,7 @@ const time = (value: unknown) => Number.isSafeInteger(value) && Number(value) >=
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const exact = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every(key => key in value);
+const automaticVideoSelectionPolicies = new Set<string>([HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY]);
 const validVideoSelectorBindings = (value: unknown, context: string) => {
   if (!record(value) || !Array.isArray(value.entries)) return false;
   const expected = videoPlanningSelectorBinding(context);
@@ -48,14 +51,22 @@ const validVideoRetry = (value: unknown) => {
 };
 
 const validSlotVideoSelection = (value: unknown, slotStatus: string, job: CreativePortfolioJob) => {
-  if (!record(value) || value.version !== 1 || typeof value.selectionModel !== 'string'
+  if (!record(value) || ![1, 2].includes(Number(value.version)) || typeof value.selectionModel !== 'string'
     || value.selectionModel.trim().length < 1 || value.selectionModel.length > MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH
     || job.videoPreparationVersion !== 1 || job.planning.phase !== 'READY_TO_RENDER' || !job.snapshot
     || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO')) return false;
   const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value;
-  if (!exact(value, ['version', 'selectionModel', ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : [])])
+  const versionedKeys = value.version === 2 ? ['selectionPolicy', 'reuseContext'] : [];
+  if (!exact(value, ['version', 'selectionModel', ...versionedKeys, ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : [])])
     || (hasSelection && !parseGenerateVideoFrameSelection(value.selection)) || (hasSelection && hasRetry)
-    || (slotStatus === 'SAVED' && !hasSelection)) return false;
+    || (slotStatus === 'SAVED' && !hasSelection) || (slotStatus === 'BLOCKED' && (hasSelection || hasRetry))) return false;
+  if (value.version === 2) {
+    if (typeof value.selectionPolicy !== 'string' || !automaticVideoSelectionPolicies.has(value.selectionPolicy)) return false;
+    try {
+      if (!isDeepStrictEqual(value.reuseContext, canonicalizeVideoFrameReuseContext(value.reuseContext as never))) return false;
+    } catch { return false; }
+  }
+  if (slotStatus === 'BLOCKED' && (value.version !== 2 || value.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY)) return false;
   if (hasRetry) {
     if (slotStatus !== 'PENDING' || !record(value.retryAuthorization) || !exact(value.retryAuthorization, ['version'])
       || value.retryAuthorization.version !== 1) return false;
@@ -188,8 +199,9 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
       || !Array.isArray(job.slots) || job.slots.length !== job.request.variationCount
       || new Set(job.slots.map(slot => slot.creativeId)).size !== job.slots.length
       || job.slots.some((slot, index) => slot.index !== index + 1 || !/^creative_[a-f0-9]{32}$/.test(slot.creativeId)
-        || !['PENDING', 'SAVED', 'RETRY_REQUIRED'].includes(slot.status)
-        || (slot.status === 'RETRY_REQUIRED' ? !text(slot.error) : slot.error !== undefined)
+        || !['PENDING', 'SAVED', 'RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)
+        || (['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status) ? !text(slot.error) : slot.error !== undefined)
+        || (slot.status === 'BLOCKED' && slot.videoSelection === undefined)
         || (slot.videoSelection !== undefined && !validSlotVideoSelection(slot.videoSelection, slot.status, job)))
       || !record(job.planning) || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planning.phase)) throw new Error();
 

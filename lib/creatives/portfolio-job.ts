@@ -11,17 +11,27 @@ import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-prepar
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
 import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { canonicalizeVideoFrameReuseContext, type AutomaticVideoSelectionPolicy,
+  type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 export const PORTFOLIO_LEASE_MS = 10 * 60 * 1000;
 export const MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH = 200;
-export type PortfolioVideoSelectionState = {
+export type LegacyPortfolioVideoSelectionState = {
   version: 1;
   selectionModel: string;
   selection?: GenerateVideoFrameSelection;
   retryAuthorization?: { version: 1 };
 };
-export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED'; error?: string;
+export type PortfolioVideoSelectionState = LegacyPortfolioVideoSelectionState | {
+  version: 2;
+  selectionModel: string;
+  selectionPolicy: AutomaticVideoSelectionPolicy;
+  reuseContext: VideoFrameReuseContext;
+  selection?: GenerateVideoFrameSelection;
+  retryAuthorization?: { version: 1 };
+};
+export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'; error?: string;
   videoSelection?: PortfolioVideoSelectionState };
 export type PortfolioPlanningPhase = 'INITIAL_PLAN' | 'DIVERSITY_AUDIT' | 'TARGETED_REPAIR' | 'READY_TO_RENDER';
 export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot; plannerArgs: CreativeBatchPlannerArgs };
@@ -40,7 +50,7 @@ export type CreativePortfolioJob = {
   planning: PortfolioPlanningState; planningError?: string;
   lease: { id: string; slotIndex: number | null; expiresAtMs: number } | null;
 };
-export type PortfolioClaim = { status: 'WORK' | 'BUSY' | 'COMPLETE' | 'RETRY_REQUIRED'; job: CreativePortfolioJob };
+export type PortfolioClaim = { status: 'WORK' | 'BUSY' | 'COMPLETE' | 'RETRY_REQUIRED' | 'BLOCKED'; job: CreativePortfolioJob };
 const id = (prefix: string) => prefix + randomUUID().replaceAll('-', '');
 const validVideoSelectionModel = (value: unknown): value is string => typeof value === 'string'
   && value.trim().length > 0 && value.length <= MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH;
@@ -95,7 +105,8 @@ export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date
   }
   const slot = job.snapshot ? job.slots.find(slot => slot.status === 'PENDING') : undefined;
   if (!job.snapshot && job.planningError) return { status: 'RETRY_REQUIRED', job };
-  if (job.snapshot && !slot) return { status: job.slots.every(slot => slot.status === 'SAVED') ? 'COMPLETE' : 'RETRY_REQUIRED', job };
+  if (job.snapshot && !slot) return { status: job.slots.every(slot => slot.status === 'SAVED') ? 'COMPLETE'
+    : job.slots.some(slot => slot.status === 'BLOCKED') ? 'BLOCKED' : 'RETRY_REQUIRED', job };
   job.lease = { id: leaseId, slotIndex: slot?.index ?? null, expiresAtMs: now + PORTFOLIO_LEASE_MS };
   job.updatedAtMs = now;
   return { status: 'WORK', job };
@@ -217,22 +228,54 @@ export function finishPortfolioPlan(current: CreativePortfolioJob, leaseId: stri
 }
 
 /** Freeze/consume durable selection-attempt state before any B3 provider work. */
-export function checkpointPortfolioVideoSelectionAttempt(
-  current: CreativePortfolioJob, leaseId: string, proposedModel: string, now = Date.now(),
+export function resolvePortfolioVideoSelectionAttempt(
+  current: CreativePortfolioJob, leaseId: string,
+  proposed: { selectionModel: string; selectionPolicy: AutomaticVideoSelectionPolicy; reuseContext: VideoFrameReuseContext },
+  now = Date.now(),
 ) {
-  const { slot: currentSlot } = requireVideoSelectionSlot(current, leaseId, now);
-  if (currentSlot.videoSelection?.selection) throw new Error('Video frame selection is already complete.');
-  const savedModel = currentSlot.videoSelection?.selectionModel;
-  if (currentSlot.videoSelection && (currentSlot.videoSelection.version !== 1 || !validVideoSelectionModel(savedModel))) {
-    throw new Error('Saved video frame selection state is invalid.');
-  }
-  if (!savedModel && !validVideoSelectionModel(proposedModel)) throw new Error('Video frame selection model is invalid.');
+  const { slot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (slot.videoSelection?.selection) throw new Error('Video frame selection is already complete.');
+  const savedModel = slot.videoSelection?.selectionModel;
+  if (slot.videoSelection && !validVideoSelectionModel(savedModel)) throw new Error('Saved video frame selection state is invalid.');
+  if (!savedModel && !validVideoSelectionModel(proposed.selectionModel)) throw new Error('Video frame selection model is invalid.');
+  const savedV2 = slot.videoSelection?.version === 2 ? slot.videoSelection : undefined;
+  return { selectionModel: savedModel ?? proposed.selectionModel,
+    selectionPolicy: savedV2?.selectionPolicy ?? proposed.selectionPolicy,
+    reuseContext: savedV2?.reuseContext ?? canonicalizeVideoFrameReuseContext(proposed.reuseContext),
+    retry: slot.videoSelection?.retryAuthorization?.version === 1 };
+}
+
+export function checkpointPortfolioVideoSelectionAttempt(
+  current: CreativePortfolioJob, leaseId: string,
+  proposed: { selectionModel: string; selectionPolicy: AutomaticVideoSelectionPolicy; reuseContext: VideoFrameReuseContext },
+  now = Date.now(),
+) {
+  requireVideoSelectionSlot(current, leaseId, now);
+  const attempt = resolvePortfolioVideoSelectionAttempt(current, leaseId, proposed, now);
   const job = structuredClone(current);
   const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
-  const retry = slot.videoSelection?.retryAuthorization?.version === 1;
-  slot.videoSelection = { version: 1, selectionModel: savedModel ?? proposedModel };
+  slot.videoSelection = { version: 2, selectionModel: attempt.selectionModel,
+    selectionPolicy: attempt.selectionPolicy, reuseContext: structuredClone(attempt.reuseContext) };
   job.updatedAtMs = now;
-  return { job, selectionModel: slot.videoSelection.selectionModel, retry };
+  return { job, selectionModel: slot.videoSelection.selectionModel, selectionPolicy: slot.videoSelection.selectionPolicy,
+    reuseContext: slot.videoSelection.reuseContext, retry: attempt.retry };
+}
+
+/** Persist a deterministic automatic-selection admission failure. This state cannot be retried or reset. */
+export function blockPortfolioVideoSelection(
+  current: CreativePortfolioJob, leaseId: string,
+  attempt: { selectionModel: string; selectionPolicy: AutomaticVideoSelectionPolicy; reuseContext: VideoFrameReuseContext },
+  message: string, now = Date.now(),
+) {
+  const { slot: currentSlot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (currentSlot.videoSelection?.selection) throw new Error('Completed video frame selection cannot be blocked.');
+  const job = structuredClone(current);
+  const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
+  slot.status = 'BLOCKED'; slot.error = message.slice(0, 1000) || 'Automatic video selection cannot continue.';
+  slot.videoSelection = { version: 2, selectionModel: attempt.selectionModel, selectionPolicy: attempt.selectionPolicy,
+    reuseContext: canonicalizeVideoFrameReuseContext(attempt.reuseContext) };
+  job.lease = null; job.updatedAtMs = now;
+  return job;
 }
 
 /** Persist a completed B3 frame choice, then release the parent lease for generation. */
@@ -240,15 +283,19 @@ export function finishPortfolioVideoFrameSelection(
   current: CreativePortfolioJob, leaseId: string, selection: GenerateVideoFrameSelection, now = Date.now(),
 ) {
   const { slot: currentSlot } = requireVideoSelectionSlot(current, leaseId, now);
-  if (!currentSlot.videoSelection || currentSlot.videoSelection.version !== 1
-    || !validVideoSelectionModel(currentSlot.videoSelection.selectionModel) || currentSlot.videoSelection.selection) {
+  if (!currentSlot.videoSelection || !validVideoSelectionModel(currentSlot.videoSelection.selectionModel)
+    || currentSlot.videoSelection.selection) {
     throw new Error('Frozen video frame selection state is required.');
   }
   const parsed = parseGenerateVideoFrameSelection(selection);
   if (!parsed) throw new Error('Completed video frame selection is invalid.');
   const job = structuredClone(current);
   const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
-  slot.videoSelection = { version: 1, selectionModel: currentSlot.videoSelection.selectionModel, selection: parsed };
+  slot.videoSelection = currentSlot.videoSelection.version === 1
+    ? { version: 1, selectionModel: currentSlot.videoSelection.selectionModel, selection: parsed }
+    : { version: 2, selectionModel: currentSlot.videoSelection.selectionModel,
+        selectionPolicy: currentSlot.videoSelection.selectionPolicy,
+        reuseContext: structuredClone(currentSlot.videoSelection.reuseContext), selection: parsed };
   job.lease = null; job.updatedAtMs = now;
   return job;
 }

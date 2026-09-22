@@ -14,7 +14,7 @@ import { extractVideoSelectionFrames, loadSavedVideoSelectionContext, loadVideoS
 
 const source = { role: 'TRA_VIDEO', media: { id: `media_${'a'.repeat(32)}` }, stored: { buffer: Buffer.from('source') } } as HydratedTraVideoSource;
 const hash = createHash('sha256').update(source.stored.buffer).digest('hex');
-const library = { id: 'library' }; const manifest = { sourceVideoContentHash: hash };
+const library = { id: 'library', representativeFrames: [] }; const manifest = { sourceVideoContentHash: hash };
 const preparation = { manifestKey: 'manifest-key', manifestSha256: 'b'.repeat(64) };
 const resultSha = 'c'.repeat(64);
 const result = { key: `libraries/sha256/${resultSha}.json`, sha256: resultSha, byteLength: 20 };
@@ -23,14 +23,14 @@ const savedIdentity = { sourceVideoMediaId: source.media.id, sourceVideoContentH
 const savedDependency = { identity: savedIdentity, artifact: result };
 const complete = () => {
   mocks.read.mockResolvedValue({ job: { phase: 'COMPLETE', preparation, result } });
-  mocks.library.mockResolvedValue(library); mocks.preparation.mockResolvedValue({ manifest });
+  mocks.library.mockResolvedValue(library); mocks.preparation.mockResolvedValue({ manifest, representatives: [] });
 };
 beforeEach(() => { vi.resetAllMocks(); vi.stubEnv('NODE_ENV', 'test'); vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'current-model'); });
 afterEach(() => vi.unstubAllEnvs());
 
 it('loads exact saved B1 selection context from the frozen identity and artifact', async () => {
   complete();
-  expect(await loadSavedVideoSelectionContext(source, savedDependency)).toEqual({ library, manifest });
+  expect(await loadSavedVideoSelectionContext(source, savedDependency)).toEqual({ library, manifest, representativeImages: [] });
   expect(mocks.read).toHaveBeenCalledWith(savedIdentity);
   expect(mocks.library).toHaveBeenCalledWith(savedIdentity, result);
   expect(mocks.preparation).toHaveBeenCalledWith({ ...preparation, expectedSourceVideoMediaId: source.media.id,
@@ -95,9 +95,9 @@ it.each([
 
 it('prefers complete durable context bound to the hydrated source and current analyzer', async () => {
   mocks.read.mockResolvedValue({ job: { phase: 'COMPLETE', preparation, result } });
-  mocks.library.mockResolvedValue(library); mocks.preparation.mockResolvedValue({ manifest });
+  mocks.library.mockResolvedValue(library); mocks.preparation.mockResolvedValue({ manifest, representatives: [] });
   const context = await loadVideoSelectionContext(source);
-  expect(context).toEqual({ library, manifest }); expect(mocks.legacy).not.toHaveBeenCalled();
+  expect(context).toEqual({ library, manifest, representativeImages: [] }); expect(mocks.legacy).not.toHaveBeenCalled();
   const identity = mocks.read.mock.calls[0][0];
   expect(identity).toMatchObject({ sourceVideoMediaId: source.media.id, sourceVideoContentHash: hash,
     analyzerFingerprint: { visionModel: 'current-model' } });
@@ -113,7 +113,7 @@ it('prefers complete durable context bound to the hydrated source and current an
 it('preserves existing local evidence while refusing a filesystem fallback in production', async () => {
   mocks.read.mockResolvedValue(null); mocks.legacy.mockResolvedValue(library);
   const context = await loadVideoSelectionContext(source);
-  expect(context).toEqual({ library, manifest: null }); expect(mocks.legacy).toHaveBeenCalledWith(source.media.id, hash);
+  expect(context).toEqual({ library, manifest: null, representativeImages: null }); expect(mocks.legacy).toHaveBeenCalledWith(source.media.id, hash);
   await extractVideoSelectionFrames(source, context!, ['chosen']);
   expect(mocks.legacyFrames).toHaveBeenCalledWith(source, library, ['chosen']); expect(mocks.preparedFrames).not.toHaveBeenCalled();
   mocks.legacy.mockClear(); vi.stubEnv('NODE_ENV', 'production');
@@ -122,7 +122,7 @@ it('preserves existing local evidence while refusing a filesystem fallback in pr
 
 it('does not silently fall back after durable artifact corruption or storage failure', async () => {
   mocks.read.mockResolvedValue({ job: { phase: 'COMPLETE', preparation, result } });
-  mocks.library.mockRejectedValue(new Error('library corrupt')); mocks.preparation.mockResolvedValue({ manifest });
+  mocks.library.mockRejectedValue(new Error('library corrupt')); mocks.preparation.mockResolvedValue({ manifest, representatives: [] });
   await expect(loadVideoSelectionContext(source)).rejects.toThrow('library corrupt');
   expect(mocks.legacy).not.toHaveBeenCalled();
   mocks.read.mockRejectedValue(new Error('storage unavailable'));

@@ -69,7 +69,9 @@ export function parsePortfolioProgress(value: unknown): PortfolioProgress | null
     || !Array.isArray(job.slots) || job.slots.length !== job.requestedCount
     || new Set(job.slots.map(slot => slot?.creativeId)).size !== job.slots.length
     || job.slots.some((slot, index) => !slot || slot.index !== index + 1 || !/^creative_[a-f0-9]{32}$/.test(slot.creativeId)
-      || !['PENDING', 'SAVED', 'RETRY_REQUIRED'].includes(slot.status) || (slot.error !== undefined && typeof slot.error !== 'string'))
+      || !['PENDING', 'SAVED', 'RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)
+      || (slot.error !== undefined && typeof slot.error !== 'string')
+      || (slot.status === 'BLOCKED' && !slot.error))
     || (job.videoPreparation !== undefined && (!job.videoPreparation || !Number.isSafeInteger(job.videoPreparation.total)
       || job.videoPreparation.total < 1 || !Number.isSafeInteger(job.videoPreparation.completed)
       || job.videoPreparation.completed < 0 || job.videoPreparation.completed > job.videoPreparation.total

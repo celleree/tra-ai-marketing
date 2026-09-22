@@ -9,16 +9,33 @@ import { createCurrentVideoIntelligenceIdentity } from '@/lib/video/intelligence
 import { loadVideoFrameLibrary, videoSourceHash } from '@/lib/video/library-service';
 import { getApprovedPreparedSelectedTraVideoFrames } from '@/lib/video/prepared-selected-frames';
 import { getApprovedSelectedTraVideoFrames } from '@/lib/video/selected-frames';
+import type { VideoSelectionRepresentativeImage } from '@/lib/video/human-frame-selection';
 
 export interface VideoSelectionContext {
   library: VideoFrameLibrary;
   manifest: VideoIntelligencePreparationManifest | null;
+  representativeImages: VideoSelectionRepresentativeImage[] | null;
 }
 
 export interface SavedVideoSelectionDependency {
   identity: VideoIntelligenceJobIdentity;
   artifact: VideoIntelligenceArtifactReference;
 }
+
+const bindRepresentativeImages = (
+  library: VideoFrameLibrary,
+  representatives: Awaited<ReturnType<typeof loadVideoIntelligencePreparation>>['representatives'],
+) => {
+  const frames = new Map(library.representativeFrames.map((frame) => [frame.candidateIndex, frame]));
+  if (representatives.length !== frames.size || representatives.some(({ candidate }) => !frames.has(candidate.candidateIndex))) {
+    throw new Error('Saved video intelligence representative images do not match the frozen library.');
+  }
+  return representatives.map(({ candidate, bytes }) => ({
+    frameId: frames.get(candidate.candidateIndex)!.id, candidateIndex: candidate.candidateIndex,
+    timestampMs: candidate.timestampMs, frameSha256: candidate.frameSha256,
+    width: candidate.width, height: candidate.height, bytes,
+  }));
+};
 
 export const loadVideoSelectionContext = async (source: HydratedTraVideoSource): Promise<VideoSelectionContext | null> => {
   const identity = createCurrentVideoIntelligenceIdentity(source.media.id, videoSourceHash(source));
@@ -31,11 +48,11 @@ export const loadVideoSelectionContext = async (source: HydratedTraVideoSource):
         expectedSourceVideoMediaId: identity.sourceVideoMediaId, expectedSourceVideoContentHash: identity.sourceVideoContentHash,
         expectedAnalyzerFingerprintSha256: identity.analyzerFingerprint.sha256 }),
     ]);
-    return { library, manifest: loaded.manifest };
+    return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives) };
   }
   if (process.env.NODE_ENV === 'production') return null;
   const library = await loadVideoFrameLibrary(identity.sourceVideoMediaId, identity.sourceVideoContentHash);
-  return library ? { library, manifest: null } : null;
+  return library ? { library, manifest: null, representativeImages: null } : null;
 };
 
 /** Strictly restore selection context from the exact completed B1 dependency saved by a portfolio. */
@@ -62,7 +79,7 @@ export const loadSavedVideoSelectionContext = async (
       expectedSourceVideoMediaId: identity.sourceVideoMediaId, expectedSourceVideoContentHash: identity.sourceVideoContentHash,
       expectedAnalyzerFingerprintSha256: identity.analyzerFingerprint.sha256 }),
   ]);
-  return { library, manifest: loaded.manifest };
+  return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives) };
 };
 
 export const extractVideoSelectionFrames = (source: HydratedTraVideoSource, context: VideoSelectionContext, frameIds: readonly string[]) =>
