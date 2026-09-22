@@ -18,6 +18,7 @@ import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selecti
 import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY,
   canonicalizeVideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 import { isSelectedPlanningProof } from '@/lib/proof/planning-selection';
+import { isCreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
@@ -157,6 +158,7 @@ const validSnapshot = (
         || (concept.selectedProof !== undefined && concept.selectedProof !== null && !isSelectedPlanningProof(concept.selectedProof))
         || ![concept.copy.headline, concept.copy.primaryText].every(text) || typeof concept.copy.description !== 'string'
         || !parseCreativePlanning({ strategy: concept.strategy, selectionReason: concept.selectionReason,
+          ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}),
           model: plan.plannerModel, reasoningEffort: plan.reasoningEffort,
           referenceCatalog: snapshot.referenceCatalog, ...(audit ? { portfolioAudit: audit } : {}) }))) return false;
     if (requireDiverse && audit && getCreativeDiversityIssue(plan.creatives, audit)) return false;
@@ -169,6 +171,10 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
   const checkpoint = value as unknown as PortfolioPlanningCheckpoint, args = checkpoint.plannerArgs;
   if (args.count !== job.slots.length || !text(args.context) || args.proofRetrievalQuery !== job.request.proofRetrievalQuery || !validAnalysis(args.analysis)
     || typeof args.hasApprovedHumanSource !== 'boolean'
+    || (args.hasBrandLogo !== undefined && typeof args.hasBrandLogo !== 'boolean')
+    || (args.hasBrandLogo !== undefined && args.hasBrandLogo !== Boolean(job.request.brandLogoMediaId))
+    || (args.logoPlacement !== undefined && (!isCreativeLogoPlacementContext(args.logoPlacement)
+      || args.logoPlacement.placement !== job.request.placement || !args.hasBrandLogo))
     || !isDeepStrictEqual(args.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)
     || !isDeepStrictEqual(args.sourceAnalysis, checkpoint.snapshot.sourceAnalysis)
     || (args.sourceAnalysis !== undefined && !validVideoSelectorBindings(args.sourceAnalysis, job.request.context))) return false;

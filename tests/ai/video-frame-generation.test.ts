@@ -6,6 +6,7 @@ import {
 } from '@/lib/ai/video-frame-generation';
 import { getVideoFrameIntegrity } from '@/lib/video/frame-cache';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
+import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const MEDIA_ID = `media_${'d'.repeat(32)}`;
@@ -65,7 +66,7 @@ describe('approved TRA video-frame provider boundary', () => {
       frames: makeFrames(),
       primaryFormat: 'direct-response',
       context: 'Approved company context',
-      reserveLogoArea,
+      ...(reserveLogoArea ? { logoGeometry: resolveCreativeLogoGeometry('SQUARE_1_1', 'bottom-right', 200, 100) } : {}),
       copy: { headline: 'Get clear next steps', shortSupport: 'Talk with TRA.', cta: 'Learn more' },
     });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];

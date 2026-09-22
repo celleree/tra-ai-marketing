@@ -6,7 +6,8 @@ import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
 import { generateCreativeRevisionImage } from '@/lib/ai/creative-revision-image';
 import { buildCreativeCompanyContext, formatCreativeCompanyContext } from '@/lib/company/creative-context';
-import { compositeCreativeBrandLogo } from '@/lib/creatives/brand-logo.server';
+import { compositeCreativeBrandLogo, eraseCreativeBrandLogo, resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
+import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { GeneratedImageValidationError, validateGeneratedCreativeImage } from '@/lib/creatives/generated-image-validation';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
@@ -52,26 +53,38 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const { planning, provenance } = sources.parent;
     const revision = parsed.data;
     const placement = revision.operation === 'PLACEMENT' ? revision.placement : parent.placement!;
+    const parentLogoPlacement = sources.logoOverlay
+      ? await resolveCreativeBrandLogoPlacementContext(sources.logoOverlay.buffer, parent.placement!)
+      : undefined;
+    // Records created before logo anchors were persisted used the legacy top-left overlay.
+    // Do not retroactively apply layout avoidance when locating the pixels to erase.
+    const parentLogoAnchor = sources.logoOverlay
+      ? planning.logoAnchor ?? 'top-left'
+      : undefined;
     const companyContext = formatCreativeCompanyContext(buildCreativeCompanyContext(revision.companyProfile));
     let concept: PlannedCreativeConcept = {
       index: 1, format: parent.format!, copy: parentCopyMode.copy,
       ...(parentCopyMode.kind === 'E2' ? { adCopy: parentCopyMode.adCopy, imageCopy: parentCopyMode.imageCopy } : {}),
-      strategy: planning.strategy, selectionReason: planning.selectionReason,
+      ...(parentLogoAnchor ? { logoAnchor: parentLogoAnchor } : {}), strategy: planning.strategy, selectionReason: planning.selectionReason,
     };
     let plannerModel = planning.model;
     if (revision.operation === 'EDIT' || revision.operation === 'VARIATION') {
       const plan = await planCreativeRevision({
         parent: { format: concept.format, copy: concept.copy,
           ...(concept.adCopy ? { adCopy: concept.adCopy } : {}),
-          ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}), strategy: concept.strategy },
+          ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}),
+          ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}), strategy: concept.strategy },
         operation: revision.operation, instruction: revision.instruction, companyContext,
         hasApprovedHumanSource: sources.originalApprovedSource !== null,
+        hasBrandLogo: sources.logoOverlay !== null,
+        ...(parentLogoPlacement ? { logoPlacement: parentLogoPlacement } : {}),
         ...(proofProvenance ? { proofProvenance } : {}),
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}),
       });
       concept = plan.concept;
       plannerModel = plan.plannerModel;
     }
+    if (sources.logoOverlay && !concept.logoAnchor) concept = { ...concept, logoAnchor: parentLogoAnchor! };
     const conceptCopyMode = classifyCreativeCopyContract(concept as unknown as Record<string, unknown>);
     if (conceptCopyMode.kind === 'INVALID') throw new Error('Revision planner returned an invalid separated ad/image copy contract.');
     if (proofProvenance) {
@@ -99,8 +112,24 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       : buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent });
     const removedLibraryHuman = !!(planning.strategy.humanSourceId || planning.strategy.approvedHumanId)
       && concept.strategy.execution.subjectSource === 'non-human';
+    const logoPlacement = sources.logoOverlay
+      ? placement === parent.placement ? parentLogoPlacement!
+        : await resolveCreativeBrandLogoPlacementContext(sources.logoOverlay.buffer, placement)
+      : undefined;
+    const logoGeometry = logoPlacement && concept.logoAnchor
+      ? resolveCreativeLogoGeometry(placement, concept.logoAnchor, logoPlacement.sourceWidth, logoPlacement.sourceHeight)
+      : undefined;
+    const parentLogoGeometry = parentLogoPlacement && parentLogoAnchor
+      ? resolveCreativeLogoGeometry(parent.placement!, parentLogoAnchor,
+          parentLogoPlacement.sourceWidth, parentLogoPlacement.sourceHeight)
+      : undefined;
+    const sourceSelection = removedLibraryHuman ? { ...sources, originalApprovedSource: null } : sources;
+    const revisionSources = parentLogoGeometry
+      ? { ...sourceSelection, canvas: { ...sourceSelection.canvas,
+          buffer: await eraseCreativeBrandLogo(sourceSelection.canvas.buffer, parentLogoGeometry), mimeType: 'image/png' as const } }
+      : sourceSelection;
     const imageResult = await generateCreativeRevisionImage({
-      sources: removedLibraryHuman ? { ...sources, originalApprovedSource: null } : sources,
+      sources: revisionSources,
       operation: revision.operation,
       concept: { format: concept.format, copy: conceptCopyMode.copy,
         ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
@@ -108,10 +137,11 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       placement, companyProfile: revision.companyProfile,
       referenceCatalog: planning.referenceCatalog,
       ...(proofProvenance ? { proofProvenance } : {}),
+      ...(logoGeometry ? { logoGeometry } : {}),
     });
     await validateGeneratedCreativeImage(imageResult.buffer, placement);
     const finalBuffer = sources.logoOverlay
-      ? await compositeCreativeBrandLogo(imageResult.buffer, sources.logoOverlay.buffer, placement)
+      ? await compositeCreativeBrandLogo(imageResult.buffer, sources.logoOverlay.buffer, logoGeometry!)
       : imageResult.buffer;
     const image = await storage.saveImage(new File([new Uint8Array(finalBuffer)], `tra-revision-${id}.png`, { type: 'image/png' }));
     const record: CreativeRecord = {
@@ -121,6 +151,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       ...(proofProvenance ? { proofProvenance } : {}),
       identity,
       planning: { strategy: concept.strategy, selectionReason: concept.selectionReason, model: plannerModel, reasoningEffort: 'medium',
+        ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}),
         ...((revision.operation === 'PLACEMENT' || revision.operation === 'REGENERATE') && planning.portfolioAudit ? { portfolioAudit: planning.portfolioAudit } : {}),
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}) },
       generationProvenance: {

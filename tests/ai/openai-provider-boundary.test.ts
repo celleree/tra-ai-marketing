@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/openai';
 import { generateApprovedTraVideoFrameCreativeImage } from '@/lib/ai/video-frame-generation';
+import { generateLegacyPromptOnlyCreativeImage } from '@/lib/ai/legacy-copy-image-generation';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { StoredMediaFile } from '@/lib/media/types';
 import { getVideoFrameIntegrity } from '@/lib/video/frame-cache';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
+import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 
 const TRA_SOURCE_BYTES = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x54, 0x52, 0x41,
@@ -31,17 +33,33 @@ afterEach(() => {
 });
 
 describe('approved TRA final image-provider boundary', () => {
+  it('gives the legacy provider the same resolved bottom-right panel geometry', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ data: [{ b64_json: TRA_SOURCE_BYTES.toString('base64') }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const geometry = resolveCreativeLogoGeometry('PORTRAIT_4_5', 'bottom-right', 200, 100);
+    const result = await generateLegacyPromptOnlyCreativeImage({
+      primaryFormat: 'direct-response', placement: 'PORTRAIT_4_5', context: 'Approved context',
+      copy: { primaryText: 'Body', headline: 'Headline', description: '' }, logoGeometry: geometry,
+    });
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).prompt as string;
+    expect(prompt).toContain(`x=${geometry.panel.left}..${geometry.panel.left + geometry.panel.width - 1}`);
+    expect(prompt).toContain('bottom-right overlay rectangle');
+    expect(result.prompt).toBe(prompt);
+  });
+
   it('gives the reference provider the Stories content and logo bounds', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: TRA_SOURCE_BYTES.toString('base64') }] })));
     vi.stubGlobal('fetch', fetchMock);
     const result = await generateApprovedTraReferenceCreativeImage({
       source, primaryFormat: 'direct-response', placement: 'VERTICAL_9_16', context: 'Approved context',
-      copy: { headline: 'Image headline', shortSupport: 'Short support', cta: 'Learn more' }, reserveLogoArea: true,
+      copy: { headline: 'Image headline', shortSupport: 'Short support', cta: 'Learn more' },
+      logoGeometry: resolveCreativeLogoGeometry('VERTICAL_9_16', 'top-left', 200, 100),
     });
     const prompt = String((fetchMock.mock.calls[0][1].body as FormData).get('prompt'));
     expect(prompt).toContain('x=70..1081, y=287..1330');
-    expect(prompt).toContain('x=105..401, y=322..546');
+    expect(prompt).toContain('x=105..401, y=322..503');
     expect(prompt).not.toContain('left 27%');
     expectImageCopyOnly(prompt);
     expectImageCopyOnly(result.prompt);
@@ -65,7 +83,7 @@ describe('approved TRA final image-provider boundary', () => {
     const context = formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: e2Concept }));
     const result = await generateApprovedTraReferenceCreativeImage({
       source, primaryFormat: e2Concept.format, placement: 'SQUARE_1_1', context,
-      copy: e2Concept.imageCopy!, reserveLogoArea: false,
+      copy: e2Concept.imageCopy!,
     });
     const prompt = String((fetchMock.mock.calls[0][1].body as FormData).get('prompt'));
     expect(prompt).toContain('IMAGE_ONLY_HEADLINE');
@@ -159,7 +177,7 @@ describe('approved TRA final image-provider boundary', () => {
       frames: [frame],
       primaryFormat: 'direct-response',
       placement: 'VERTICAL_9_16',
-      reserveLogoArea: true,
+      logoGeometry: resolveCreativeLogoGeometry('VERTICAL_9_16', 'top-left', 200, 100),
       context: 'Approved company context',
       copy: {
         headline: 'Image headline',
@@ -173,7 +191,7 @@ describe('approved TRA final image-provider boundary', () => {
     expect(formData.get('size')).toBe('1152x2048');
     expect(String(formData.get('prompt'))).toContain('9:16 canvas (1152x2048)');
     expect(formData.get('prompt')).toContain('x=70..1081, y=287..1330');
-    expect(formData.get('prompt')).toContain('x=105..401, y=322..546');
+    expect(formData.get('prompt')).toContain('x=105..401, y=322..503');
     expect(String(formData.get('prompt'))).toContain('rather than cropping or stretching a square design');
     expectImageCopyOnly(String(formData.get('prompt')));
     expect(result.prompt).toBe(formData.get('prompt'));

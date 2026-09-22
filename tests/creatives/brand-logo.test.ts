@@ -102,7 +102,7 @@ let revokeObjectUrl: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   imageDimensions = [
-    [1000, 500],
+    [1024, 1024],
     [1000, 500],
   ];
   decode.mockReset();
@@ -152,13 +152,13 @@ describe('applyBrandLogoToCreatives', () => {
     ]);
     expect(decode).toHaveBeenCalledTimes(2);
     expect(createImageBitmap).not.toHaveBeenCalled();
-    expect(canvas.context.roundRect).toHaveBeenCalledWith(30, 30, 113, 55, 12);
+    expect(canvas.context.roundRect).toHaveBeenCalledWith(31, 31, 202, 111, 12);
     expect(canvas.context.drawImage).toHaveBeenLastCalledWith(
       expect.any(FakeImage),
-      44,
-      36,
-      85,
-      43
+      45,
+      43,
+      174,
+      87
     );
     expect(canvas.context.imageSmoothingEnabled).toBe(true);
     expect(canvas.context.imageSmoothingQuality).toBe('high');
@@ -290,7 +290,7 @@ describe('applyBrandLogoToCreatives', () => {
 
   it('rejects a dimensionless decoded image and revokes its object URL', async () => {
     imageDimensions = [
-      [1000, 500],
+      [1024, 1024],
       [0, 0],
     ];
     fetchMock

@@ -4,6 +4,7 @@ import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/li
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import type { CreativeImageCopy } from '@/lib/creatives/generated';
+import type { CreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import {
   creativeImageHttpError,
   creativeImageMissingOutputError,
@@ -43,7 +44,7 @@ export const generatePromptOnlyCreativeImage = async (args: {
   placement: CreativePlacement;
   context: string;
   copy: CreativeImageCopy;
-  reserveLogoArea: boolean;
+  logoGeometry?: CreativeLogoGeometry;
   operationType?: Extract<CreativeImageOperationType, 'PROMPT_GENERATION' | 'LAYOUT_REFERENCE_GENERATION'>;
 }): Promise<ImageGenerationResult> => {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -53,7 +54,7 @@ export const generatePromptOnlyCreativeImage = async (args: {
 
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
   const document = await prepareTaxDocumentReference(args.taxDocumentReference);
-  const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
+  const logoDirection = args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : '';
   const prompt = `
 Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 

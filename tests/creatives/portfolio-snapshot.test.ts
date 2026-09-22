@@ -20,6 +20,7 @@ describe('resumable creative portfolio snapshot', () => {
 
   it('round-trips plan and audit without runtime buffers, functions or aliasing', async () => {
     const context = prepared();
+    context.batchPlan.creatives = [{ index: 1, logoAnchor: 'top-center' } as never];
     const source = { role: 'TRA_VIDEO' as const, mediaId: `media_${'d'.repeat(32)}`, sha256: hash };
     context.requestedSources = [source];
     context.request.sourceAssets = [{ role: source.role, mediaId: source.mediaId }];
@@ -40,6 +41,7 @@ describe('resumable creative portfolio snapshot', () => {
     const restored = await restoreCreativePortfolio(reloaded);
     expect(hydrate).toHaveBeenCalledWith(snapshot.request);
     expect(restored.batchPlan).toEqual(snapshot.batchPlan);
+    expect(restored.batchPlan.creatives[0].logoAnchor).toBe('top-center');
     expect(restored.sourceAnalysis).toEqual(context.sourceAnalysis);
     expect(restored.sourceAnalysis).not.toBe(snapshot.sourceAnalysis);
     expect(restored.storage).toBe(current.storage);

@@ -8,6 +8,7 @@ import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { TAX_DOCUMENT_REFERENCES } from '@/lib/references/tax-documents';
 import { resolveReferenceSelection, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
+import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   humanOptions: vi.fn(),
   resolveHuman: vi.fn(),
   compositeCreativeBrandLogo: vi.fn(),
+  resolveCreativeBrandLogoPlacementContext: vi.fn(),
   saveCreativeBatch: vi.fn(),
   validateGeneratedCreativeImage: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
@@ -50,7 +52,10 @@ vi.mock('@/lib/quotas/require-quota', () => ({
   requireOperatorQuota: mocks.requireOperatorQuota,
 }));
 
-vi.mock('@/lib/creatives/brand-logo.server', () => ({ compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo }));
+vi.mock('@/lib/creatives/brand-logo.server', () => ({
+  compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo,
+  resolveCreativeBrandLogoPlacementContext: mocks.resolveCreativeBrandLogoPlacementContext,
+}));
 vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveCreativeBatch }));
 vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.listProofRecords }));
 
@@ -423,7 +428,7 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
     placement,
     context: 'Approved prompt-only context',
     copy: { headline: 'Image headline', shortSupport: 'Short support', cta: 'Learn more' },
-    reserveLogoArea: placement === 'VERTICAL_9_16',
+    ...(placement === 'VERTICAL_9_16' ? { logoGeometry: resolveCreativeLogoGeometry(placement, 'top-left', 200, 100) } : {}),
   });
   const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
 
@@ -439,7 +444,7 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
   expect(body.prompt).not.toContain('Description:');
   if (placement === 'VERTICAL_9_16') {
     expect(body.prompt).toContain('x=70..1081, y=287..1330');
-    expect(body.prompt).toContain('x=105..401, y=322..546');
+    expect(body.prompt).toContain('x=105..401, y=322..503');
     expect(body.prompt).toContain('invisible composition constraint');
     expect(body.prompt).toContain('do not render a placeholder, box, panel, border, dashed outline');
   } else {
@@ -455,6 +460,8 @@ beforeEach(() => {
   mocks.requireOperatorQuota.mockResolvedValue(null);
   mocks.listProofRecords.mockResolvedValue([]);
   mocks.compositeCreativeBrandLogo.mockReset().mockImplementation(async (buffer) => buffer);
+  mocks.resolveCreativeBrandLogoPlacementContext.mockImplementation(async (_logo, placement) =>
+    ({ placement, sourceWidth: 200, sourceHeight: 100 }));
   mocks.saveCreativeBatch.mockReset().mockImplementation(async (records) => records);
   mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
@@ -1327,8 +1334,18 @@ describe('progressive creative delivery', () => {
     mocks.compositeCreativeBrandLogo.mockResolvedValue(finalPixels);
     const response = await POST(generationRequest([], undefined, 2, undefined, 'PORTRAIT_4_5', { brandLogoMediaId: mediaId('7') }));
     const events = await readStreamEvents(response);
+    const geometry = resolveCreativeLogoGeometry('PORTRAIT_4_5', 'top-left', 200, 100);
+    expect(mocks.planCreativeBatch).toHaveBeenCalledWith(expect.objectContaining({
+      hasBrandLogo: true,
+      logoPlacement: { placement: 'PORTRAIT_4_5', sourceWidth: 200, sourceHeight: 100 },
+    }));
     expect(mocks.compositeCreativeBrandLogo).toHaveBeenCalledTimes(2);
-    expect(mocks.compositeCreativeBrandLogo).toHaveBeenCalledWith(PNG, PNG, 'PORTRAIT_4_5');
+    expect(mocks.compositeCreativeBrandLogo).toHaveBeenCalledWith(PNG, PNG, geometry);
+    for (const [, init] of vi.mocked(fetch).mock.calls) {
+      const prompt = JSON.parse(init!.body as string).prompt as string;
+      expect(prompt).toContain(`x=${geometry.panel.left}..${geometry.panel.left + geometry.panel.width - 1}`);
+      expect(prompt).toContain('top-left overlay rectangle');
+    }
     expect(await Promise.all(saveImage.mock.calls.map(async ([file]) => Buffer.from(await file.arrayBuffer())))).toEqual([finalPixels, finalPixels]);
     expect(mocks.compositeCreativeBrandLogo.mock.invocationCallOrder[0]).toBeLessThan(saveImage.mock.invocationCallOrder[0]);
     expect(saveImage.mock.invocationCallOrder[0]).toBeLessThan(mocks.saveCreativeBatch.mock.invocationCallOrder[0]);
@@ -1337,6 +1354,7 @@ describe('progressive creative delivery', () => {
       const creative = data.creative as { id: string; image: unknown; finalization: unknown };
       const record = saved.find((item) => item.id === creative.id);
       expect(record).toMatchObject({ image: creative.image, placement: 'PORTRAIT_4_5', identity: expect.any(Object), planning: expect.any(Object), generationProvenance: expect.any(Object) });
+      expect(record.planning.logoAnchor).toBe('top-left');
       expect(record.copy).toEqual(record.adCopy);
       expect(record.imageCopy).toBeDefined();
       expect(creative.finalization).toEqual({ status: 'SAVED', createdAt: record.createdAt });

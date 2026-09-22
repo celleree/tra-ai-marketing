@@ -75,6 +75,35 @@ const sourceProjection = (): PlanningSourceAnalysisState => ({ version: 1, entri
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); proofMocks.load.mockReset(); });
 
 describe('creative batch planner', () => {
+  it('validates planner logo anchors and lets selected layout geometry override the fallback before persistence', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const referenceCatalog = [referenceCandidate('f')];
+    referenceCatalog[0].blueprint.regions = [{
+      ...referenceCatalog[0].blueprint.regions[0], role: 'CTA',
+      xPct: 0, yPct: 50, widthPct: 40, heightPct: 15,
+    }];
+    const creatives = [1, 2].map(index => ({
+      ...concept(index), logoAnchor: 'bottom-left',
+      referenceChoices: { angleSource: null, layoutSource: referenceCatalog[0].referenceId },
+    }));
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: 'Approved context', analysis, hasApprovedHumanSource: false,
+      hasBrandLogo: true, logoPlacement: { placement: 'VERTICAL_9_16' as const, sourceWidth: 200, sourceHeight: 100 },
+      referenceCatalog };
+
+    const plan = await requestCreativeBatch(args);
+
+    expect(plan.creatives.map(item => item.logoAnchor)).toEqual(['top-left', 'top-left']);
+    const request = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(request.text.format.schema.properties.creatives.items.properties.logoAnchor.enum)
+      .toEqual(['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-right']);
+    expect(JSON.parse(request.input[1].content[0].text).hasBrandLogo).toBe(true);
+    expect(JSON.parse(request.input[1].content[0].text).logoTargetPlacement).toBe('VERTICAL_9_16');
+    creatives[0].logoAnchor = 'middle' as never;
+    await expect(requestCreativeBatch(args)).rejects.toThrow('invalid creative batch plan concept');
+  });
+
   it('sends every source-labelled sentinel to Astra and retains initial/audit/repair arguments and snapshots on save/reload', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives: [concept(1), concept(2)] }));

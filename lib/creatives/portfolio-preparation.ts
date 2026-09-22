@@ -17,6 +17,7 @@ import type { ReferenceLibraryItem } from '@/lib/references/types';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
+import { resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
 
 export type PortfolioPreparationState = {
   videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
@@ -267,6 +268,9 @@ export async function advancePortfolioPreparation(
       : '';
   const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
   state.referenceCatalog = await withCuratedReferenceMetadata(state.referenceCatalog);
+  const logoPlacement = brandLogo
+    ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, data.placement)
+    : undefined;
   const plannerArgs = {
     count: data.variationCount,
     context: generationContext,
@@ -274,6 +278,8 @@ export async function advancePortfolioPreparation(
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
+    hasBrandLogo: reserveLogoArea,
+    ...(logoPlacement ? { logoPlacement } : {}),
     referenceCatalog: state.referenceCatalog,
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
   };

@@ -10,6 +10,7 @@ import { selectBestReferenceCreatives, type ReferenceSelectionCandidate, type Se
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
+import { resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
 import { formatLayoutBlueprintForPlanning, LAYOUT_BLUEPRINT_SCHEMA_VERSION, type LayoutBlueprint } from '@/lib/layouts/blueprint';
 import { isUsableApprovedHumanSource } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
@@ -165,12 +166,17 @@ export async function prepareCreativeGeneration(
 
   const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
   referenceCatalog = await withCuratedReferenceMetadata(referenceCatalog);
+  const logoPlacement = brandLogo
+    ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, data.placement)
+    : undefined;
   const plannerArgs: CreativeBatchPlannerArgs = {
     count: data.variationCount,
     context: generationContext,
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis, sourceAnalysis,
     hasApprovedHumanSource: hasUsableApprovedHumanSource,
+    hasBrandLogo: reserveLogoArea,
+    ...(logoPlacement ? { logoPlacement } : {}),
     referenceCatalog,
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
   };
