@@ -101,9 +101,20 @@ describe('durable portfolio B3 selection activation', () => {
     mocks.restore.mockResolvedValue(context); mocks.select.mockResolvedValueOnce({ status: 'NO_SUITABLE_HUMAN' });
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result).toMatchObject({ status: 409, error: expect.stringContaining('No suitable human frame') });
-    expect(result.job.slots[0]).toMatchObject({ status: 'RETRY_REQUIRED',
+    expect(result.job.slots[0]).toMatchObject({ status: 'BLOCKED',
       videoSelection: { selectionPolicy: HUMAN_FRAME_SELECTION_POLICY } });
-    expect(mocks.render).not.toHaveBeenCalled();
+    expect(result.job.lease).toBeNull(); expect(() => retryPortfolioWork(result.job, 1)).toThrow('does not require a retry');
+    expect(quotaGroups()).toEqual(['VIDEO_SELECTION']); expect(mocks.render).not.toHaveBeenCalled();
+  });
+
+  it('blocks a completed no-suitable preflight before selection quota or a selector call', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await ready(storage); const context = contextFor(job);
+    context.batchPlan.creatives[0].strategy.execution.subjectSource = 'approved-tra-human';
+    mocks.restore.mockResolvedValue(context); mocks.preflight.mockResolvedValueOnce({ status: 'NO_SUITABLE_HUMAN' });
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result).toMatchObject({ status: 409, job: { lease: null } });
+    expect(result.job.slots[0]).toMatchObject({ status: 'BLOCKED' });
+    expect(quotaGroups()).toEqual([]); expect(mocks.select).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
   });
 
   it('propagates local visual-selection admission failure without rendering', async () => {

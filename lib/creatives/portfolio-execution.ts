@@ -34,6 +34,8 @@ export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; s
 
 class InvalidPlannedCreativeCopyError extends CreativeGenerationPreparationError {}
 
+const noSuitableHumanFrameMessage = 'No suitable human frame was found. Create a new portfolio with a clearer approved source (open eyes, usable framing, and sufficient facial detail); saved creatives remain available.';
+
 const assertValidPlannedCreativeCopy = (concept: Parameters<typeof classifyCreativeCopyContract>[0]) => {
   if (classifyCreativeCopyContract(concept).kind === 'INVALID') {
     throw new InvalidPlannedCreativeCopyError(
@@ -243,6 +245,12 @@ export async function advanceCreativePortfolio(
           const checkpointed = checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job;
           return finishPortfolioVideoFrameSelection(checkpointed, token, preflight.selection);
         }, storage) };
+        if (preflight.status === 'NO_SUITABLE_HUMAN') return {
+          job: await updateCreativePortfolio(id, current =>
+            blockPortfolioVideoSelection(current, token, attempt, noSuitableHumanFrameMessage), storage),
+          error: noSuitableHumanFrameMessage,
+          status: 409,
+        };
         const denied = await reserveWorkQuota('VIDEO_SELECTION');
         if (denied) return denied;
         await updateCreativePortfolio(id, current => checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job, storage);
@@ -266,9 +274,9 @@ export async function advanceCreativePortfolio(
             `Video frame selection requires explicit Retry (${selected.reason}).`), storage) };
         }
         if (selected.status === 'NO_SUITABLE_HUMAN') {
-          const message = 'No suitable human frame was found. Upload or select a clearer TRA video frame with open eyes, usable framing, and sufficient facial detail, then create a new portfolio.';
-          return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token, message), storage),
-            error: message, status: 409 };
+          return { job: await updateCreativePortfolio(id, current =>
+            blockPortfolioVideoSelection(current, token, attempt, noSuitableHumanFrameMessage), storage),
+            error: noSuitableHumanFrameMessage, status: 409 };
         }
         return { job: await updateCreativePortfolio(id, current =>
           finishPortfolioVideoFrameSelection(current, token, selected.selection), storage) };
