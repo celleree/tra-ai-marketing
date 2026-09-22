@@ -19,7 +19,7 @@ const renderPanel = ({
   videoPreparation,
 }: {
   count?: number;
-  statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED'>;
+  statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>;
   running?: boolean;
   stopped?: boolean;
   planningError?: string | null;
@@ -37,7 +37,9 @@ const renderPanel = ({
       slots: base.slots.map((slot, index) => ({
         ...slot,
         status: statuses[index] ?? 'PENDING',
-        ...((statuses[index] ?? 'PENDING') === 'RETRY_REQUIRED' ? { error: 'Render failed.' } : {}),
+        ...(['RETRY_REQUIRED', 'BLOCKED'].includes(statuses[index] ?? 'PENDING')
+          ? { error: (statuses[index] ?? 'PENDING') === 'BLOCKED'
+              ? 'Create a new portfolio with a smaller video pool; saved creatives remain available.' : 'Render failed.' } : {}),
       })),
     } : {}),
   };
@@ -149,5 +151,14 @@ describe('portfolio progress panel', () => {
     expect(html).not.toContain('Resume generation');
     expect(resume).not.toHaveBeenCalled();
     expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('shows durable recovery guidance for blocked work without Retry or false completion', () => {
+    const { html } = renderPanel({ count: 3, planReady: true, statuses: ['SAVED', 'BLOCKED', 'PENDING'] });
+    expect(html).toContain('<strong>1 / 3</strong> creatives saved');
+    expect(html).toContain('Create a new portfolio with a smaller video pool; saved creatives remain available.');
+    expect(html).not.toContain('Retry creative 2');
+    expect(html).not.toContain('Generation complete.');
+    expect(html).toContain('Resume generation');
   });
 });

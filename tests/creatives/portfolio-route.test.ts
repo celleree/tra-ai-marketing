@@ -68,6 +68,15 @@ describe('resumable portfolio API', () => {
     expect((await response.json()).job.planningError).toBeNull();
     expect(mocks.advance).not.toHaveBeenCalled();
   });
+  it('refuses to reset a blocked creative', async () => {
+    job.snapshot = portfolioSnapshot(job);
+    job.planning = { phase: 'READY_TO_RENDER' };
+    job.slots[0] = { ...job.slots[0], status: 'BLOCKED', error: 'Create a new portfolio with a smaller video pool.' };
+    const reopened = await (await GET(request(undefined, job.id))).json();
+    expect(reopened.job.slots[0].status).toBe('BLOCKED');
+    expect((await PATCH(request({ id: job.id, action: 'retry', slotIndex: 1 }))).status).toBe(409);
+    expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
+  });
   it.each([null, {}, { id: 'bad', action: 'advance' }, { action: 'unknown' }, { action: 'retry' },
     { action: 'retry', slotIndex: 37 }, { action: 'advance', slotIndex: 1 }])('rejects malformed action %j before execution', async input => {
     const body = input === null ? null : { id: job.id, ...input };

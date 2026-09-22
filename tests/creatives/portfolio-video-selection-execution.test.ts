@@ -7,7 +7,7 @@ import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY, VideoHum
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
 const mocks = vi.hoisted(() => ({
-  restore: vi.fn(), render: vi.fn(), select: vi.fn(), hydrate: vi.fn(), inventory: vi.fn(), list: vi.fn(), quota: vi.fn(),
+  restore: vi.fn(), render: vi.fn(), preflight: vi.fn(), select: vi.fn(), hydrate: vi.fn(), inventory: vi.fn(), list: vi.fn(), quota: vi.fn(),
 }));
 vi.mock('@/lib/creatives/portfolio-snapshot', async original => ({
   ...await original<typeof import('@/lib/creatives/portfolio-snapshot')>(), restoreCreativePortfolio: mocks.restore,
@@ -15,7 +15,8 @@ vi.mock('@/lib/creatives/portfolio-snapshot', async original => ({
 vi.mock('@/lib/creatives/render-planned', () => ({ renderPlannedCreative: mocks.render }));
 vi.mock('@/lib/creatives/portfolio-video-selection', async original => ({
   ...await original<typeof import('@/lib/creatives/portfolio-video-selection')>(),
-  selectPortfolioVideoFrames: mocks.select, hydratePortfolioVideoFrameSelection: mocks.hydrate,
+  preflightPortfolioVideoFrames: mocks.preflight, selectPortfolioVideoFrames: mocks.select,
+  hydratePortfolioVideoFrameSelection: mocks.hydrate,
 }));
 vi.mock('@/lib/creatives/generation-sources', async original => ({
   ...await original<typeof import('@/lib/creatives/generation-sources')>(), hydratePlanningSourceInventory: mocks.inventory,
@@ -61,6 +62,7 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'selector-model-a');
   mocks.list.mockResolvedValue([]); mocks.quota.mockResolvedValue({ allowed: true });
   mocks.inventory.mockResolvedValue([{ source: videoSource }]);
+  mocks.preflight.mockResolvedValue({ status: 'READY' });
   mocks.select.mockResolvedValue({ status: 'COMPLETE', selection }); mocks.hydrate.mockResolvedValue(selectedFrames);
   mocks.render.mockImplementation(async (_concept, _context, options) => ({ id: options.creativeId }));
 });
@@ -108,11 +110,12 @@ describe('durable portfolio B3 selection activation', () => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage); const context = contextFor(job);
     context.batchPlan.creatives[0].strategy.execution.subjectSource = 'approved-tra-human';
     mocks.restore.mockResolvedValue(context);
-    mocks.select.mockRejectedValueOnce(new VideoHumanSelectionAdmissionError('Visual human selection requires 128128 output tokens for 788 images.'));
+    mocks.preflight.mockRejectedValueOnce(new VideoHumanSelectionAdmissionError('Visual human selection requires 128128 output tokens for 788 images.'));
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result).toMatchObject({ status: 409, error: expect.stringContaining('requires 128128 output tokens') });
-    expect(result.job.slots[0].status).toBe('RETRY_REQUIRED');
-    expect(mocks.render).not.toHaveBeenCalled();
+    expect(result.job.slots[0]).toMatchObject({ status: 'BLOCKED', error: expect.stringContaining('smaller video pool') });
+    expect(() => retryPortfolioWork(result.job, 1)).toThrow('does not require a retry');
+    expect(quotaGroups()).toEqual([]); expect(mocks.select).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
   });
 
   it('hydrates and renders only the persisted selection with creative-generation admission', async () => {

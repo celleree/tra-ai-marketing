@@ -7,7 +7,7 @@ import { advancePortfolioPreparation } from '@/lib/creatives/portfolio-preparati
 import { advancePlanningSourceAnalysis } from '@/lib/creatives/planning-source-composition';
 import { stepPortfolioVideoDependency } from '@/lib/creatives/portfolio-video-adapter';
 import { hydratePortfolioVideoFrameSelection, portfolioVideoFrameReuseContext, portfolioVideoSelectionPolicy,
-  selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
+  preflightPortfolioVideoFrames, selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelligence-planning';
 import { VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
@@ -15,10 +15,10 @@ import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
-import { checkpointPortfolioPreparation, checkpointPortfolioVideoSelectionAttempt, claimCreativePortfolio,
+import { blockPortfolioVideoSelection, checkpointPortfolioPreparation, checkpointPortfolioVideoSelectionAttempt, claimCreativePortfolio,
   finishPortfolioAuditFailure, finishPortfolioAuditForRepair, finishPortfolioInitialPlan, finishPortfolioPlan,
   finishPortfolioPreparation, finishPortfolioPreparationFailure, finishPortfolioRepair, finishPortfolioSlot,
-  finishPortfolioVideoFrameSelection, failPortfolioWork, releasePortfolioWork,
+  finishPortfolioVideoFrameSelection, failPortfolioWork, releasePortfolioWork, resolvePortfolioVideoSelectionAttempt,
   type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { CreativeGenerationPreparationError, hydratePlanningSourceInventory } from '@/lib/creatives/generation-sources';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
@@ -69,6 +69,7 @@ export async function advanceCreativePortfolio(
     } satisfies PortfolioStepResult;
   };
   let providerWorkStarted = false;
+  let admissionAttempt: ReturnType<typeof resolvePortfolioVideoSelectionAttempt> | undefined;
   try {
     if (slotIndex === null && job.planning.phase === 'INITIAL_PLAN' && !job.planning.preparation.quotaReserved) {
       const quota = await reserveOperatorQuota({
@@ -224,26 +225,27 @@ export async function advanceCreativePortfolio(
       if (!context.sourceAnalysis) {
         throw new CreativeGenerationPreparationError('Durable automatic video selection is missing its frozen B1 source analysis.', 409);
       }
-      const denied = await reserveWorkQuota(slot.videoSelection?.selection ? 'CREATIVE_GENERATION' : 'VIDEO_SELECTION');
-      if (denied) return denied;
       const inventory = await hydratePlanningSourceInventory(job.request.sourceAssets, context.storage);
       const videoSources = inventory.filter(({ source }) => source.role === 'TRA_VIDEO')
         .map(({ source }) => source as HydratedTraVideoSource);
       if (!slot.videoSelection?.selection) {
-        let attempt: ReturnType<typeof checkpointPortfolioVideoSelectionAttempt> | undefined;
-        await updateCreativePortfolio(id, current => {
-          const completedSelections = current.slots.flatMap((candidate) => candidate.videoSelection?.selection
-            ? [candidate.videoSelection.selection] : []);
-          attempt = checkpointPortfolioVideoSelectionAttempt(
-            current, token, {
-              selectionModel: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra').trim(),
-              selectionPolicy: portfolioVideoSelectionPolicy(concept),
-              reuseContext: portfolioVideoFrameReuseContext(completedSelections),
-            },
-          );
-          return attempt.job;
-        }, storage);
-        if (!attempt) throw new Error('Video frame selection attempt was not checkpointed.');
+        const proposed = { selectionModel: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra').trim(),
+          selectionPolicy: portfolioVideoSelectionPolicy(concept),
+          reuseContext: portfolioVideoFrameReuseContext(job.slots.flatMap((candidate) => candidate.videoSelection?.selection
+            ? [candidate.videoSelection.selection] : [])) };
+        const attempt = resolvePortfolioVideoSelectionAttempt(job, token, proposed);
+        admissionAttempt = attempt;
+        const cache = { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}) };
+        const preflight = await preflightPortfolioVideoFrames({ sourceAnalysis: context.sourceAnalysis,
+          sources: videoSources, finalConcept: concept, selectionPolicy: attempt.selectionPolicy,
+          reuseContext: attempt.reuseContext, cache });
+        if (preflight.status === 'COMPLETE') return { job: await updateCreativePortfolio(id, current => {
+          const checkpointed = checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job;
+          return finishPortfolioVideoFrameSelection(checkpointed, token, preflight.selection);
+        }, storage) };
+        const denied = await reserveWorkQuota('VIDEO_SELECTION');
+        if (denied) return denied;
+        await updateCreativePortfolio(id, current => checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job, storage);
         await assertCurrentWork();
         providerWorkStarted = true;
         const selected = await selectPortfolioVideoFrames({
@@ -252,7 +254,7 @@ export async function advanceCreativePortfolio(
           finalConcept: concept,
           selectionPolicy: attempt.selectionPolicy,
           reuseContext: attempt.reuseContext,
-          cache: { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}) },
+          cache,
         });
         if (selected.status === 'BUSY') return {
           job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
@@ -272,6 +274,8 @@ export async function advanceCreativePortfolio(
           finishPortfolioVideoFrameSelection(current, token, selected.selection), storage) };
       }
 
+      const denied = await reserveWorkQuota('CREATIVE_GENERATION');
+      if (denied) return denied;
       providerWorkStarted = true;
       const selectedFrames = await hydratePortfolioVideoFrameSelection({
         sourceAnalysis: context.sourceAnalysis,
@@ -302,8 +306,12 @@ export async function advanceCreativePortfolio(
     return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
   } catch (error) {
     console.error('Portfolio work failed', error);
+    if (error instanceof VideoHumanSelectionAdmissionError && admissionAttempt) {
+      const message = `${error.message} Create a new portfolio with a smaller video pool; saved creatives remain available.`;
+      return { job: await updateCreativePortfolio(id, current =>
+        blockPortfolioVideoSelection(current, token, admissionAttempt!, message), storage), error: message, status: 409 };
+    }
     const message = error instanceof CreativeGenerationPreparationError || error instanceof GeneratedImageValidationError
-      || error instanceof VideoHumanSelectionAdmissionError
       ? error.message : 'Portfolio work could not be completed. Review its status before retrying.';
     const current = await updateCreativePortfolio(id, value => {
       if (value.lease?.id !== token) return value;
@@ -313,7 +321,6 @@ export async function advanceCreativePortfolio(
         : releasePortfolioWork(value, token);
     }, storage);
     return { job: current, error: message, status: error instanceof OperatorQuotaUnavailableError ? 503
-      : error instanceof CreativeGenerationPreparationError ? error.status
-        : error instanceof VideoHumanSelectionAdmissionError ? 409 : 500 };
+      : error instanceof CreativeGenerationPreparationError ? error.status : 500 };
   }
 }

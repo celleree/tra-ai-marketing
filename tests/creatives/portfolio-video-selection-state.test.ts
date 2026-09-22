@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  blockPortfolioVideoSelection,
   checkpointPortfolioVideoSelectionAttempt,
   claimCreativePortfolio,
   failPortfolioWork,
@@ -50,6 +51,22 @@ const frozenFailure = () => {
 };
 
 describe('portfolio video selection persistence', () => {
+  it('persists deterministic visual admission as terminal blocked state', () => {
+    const current = leased();
+    const blocked = blockPortfolioVideoSelection(current, 'slot', { selectionModel: 'selection-model-a',
+      selectionPolicy: HUMAN_FRAME_SELECTION_POLICY, reuseContext: emptyReuse },
+    'Create a new portfolio with a smaller video pool; saved creatives remain available.', 4_100);
+    expect(blocked.lease).toBeNull();
+    expect(blocked.slots[0]).toMatchObject({ status: 'BLOCKED', error: expect.stringContaining('smaller video pool'),
+      videoSelection: { version: 2, selectionPolicy: HUMAN_FRAME_SELECTION_POLICY } });
+    expect(() => retryPortfolioWork(blocked, 1, 4_200)).toThrow('does not require a retry');
+    expect(parse(blocked)).toEqual(blocked);
+    const mixed = claimCreativePortfolio(blocked, 4_300, 'next');
+    expect(mixed.status).toBe('WORK'); expect(mixed.job.lease?.slotIndex).toBe(2);
+    const terminal = structuredClone(blocked); terminal.slots[1].status = 'SAVED';
+    expect(claimCreativePortfolio(terminal, 4_400).status).toBe('BLOCKED');
+  });
+
   it('freezes visual policy and same-portfolio reuse inputs across reload and explicit retry', () => {
     const reuseContext = { version: 1 as const, frames: [{ libraryId: selection.libraryId,
       frameId: selection.frameIds[0], useCount: 1 }] };

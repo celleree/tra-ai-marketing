@@ -16,9 +16,10 @@ export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<ty
 
   const savedCount = job.slots.filter(slot => slot.status === 'SAVED').length;
   const failed = job.slots.filter(slot => slot.status === 'RETRY_REQUIRED');
+  const blocked = job.slots.filter(slot => slot.status === 'BLOCKED');
   const complete = savedCount === job.requestedCount;
   const videoFailed = job.videoPreparation?.phase === 'FAILED';
-  const hasFailure = Boolean(job.planningError) || failed.length > 0 || videoFailed;
+  const hasFailure = Boolean(job.planningError) || failed.length > 0 || blocked.length > 0 || videoFailed;
   const retryFailure = Boolean(job.planningError) || failed.length > 0;
   const preparingVideo = Boolean(job.videoPreparation && activeVideoPhases.has(job.videoPreparation.phase));
 
@@ -66,6 +67,9 @@ export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<ty
       {failed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}{' '}
         <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease)}
           onClick={() => void portfolio.retry(slot.index)}>Retry creative {slot.index}</button></p>)}
+    </div> : null}
+    {blocked.length ? <div className={styles.failures} aria-live="polite">
+      {blocked.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error}</p>)}
     </div> : null}
   </section>;
 }

@@ -187,13 +187,12 @@ export const selectVideoFramesFromPoolWithCache = async (
   return checkpoint({ ...identity, status: 'COMPLETE', selection });
 };
 
-/** Versioned visual policy cache. Every admitted representative image and same-portfolio reuse count is identity-bound. */
-export const selectVideoHumanFrameFromPoolWithCache = async (
+const visualSelectionCacheContext = (
   bindings: readonly VideoHumanSelectionPoolBinding[],
   concept: string,
   reuseContext: VideoFrameReuseContext,
   dependencies: VideoSelectionCacheDependencies,
-): Promise<CachedVideoHumanSelectionResult> => {
+) => {
   const brief = concept.trim(); const model = dependencies.model.trim();
   if (!brief || brief.length > 2_000 || !model || !Number.isSafeInteger(dependencies.deadlineAtMs)) {
     throw new Error('Video selection cache input is invalid.');
@@ -234,6 +233,35 @@ export const selectVideoHumanFrameFromPoolWithCache = async (
     if (bytes.length > MAX_VISUAL_RECORD_BYTES) throw new Error('Visual video selection cache exceeds its size limit.');
     return storage.write(key, bytes, etag);
   };
+  return { brief, model, canonical, imageCount, reuse, identity, read, write, now };
+};
+
+export type VideoHumanSelectionPreflight = { status: 'READY' }
+  | { status: 'COMPLETE'; outcome: VideoHumanFrameSelectionOutcome };
+
+/** Read-only outgoing-work admission. Completed historical decisions remain usable under later sizing rules. */
+export const preflightVideoHumanFrameFromPoolWithCache = async (
+  bindings: readonly VideoHumanSelectionPoolBinding[],
+  concept: string,
+  reuseContext: VideoFrameReuseContext,
+  dependencies: VideoSelectionCacheDependencies,
+): Promise<VideoHumanSelectionPreflight> => {
+  const { imageCount, read } = visualSelectionCacheContext(bindings, concept, reuseContext, dependencies);
+  const current = await read();
+  if (current?.value.status === 'COMPLETE') return { status: 'COMPLETE', outcome: current.value.outcome };
+  requireVisualSelectionOutputBudget(imageCount);
+  return { status: 'READY' };
+};
+
+/** Versioned visual policy cache. Every admitted representative image and same-portfolio reuse count is identity-bound. */
+export const selectVideoHumanFrameFromPoolWithCache = async (
+  bindings: readonly VideoHumanSelectionPoolBinding[],
+  concept: string,
+  reuseContext: VideoFrameReuseContext,
+  dependencies: VideoSelectionCacheDependencies,
+): Promise<CachedVideoHumanSelectionResult> => {
+  const { brief, model, canonical, imageCount, reuse, identity, read, write, now } =
+    visualSelectionCacheContext(bindings, concept, reuseContext, dependencies);
   let owned: Extract<VisualPoolCacheRecord, { status: 'RUNNING' }> | undefined;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const current = await read(); const value = current?.value;

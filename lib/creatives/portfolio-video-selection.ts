@@ -5,7 +5,7 @@ import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/vid
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { videoSourceHash } from '@/lib/video/library-service';
-import { selectVideoFramesFromPoolWithCache, selectVideoHumanFrameFromPoolWithCache,
+import { preflightVideoHumanFrameFromPoolWithCache, selectVideoFramesFromPoolWithCache, selectVideoHumanFrameFromPoolWithCache,
   type VideoSelectionCacheDependencies } from '@/lib/video/selection-cache';
 import { extractVideoSelectionFrames, loadSavedVideoSelectionContext, type VideoSelectionContext } from '@/lib/video/selection-context';
 import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY, createVideoFrameReuseContext,
@@ -22,6 +22,8 @@ export type PortfolioVideoSelectionResult =
   | { status: 'RETRY_REQUIRED'; reason: 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME' }
   | { status: 'NO_SUITABLE_HUMAN' }
   | { status: 'COMPLETE'; selection: GenerateVideoFrameSelection };
+export type PortfolioVideoSelectionPreflight = { status: 'READY' }
+  | Extract<PortfolioVideoSelectionResult, { status: 'COMPLETE' | 'NO_SUITABLE_HUMAN' }>;
 
 export const portfolioVideoSelectionPolicy = (concept: PlannedCreativeConcept): AutomaticVideoSelectionPolicy =>
   concept.strategy.execution?.subjectSource === 'approved-tra-human'
@@ -77,6 +79,37 @@ const restoreOne = async (
   return { source, context, librarySha256: completed.artifact.sha256 };
 };
 
+const humanBindings = (restored: readonly Restored[]) => restored.map(({ context, librarySha256 }) => {
+  if (!context.representativeImages) {
+    throw new Error('Automatic human-frame selection requires source-bound preparation images; reanalyze the uploaded video.');
+  }
+  return { library: context.library, librarySha256, representativeImages: context.representativeImages };
+});
+
+const generationSelection = (selection: import('@/lib/video/concept-selection').VideoConceptSelection) => {
+  const parsed = parseGenerateVideoFrameSelection({ libraryId: selection.libraryId,
+    sourceVideoContentHash: selection.sourceVideoContentHash, frameIds: selection.frames.map((frame) => frame.frameId) });
+  if (!parsed) throw new Error('Cached visual human-frame selection cannot be persisted for generation.');
+  return parsed;
+};
+
+/** Read-only check before portfolio selection quota. It neither claims cache work nor calls a provider. */
+export async function preflightPortfolioVideoFrames(
+  input: { sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
+    finalConcept: PlannedCreativeConcept; selectionPolicy: AutomaticVideoSelectionPolicy;
+    reuseContext: VideoFrameReuseContext; cache: VideoSelectionCacheDependencies },
+): Promise<PortfolioVideoSelectionPreflight> {
+  const expectedPolicy = portfolioVideoSelectionPolicy(input.finalConcept);
+  if (input.selectionPolicy !== expectedPolicy) throw new Error('Frozen automatic video selection policy does not match the final concept.');
+  if (input.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY) return { status: 'READY' };
+  const restored = await Promise.all(completedDependencies(input.sourceAnalysis).map((dependency) => restoreOne(input.sources, dependency)));
+  const result = await preflightVideoHumanFrameFromPoolWithCache(humanBindings(restored),
+    createPortfolioVideoSelectionConcept(input.finalConcept), input.reuseContext, input.cache);
+  if (result.status === 'READY') return result;
+  if (result.outcome.status === 'NO_SUITABLE_HUMAN') return { status: 'NO_SUITABLE_HUMAN' };
+  return { status: 'COMPLETE', selection: generationSelection(result.outcome.selection) };
+}
+
 export async function selectPortfolioVideoFrames(
   input: { sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
     finalConcept: PlannedCreativeConcept; selectionPolicy?: AutomaticVideoSelectionPolicy;
@@ -89,19 +122,10 @@ export async function selectPortfolioVideoFrames(
   if (selectionPolicy !== expectedPolicy) throw new Error('Frozen automatic video selection policy does not match the final concept.');
   const concept = createPortfolioVideoSelectionConcept(input.finalConcept);
   if (selectionPolicy === HUMAN_FRAME_SELECTION_POLICY) {
-    const result = await selectVideoHumanFrameFromPoolWithCache(restored.map(({ context, librarySha256 }) => {
-      if (!context.representativeImages) {
-        throw new Error('Automatic human-frame selection requires source-bound preparation images; reanalyze the uploaded video.');
-      }
-      return { library: context.library, librarySha256, representativeImages: context.representativeImages };
-    }), concept, reuseContext, input.cache);
+    const result = await selectVideoHumanFrameFromPoolWithCache(humanBindings(restored), concept, reuseContext, input.cache);
     if (result.status !== 'COMPLETE') return result;
     if (result.outcome.status === 'NO_SUITABLE_HUMAN') return { status: 'NO_SUITABLE_HUMAN' };
-    const selection = parseGenerateVideoFrameSelection({ libraryId: result.outcome.selection.libraryId,
-      sourceVideoContentHash: result.outcome.selection.sourceVideoContentHash,
-      frameIds: result.outcome.selection.frames.map((frame) => frame.frameId) });
-    if (!selection) throw new Error('Cached visual human-frame selection cannot be persisted for generation.');
-    return { status: 'COMPLETE', selection };
+    return { status: 'COMPLETE', selection: generationSelection(result.outcome.selection) };
   }
   const result = await selectVideoFramesFromPoolWithCache(restored.map(({ context, librarySha256 }) => ({ library: context.library, librarySha256 })),
     concept, input.cache);

@@ -6,7 +6,6 @@ import { CreativeLibrary } from '@/components/creative-library/creative-library'
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
 import { PortfolioProgressPanel } from '@/components/creative-generator/portfolio-progress-panel';
-import { portfolioCanAdvance } from '@/lib/creatives/portfolio-client';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
 import { DirectCreativeUploader } from '@/components/creative-generator/direct-creative-uploader';
@@ -99,9 +98,10 @@ export function CreativeGenerator() {
   const generating = portfolio.running;
   const savedPortfolio = portfolio.response?.job;
   const creatives = creationMode === 'generate' ? portfolio.response?.creatives ?? [] : uploadedCreatives;
-  const generationComplete = !savedPortfolio || (!generating && !portfolioCanAdvance(savedPortfolio));
+  const generationComplete = !savedPortfolio || savedPortfolio.slots.every(slot => slot.status === 'SAVED');
   const generationFailures = Object.fromEntries((savedPortfolio?.slots ?? [])
-    .filter(slot => slot.status === 'RETRY_REQUIRED').map(slot => [slot.index, slot.error || 'Could not be completed.']));
+    .filter(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status))
+    .map(slot => [slot.index, slot.error || 'Could not be completed.']));
   const displayGenerationError = creationMode === 'generate' ? portfolio.error || generationError : generationError;
 
   const ready = Boolean(context.trim());

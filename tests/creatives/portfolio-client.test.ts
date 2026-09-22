@@ -5,9 +5,11 @@ import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { portfolioRequest } from '../fixtures/creative-portfolio';
 
 const initial = (): PortfolioResponse => ({ job: portfolioProgress(newCreativePortfolio(portfolioRequest())), creatives: [] });
-const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED'>): PortfolioResponse => ({
+const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>): PortfolioResponse => ({
   job: { ...value.job, planReady: true, planningPhase: 'READY_TO_RENDER', preparationFingerprint: undefined, lease: null,
-    slots: value.job.slots.map((slot, index) => ({ ...slot, status: statuses[index] })) },
+    slots: value.job.slots.map((slot, index) => ({ ...slot, status: statuses[index],
+      ...(['RETRY_REQUIRED', 'BLOCKED'].includes(statuses[index]) ? { error: statuses[index] === 'BLOCKED'
+          ? 'Create a new portfolio with a smaller video pool; saved creatives remain available.' : 'Failed.' } : {}) })) },
   creatives: value.job.slots.filter((_, index) => statuses[index] === 'SAVED').map(slot => ({
     id: slot.creativeId, index: slot.index, category: 'customer-problems', format: 'direct-response',
     copy: { headline: 'Headline', primaryText: 'Copy', description: '' },
@@ -139,6 +141,16 @@ describe('resumable portfolio browser controller', () => {
     vi.stubGlobal('fetch', fetchMock);
     expect((await runPortfolio(value, vi.fn(), () => false)).job.slots[0].status).toBe('RETRY_REQUIRED');
     expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance']);
+  });
+  it('parses blocked progress, advances other pending slots, and never retries blocked work', async () => {
+    const value = withSlots(initial(), ['BLOCKED', 'PENDING']);
+    const finished = withSlots(value, ['BLOCKED', 'SAVED']);
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(finished)); vi.stubGlobal('fetch', fetchMock);
+    const result = await runPortfolio(value, vi.fn(), () => false);
+    expect(result.job.slots.map(slot => slot.status)).toEqual(['BLOCKED', 'SAVED']);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).action).toBe('advance');
+    expect(result.job.slots[0].error).toContain('smaller video pool');
   });
   it('pauses immediately after quota denial and after a lost network response', async () => {
     const value = initial(), update = vi.fn();
