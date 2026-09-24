@@ -3,7 +3,7 @@ import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioPlan, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
-import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
+import { HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
 const mocks = vi.hoisted(() => ({
@@ -43,13 +43,15 @@ const automaticRequest = (extra: Record<string, unknown> = {}) => ({ ...portfoli
   sourceAssets: [{ role: 'TRA_VIDEO' as const, mediaId }], ...extra }) as any;
 const quotaGroups = () => mocks.quota.mock.calls.map(([arg]) => arg.group);
 
-async function ready(storage: MemoryPortfolioStorage, request = automaticRequest()) {
+async function ready(storage: MemoryPortfolioStorage, request = automaticRequest(), human = true) {
   const now = Date.now() - 1000;
   const created = await createCreativePortfolio(request, storage, now);
   return updateCreativePortfolio(created.id, current => {
     const token = 'planning-lease';
     const claimed = claimCreativePortfolio(current, now + 10, token).job;
-    return finishPortfolioPlan(claimed, token, portfolioSnapshot(current), now + 20);
+    const snapshot = portfolioSnapshot(current);
+    if (human) snapshot.batchPlan.creatives.forEach(concept => { concept.strategy.execution.subjectSource = 'approved-tra-human'; });
+    return finishPortfolioPlan(claimed, token, snapshot, now + 20);
   }, storage);
 }
 const contextFor = (job: Awaited<ReturnType<typeof ready>>, overrides: Record<string, unknown> = {}) => ({
@@ -68,11 +70,44 @@ beforeEach(() => {
 });
 
 describe('durable portfolio B3 selection activation', () => {
+  it('skips selection, extraction and quota for a final non-human concept while retaining video planning', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await ready(storage, automaticRequest(), false);
+    mocks.restore.mockResolvedValue(contextFor(job));
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.job.slots[0].status).toBe('SAVED');
+    expect(result.job.slots[0].videoSelection).toBeUndefined();
+    expect(mocks.render.mock.calls[0][0].strategy.execution.subjectSource).toBe('non-human');
+    expect(mocks.render).toHaveBeenCalledOnce();
+    expect(mocks.inventory).not.toHaveBeenCalled();
+    expect(mocks.preflight).not.toHaveBeenCalled();
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(quotaGroups()).toEqual(['CREATIVE_GENERATION']);
+  });
+
+  it('resumes an old blocked non-human slot without reusing its frame choice', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await ready(storage, automaticRequest(), false);
+    await updateCreativePortfolio(job.id, current => {
+      const next = structuredClone(current);
+      next.slots[0] = { ...next.slots[0], status: 'BLOCKED', error: 'No suitable human frame',
+        videoSelection: { version: 2, selectionModel: 'old-model', selectionPolicy: HUMAN_FRAME_SELECTION_POLICY,
+          reuseContext: { version: 1, frames: [] } } };
+      return next;
+    }, storage);
+    mocks.restore.mockResolvedValue(contextFor(job));
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.job.slots[0]).toMatchObject({ status: 'SAVED' });
+    expect(result.job.slots[0].videoSelection).toBeUndefined();
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(quotaGroups()).toEqual(['CREATIVE_GENERATION']);
+  });
+
   it('persists a cold automatic selection without rendering or consuming render quota', async () => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.slots[0]).toMatchObject({ status: 'PENDING', videoSelection: { version: 2,
-      selectionModel: 'selector-model-a', selectionPolicy: METADATA_FRAME_SELECTION_POLICY,
+      selectionModel: 'selector-model-a', selectionPolicy: HUMAN_FRAME_SELECTION_POLICY,
       reuseContext: { version: 1, frames: [] }, selection } });
     expect(result.job.lease).toBeNull(); expect(mocks.render).not.toHaveBeenCalled();
     expect(quotaGroups()).toEqual(['VIDEO_SELECTION']);

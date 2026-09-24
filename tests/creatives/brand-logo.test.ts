@@ -130,6 +130,18 @@ afterEach(() => {
 });
 
 describe('applyBrandLogoToCreatives', () => {
+  it('does not composite or upload an image already branded by the server', async () => {
+    const branded = { ...creative, generationProvenance: { version: 1 as const,
+      imageGeneration: { prompt: 'prompt', model: 'gpt-image-2.5-sunburst', routing: { operationType: 'PROMPT_GENERATION' as const,
+        preferredModel: 'gpt-image-2.5-sunburst' as const, actualModel: 'gpt-image-2.5-sunburst' as const,
+        fallbackUsed: false as const, fallbackFromModel: null, fallbackReason: null } },
+      requestedSources: [], attachedSource: null, analysisSources: [],
+      logoOverlaySource: { mediaId: mediaId('b'), sha256: 'a'.repeat(64) } } };
+    expect(await applyBrandLogoToCreatives([branded], `/api/media/files/${logoFileName}`)).toEqual([branded]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(canvas.context.drawImage).not.toHaveBeenCalled();
+  });
+
   it('uses same-origin media, browser decoding, current panel geometry, and high-quality smoothing', async () => {
     fetchMock
       .mockResolvedValueOnce(imageResponse())

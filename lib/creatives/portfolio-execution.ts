@@ -218,6 +218,7 @@ export async function advanceCreativePortfolio(
     const concept = context.batchPlan.creatives[slotIndex - 1];
     assertValidPlannedCreativeCopy(concept);
     const automaticVideoSelection = job.videoPreparationVersion === 1
+      && concept.strategy.execution.subjectSource === 'approved-tra-human'
       && !job.request.videoFrameSelection
       && !concept.strategy.approvedHumanId
       && !concept.strategy.humanSourceId

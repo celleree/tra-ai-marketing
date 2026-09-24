@@ -4,8 +4,9 @@ import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
 
-const mocks = vi.hoisted(() => ({ generate: vi.fn(), saveBatch: vi.fn(), validate: vi.fn(), resolveHuman: vi.fn() }));
+const mocks = vi.hoisted(() => ({ generate: vi.fn(), promptOnly: vi.fn(), saveBatch: vi.fn(), validate: vi.fn(), resolveHuman: vi.fn() }));
 vi.mock('@/lib/ai/video-frame-generation', () => ({ generateApprovedTraVideoFrameCreativeImage: mocks.generate }));
+vi.mock('@/lib/ai/prompt-only-generation', () => ({ generatePromptOnlyCreativeImage: mocks.promptOnly }));
 vi.mock('@/lib/video/approved-human-service', () => ({ resolveApprovedHumanFrame: mocks.resolveHuman }));
 vi.mock('@/lib/creatives/generated-image-validation', () => ({ validateGeneratedCreativeImage: mocks.validate }));
 vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveBatch }));
@@ -27,6 +28,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.generate.mockResolvedValue({ buffer: Buffer.from('image'), prompt: 'prompt', model: 'gpt-image-2.5-sunburst', routing,
     providerFrames: [frame] });
+  mocks.promptOnly.mockResolvedValue({ buffer: Buffer.from('image'), prompt: 'prompt', model: 'gpt-image-2.5-sunburst', routing });
   mocks.resolveHuman.mockResolvedValue({ record: { source: selection }, selected: frameSet });
   mocks.saveBatch.mockImplementation(async records => records.map((record: object) => ({ ...record, createdAt: '2026-09-14T00:00:00.000Z' })));
 });
@@ -34,12 +36,15 @@ beforeEach(() => {
 const storage = { saveImage: vi.fn().mockResolvedValue({ id: `media_${'1'.repeat(32)}`, fileName: 'creative.png', originalName: 'creative.png',
   mimeType: 'image/png', size: 5, url: '/creative.png' }) } as any;
 
-async function render(explicit = false) {
+async function render(explicit = false, human = true) {
   const request = { ...portfolioRequest(), sourceAssets: [{ role: 'TRA_VIDEO', mediaId }],
     ...(explicit ? { videoFrameSelection: { libraryId: selection.libraryId, sourceVideoContentHash: sourceHash, frameIds: [frameId] } } : {}) } as any;
   const snapshot = portfolioSnapshot(newCreativePortfolio(request));
-  return renderPlannedCreative(snapshot.batchPlan.creatives[0], {
-    request, batchPlan: snapshot.batchPlan, referenceCatalog: [], selectedReferences: [], requestedSources: [], analysisSources: [],
+  const item = snapshot.batchPlan.creatives[0];
+  if (human) item.strategy.execution.subjectSource = 'approved-tra-human';
+  return renderPlannedCreative(item, {
+    request, batchPlan: snapshot.batchPlan, referenceCatalog: [], selectedReferences: [],
+    requestedSources: [{ role: 'TRA_VIDEO', mediaId, sha256: sourceHash }], analysisSources: [],
     reserveLogoArea: false, brandLogo: null, providerImageSource: undefined,
     videoFrameSet: frameSet, generatedVideoFrameSelection: selection, storage,
   }, { creativeId: `creative_${'2'.repeat(32)}` });
@@ -65,6 +70,15 @@ async function renderCatalogHuman(legacy = false) {
 }
 
 describe('render planned video provenance', () => {
+  it.each([false, true])('omits discarded request-wide video frames and selection from a non-human creative (explicit=%s)', async explicit => {
+    const creative = await render(explicit, false);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.promptOnly).toHaveBeenCalledOnce();
+    expect(creative.generationProvenance!.attachedSource).toBeNull();
+    expect(creative.videoFrameSelection).toBeUndefined();
+    expect(creative.generationProvenance!.requestedSources).toEqual([{ role: 'TRA_VIDEO', mediaId, sha256: sourceHash }]);
+  });
+
   it('saves automatic B3 provenance with exact selected-frame evidence', async () => {
     const creative = await render(false);
     expect(creative.generationProvenance!.attachedSource).toEqual({ type: 'TRA_VIDEO_FRAMES', mediaId,

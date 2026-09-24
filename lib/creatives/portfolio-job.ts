@@ -103,6 +103,14 @@ export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date
     if (job.lease.expiresAtMs > now) return { status: 'BUSY', job };
     return { status: 'RETRY_REQUIRED', job: { ...failed(job, 'Previous work was interrupted; its provider outcome may be uncertain. Explicit retry is required.'), updatedAtMs: now } };
   }
+  // Older portfolios may have blocked a graphic concept during unnecessary human-frame selection.
+  // No image provider work occurred for a blocked slot, so it can proceed with its frozen plan.
+  if (job.snapshot) for (const slot of job.slots) {
+    const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
+    if (slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy.execution.subjectSource === 'non-human') {
+      slot.status = 'PENDING'; delete slot.error; delete slot.videoSelection;
+    }
+  }
   const slot = job.snapshot ? job.slots.find(slot => slot.status === 'PENDING') : undefined;
   if (!job.snapshot && job.planningError) return { status: 'RETRY_REQUIRED', job };
   if (job.snapshot && !slot) return { status: job.slots.every(slot => slot.status === 'SAVED') ? 'COMPLETE'
@@ -305,6 +313,8 @@ export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: stri
   const job = structuredClone(current);
   const slot = job.slots.find(slot => slot.index === lease.slotIndex);
   if (!job.snapshot || !slot || slot.creativeId !== creativeId || slot.status !== 'PENDING') throw new Error('Portfolio result does not match the reserved creative.');
+  const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
+  if (concept?.strategy.execution.subjectSource === 'non-human') delete slot.videoSelection;
   if (slot.videoSelection && (!slot.videoSelection.selection || slot.videoSelection.retryAuthorization
     || !parseGenerateVideoFrameSelection(slot.videoSelection.selection))) {
     throw new Error('Completed video frame selection is required before saving this creative.');

@@ -77,9 +77,9 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     : item.strategy.approvedHumanId ?? null;
   if (item.strategy.humanSourceId && !humanRecordId) throw new Error('Unsupported or invalid human source ID.');
   const human = humanRecordId ? await resolveApprovedHumanFrame(humanRecordId) : null;
-  const itemVideoFrames = human?.selected ?? videoFrameSet;
+  const itemVideoFrames = human?.selected ?? (item.strategy.execution.subjectSource === 'approved-tra-human' ? videoFrameSet : null);
   const itemImageSource = human ? null : providerImageSource;
-  const itemFrameSelection = human?.record.source ?? generatedVideoFrameSelection;
+  const itemFrameSelection = itemVideoFrames ? human?.record.source ?? generatedVideoFrameSelection : undefined;
   const itemRequestedSources = human ? [
     ...requestedSources.filter(source => source.mediaId !== human.record.source.sourceVideoMediaId),
     { role: 'TRA_VIDEO' as const, mediaId: human.record.source.sourceVideoMediaId, sha256: human.record.source.sourceVideoContentHash },

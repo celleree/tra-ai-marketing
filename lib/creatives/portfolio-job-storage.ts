@@ -56,7 +56,9 @@ export async function updateCreativePortfolio(
       || !isDeepStrictEqual(next.slots.map(slot => [slot.index, slot.creativeId]), current.job.slots.map(slot => [slot.index, slot.creativeId]))
       || (current.job.snapshot && !isDeepStrictEqual(next.snapshot, current.job.snapshot))
       || current.job.slots.some((slot, index) => (slot.status === 'SAVED' && next.slots[index].status !== 'SAVED')
-        || (slot.status === 'BLOCKED' && next.slots[index].status !== 'BLOCKED'))) {
+        || (slot.status === 'BLOCKED' && next.slots[index].status !== 'BLOCKED'
+          && !(slot.videoSelection && current.job.snapshot?.batchPlan.creatives[index]?.strategy.execution.subjectSource === 'non-human'
+            && next.slots[index].status === 'PENDING' && !next.slots[index].videoSelection)))) {
       throw new Error('Portfolio update may not replace its request, plan, identities or completed work.');
     }
     if (isDeepStrictEqual(next, current.job)) return current.job;
