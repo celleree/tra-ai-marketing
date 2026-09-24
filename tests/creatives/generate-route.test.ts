@@ -618,6 +618,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
   it('turns validated TRA video into approved frame pixels while keeping raw video out of the image provider', async () => {
     const videoId = mediaId('b');
     storedById[videoId] = video('b');
+    mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2),
+      creatives: [1, 2].map(index => plannedCreative(index, 'approved-tra-human')) });
 
     const response = await POST(
       generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }])
@@ -910,6 +912,13 @@ describe('layout blueprint and final image-provider boundaries', () => {
       [layoutId]: image('7'),
       [videoId]: video('8'),
     };
+    mocks.planCreativeBatch.mockImplementation(async ({ referenceCatalog = [] }: { referenceCatalog?: ReferencePlanningCandidate[] }) => ({
+      ...batchPlan(2), creatives: [1, 2].map(index => {
+        const concept = plannedCreative(index, 'approved-tra-human');
+        return { ...concept, strategy: { ...concept.strategy,
+          referenceSelection: resolveReferenceSelection({ angleSource: null, layoutSource: referenceCatalog[0]?.referenceId ?? null }, referenceCatalog) } };
+      }),
+    }));
 
     const response = await POST(
       generationRequest(

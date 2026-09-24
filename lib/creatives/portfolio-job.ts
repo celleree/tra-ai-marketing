@@ -107,7 +107,7 @@ export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date
   // No image provider work occurred for a blocked slot, so it can proceed with its frozen plan.
   if (job.snapshot) for (const slot of job.slots) {
     const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
-    if (slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy.execution.subjectSource === 'non-human') {
+    if (slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy?.execution?.subjectSource === 'non-human') {
       slot.status = 'PENDING'; delete slot.error; delete slot.videoSelection;
     }
   }
@@ -314,7 +314,7 @@ export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: stri
   const slot = job.slots.find(slot => slot.index === lease.slotIndex);
   if (!job.snapshot || !slot || slot.creativeId !== creativeId || slot.status !== 'PENDING') throw new Error('Portfolio result does not match the reserved creative.');
   const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
-  if (concept?.strategy.execution.subjectSource === 'non-human') delete slot.videoSelection;
+  if (concept?.strategy?.execution?.subjectSource === 'non-human') delete slot.videoSelection;
   if (slot.videoSelection && (!slot.videoSelection.selection || slot.videoSelection.retryAuthorization
     || !parseGenerateVideoFrameSelection(slot.videoSelection.selection))) {
     throw new Error('Completed video frame selection is required before saving this creative.');

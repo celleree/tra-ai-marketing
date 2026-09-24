@@ -24,7 +24,9 @@ const videoRequest = () => ({
 const ready = (video = true) => {
   const start = newCreativePortfolio(video ? videoRequest() : portfolioRequest(), 1_000);
   const claimed = claimCreativePortfolio(start, 2_000, 'plan').job;
-  return finishPortfolioPlan(claimed, 'plan', portfolioSnapshot(claimed), 3_000);
+  const snapshot = portfolioSnapshot(claimed);
+  if (video) snapshot.batchPlan.creatives.forEach(concept => { concept.strategy.execution.subjectSource = 'approved-tra-human'; });
+  return finishPortfolioPlan(claimed, 'plan', snapshot, 3_000);
 };
 const leased = () => claimCreativePortfolio(ready(), 4_000, 'slot').job;
 const selection: GenerateVideoFrameSelection = {
