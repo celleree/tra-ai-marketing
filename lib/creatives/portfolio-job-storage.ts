@@ -1,5 +1,7 @@
 import { preservesVideoDependencies } from '@/lib/creatives/portfolio-video-dependency';
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
+import { parseSubmissionId, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { newCreativePortfolio, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { isPortfolioId, parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -22,9 +24,24 @@ async function read(id: string, storage: VideoIntelligenceStorage) {
 export async function readCreativePortfolio(id: string, storage = getVideoIntelligenceStorage()) {
   return (await read(id, storage))?.job ?? null;
 }
-export async function createCreativePortfolio(request: ValidGenerateCreativeRequest, storage = getVideoIntelligenceStorage(), now = Date.now()) {
+export async function createCreativePortfolio(request: ValidGenerateCreativeRequest, storage = getVideoIntelligenceStorage(), now = Date.now(),
+  submission?: { operatorId: string; id: string }) {
   const job = newCreativePortfolio(request, now);
-  if (!await storage.write(key(job.id), bytes(job), null)) throw new Error('Creative portfolio could not be created.');
+  if (submission) {
+    const id = parseSubmissionId(submission.id);
+    if (!id || !submission.operatorId) throw new SubmissionConflictError('Invalid portfolio submission identity.');
+    job.id = 'portfolio_' + createHash('sha256').update(JSON.stringify([submission.operatorId, id])).digest('hex').slice(0, 32);
+    const existing = await readCreativePortfolio(job.id, storage);
+    if (existing) {
+      if (!isDeepStrictEqual(existing.request, request)) throw new SubmissionConflictError('Submission inputs changed. Start a new portfolio.');
+      return existing;
+    }
+  }
+  if (!await storage.write(key(job.id), bytes(job), null)) {
+    const existing = submission ? await readCreativePortfolio(job.id, storage) : null;
+    if (!existing || !isDeepStrictEqual(existing.request, request)) throw new SubmissionConflictError('Creative portfolio submission could not be reconciled.');
+    return existing;
+  }
   return job;
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
+import { createPortfolioSubmitter, requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
 import { portfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { portfolioRequest } from '../fixtures/creative-portfolio';
@@ -20,6 +20,24 @@ const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED'
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('resumable portfolio browser controller', () => {
+  it('preserves a submission key across transport retry and changes it only for a new action', async () => {
+    const value = initial(); const fetcher = vi.fn().mockRejectedValueOnce(new Error('Lost response'))
+      .mockImplementation(async () => Response.json(value));
+    vi.stubGlobal('fetch', fetcher);
+    const submit = createPortfolioSubmitter();
+    await expect(submit(portfolioRequest())).rejects.toThrow('Lost response');
+    await submit(portfolioRequest());
+    await submit(portfolioRequest());
+    const keys = fetcher.mock.calls.map(([, options]) => options.headers['Idempotency-Key']);
+    expect(keys[0]).toBe(keys[1]); expect(keys[2]).not.toBe(keys[1]);
+  });
+  it('allocates a new submission when inputs change after a failed delivery', async () => {
+    const fetcher = vi.fn().mockRejectedValue(new Error('Lost response')); vi.stubGlobal('fetch', fetcher);
+    const submit = createPortfolioSubmitter();
+    await expect(submit(portfolioRequest())).rejects.toThrow();
+    await expect(submit({ ...portfolioRequest(), context: 'A different deliberate request' })).rejects.toThrow();
+    expect(fetcher.mock.calls[0][1].headers['Idempotency-Key']).not.toBe(fetcher.mock.calls[1][1].headers['Idempotency-Key']);
+  });
   it('parses bounded transient BUSY Retry-After timing without treating 429 as BUSY', async () => {
     const value = initial();
     const fetchMock = vi.fn()

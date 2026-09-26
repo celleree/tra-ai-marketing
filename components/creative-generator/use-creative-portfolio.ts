@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { GenerateCreativeRequest } from '@/lib/creatives/generate-request';
-import { requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
+import { createPortfolioSubmitter, requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
 
 const LAST_PORTFOLIO = 'tra-creative-portfolio-v1';
 export function useCreativePortfolio() {
   const [response, setResponse] = useState<PortfolioResponse | null>(null);
   const [running, setRunning] = useState(false), [stopped, setStopped] = useState(false), [error, setError] = useState('');
   const current = useRef<PortfolioResponse | null>(null), busy = useRef(false), stopRequested = useRef(false), mounted = useRef(true);
+  const submit = useRef(createPortfolioSubmitter());
   useEffect(() => { mounted.current = true; stopRequested.current = false; return () => { mounted.current = false; stopRequested.current = true; }; }, []);
   const update = (value: PortfolioResponse) => {
     current.current = value;
@@ -32,7 +33,7 @@ export function useCreativePortfolio() {
       if (mounted.current) setRunning(false);
     }
   };
-  const start = (request: GenerateCreativeRequest) => execute(() => requestPortfolio({ action: 'create', request }), true);
+  const start = (request: GenerateCreativeRequest) => execute(() => submit.current(request), true);
   const resume = () => {
     const id = current.current?.job.id;
     if (id) return execute(() => requestPortfolio({ action: 'load', id }), true);

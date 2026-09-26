@@ -2,9 +2,10 @@ import type { GenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { parseCreative } from '@/lib/creatives/parse-generation-response';
 import { parsePortfolioProgress, type PortfolioProgress } from '@/lib/creatives/portfolio-progress';
+import { SUBMISSION_HEADER } from '@/lib/creatives/submission-id';
 
 export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number };
-type Command = { action: 'create'; request: GenerateCreativeRequest } | { action: 'load' | 'advance'; id: string }
+type Command = { action: 'create'; request: GenerateCreativeRequest; submissionId: string } | { action: 'load' | 'advance'; id: string }
   | { action: 'retry'; id: string; slotIndex: number | null };
 const endpoint = '/api/creatives/portfolios';
 const POLL_DELAY_MS = 2000;
@@ -15,10 +16,25 @@ const parseBusyRetryAfterMs = (value: string | null) => {
   return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, MAX_BUSY_RETRY_AFTER_MS) : POLL_DELAY_MS;
 };
 
+/** Retain an unresolved browser submission across failed deliveries. */
+export function createPortfolioSubmitter() {
+  let pending: { command: Extract<Command, { action: 'create' }>; signature: string } | null = null;
+  return async (request: GenerateCreativeRequest) => {
+    const signature = JSON.stringify(request);
+    if (!pending || pending.signature !== signature) pending = { signature,
+      command: { action: 'create', request: structuredClone(request), submissionId: crypto.randomUUID() } };
+    const current = pending;
+    const response = await requestPortfolio(current.command);
+    if (pending === current) pending = null;
+    return response;
+  };
+}
+
 export async function requestPortfolio(command: Command): Promise<PortfolioResponse> {
   const response = await fetch(command.action === 'load' ? endpoint + '?id=' + encodeURIComponent(command.id) : endpoint, {
     method: command.action === 'load' ? 'GET' : command.action === 'create' ? 'POST' : 'PATCH', cache: 'no-store',
-    ...(command.action === 'load' ? {} : { headers: { 'Content-Type': 'application/json' },
+    ...(command.action === 'load' ? {} : { headers: { 'Content-Type': 'application/json',
+      ...(command.action === 'create' ? { [SUBMISSION_HEADER]: command.submissionId } : {}) },
       body: JSON.stringify(command.action === 'create' ? command.request : command) }),
   });
   const value = await response.json().catch(() => { throw new Error('Portfolio response was interrupted. Reload saved progress before resuming.'); });
