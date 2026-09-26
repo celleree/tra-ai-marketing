@@ -15,6 +15,7 @@ export interface VideoSelectionContext {
   library: VideoFrameLibrary;
   manifest: VideoIntelligencePreparationManifest | null;
   representativeImages: VideoSelectionRepresentativeImage[] | null;
+  librarySha256?: string;
 }
 
 export interface SavedVideoSelectionDependency {
@@ -48,7 +49,7 @@ export const loadVideoSelectionContext = async (source: HydratedTraVideoSource):
         expectedSourceVideoMediaId: identity.sourceVideoMediaId, expectedSourceVideoContentHash: identity.sourceVideoContentHash,
         expectedAnalyzerFingerprintSha256: identity.analyzerFingerprint.sha256 }),
     ]);
-    return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives) };
+    return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives), librarySha256: stored.job.result!.sha256 };
   }
   if (process.env.NODE_ENV === 'production') return null;
   const library = await loadVideoFrameLibrary(identity.sourceVideoMediaId, identity.sourceVideoContentHash);
@@ -79,10 +80,11 @@ export const loadSavedVideoSelectionContext = async (
       expectedSourceVideoMediaId: identity.sourceVideoMediaId, expectedSourceVideoContentHash: identity.sourceVideoContentHash,
       expectedAnalyzerFingerprintSha256: identity.analyzerFingerprint.sha256 }),
   ]);
-  return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives) };
+  return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives), librarySha256: artifact.sha256 };
 };
 
-export const extractVideoSelectionFrames = (source: HydratedTraVideoSource, context: VideoSelectionContext, frameIds: readonly string[]) =>
-  context.manifest
+export const extractVideoSelectionFrames = async (source: HydratedTraVideoSource, context: VideoSelectionContext, frameIds: readonly string[]) => {
+  return context.manifest
     ? getApprovedPreparedSelectedTraVideoFrames(source, context.library, frameIds, context.manifest)
     : getApprovedSelectedTraVideoFrames(source, context.library, frameIds);
+};

@@ -24,7 +24,9 @@ const videoRequest = () => ({
 const ready = (video = true) => {
   const start = newCreativePortfolio(video ? videoRequest() : portfolioRequest(), 1_000);
   const claimed = claimCreativePortfolio(start, 2_000, 'plan').job;
-  return finishPortfolioPlan(claimed, 'plan', portfolioSnapshot(claimed), 3_000);
+  const snapshot = portfolioSnapshot(claimed);
+  if (video) snapshot.batchPlan.creatives.forEach(concept => { concept.strategy.execution.subjectSource = 'approved-tra-human'; });
+  return finishPortfolioPlan(claimed, 'plan', snapshot, 3_000);
 };
 const leased = () => claimCreativePortfolio(ready(), 4_000, 'slot').job;
 const selection: GenerateVideoFrameSelection = {
@@ -65,6 +67,11 @@ describe('portfolio video selection persistence', () => {
     expect(mixed.status).toBe('WORK'); expect(mixed.job.lease?.slotIndex).toBe(2);
     const terminal = structuredClone(blocked); terminal.slots[1].status = 'SAVED';
     expect(claimCreativePortfolio(terminal, 4_400).status).toBe('BLOCKED');
+    const historical = structuredClone(blocked);
+    if (historical.slots[0].videoSelection?.version === 2) {
+      historical.slots[0].videoSelection.selectionPolicy = 'human-frame-visual-quality-v1';
+    }
+    expect(parse(historical)).toEqual(historical);
   });
 
   it('freezes visual policy and same-portfolio reuse inputs across reload and explicit retry', () => {

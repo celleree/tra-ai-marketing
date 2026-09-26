@@ -71,10 +71,11 @@ describe('creative source workload limit', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('admits the exact boundary to quota enforcement without live provider work', async () => {
-    expect((await POST(request(sources(MAX_CREATIVE_SOURCE_ASSETS)))).status).toBe(429);
-    expect(mocks.requireOperatorQuota).toHaveBeenCalledExactlyOnceWith('operator', 'CREATIVE_GENERATION', 2);
-    expect(mocks.getMediaStorage).not.toHaveBeenCalled();
+  it('admits the exact boundary to local hydration without live provider work', async () => {
+    mocks.getMediaStorage.mockReturnValue({ readMediaById: vi.fn().mockResolvedValue(null) });
+    expect((await POST(request(sources(MAX_CREATIVE_SOURCE_ASSETS)))).status).toBe(404);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+    expect(mocks.getMediaStorage).toHaveBeenCalledOnce();
     expect(fetch).not.toHaveBeenCalled();
   });
 

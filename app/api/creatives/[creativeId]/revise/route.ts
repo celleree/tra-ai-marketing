@@ -15,6 +15,7 @@ import { validateCreativeRevisionRequest } from '@/lib/creatives/revision-reques
 import { CreativeRevisionHydrationError, hydrateSavedCreativeRevisionContext } from '@/lib/creatives/revision-source-hydration';
 import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import { requireActiveHumanSelection } from '@/lib/video/approved-human-service';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 import { isSafeCreativeId, listCreatives, saveCreativeBatch } from '@/lib/creatives/storage';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import type { CreativeRecord } from '@/lib/creatives/generated';
@@ -36,8 +37,6 @@ export async function POST(request: Request, context: { params: Promise<{ creati
   }
   const parsed = validateCreativeRevisionRequest(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  const quotaDenied = await requireOperatorQuota(access.userId, 'CREATIVE_REVISION', 1);
-  if (quotaDenied) return quotaDenied;
   try {
     const parent = (await listCreatives()).find(record => record.id === parentId);
     if (!parent) return NextResponse.json({ error: 'Saved creative not found.' }, { status: 404 });
@@ -50,6 +49,13 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       : undefined;
     const storage = getMediaStorage();
     const sources = await hydrateSavedCreativeRevisionContext(parent, storage);
+    if (sources.originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES') {
+      try { await prepareProviderVideoFrames(sources.originalApprovedSource.frames); }
+      catch (error) { throw new CreativeRevisionHydrationError(
+        error instanceof Error ? error.message : 'Saved TRA video frames failed local validation.', 409); }
+    }
+    const quotaDenied = await requireOperatorQuota(access.userId, 'CREATIVE_REVISION', 1);
+    if (quotaDenied) return quotaDenied;
     const { planning, provenance } = sources.parent;
     const revision = parsed.data;
     const placement = revision.operation === 'PLACEMENT' ? revision.placement : parent.placement!;
@@ -112,6 +118,9 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       : buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent });
     const removedLibraryHuman = !!(planning.strategy.humanSourceId || planning.strategy.approvedHumanId)
       && concept.strategy.execution.subjectSource === 'non-human';
+    const removedVideoHuman = concept.strategy.execution.subjectSource === 'non-human'
+      && sources.originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES';
+    const removedHumanSource = removedLibraryHuman || removedVideoHuman;
     const logoPlacement = sources.logoOverlay
       ? placement === parent.placement ? parentLogoPlacement!
         : await resolveCreativeBrandLogoPlacementContext(sources.logoOverlay.buffer, placement)
@@ -123,7 +132,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       ? resolveCreativeLogoGeometry(parent.placement!, parentLogoAnchor,
           parentLogoPlacement.sourceWidth, parentLogoPlacement.sourceHeight)
       : undefined;
-    const sourceSelection = removedLibraryHuman ? { ...sources, originalApprovedSource: null } : sources;
+    const sourceSelection = removedHumanSource ? { ...sources, originalApprovedSource: null } : sources;
     const revisionSources = parentLogoGeometry
       ? { ...sourceSelection, canvas: { ...sourceSelection.canvas,
           buffer: await eraseCreativeBrandLogo(sourceSelection.canvas.buffer, parentLogoGeometry), mimeType: 'image/png' as const } }
@@ -156,12 +165,12 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}) },
       generationProvenance: {
         ...provenance, imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
-        ...(removedLibraryHuman ? { attachedSource: null } : {}),
+        ...(removedHumanSource ? { attachedSource: null } : {}),
         revision: { parentCreativeId: parentId, canvasMediaId: sources.canvas.mediaId, canvasSha256: sources.canvas.sha256, ...(instruction ? { instruction } : {}) },
       },
       ...((concept.strategy.referenceSelection ? concept.strategy.referenceSelection.layoutSource : parent.referenceImageId)
         ? { referenceImageId: concept.strategy.referenceSelection?.layoutSource ?? parent.referenceImageId } : {}),
-      ...(!removedLibraryHuman && parent.videoFrameSelection ? { videoFrameSelection: parent.videoFrameSelection } : {}),
+      ...(!removedHumanSource && parent.videoFrameSelection ? { videoFrameSelection: parent.videoFrameSelection } : {}),
     };
     const [saved] = await saveCreativeBatch([record]);
     return NextResponse.json({ creative: saved }, { status: 201 });

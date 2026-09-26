@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import sharp from 'sharp';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
@@ -133,9 +135,10 @@ const mediaId = (hex: string) => `media_${hex.repeat(32)}`;
 const contentHash = (buffer: Buffer) =>
   createHash('sha256').update(buffer).digest('hex');
 const selectionFor = (sourceVideoContentHash: string) => ({
-  libraryId: LIBRARY_ID,
+  version: 2 as const, libraryId: LIBRARY_ID,
   sourceVideoContentHash,
   frameIds: [LIBRARY_FRAME_ID],
+  sourceOverlays: [{ version: 2 as const, status: 'CLEAN' as const }],
 });
 
 const image = (hex: string): StoredCreativeSourceMediaFile => ({
@@ -498,7 +501,9 @@ beforeEach(() => {
   );
   mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(imageResultFor('TRA_REFERENCE_GENERATION'));
   mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(
-    async ({ frames }) => ({ ...imageResultFor('TRA_VIDEO_FRAME_GENERATION'), providerFrames: [frames.at(-1)] })
+    async ({ frames }) => { const frame = frames.at(-1); return { ...imageResultFor('TRA_VIDEO_FRAME_GENERATION'),
+      providerFrames: [{ ...frame, providerBuffer: frame.buffer, providerPngSha256: frame.frameSha256, crop: null,
+        sourceOverlay: frame.sourceOverlay ?? { version: 2, status: 'CLEAN' } }] }; }
   );
   mocks.loadVideoSelectionContext.mockResolvedValue(null);
   mocks.getApprovedTraVideoFrames.mockImplementation(async (source) => ({
@@ -519,6 +524,7 @@ beforeEach(() => {
         sourceVideoFileName: source.media.fileName,
         sourceVideoContentHash: contentHash(source.stored.buffer),
         approvedHumanSource: true,
+        sourceOverlay: { version: 2, status: 'CLEAN' },
         cacheKey: `derived/video-frames/${source.media.id}/${contentHash(source.stored.buffer)}/frame-${String(frameIndex).padStart(3, '0')}.png`,
       })
     ),
@@ -618,6 +624,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
   it('turns validated TRA video into approved frame pixels while keeping raw video out of the image provider', async () => {
     const videoId = mediaId('b');
     storedById[videoId] = video('b');
+    mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2),
+      creatives: [1, 2].map(index => plannedCreative(index, 'approved-tra-human')) });
 
     const response = await POST(
       generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }])
@@ -705,6 +713,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
         sourceVideoFileName: storedById[videoId].fileName,
         sourceVideoContentHash,
         approvedHumanSource: true,
+        sourceOverlay: { version: 2, status: 'CLEAN' },
         cacheKey: `derived/video-frames/${videoId}/${sourceVideoContentHash}/frame-000.png`,
       },
     ];
@@ -773,7 +782,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     );
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     for (const [call] of mocks.generateApprovedTraVideoFrameCreativeImage.mock.calls) {
-      expect(call.frames).toBe(selectedFrames);
+      expect(call.frames).toEqual(selectedFrames);
     }
     for (const { data } of events.filter(({ event }) => event === 'creative')) {
       expect(data.creative).toMatchObject({
@@ -860,6 +869,85 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it.each(['missing assessment', 'unsafe assessment', 'crop mismatch', 'provider hash mismatch'] as const)(
+    'rejects locally invalid explicit TRA video %s before either quota or planner', async problem => {
+      const videoId = mediaId('9'); storedById[videoId] = video('9');
+      const hash = contentHash(storedById[videoId].buffer);
+      mocks.loadVideoSelectionContext.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: null });
+      const frame = { frameIndex: 0, timestampMs: 250, mimeType: 'image/png', buffer: PNG,
+        frameSha256: contentHash(PNG), byteLength: PNG.length, sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: videoId, sourceVideoFileName: storedById[videoId].fileName,
+        sourceVideoContentHash: hash, approvedHumanSource: true, cacheKey: null,
+        ...(problem === 'missing assessment' ? {} : { sourceOverlay: problem === 'unsafe assessment'
+          ? { version: 2, status: 'UNSAFE' } : { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM',
+            removePermille: 400, overlayDepthPermille: 390 } }),
+        ...(problem === 'crop mismatch' ? { expectedCrop: { left: 0, top: 0, width: 1, height: 1 } } : {}),
+        ...(problem === 'provider hash mismatch' ? { expectedProviderPngSha256: '0'.repeat(64) } : {}),
+      };
+      mocks.extractVideoSelectionFrames.mockImplementation(async source => ({ source, sourceVideoContentHash: hash,
+        frames: [frame], selectionProvenance: [{ frameIndex: 0, libraryFrameId: LIBRARY_FRAME_ID,
+          timestampMs: 250, approvedPngSha256: contentHash(PNG) }] }));
+      const assessed = selectionFor(hash);
+      const requestSelection = problem === 'missing assessment'
+        ? { libraryId: assessed.libraryId, sourceVideoContentHash: hash, frameIds: assessed.frameIds }
+        : problem === 'unsafe assessment' ? { ...assessed, sourceOverlays: [{ version: 2, status: 'UNSAFE' }] }
+          : assessed;
+      const response = await POST(generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2, requestSelection));
+      expect(response.status).toBe(problem === 'unsafe assessment' ? 400 : 409);
+      expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+      expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
+      expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+  it('attaches the pixel-only derivative of an explicitly assessed v2 edge crop', async () => {
+    const videoId = mediaId('9'); storedById[videoId] = video('9');
+    const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
+    const original = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#416589' } }).png().toBuffer();
+    const expected = await sharp(original).extract({ left: 0, top: 0, width: 100, height: 70 }).png().toBuffer();
+    const frame = { frameIndex: 0, timestampMs: 250, mimeType: 'image/png', buffer: original,
+      frameSha256: contentHash(original), byteLength: original.length, sourceRole: 'TRA_VIDEO',
+      sourceVideoMediaId: videoId, sourceVideoFileName: storedById[videoId].fileName,
+      sourceVideoContentHash, approvedHumanSource: true, cacheKey: null,
+      expectedCrop: { left: 0, top: 0, width: 100, height: 70 }, expectedProviderPngSha256: contentHash(expected) };
+    mocks.loadVideoSelectionContext.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: null });
+    mocks.extractVideoSelectionFrames.mockImplementation(async source => ({ source, sourceVideoContentHash,
+      frames: [frame], selectionProvenance: [{ frameIndex: 0, libraryFrameId: LIBRARY_FRAME_ID,
+        candidateFrameSha256: 'a'.repeat(64), timestampMs: 250, approvedPngSha256: contentHash(original) }] }));
+    mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2), creatives: [plannedCreative(1, 'approved-tra-human'), plannedCreative(2)] });
+    const attachments: Buffer[] = [];
+    mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(async ({ frames }) => {
+      const providerFrames = await prepareProviderVideoFrames(frames);
+      attachments.push(providerFrames[0].providerBuffer);
+      return { ...imageResultFor('TRA_VIDEO_FRAME_GENERATION'), providerFrames };
+    });
+    const response = await POST(generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2,
+      { ...selectionFor(sourceVideoContentHash), sourceOverlays: [{ version: 2, status: 'EDGE_CROP',
+        edge: 'BOTTOM', removePermille: 300, overlayDepthPermille: 280 }] }));
+    expect(response.status).toBe(200);
+    expect((await readStreamEvents(response)).at(-1)?.data.successfulCount).toBe(2);
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toEqual(expected);
+    expect((await sharp(attachments[0]).metadata()).height).toBe(70);
+  });
+
+  it('rejects a v2 decision whose fresh extracted frame order no longer matches before quota', async () => {
+    const videoId = mediaId('9'); storedById[videoId] = video('9');
+    const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
+    mocks.loadVideoSelectionContext.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: null });
+    mocks.extractVideoSelectionFrames.mockImplementation(async source => ({ source, sourceVideoContentHash,
+      frames: [{ frameIndex: 0, timestampMs: 250, mimeType: 'image/png', buffer: PNG,
+        frameSha256: contentHash(PNG), byteLength: PNG.length, sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: videoId, sourceVideoFileName: storedById[videoId].fileName,
+        sourceVideoContentHash, approvedHumanSource: true, cacheKey: null }],
+      selectionProvenance: [{ frameIndex: 0, libraryFrameId: `video-frame:${'f'.repeat(64)}` }] }));
+    const response = await POST(generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2, selectionFor(sourceVideoContentHash)));
+    expect(response.status).toBe(409);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
+  });
+
   it('rejects explicit frames with TRA images before hydration or providers', async () => {
     const response = await POST(generationRequest([
       { mediaId: mediaId('9'), role: 'TRA_VIDEO' }, { mediaId: mediaId('8'), role: 'LAYOUT_REFERENCE' },
@@ -910,6 +998,13 @@ describe('layout blueprint and final image-provider boundaries', () => {
       [layoutId]: image('7'),
       [videoId]: video('8'),
     };
+    mocks.planCreativeBatch.mockImplementation(async ({ referenceCatalog = [] }: { referenceCatalog?: ReferencePlanningCandidate[] }) => ({
+      ...batchPlan(2), creatives: [1, 2].map(index => {
+        const concept = plannedCreative(index, 'approved-tra-human');
+        return { ...concept, strategy: { ...concept.strategy,
+          referenceSelection: resolveReferenceSelection({ angleSource: null, layoutSource: referenceCatalog[0]?.referenceId ?? null }, referenceCatalog) } };
+      }),
+    }));
 
     const response = await POST(
       generationRequest(
@@ -1386,12 +1481,14 @@ describe('progressive creative delivery', () => {
   it('routes only a selected library human and saves its stable ID and source provenance', async () => {
     const humanId = `human_${'a'.repeat(64)}`; const traId = mediaId('4'); const videoId = mediaId('3');
     storedById[traId] = image('4');
+    const curatedVideo = video('3'); const curatedHash = contentHash(curatedVideo.buffer);
     const frame = { frameIndex:0,timestampMs:1000,mimeType:'image/png',buffer:PNG,frameSha256:contentHash(PNG),byteLength:PNG.length,
-      sourceRole:'TRA_VIDEO',sourceVideoMediaId:videoId,sourceVideoFileName:`${videoId}.mp4`,sourceVideoContentHash:'b'.repeat(64),approvedHumanSource:true,cacheKey:null };
-    const source = { libraryId:`video-library:${'c'.repeat(64)}`,sourceVideoMediaId:videoId,sourceVideoContentHash:'b'.repeat(64),
+      sourceRole:'TRA_VIDEO',sourceVideoMediaId:videoId,sourceVideoFileName:`${videoId}.mp4`,sourceVideoContentHash:curatedHash,approvedHumanSource:true,cacheKey:null,
+      sourceOverlay:{version:2,status:'CLEAN'} };
+    const source = { libraryId:`video-library:${'c'.repeat(64)}`,sourceVideoMediaId:videoId,sourceVideoContentHash:curatedHash,
       frames:[{frameIndex:0,libraryFrameId:`video-frame:${'d'.repeat(64)}`,candidateFrameSha256:'e'.repeat(64),timestampMs:1000,approvedPngSha256:contentHash(PNG)}] };
     mocks.humanOptions.mockResolvedValue([{id:humanId,sourceName:'TRA video',description:'Approved explanatory presenter'}]);
-    mocks.resolveHuman.mockResolvedValue({record:{id:humanId,source},selected:{frames:[frame]}});
+    mocks.resolveHuman.mockResolvedValue({record:{id:humanId,source},selected:{source:{role:'TRA_VIDEO',media:{id:videoId,fileName:`${videoId}.mp4`},stored:curatedVideo},sourceVideoContentHash:curatedHash,frames:[frame]}});
     mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2), creatives:batchPlan(2).creatives.map((item,index)=>index===0
       ? {...item,strategy:{...item.strategy,approvedHumanId:humanId,execution:{...item.strategy.execution,subjectSource:'approved-tra-human'}}} : item) });
     const events = await readStreamEvents(await POST(generationRequest([{mediaId:traId,role:'TRA_REFERENCE'}])));
@@ -1403,14 +1500,35 @@ describe('progressive creative delivery', () => {
     expect(saved.planning.strategy.approvedHumanId).toBe(humanId); expect(saved.videoFrameSelection).toEqual(source);
     expect(parseCreativePlanning(saved.planning)).not.toBeNull();
     expect(parseCreativeGenerationProvenance(saved.generationProvenance)).toMatchObject({
-      requestedSources:expect.arrayContaining([{role:'TRA_VIDEO',mediaId:videoId,sha256:'b'.repeat(64)}]),
-      attachedSource:{type:'TRA_VIDEO_FRAMES',mediaId:videoId,sourceSha256:'b'.repeat(64)},
+      requestedSources:expect.arrayContaining([{role:'TRA_VIDEO',mediaId:videoId,sha256:curatedHash}]),
+      attachedSource:{type:'TRA_VIDEO_FRAMES',mediaId:videoId,sourceSha256:curatedHash},
     });
     expect(events.at(-1)?.data.successfulCount).toBe(2);
     mocks.resolveHuman.mockRejectedValue(new Error('Human inactive'));
-    const failed = await readStreamEvents(await POST(generationRequest([{mediaId:traId,role:'TRA_REFERENCE'}])));
-    expect(failed.at(-1)?.data).toMatchObject({successfulCount:1,failedIndexes:[1]});
+    const failed = await POST(generationRequest([{mediaId:traId,role:'TRA_REFERENCE'}]));
+    expect(failed.status).toBe(409);
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(1);
+  });
+  it('rejects a curated unsafe human before legacy generation quota and image work', async () => {
+    const humanId = `human_${'a'.repeat(64)}`;
+    const videoId = mediaId('3'); const curatedVideo = video('3'); const hash = contentHash(curatedVideo.buffer);
+    mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2), creatives: batchPlan(2).creatives.map((item, index) => index
+      ? item : { ...item, strategy: { ...item.strategy, approvedHumanId: humanId,
+        execution: { ...item.strategy.execution, subjectSource: 'approved-tra-human' } } }) });
+    mocks.resolveHuman.mockResolvedValue({ record: { id: humanId }, selected: {
+      source: { role: 'TRA_VIDEO', media: { id: videoId, fileName: `${videoId}.mp4` }, stored: curatedVideo },
+      sourceVideoContentHash: hash, frames: [{ frameIndex: 0, timestampMs: 1000, mimeType: 'image/png',
+        buffer: PNG, frameSha256: contentHash(PNG), byteLength: PNG.length, sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: videoId, sourceVideoFileName: `${videoId}.mp4`, sourceVideoContentHash: hash,
+        approvedHumanSource: true, cacheKey: null, sourceOverlay: { version: 2, status: 'UNSAFE' } }],
+    } });
+    const response = await POST(generationRequest([]));
+    expect(response.status).toBe(409);
+    expect(mocks.requireOperatorQuota.mock.calls.map(([, group]) => group)).toEqual(['CREATIVE_PLANNING']);
+    expect(mocks.planCreativeBatch).toHaveBeenCalledOnce();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
+    expect(saveImage).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
   it('streams exact prompt-only image provenance without fabricated sources', async () => {
     const response = await POST(generationRequest([], undefined, 2));
@@ -1607,21 +1725,21 @@ describe('progressive creative delivery', () => {
   });
 
   it('shares the planning quota with resumable portfolios before legacy provider work', async () => {
-    mocks.requireOperatorQuota.mockResolvedValueOnce(null).mockResolvedValueOnce(new Response('{}', { status: 429 }));
+    mocks.requireOperatorQuota.mockResolvedValueOnce(new Response('{}', { status: 429 }));
     expect((await POST(generationRequest([], undefined, 2))).status).toBe(429);
-    expect(mocks.requireOperatorQuota).toHaveBeenNthCalledWith(2, 'operator', 'CREATIVE_PLANNING', 2);
+    expect(mocks.requireOperatorQuota).toHaveBeenNthCalledWith(1, 'operator', 'CREATIVE_PLANNING', 2);
     expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
-  it.each([429, 503])('rejects quota admission %i before hydration, planning, provider, or saving', async (status) => {
+  it.each([429, 503])('rejects quota admission %i before planning, provider, or saving', async (status) => {
     mocks.requireOperatorQuota.mockResolvedValue(new Response(JSON.stringify({ error: 'Quota unavailable.' }), {
       status, headers: { 'Cache-Control': 'private, no-store', ...(status === 429 ? { 'Retry-After': '60' } : {}) },
     }));
     const response = await POST(generationRequest([], undefined, 2));
     expect(response.status).toBe(status);
     expect(response.headers.get('Retry-After')).toBe(status === 429 ? '60' : null);
-    expect(mocks.requireOperatorQuota).toHaveBeenCalledWith('operator', 'CREATIVE_GENERATION', 2);
-    expect(mocks.getMediaStorage).not.toHaveBeenCalled();
+    expect(mocks.requireOperatorQuota).toHaveBeenCalledWith('operator', 'CREATIVE_PLANNING', 2);
+    expect(mocks.getMediaStorage).toHaveBeenCalledOnce();
     expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();

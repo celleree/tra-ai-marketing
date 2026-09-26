@@ -23,6 +23,7 @@ const makeFrames = (count = 6): ApprovedTraVideoFrame[] => Array.from({ length: 
   sourceVideoContentHash: HASH,
   approvedHumanSource: true,
   cacheKey: `derived/video-frames/${MEDIA_ID}/${HASH}/frame-${String(index).padStart(3, '0')}.png`,
+  sourceOverlay: { version: 2, status: 'CLEAN' },
 }));
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
@@ -54,7 +55,7 @@ describe('approved TRA video-frame provider boundary', () => {
     });
     const images = (fetchMock.mock.calls[0][1].body as FormData).getAll('image[]') as File[];
     expect(images.map(file => file.type)).toEqual(['image/png', 'image/jpeg']);
-    expect(result.providerFrames).toEqual(makeFrames(1));
+    expect(result.providerFrames).toMatchObject(makeFrames(1));
     expect(result.prompt).toContain('NOT a TRA human source');
   });
 

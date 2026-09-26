@@ -10,6 +10,7 @@ vi.mock('@/lib/video/preview-availability', () => ({ assertDurableVideoIntellige
 vi.mock('@/lib/video/selection-context', () => ({ loadVideoSelectionContext: mocks.context, extractVideoSelectionFrames: mocks.extract }));
 import { approveHumanFrame, changeApprovedHumanActive, readApprovedHumanPreview, resolveApprovedHumanFrame, requireActiveHumanSelection } from '@/lib/video/approved-human-service';
 import { listApprovedHumanFrames } from '@/lib/video/approved-human-store';
+import { approvedHumanId } from '@/lib/video/approved-human-store';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const pngHash = createHash('sha256').update(png).digest('hex');
@@ -17,7 +18,8 @@ const mediaId = `media_${'a'.repeat(32)}`;
 const libraryId = `video-library:${'b'.repeat(64)}`;
 const frameId = `video-frame:${'c'.repeat(64)}`;
 const sourceHash = 'd'.repeat(64);
-const input = { mediaId, selection: { libraryId, sourceVideoContentHash: sourceHash, frameIds: [frameId] },
+const input = { mediaId, selection: { version: 2 as const, libraryId, sourceVideoContentHash: sourceHash,
+  frameIds: [frameId], sourceOverlays: [{ version: 2 as const, status: 'CLEAN' as const }] },
   previewPngSha256: pngHash, description: 'Presenter with room for copy; identity only, no claims.' };
 const provenance = { frameIndex: 0, libraryFrameId: frameId, candidateFrameSha256: 'e'.repeat(64), timestampMs: 1000, approvedPngSha256: pngHash };
 class MemoryStorage implements VideoIntelligenceStorage {
@@ -33,10 +35,28 @@ beforeEach(() => {
   const source = { role: 'TRA_VIDEO', media: { id: mediaId, fileName: 'TRA presenter.mp4' }, stored: {} };
   mocks.hydrate.mockResolvedValue([source]); mocks.hash.mockReturnValue(sourceHash);
   mocks.context.mockResolvedValue({ library: { id: libraryId }, manifest: {} });
-  mocks.extract.mockResolvedValue({ source, frames: [{ buffer: png, frameSha256: pngHash }], selectionProvenance: [provenance] });
+  mocks.extract.mockResolvedValue({ source, frames: [{ frameIndex: 0, timestampMs: 1000,
+    buffer: png, frameSha256: pngHash, byteLength: png.length,
+    mimeType: 'image/png', sourceRole: 'TRA_VIDEO', sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash,
+    approvedHumanSource: true }], selectionProvenance: [provenance] });
 });
 
 describe('approved-human source boundary', () => {
+  it('keeps historical v1 readable but never provider eligible', async () => {
+    const storage = new MemoryStorage();
+    const { source } = await approveHumanFrame(input, 'operator', storage);
+    const legacy = { version: 1, id: approvedHumanId(source), source, sourceName: 'Historic presenter',
+      description: 'Historic approval', extractionVersion: 'selected-png-v1', approvedBy: 'operator',
+      approvedAt: '2026-09-10T00:00:00.000Z', updatedAt: '2026-09-10T00:00:00.000Z', active: true };
+    const stored = storage.data.get('approved-humans/v1/index.json')!;
+    storage.data.set('approved-humans/v1/index.json', { bytes: Buffer.from(JSON.stringify({ version: 1, records: [legacy] })), etag: stored.etag });
+    storage.data.set(`approved-humans/v1/previews/${legacy.id}.png`, { bytes: png, etag: '1' });
+    expect((await listApprovedHumanFrames(storage))[0]).toMatchObject({ version: 1, id: legacy.id });
+    expect(await readApprovedHumanPreview(legacy.id, storage)).toEqual(png);
+    await expect(resolveApprovedHumanFrame(legacy.id, storage)).rejects.toThrow('unassessed');
+    await expect(requireActiveHumanSelection(legacy.id, source, storage)).rejects.toThrow('unassessed');
+    expect(mocks.extract).toHaveBeenCalledTimes(1);
+  });
   it('requires current approval and exact saved selection for revision reuse', async () => {
     const storage = new MemoryStorage(); const record = await approveHumanFrame(input, 'operator', storage);
     await expect(requireActiveHumanSelection(record.id, record.source, storage)).resolves.toEqual(record);
@@ -86,7 +106,7 @@ describe('approved-human source boundary', () => {
     const storage = new MemoryStorage(); const record = await approveHumanFrame(input, 'operator', storage);
     const selected = await mocks.extract();
     mocks.extract.mockResolvedValue({ ...selected, selectionProvenance: [{ ...provenance, timestampMs: 2000 }] });
-    await expect(resolveApprovedHumanFrame(record.id, storage)).rejects.toThrow('provenance changed');
+    await expect(resolveApprovedHumanFrame(record.id, storage)).rejects.toThrow('approved preview');
   });
   it('keeps a corrupted cached preview out of curation without making it a generation source', async () => {
     const storage = new MemoryStorage(); const record = await approveHumanFrame(input, 'operator', storage);

@@ -47,6 +47,9 @@ export const POST = (request: Request) => withOperator(async userId => {
     || typeof body.description !== 'string' || !body.description.trim() || body.description.length > 500) {
     return json({ error: 'Preview one TRA frame and provide brief approval notes.' }, 400);
   }
+  if (selection.version !== 2 || selection.sourceOverlays?.length !== 1) {
+    return json({ error: 'This frame is unassessed. Run visual source assessment before approval.' }, 409);
+  }
   const denied = await requireOperatorQuota(userId, 'VIDEO_FRAME_PREVIEW', 1);
   if (denied) return denied;
   return json({ record: await approveHumanFrame({ mediaId: body.mediaId, selection,

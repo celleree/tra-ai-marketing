@@ -1,7 +1,11 @@
+import { parseSourceOverlayDecision, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
+
 export interface GenerateVideoFrameSelection {
   libraryId: string;
   sourceVideoContentHash: string;
   frameIds: string[];
+  version?: 2;
+  sourceOverlays?: SourceOverlayDecision[];
 }
 
 export interface GeneratedVideoFrameProvenance {
@@ -36,11 +40,11 @@ export const parseGenerateVideoFrameSelection = (
 ): GenerateVideoFrameSelection | null => {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, [
+    !(hasExactKeys(value, [
       'libraryId',
       'sourceVideoContentHash',
       'frameIds',
-    ])
+    ]) || hasExactKeys(value, ['version', 'libraryId', 'sourceVideoContentHash', 'frameIds', 'sourceOverlays']))
   ) {
     return null;
   }
@@ -60,6 +64,12 @@ export const parseGenerateVideoFrameSelection = (
     new Set(frameIds).size !== frameIds.length
   ) {
     return null;
+  }
+  if ('version' in value) {
+    if (value.version !== 2 || !Array.isArray(value.sourceOverlays) || value.sourceOverlays.length !== frameIds.length) return null;
+    const sourceOverlays = value.sourceOverlays.map(parseSourceOverlayDecision);
+    if (sourceOverlays.some((decision) => !decision || decision.status === 'UNSAFE')) return null;
+    return { version: 2, libraryId, sourceVideoContentHash, frameIds, sourceOverlays: sourceOverlays as SourceOverlayDecision[] };
   }
   return { libraryId, sourceVideoContentHash, frameIds };
 };

@@ -55,6 +55,7 @@ const assessment = (frameId: string, overrides: Partial<VideoHumanFrameAssessmen
   libraryId: library.id, frameId, humanPresence: 'CLEAR', facialDetail: 'SUFFICIENT', eyes: 'OPEN_OR_NOT_VISIBLE',
   blur: 'CLEAR', occlusion: 'NONE_OR_MINOR', expressionUsability: 'NATURAL_OR_NEUTRAL', framing: 'USABLE',
   compositionFit: 'STRONG', observableReason: `Observable quality for ${frameId}.`, ...overrides,
+  sourceOverlay: overrides.sourceOverlay ?? { version: 2, status: 'CLEAN' },
 });
 const completed = (assessments: VideoHumanFrameAssessment[]) => Response.json({ status: 'completed', output: [{ content: [
   { type: 'output_text', text: JSON.stringify({ assessments }) },
@@ -131,6 +132,33 @@ describe('visual human-frame selection', () => {
     request.mockClear();
     await expect(selectVideoHumanFrameFromPool([stale], 'Portrait', emptyReuse, { request })).rejects.toThrow('binding is invalid');
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('skips a contaminated unsafe candidate and persists a bounded removable-edge decision for the winner', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-only-dummy');
+    const request = vi.fn<typeof fetch>().mockResolvedValue(completed([
+      assessment('frame-sharp-blink', { sourceOverlay: { version: 2, status: 'UNSAFE' } }),
+      assessment('frame-usable', { sourceOverlay: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM',
+        removePermille: 400, overlayDepthPermille: 390 } }),
+    ]));
+    const result = await selectVideoHumanFrameFromPool([binding()], 'Portrait', emptyReuse, { request });
+    expect(result).toMatchObject({ status: 'SELECTED', selection: { frames: [{ frameId: 'frame-usable' }] },
+      selectedSourceOverlay: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 400 } });
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it('normalizes the actual strict response shape into a versioned crop decision', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-only-dummy');
+    const assessments = [assessment('frame-sharp-blink', { eyes: 'CLOSED_OR_BLINKING' }),
+      assessment('frame-usable')].map(item => ({ ...item, sourceOverlay: item.frameId === 'frame-usable'
+        ? { status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 400, overlayDepthPermille: 390 }
+        : { status: 'CLEAN', edge: 'NONE', removePermille: 0, overlayDepthPermille: 0 } }));
+    const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ status: 'completed', output: [
+      { content: [{ type: 'output_text', text: JSON.stringify({ assessments }) }] },
+    ] }));
+    const result = await selectVideoHumanFrameFromPool([binding()], 'Portrait', emptyReuse, { request });
+    expect(result).toMatchObject({ status: 'SELECTED', selectedSourceOverlay: { version: 2, status: 'EDGE_CROP',
+      edge: 'BOTTOM', removePermille: 400, overlayDepthPermille: 390 } });
   });
 
   it('rejects the whole over-budget pool instead of silently truncating candidates', async () => {

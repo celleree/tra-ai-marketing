@@ -9,9 +9,10 @@ import { stepPortfolioVideoDependency } from '@/lib/creatives/portfolio-video-ad
 import { hydratePortfolioVideoFrameSelection, portfolioVideoFrameReuseContext, portfolioVideoSelectionPolicy,
   preflightPortfolioVideoFrames, selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelligence-planning';
-import { VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
+import { HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
+import { preflightPlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
@@ -25,6 +26,7 @@ import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-v
 import { reserveOperatorQuota, OperatorQuotaUnavailableError } from '@/lib/quotas/operator-quota';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import type { VideoIntelligenceServiceDependencies } from '@/lib/video/intelligence-service';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
@@ -34,7 +36,7 @@ export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; s
 
 class InvalidPlannedCreativeCopyError extends CreativeGenerationPreparationError {}
 
-const noSuitableHumanFrameMessage = 'No suitable human frame was found. Create a new portfolio with a clearer approved source (open eyes, usable framing, and sufficient facial detail); saved creatives remain available.';
+const noSuitableHumanFrameMessage = 'No suitable human frame was found. Create a new portfolio with a clearer approved source (open eyes, usable framing, sufficient facial detail, and no unremovable source overlay); saved creatives remain available.';
 
 const assertValidPlannedCreativeCopy = (concept: Parameters<typeof classifyCreativeCopyContract>[0]) => {
   if (classifyCreativeCopyContract(concept).kind === 'INVALID') {
@@ -218,12 +220,20 @@ export async function advanceCreativePortfolio(
     const concept = context.batchPlan.creatives[slotIndex - 1];
     assertValidPlannedCreativeCopy(concept);
     const automaticVideoSelection = job.videoPreparationVersion === 1
+      && concept.strategy.execution.subjectSource === 'approved-tra-human'
       && !job.request.videoFrameSelection
       && !concept.strategy.approvedHumanId
       && !concept.strategy.humanSourceId
       && !context.providerImageSource
       && context.videoFrameSet !== null;
     if (automaticVideoSelection) {
+      if (slot.videoSelection && (slot.videoSelection.version !== 2
+        || slot.videoSelection.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY
+        || (slot.videoSelection.selection && slot.videoSelection.selection.version !== 2))) {
+        const message = 'Saved human-frame selection predates source-overlay assessment. Explicitly Retry this slot to select an assessed frame before image generation.';
+        return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token, message), storage),
+          error: message, status: 409 };
+      }
       if (!context.sourceAnalysis) {
         throw new CreativeGenerationPreparationError('Durable automatic video selection is missing its frozen B1 source analysis.', 409);
       }
@@ -282,14 +292,21 @@ export async function advanceCreativePortfolio(
           finishPortfolioVideoFrameSelection(current, token, selected.selection), storage) };
       }
 
-      const denied = await reserveWorkQuota('CREATIVE_GENERATION');
-      if (denied) return denied;
-      providerWorkStarted = true;
       const selectedFrames = await hydratePortfolioVideoFrameSelection({
         sourceAnalysis: context.sourceAnalysis,
         sources: videoSources,
         selection: slot.videoSelection.selection,
+      }).catch(error => {
+        const message = error instanceof Error ? error.message : 'Saved human-frame selection could not be hydrated.';
+        throw new CreativeGenerationPreparationError(message, 409);
       });
+      await prepareProviderVideoFrames(selectedFrames.frames).catch(error => {
+        const message = error instanceof Error ? error.message : 'Selected TRA video frames failed local validation.';
+        throw new CreativeGenerationPreparationError(`${message} Create a new portfolio with an assessed source frame.`, 409);
+      });
+      const denied = await reserveWorkQuota('CREATIVE_GENERATION');
+      if (denied) return denied;
+      providerWorkStarted = true;
       const generatedVideoFrameSelection: GeneratedVideoFrameSelection = {
         libraryId: slot.videoSelection.selection.libraryId,
         sourceVideoMediaId: selectedFrames.source.media.id,
@@ -304,12 +321,16 @@ export async function advanceCreativePortfolio(
       return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
     }
 
+    const preflightHumanVideo = await preflightPlannedHumanVideoSource(concept, context).catch(error => {
+      throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'The approved human source could not be verified.', 409);
+    });
     const denied = await reserveWorkQuota('CREATIVE_GENERATION');
     if (denied) return denied;
     providerWorkStarted = true;
     const creative = await renderPlannedCreative(concept, context, {
       creativeId: slot.creativeId,
       assertCurrentWork,
+      preflightHumanVideo,
     });
     return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
   } catch (error) {
@@ -324,7 +345,7 @@ export async function advanceCreativePortfolio(
     const current = await updateCreativePortfolio(id, value => {
       if (value.lease?.id !== token) return value;
       if (value.lease.expiresAtMs <= Date.now()) return claimCreativePortfolio(value).job;
-      return providerWorkStarted || error instanceof InvalidPlannedCreativeCopyError
+      return providerWorkStarted || error instanceof CreativeGenerationPreparationError || error instanceof InvalidPlannedCreativeCopyError
         ? failPortfolioWork(value, token, message)
         : releasePortfolioWork(value, token);
     }, storage);

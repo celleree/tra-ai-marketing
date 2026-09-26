@@ -43,6 +43,7 @@ export function SelectedFrameGeneration({
   const [failures, setFailures] = useState<Record<number, string>>({});
   const [previews, setPreviews] = useState<Array<{ frameId: string; timestampMs: number; url: string }>>([]);
   const [previewing, setPreviewing] = useState(false);
+  const [assessmentRetry, setAssessmentRetry] = useState(false);
   const completedIndexes = useRef(new Set<number>());
   const failedIndexes = useRef(new Map<number, string>());
   const previewAbort = useRef<AbortController | null>(null);
@@ -131,6 +132,14 @@ export function SelectedFrameGeneration({
     };
 
     try {
+      const assessmentResponse = await fetch('/api/video/intelligence/source-overlay-assessment', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaId: media.id, videoFrameSelection: { libraryId: library.id,
+          sourceVideoContentHash: library.sourceVideoContentHash, frameIds }, ...(assessmentRetry ? { retry: true } : {}) }),
+      });
+      const assessment = await assessmentResponse.json();
+      setAssessmentRetry(Boolean(assessment.retryRequired));
+      if (!assessmentResponse.ok) throw new Error(assessment.error || 'Source-frame visual assessment failed.');
       const brand = readStoredBrandGuidance();
       const companyProfile = readStoredRuntimeCompanyProfile();
       const response = await fetch('/api/creatives/generate', {
@@ -138,11 +147,7 @@ export function SelectedFrameGeneration({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sourceAssets: [{ mediaId: media.id, role: 'TRA_VIDEO' }],
-          videoFrameSelection: {
-            libraryId: library.id,
-            sourceVideoContentHash: library.sourceVideoContentHash,
-            frameIds,
-          },
+          videoFrameSelection: assessment.videoFrameSelection,
           ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
           ...(brand.colors.length ? { brandColors: brand.colors } : {}),
           ...(brand.fontGuidance.length ? { brandFontNames: brand.fontGuidance } : {}),
@@ -252,7 +257,8 @@ export function SelectedFrameGeneration({
     </article>)}</section> : null}
     <CreativePlacementSelect value={placement} onChange={setPlacement} disabled={generating || previewing} />
     <button className={styles.primary} type="button" onClick={() => void generate()} disabled={generating || previewing || selectedFrameIds.length < 1}>
-      {generating ? 'Generating 2 creatives…' : 'Generate 2 creatives from checked frames (uses API)'}
+      {generating ? 'Assessing source and generating…' : assessmentRetry
+        ? 'Retry source assessment and generate (uses API)' : 'Assess checked frames and generate 2 creatives (uses API)'}
     </button>
     {savedCount ? <p className={styles.progress} role="status">Saved {savedCount} {savedCount === 1 ? 'creative' : 'creatives'} to the TRA creative library.</p> : null}
     {error ? <p className={styles.error} role="alert">{error}</p> : null}

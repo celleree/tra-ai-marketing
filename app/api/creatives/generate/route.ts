@@ -1,7 +1,8 @@
-import { assertGenerationAvailable, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
+import { assertGenerationAvailable, CreativeGenerationPreparationError, hydrateGenerationSources } from '@/lib/creatives/generation-sources';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
 export { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
+import { preflightApprovedTraVideoFrameSet, preflightPlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
 import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
@@ -36,20 +37,27 @@ export async function POST(request: Request) {
     }
 
     assertGenerationAvailable(parsed.data);
-
-    const quotaDenied = await requireOperatorQuota(
-      access.userId,
-      'CREATIVE_GENERATION',
-      parsed.data.variationCount,
-    );
-    if (quotaDenied) return quotaDenied;
+    const hydratedSources = await hydrateGenerationSources(parsed.data);
+    if (parsed.data.videoFrameSelection) {
+      if (!hydratedSources.videoFrameSet) throw new CreativeGenerationPreparationError('The selected TRA video frames could not be verified. Select frames again.', 409);
+      await preflightApprovedTraVideoFrameSet(hydratedSources.videoFrameSet).catch(error => {
+        throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'The selected TRA video frames could not be verified.', 409);
+      });
+    }
 
     const planningQuotaDenied = await requireOperatorQuota(access.userId, 'CREATIVE_PLANNING', parsed.data.variationCount);
     if (planningQuotaDenied) return planningQuotaDenied;
 
-    const renderContext = await prepareCreativeGeneration(parsed.data, request.url);
+    const renderContext = await prepareCreativeGeneration(parsed.data, request.url, { hydratedSources });
     const creativePlan = renderContext.batchPlan.creatives;
-    const renderCreative = (item: PlannedCreativeConcept) => renderPlannedCreative(item, renderContext);
+    const preflights = new Map(await Promise.all(creativePlan.map(async item => [item.index,
+      await preflightPlannedHumanVideoSource(item, renderContext).catch(error => {
+        throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'The approved human source could not be verified.', 409);
+      })] as const)));
+    const quotaDenied = await requireOperatorQuota(access.userId, 'CREATIVE_GENERATION', parsed.data.variationCount);
+    if (quotaDenied) return quotaDenied;
+    const renderCreative = (item: PlannedCreativeConcept) => renderPlannedCreative(item, renderContext,
+      { preflightHumanVideo: preflights.get(item.index) });
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({

@@ -154,6 +154,22 @@ describe('multi-source creative generation request', () => {
     });
   });
 
+  it('requires one valid v2 overlay decision for each exact selected frame', () => {
+    const assessed = { ...videoFrameSelection, version: 2, sourceOverlays: [{ version: 2, status: 'CLEAN' }] };
+    const valid = validateGenerateCreativeRequest({ ...baseRequest,
+      sourceAssets: [makeSource('TRA_VIDEO', 'a')], videoFrameSelection: assessed });
+    expect(valid.success).toBe(true);
+    for (const invalid of [
+      { ...assessed, sourceOverlays: [] },
+      { ...assessed, sourceOverlays: [{ version: 2, status: 'UNSAFE' }] },
+      { ...assessed, frameIds: [...assessed.frameIds, `video-frame:${'d'.repeat(64)}`] },
+      { ...assessed, sourceVideoContentHash: 'stale' },
+    ]) {
+      expect(validateGenerateCreativeRequest({ ...baseRequest, sourceAssets: [makeSource('TRA_VIDEO', 'a')],
+        videoFrameSelection: invalid }).success).toBe(false);
+    }
+  });
+
   it.each([
     { sourceAssets: [] },
     { sourceAssets: [makeSource('TRA_REFERENCE', 'a')] },
