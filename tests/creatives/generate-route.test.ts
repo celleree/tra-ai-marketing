@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   compositeCreativeBrandLogo: vi.fn(),
   resolveCreativeBrandLogoPlacementContext: vi.fn(),
   saveCreativeBatch: vi.fn(),
+  listCreatives: vi.fn(),
   validateGeneratedCreativeImage: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
   analyzeReferenceCreative: vi.fn(),
@@ -58,7 +59,7 @@ vi.mock('@/lib/creatives/brand-logo.server', () => ({
   compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo,
   resolveCreativeBrandLogoPlacementContext: mocks.resolveCreativeBrandLogoPlacementContext,
 }));
-vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveCreativeBatch }));
+vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveCreativeBatch, listCreatives: mocks.listCreatives }));
 vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.listProofRecords }));
 
 vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
@@ -377,6 +378,22 @@ it('recovers failed finalization from saved raw output under the same submission
   expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2); expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
 });
 
+it('recovers direct generation after creative persistence succeeds but its acknowledgement is lost', async () => {
+  const saved: Array<Record<string, any>> = [];
+  mocks.listCreatives.mockImplementation(async () => saved);
+  mocks.saveCreativeBatch.mockImplementation(async records => {
+    if (records.some((record: { id: string }) => saved.some(existing => existing.id === record.id))) throw new Error('Duplicate creative ID');
+    saved.push(...records); throw new Error('Acknowledgement lost after persistence');
+  });
+  const request = generationRequest([]), duplicate = request.clone();
+  const first = await readStreamEvents(await POST(request));
+  expect(first.find(event => event.event === 'complete')?.data.failedCount).toBe(2);
+  const replay = await readStreamEvents(await POST(duplicate));
+  expect(replay.find(event => event.event === 'complete')?.data.successfulCount).toBe(2);
+  expect(mocks.saveCreativeBatch).toHaveBeenCalledTimes(2); expect(saveImage).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(2); expect(saved).toHaveLength(2);
+});
+
 it('admits one concurrent preparation and rejects changed or missing submission identity', async () => {
   const request = generationRequest([]), duplicate = request.clone(), changed = request.clone();
   const original = mocks.planCreativeBatch.getMockImplementation()!; let release!: () => void;
@@ -536,6 +553,7 @@ beforeEach(() => {
   mocks.resolveCreativeBrandLogoPlacementContext.mockImplementation(async (_logo, placement) =>
     ({ placement, sourceWidth: 200, sourceHeight: 100 }));
   mocks.saveCreativeBatch.mockReset().mockImplementation(async (records) => records);
+  mocks.listCreatives.mockReset().mockResolvedValue([]);
   mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   storedById = {};

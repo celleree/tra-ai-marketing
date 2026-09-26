@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { listCreatives } from '@/lib/creatives/storage';
+import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
+import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { runDurableCheckpoint } from '@/lib/creatives/durable-checkpoint';
 import { withPaidPreparationScope } from '@/lib/creatives/preparation-checkpoint';
 import { prepareCreativeGeneration, type PreparedCreativeGeneration } from '@/lib/creatives/prepare-generation';
@@ -29,8 +33,19 @@ export async function directGenerationExecution(runId: string, operatorId: strin
   const context = prepared ?? await restoreCreativePortfolio(snapshot);
   return { plan: context.batchPlan.creatives, render: (item: PlannedCreativeConcept) => {
     const creativeId = 'creative_' + createHash('sha256').update(`${runId}:${item.index}`).digest('hex').slice(0, 32);
-    return runDurableCheckpoint(runId, `render:${item.index}`, { snapshot, item }, assertCurrentWork =>
-      withImageAttemptScope({ runId, operationId: creativeId, budget: imageAttemptBudget(request.variationCount), storage },
-        () => renderPlannedCreative(item, context, { creativeId, assertCurrentWork })), { storage, safeToResume: true });
+    return runDurableCheckpoint(runId, `render:${item.index}`, { snapshot, item }, async assertCurrentWork => {
+      const existing = (await listCreatives()).find(record => record.id === creativeId);
+      if (existing) {
+        const identity = buildCreativeIdentity({ creativeId, operation: 'GENERATE', strategy: item.strategy });
+        if (!isDeepStrictEqual(existing.identity, identity) || !isDeepStrictEqual(existing.copy, item.copy)
+          || existing.format !== item.format || existing.placement !== request.placement) {
+          throw new Error('Saved creative does not match its reserved generation intent.');
+        }
+        return { ...existing, index: item.index, format: item.format,
+          finalization: { status: 'SAVED', createdAt: existing.createdAt } } satisfies GeneratedCreative;
+      }
+      return withImageAttemptScope({ runId, operationId: creativeId, budget: imageAttemptBudget(request.variationCount), storage },
+        () => renderPlannedCreative(item, context, { creativeId, assertCurrentWork }));
+    }, { storage, safeToResume: true });
   } };
 }

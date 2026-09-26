@@ -9,6 +9,11 @@ import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import { referenceCandidate } from '../fixtures/reference-catalog';
+import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
+import { fetchCreativeImage } from '@/lib/creatives/image-models';
+
+let executionStorage = new MemoryPortfolioStorage();
+vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => executionStorage }));
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), logoGeometry: vi.fn(), eraseLogo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn(), proof: vi.fn() }));
 vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
@@ -106,10 +111,12 @@ const caseStudyProofParent = (): CreativeRecord => {
     },
   };
 };
-const call = (body: unknown, creativeId = parentId) => POST(new Request('http://localhost/api/creatives/revise', { method: 'POST', body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
+const call = (body: unknown, creativeId = parentId, submissionId = crypto.randomUUID()) => POST(new Request('http://localhost/api/creatives/revise', {
+  method: 'POST', headers: { 'Idempotency-Key': submissionId }, body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
 const hydrate = (record: CreativeRecord) => ({ parent: { record, identity: record.identity, planning: record.planning, provenance: record.generationProvenance }, canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId, sha256: 'c'.repeat(64) }, originalApprovedSource: null, logoOverlay: null });
 const hydrateGeneralizedHuman = (record: CreativeRecord) => ({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[]} });
 beforeEach(() => {
+  executionStorage = new MemoryPortfolioStorage();
   Object.values(mocks).forEach(mock => mock.mockReset());
   mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
   mocks.requireOperatorQuota.mockResolvedValue(null);
@@ -126,6 +133,87 @@ beforeEach(() => {
   mocks.saveImage.mockResolvedValue({ ...record.image, id: `media_${'d'.repeat(32)}`, fileName: `media_${'d'.repeat(32)}.png` });
   mocks.save.mockImplementation(async records => records);
   mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: { ...record.copy, headline: 'Edited headline' }, strategy, selectionReason: 'Requested edit' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+});
+
+it.each([
+  [{ operation: 'EDIT', instruction: 'Simplify the headline' }, 1],
+  [{ operation: 'VARIATION', instruction: 'Use another supported angle' }, 1],
+  [{ operation: 'PLACEMENT', placement: 'PORTRAIT_4_5' }, 0],
+  [{ operation: 'REGENERATE' }, 0],
+])('replays %j under the same intent without another planner or image operation', async (body, plans) => {
+  if (typeof body === 'object' && body.operation === 'VARIATION') mocks.plan.mockResolvedValue({
+    concept: { index: 1, format: 'direct-response', copy: parent().copy, selectionReason: 'Changed strategy',
+      strategy: { ...strategy, awarenessStage: 'solution-aware', execution: { ...strategy.execution, composition: 'split' } } },
+    plannerModel: 'gpt-6-astra', reasoningEffort: 'medium',
+  });
+  const key = crypto.randomUUID(); const first = await call(body, parentId, key);
+  expect(first.status).toBe(201); const firstBody = await first.json();
+  const replay = await call(body, parentId, key); expect(await replay.json()).toEqual(firstBody);
+  expect(mocks.plan).toHaveBeenCalledTimes(Number(plans)); expect(mocks.generate).toHaveBeenCalledTimes(1);
+  expect(mocks.save).toHaveBeenCalledTimes(1); expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(1);
+});
+
+it('preserves fresh deliberate regeneration while rejecting mutation of an existing intent', async () => {
+  const key = crypto.randomUUID(); const first = await (await call({ operation: 'REGENERATE' }, parentId, key)).json();
+  const next = await (await call({ operation: 'REGENERATE' })).json();
+  expect(next.creative.id).not.toBe(first.creative.id); expect(mocks.generate).toHaveBeenCalledTimes(2);
+  expect((await call({ operation: 'PLACEMENT', placement: 'PORTRAIT_4_5' }, parentId, key)).status).toBe(409);
+  expect((await call({ operation: 'REGENERATE' }, parentId, 'invalid')).status).toBe(400);
+  expect(mocks.generate).toHaveBeenCalledTimes(2);
+});
+
+it('admits one concurrent revision planner and blocks unknown planner outcomes on replay', async () => {
+  const body = { operation: 'EDIT', instruction: 'Simplify the headline' }; const key = crypto.randomUUID();
+  const plan = mocks.plan.getMockImplementation()!; let release!: () => void;
+  mocks.plan.mockImplementation(async (...args) => { await new Promise<void>(resolve => { release = resolve; }); return plan(...args); });
+  const first = call(body, parentId, key); await vi.waitFor(() => expect(release).toBeDefined());
+  expect((await call(body, parentId, key)).status).toBe(202); release(); expect((await first).status).toBe(201);
+  expect(mocks.plan).toHaveBeenCalledTimes(1); expect(mocks.generate).toHaveBeenCalledTimes(1);
+  const unknownKey = crypto.randomUUID(); mocks.plan.mockRejectedValueOnce(new Error('Lost planner response'));
+  expect((await call(body, parentId, unknownKey)).status).toBe(500);
+  expect((await call(body, parentId, unknownKey)).status).toBe(409);
+  expect(mocks.plan).toHaveBeenCalledTimes(2); expect(mocks.generate).toHaveBeenCalledTimes(1);
+});
+
+it.each(['save acknowledgement', 'completion checkpoint'])('recovers persisted revision after lost %s without reinserting it', async failure => {
+  const saved: CreativeRecord[] = []; const original = parent();
+  mocks.list.mockImplementation(async () => [original, ...saved]);
+  mocks.save.mockImplementation(async records => {
+    if (saved.length) throw new Error('Duplicate creative ID');
+    saved.push(...records);
+    if (failure === 'save acknowledgement') throw new Error('Acknowledgement lost after persistence');
+    return records;
+  });
+  if (failure === 'completion checkpoint') {
+    const write = executionStorage.write.bind(executionStorage); let failed = false;
+    executionStorage.write = async (key, bytes, etag) => {
+      const value = JSON.parse(bytes.toString());
+      if (!failed && value.status === 'COMPLETE' && value.value?.creative) { failed = true; throw new Error('Checkpoint outage'); }
+      return write(key, bytes, etag);
+    };
+  }
+  const key = crypto.randomUUID();
+  expect((await call({ operation: 'REGENERATE' }, parentId, key)).status).toBe(500);
+  const replay = await call({ operation: 'REGENERATE' }, parentId, key);
+  expect(replay.status).toBe(201); expect(await replay.json()).toEqual({ creative: saved[0] });
+  expect(mocks.generate).toHaveBeenCalledTimes(1); expect(mocks.saveImage).toHaveBeenCalledTimes(1);
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+});
+
+it('reuses a purchased raw revision after finalization failure without another image request', async () => {
+  const makeResult = mocks.generate.getMockImplementation()!;
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ data: [{ b64_json: 'cmF3' }] }));
+  mocks.generate.mockImplementation(async args => {
+    const response = await fetchCreativeImage('https://api.openai.com/v1/images/generations', { method: 'POST',
+      body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', prompt: 'Same revision', size: '1024x1024' }) });
+    return { ...await makeResult(args), buffer: Buffer.from((await response.json()).data[0].b64_json, 'base64') };
+  });
+  const key = crypto.randomUUID(); mocks.save.mockRejectedValueOnce(new Error('Save interrupted'));
+  try {
+    expect((await call({ operation: 'REGENERATE' }, parentId, key)).status).toBe(500);
+    expect((await call({ operation: 'REGENERATE' }, parentId, key)).status).toBe(201);
+    expect(fetcher).toHaveBeenCalledTimes(1); expect(mocks.plan).not.toHaveBeenCalled();
+  } finally { fetcher.mockRestore(); }
 });
 
 describe('saved creative revision API', () => {
