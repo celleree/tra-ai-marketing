@@ -1,3 +1,5 @@
+import { assertLiveImageGenerationAllowed } from '@/lib/creatives/image-provider-admission';
+
 export const PREFERRED_CREATIVE_IMAGE_MODEL = 'gpt-image-2.5-sunburst' as const;
 export const FALLBACK_CREATIVE_IMAGE_MODEL = 'gpt-image-2.5-flare' as const;
 
@@ -60,6 +62,7 @@ export async function fetchCreativeImage(
   input: string,
   init: RequestInit
 ) {
+  assertLiveImageGenerationAllowed();
   try {
     return await fetch(input, init);
   } catch (error) {
