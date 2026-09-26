@@ -4,6 +4,7 @@ import { fingerprintImageRenderRequest } from '@/lib/creatives/image-render-iden
 import { imageRenderPurpose } from '@/lib/creatives/image-render-request';
 import { reserveImageAttempt, settleImageAttempt, type ImageAttemptBudget } from '@/lib/creatives/image-attempt-store';
 import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
+import { CreativeImageProviderError, imageProviderFailure } from '@/lib/creatives/image-provider-failure';
 
 type Scope = { runId: string; operationId: string; budget: ImageAttemptBudget; storage?: VideoIntelligenceStorage };
 const scopes = new AsyncLocalStorage<Scope>();
@@ -36,8 +37,8 @@ export async function executeImageAttempt(endpoint: string, request: RequestInit
     }
     return new Response(saved.bytes.toString(), { headers: { 'Content-Type': 'application/json' } });
   }
-  if (claim.status === 'FAILED') return new Response(JSON.stringify({ error: { message: 'Previously recorded image provider failure.' } }),
-    { status: claim.httpStatus ?? 400 });
+  if (claim.status === 'FAILED') throw new CreativeImageProviderError('Previously recorded image provider failure.',
+    claim.retryable ? claim.httpStatus === 429 ? 'rate_limited' : 'provider_unavailable' : null, 'FAILED', claim.httpStatus);
   if (claim.status !== 'CLAIMED') throw new Error(`Image attempt is ${claim.status}; no repeat purchase is authorized.`);
   const owned = { ...input, token: claim.token };
   let response: Response;
@@ -47,9 +48,10 @@ export async function executeImageAttempt(endpoint: string, request: RequestInit
     throw new Error('Image provider outcome is unknown; no repeat purchase is authorized.');
   }
   if (!response.ok) {
-    await settleImageAttempt(owned, { status: 'FAILED', httpStatus: response.status,
-      retryable: response.status === 429 || response.status >= 500 }, storage);
-    return response;
+    const failure = await imageProviderFailure(response);
+    await settleImageAttempt(owned, failure.outcome === 'UNKNOWN' ? { status: 'UNKNOWN' }
+      : { status: 'FAILED', httpStatus: response.status, retryable: failure.fallbackReason !== null }, storage);
+    throw failure;
   }
   try {
     const body = await response.clone().json();

@@ -1,38 +1,12 @@
 import { assertLiveImageGenerationAllowed } from '@/lib/creatives/image-provider-admission';
 import { imageRenderPurpose, prepareImageRenderRequest } from '@/lib/creatives/image-render-request';
 import { executeImageAttempt } from '@/lib/creatives/image-attempt-execution';
+import { CreativeImageProviderError, imageProviderFailure } from '@/lib/creatives/image-provider-failure';
+export { CreativeImageProviderError, creativeImageHttpError, creativeImageMissingOutputError } from '@/lib/creatives/image-provider-failure';
 
 export * from '@/lib/creatives/image-routing';
 import { PREFERRED_CREATIVE_IMAGE_MODEL, FALLBACK_CREATIVE_IMAGE_MODEL,
   type CreativeImageModel, type CreativeImageOperationType, type CreativeImageRouting } from '@/lib/creatives/image-routing';
-
-export class CreativeImageProviderError extends Error {
-  constructor(
-    message: string,
-    readonly fallbackReason: string | null
-  ) {
-    super(message);
-    this.name = 'CreativeImageProviderError';
-  }
-}
-
-export const creativeImageHttpError = (status: number, message: string) =>
-  new CreativeImageProviderError(
-    message,
-    status === 408
-      ? 'provider_timeout'
-      : status === 429
-        ? 'rate_limited'
-        : status >= 500
-          ? 'provider_unavailable'
-          : null
-  );
-
-export const creativeImageMissingOutputError = () =>
-  new CreativeImageProviderError(
-    'OpenAI returned no generated image.',
-    'missing_provider_output'
-  );
 
 export async function fetchCreativeImage(
   input: string,
@@ -41,12 +15,14 @@ export async function fetchCreativeImage(
   assertLiveImageGenerationAllowed();
   const request = prepareImageRenderRequest(input, init);
   try {
-    return await executeImageAttempt(input, request, () => fetch(input, request));
+    const response = await executeImageAttempt(input, request, () => fetch(input, request));
+    if (!response.ok) throw await imageProviderFailure(response);
+    return response;
   } catch (error) {
     if (error instanceof TypeError) {
       throw new CreativeImageProviderError(
         'OpenAI image request could not reach the provider.',
-        'network_failure'
+        null, 'UNKNOWN'
       );
     }
     throw error;
@@ -54,7 +30,8 @@ export async function fetchCreativeImage(
 }
 
 const transientReason = (error: unknown) => {
-  if (error instanceof CreativeImageProviderError) return error.fallbackReason;
+  if (error instanceof CreativeImageProviderError && error.outcome === 'FAILED'
+    && ['rate_limited', 'provider_unavailable'].includes(error.fallbackReason ?? '')) return error.fallbackReason;
   return null;
 };
 
@@ -77,7 +54,7 @@ export async function runCreativeImageModelRoute<T>(args: {
     };
   } catch (error) {
     const fallbackReason = transientReason(error);
-    if (!fallbackReason || purpose === 'diagnostic') throw error;
+    if (!fallbackReason || purpose !== 'production') throw error;
     return {
       value: await args.generate(FALLBACK_CREATIVE_IMAGE_MODEL),
       routing: {

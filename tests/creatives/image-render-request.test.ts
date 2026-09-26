@@ -54,7 +54,7 @@ describe('image render profiles', () => {
     await expect(runCreativeImageModelRoute({ operationType: 'PROMPT_GENERATION', generate: async model => {
       await fetchCreativeImage(url, { method: 'POST', body: JSON.stringify({ ...parameters, model }) });
       throw creativeImageHttpError(503, 'unavailable');
-    } })).rejects.toThrow('unavailable');
+    } })).rejects.toThrow('HTTP 503');
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ quality: 'low', n: 1, partial_images: 0 });
   });

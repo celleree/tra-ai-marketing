@@ -161,16 +161,15 @@ describe('revision image provider', () => {
     await expect(generateCreativeRevisionImage(args())).rejects.toThrow('not configured');
     expect(fetchMock).not.toHaveBeenCalled();
     vi.stubEnv('OPENAI_API_KEY', 'fixture-only');
-    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 429 }));
+    fetchMock.mockResolvedValueOnce(Response.json({ error: { code: 'rate_limit_exceeded' } }, { status: 429 }));
     fetchMock.mockResolvedValueOnce(new Response('{}', { status: 503 }));
     await expect(generateCreativeRevisionImage(args())).rejects.toThrow('503');
-    fetchMock.mockResolvedValueOnce(new Response('{"data":[]}'));
     fetchMock.mockResolvedValueOnce(new Response('{"data":[]}'));
     await expect(generateCreativeRevisionImage(args())).rejects.toThrow('no generated image');
   });
 
   it('retries one transient failure with Flare and reports the fallback', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    fetchMock.mockResolvedValueOnce(Response.json({ error: { code: 'server_is_overloaded' } }, { status: 503 }));
     fetchMock.mockResolvedValueOnce(response());
     const result = await generateCreativeRevisionImage(args());
     const models = fetchMock.mock.calls.map((call) => (call[1].body as FormData).get('model'));

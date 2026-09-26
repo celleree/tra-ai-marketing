@@ -45,11 +45,8 @@ describe('automatic creative image model routing', () => {
   });
 
   it.each([
-    [creativeImageHttpError(408, 'timeout'), 'provider_timeout'],
-    [creativeImageHttpError(429, 'limited'), 'rate_limited'],
-    [creativeImageHttpError(503, 'unavailable'), 'provider_unavailable'],
-    [creativeImageMissingOutputError(), 'missing_provider_output'],
-    [new CreativeImageProviderError('fetch failed', 'network_failure'), 'network_failure'],
+    [new CreativeImageProviderError('Rate limit', 'rate_limited'), 'rate_limited'],
+    [new CreativeImageProviderError('Overloaded', 'provider_unavailable'), 'provider_unavailable'],
   ])('retries one transient failure once with hidden Flare', async (failure, reason) => {
     const generate = vi.fn()
       .mockRejectedValueOnce(failure)
@@ -100,12 +97,12 @@ describe('automatic creative image model routing', () => {
     await expect(fetchCreativeImage('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', prompt: 'Fixture', size: '1024x1024' }),
-    })).rejects.toMatchObject({ fallbackReason: 'network_failure' });
+    })).rejects.toMatchObject({ fallbackReason: null, outcome: 'UNKNOWN' });
   });
 
   it('makes at most two attempts when the fallback also fails', async () => {
     const generate = vi.fn()
-      .mockRejectedValueOnce(creativeImageHttpError(503, 'preferred failed'))
+      .mockRejectedValueOnce(new CreativeImageProviderError('preferred failed', 'provider_unavailable'))
       .mockRejectedValueOnce(new Error('fallback failed'));
     await expect(runCreativeImageModelRoute({
       operationType: 'TRA_REFERENCE_GENERATION',
