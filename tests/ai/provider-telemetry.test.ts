@@ -65,4 +65,9 @@ describe('actual provider attempt telemetry', () => {
       async () => response)).toBe(response);
     expect(await response.json()).toHaveProperty('data');
   });
+  it.each([{}, 1, '', null])('reports malformed image bytes as unknown (%j)', async b64_json => {
+    const events = logs(); vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ data: [{ b64_json }] }));
+    await expect(withImageAttemptScope(scope(), () => fetchCreativeImage(endpoint, request()))).rejects.toThrow('durable');
+    expect(events().map(event => event.status)).toEqual(['started', 'unknown']);
+  });
 });

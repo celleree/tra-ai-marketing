@@ -21,7 +21,8 @@ export async function observeProviderAttempt(meta: ProviderAttemptMetadata, disp
   catch (error) { emitProviderUsage(meta, { status: 'unknown' }); throw error; }
   let body: any;
   try { body = await response.clone().json(); } catch { /* missing usage stays unknown */ }
-  const validOutput = meta.endpoint !== 'images' || (body?.data?.length === 1 && Boolean(body.data[0]?.b64_json));
+  const validOutput = meta.endpoint !== 'images' || (body?.data?.length === 1
+    && typeof body.data[0]?.b64_json === 'string' && body.data[0].b64_json.length > 0);
   const failureStatus = !response.ok && meta.endpoint === 'images'
     ? (await imageProviderFailure(response)).outcome === 'UNKNOWN' ? 'unknown' : 'failed'
     : response.status >= 500 || response.status === 408 ? 'unknown' : 'failed';
