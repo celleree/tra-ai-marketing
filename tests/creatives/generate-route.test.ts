@@ -1,4 +1,5 @@
 import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
+import { createSubmissionIdentity } from '@/lib/creatives/submission-id';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
@@ -402,6 +403,27 @@ it('never repeats an unknown planner outcome on retransmission', async () => {
   expect((await POST(request)).status).toBe(500);
   expect((await POST(duplicate)).status).toBe(409);
   expect(fetch).toHaveBeenCalledTimes(1); expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();
+});
+
+it('retains browser recovery identity when a duplicate stream finishes while original renders are busy', async () => {
+  const identity = createSubmissionIdentity(), key = identity.forInput('same request');
+  const request = generationRequest([]); request.headers.set('Idempotency-Key', key);
+  const duplicate = request.clone(); const releases: Array<() => void> = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => {
+    releases.push(() => resolve(Response.json({ data: [{ b64_json: PNG.toString('base64') }] })));
+  })));
+  const original = await POST(request);
+  await vi.waitFor(() => expect(releases).toHaveLength(2));
+  const replay = await readStreamEvents(await POST(duplicate));
+  const incomplete = replay.find(event => event.event === 'complete')!.data;
+  expect(incomplete).toMatchObject({ successfulCount: 0, failedCount: 2 });
+  identity.completeGeneration(key, Number(incomplete.requestedCount), Number(incomplete.successfulCount), Number(incomplete.failedCount));
+  expect(identity.forInput('same request')).toBe(key);
+  releases.forEach(release => release());
+  const completed = (await readStreamEvents(original)).find(event => event.event === 'complete')!.data;
+  identity.completeGeneration(key, Number(completed.requestedCount), Number(completed.successfulCount), Number(completed.failedCount));
+  expect(identity.forInput('same request')).not.toBe(key);
+  expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 it('uses a seeded document and rich concept from the real planner through rendering and saved planning without uploads', async () => {

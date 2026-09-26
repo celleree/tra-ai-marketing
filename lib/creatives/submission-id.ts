@@ -14,5 +14,9 @@ export function createSubmissionIdentity() {
       return pending.id;
     },
     complete(id: string) { if (pending?.id === id) pending = null; },
+    completeGeneration(id: string, requested: number, saved: number, failed: number) {
+      if (requested > 0 && saved === requested && failed === 0 && pending?.id === id) pending = null;
+    },
+    reset() { pending = null; },
   };
 }

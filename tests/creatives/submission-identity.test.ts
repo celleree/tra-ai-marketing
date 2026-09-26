@@ -14,4 +14,10 @@ describe('browser submission lifecycle', () => {
     const state = createSubmissionIdentity(); const first = state.forInput('frames A');
     expect(state.forInput('frames B')).not.toBe(first);
   });
+  it('retains failed finalization identity until recovery or explicit new paid intent', () => {
+    const state = createSubmissionIdentity(); const first = state.forInput('same request');
+    state.completeGeneration(first, 2, 1, 1); expect(state.forInput('same request')).toBe(first);
+    state.reset(); const next = state.forInput('same request'); expect(next).not.toBe(first);
+    state.complete(first); expect(state.forInput('same request')).toBe(next);
+  });
 });

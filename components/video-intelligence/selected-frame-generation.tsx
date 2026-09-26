@@ -216,7 +216,7 @@ export function SelectedFrameGeneration({
       });
 
       if (!receivedComplete) throw new Error('Creative generation ended before reporting completion.');
-      submission.current.complete(submissionId);
+      submission.current.completeGeneration(submissionId, 2, completedIndexes.current.size, failedIndexes.current.size);
       if (failedIndexes.current.size) {
         setError(`Completed ${completedIndexes.current.size} of 2 creatives. ${failedIndexes.current.size} failed.`);
       }
@@ -252,6 +252,9 @@ export function SelectedFrameGeneration({
     </fieldset>
     <button className={styles.primary} type="button" onClick={() => void preview()} disabled={generating || previewing || selectedFrameIds.length < 1}>{previewing ? 'Extracting source frames…' : 'Preview source frames'}</button>
     <p className={styles.muted}>Extracted from the original video. No image generation.</p>
+    {error && !generating ? <button type="button" onClick={() => { submission.current.reset(); void generate(); }}>
+      Start a new paid generation
+    </button> : null}
     {previews.length ? <section className={styles.generatedResults}>{previews.map((frame) => <article className={styles.frameChoice} key={frame.frameId}>
       {/* eslint-disable-next-line @next/next/no-img-element */}<img src={frame.url} alt={`Verified source video frame at ${(frame.timestampMs / 1000).toFixed(3)} seconds`} />
       <span><b>{(frame.timestampMs / 1000).toFixed(3)}s</b> Fresh source PNG</span>
