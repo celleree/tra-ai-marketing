@@ -12,6 +12,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    setupFiles: ['./tests/setup/image-provider.ts'],
     include: ['tests/**/*.test.ts'],
   },
 });
