@@ -4,6 +4,7 @@ import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { planCreativeRevision } from '@/lib/ai/creative-revision-planner';
+import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 import { generateCreativeRevisionImage } from '@/lib/ai/creative-revision-image';
 import { buildCreativeCompanyContext, formatCreativeCompanyContext } from '@/lib/company/creative-context';
 import { compositeCreativeBrandLogo, eraseCreativeBrandLogo, resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
@@ -49,8 +50,9 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       if (denied) throw denied;
       return true;
     }, { safeToResume: true });
-    const result = await runDurableCheckpoint(runId, 'revision', intent, async assertCurrentWork => {
     const id = 'creative_' + createHash('sha256').update(runId).digest('hex').slice(0, 32);
+    const result = await withProviderUsageContext({ runId, creativeId: id, operationId: id, operationType: parsed.data.operation },
+      () => runDurableCheckpoint(runId, 'revision', intent, async assertCurrentWork => {
     const records = await listCreatives();
     const existing = records.find(record => record.id === id);
     if (existing) {
@@ -189,7 +191,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     await assertCurrentWork();
     const [saved] = await saveCreativeBatch([record]);
     return { creative: saved };
-    }, { safeToResume: true });
+    }, { safeToResume: true }));
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof Response) return error;

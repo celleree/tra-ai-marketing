@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 import { isDeepStrictEqual } from 'node:util';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
@@ -47,7 +48,11 @@ const assertValidPlannedCreativeCopy = (concept: Parameters<typeof classifyCreat
 };
 
 /** One persisted provider-capable planning step OR one image; no background loop or automatic failed-provider retry. */
-export async function advanceCreativePortfolio(
+export function advanceCreativePortfolio(...args: Parameters<typeof advancePortfolio>) {
+  return withProviderUsageContext({ runId: `portfolio:${args[0]}`, jobId: args[0], portfolioId: args[0] }, () => advancePortfolio(...args));
+}
+
+async function advancePortfolio(
   id: string, operatorId: string, requestUrl: string, storage?: VideoIntelligenceStorage,
   options: { deadlineAtMs?: number; video?: Omit<VideoIntelligenceServiceDependencies, 'storage' | 'deadlineAtMs'> } = {},
 ): Promise<PortfolioStepResult> {
@@ -261,14 +266,15 @@ export async function advanceCreativePortfolio(
         await updateCreativePortfolio(id, current => checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job, storage);
         await assertCurrentWork();
         providerWorkStarted = true;
-        const selected = await selectPortfolioVideoFrames({
-          sourceAnalysis: context.sourceAnalysis,
+        const sourceAnalysis = context.sourceAnalysis;
+        const selected = await withProviderUsageContext({ creativeId: slot.creativeId }, () => selectPortfolioVideoFrames({
+          sourceAnalysis,
           sources: videoSources,
           finalConcept: concept,
           selectionPolicy: attempt.selectionPolicy,
           reuseContext: attempt.reuseContext,
           cache,
-        });
+        }));
         if (selected.status === 'BUSY') return {
           job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
           status: 202,
