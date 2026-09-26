@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
+import { createSubmissionIdentity, SUBMISSION_HEADER } from '@/lib/creatives/submission-id';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import type { CreativeRecord, GeneratedCreative } from '@/lib/creatives/generated';
 import type { CreativeRevisionRequest } from '@/lib/creatives/revision-request';
@@ -45,6 +46,7 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState<CreativeRecord | null>(null);
+  const submission = useRef(createSubmissionIdentity());
 
   const submitRevision = async (body: CreativeRevisionRequest) => {
     if (busy) return;
@@ -53,10 +55,12 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
     setSaved(null);
     try {
       const companyProfile = readStoredRuntimeCompanyProfile();
+      const requestBody = JSON.stringify({ ...body, companyProfile });
+      const submissionId = submission.current.forInput(`${creative.id}:${requestBody}`);
       const response = await fetch(`/api/creatives/${creative.id}/revise`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, companyProfile }),
+        headers: { 'Content-Type': 'application/json', [SUBMISSION_HEADER]: submissionId },
+        body: requestBody,
       });
       const payload = await response.json();
       if (!response.ok || !payload.creative) {
@@ -65,6 +69,7 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
       const next = payload.creative as CreativeRecord;
       onSaved(next);
       setSaved(next);
+      submission.current.complete(submissionId);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The new version could not be saved.');
     } finally {
