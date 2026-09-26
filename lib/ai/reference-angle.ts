@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import {
   CREATIVE_CATEGORIES,
   CREATIVE_CATEGORY_LABELS,
@@ -72,7 +73,7 @@ export async function classifyReferenceCreativeAngle(
     (angle) => `- ${angle}: ${CREATIVE_CATEGORY_LABELS[angle]} — ${ANGLE_GUIDE[angle]}`
   ).join('\n');
 
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('reference-classification', `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,

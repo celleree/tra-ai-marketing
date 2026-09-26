@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { referenceSelectionSchema, resolveReferenceSelection, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
@@ -122,7 +123,7 @@ export async function planCreativeRevision(args: {
     ...baseSchema, required: [...baseSchema.required, 'referenceChoices'], properties: { ...baseSchema.properties,
       referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) },
   } : baseSchema;
-  const response = await fetch('https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('revision-plan', 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, input: [
       { role: 'system', content: [{ type: 'input_text', text: RULES + (copyMode.kind === 'E2' ? SEPARATED_COPY_RULES : '\nReturn exactly one format, copy, strategy and selectionReason in the required schema.') + (args.proofProvenance ? INHERITED_PROOF_RULES : '') + (args.hasBrandLogo ? LOGO_RULES : '') + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') }] },

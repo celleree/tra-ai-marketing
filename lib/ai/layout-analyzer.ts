@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import type { StoredMediaFile } from '@/lib/media/types';
 import {
   LAYOUT_BLUEPRINT_JSON_SCHEMA,
@@ -76,7 +77,7 @@ const imageDataUrl = (source: StoredMediaFile) =>
 export async function analyzeLayoutReference(
   source: StoredMediaFile
 ): Promise<LayoutBlueprint> {
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('layout-analysis', `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
