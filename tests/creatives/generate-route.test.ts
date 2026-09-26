@@ -423,7 +423,10 @@ it('never repeats an unknown planner outcome on retransmission', async () => {
 });
 
 it('retains browser recovery identity when a duplicate stream finishes while original renders are busy', async () => {
-  const identity = createSubmissionIdentity(), key = identity.forInput('same request');
+  const values = new Map<string, string>();
+  const identity = createSubmissionIdentity('generation', () => ({ getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); }, removeItem: key => { values.delete(key); } }));
+  const key = await identity.forInput('same request');
   const request = generationRequest([]); request.headers.set('Idempotency-Key', key);
   const duplicate = request.clone(); const releases: Array<() => void> = [];
   vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => {
@@ -435,11 +438,11 @@ it('retains browser recovery identity when a duplicate stream finishes while ori
   const incomplete = replay.find(event => event.event === 'complete')!.data;
   expect(incomplete).toMatchObject({ successfulCount: 0, failedCount: 2 });
   identity.completeGeneration(key, Number(incomplete.requestedCount), Number(incomplete.successfulCount), Number(incomplete.failedCount));
-  expect(identity.forInput('same request')).toBe(key);
+  expect(await identity.forInput('same request')).toBe(key);
   releases.forEach(release => release());
   const completed = (await readStreamEvents(original)).find(event => event.event === 'complete')!.data;
   identity.completeGeneration(key, Number(completed.requestedCount), Number(completed.successfulCount), Number(completed.failedCount));
-  expect(identity.forInput('same request')).not.toBe(key);
+  expect(await identity.forInput('same request')).not.toBe(key);
   expect(fetch).toHaveBeenCalledTimes(2);
 });
 
