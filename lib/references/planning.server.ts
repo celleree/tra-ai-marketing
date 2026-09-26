@@ -1,6 +1,7 @@
 import { listAllReferenceLibrary } from '@/lib/references/storage';
 import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { createHash } from 'node:crypto';
+import { checkpointPaidPreparation } from '@/lib/creatives/preparation-checkpoint';
 import { analyzeReusableReferenceAngle } from '@/lib/ai/openai';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { getLayoutBlueprintCache, getOrAnalyzeLayoutBlueprint, type ResolvedLayoutBlueprint } from '@/lib/layouts/service';
@@ -16,20 +17,22 @@ export async function buildReferencePlanningCatalog(args: {
   uploaded?: { referenceId: string; source: StoredMediaFile; angleDescription: string; layout?: ResolvedLayoutBlueprint };
 }): Promise<ReferencePlanningCandidate[]> {
   const catalog: ReferencePlanningCandidate[] = [];
+  const layoutFor = (id: string, source: StoredMediaFile) => checkpointPaidPreparation(`reference-layout:${id}`,
+    { id, sha256: createHash('sha256').update(source.buffer).digest('hex') }, () => getOrAnalyzeLayoutBlueprint(source));
   const add = (referenceId: string, priority: 'user' | 'library', angleDescription: string, layout: ResolvedLayoutBlueprint) => {
     catalog.push({ referenceId, priority, angleDescription: angleDescription.slice(0, 2000),
       sourceSha256: layout.contentHash, analyzerModel: layout.analyzerModel, blueprint: layout.blueprint });
   };
   if (args.uploaded) {
     const uploaded = args.uploaded;
-    add(uploaded.referenceId, 'user', uploaded.angleDescription, uploaded.layout ?? await getOrAnalyzeLayoutBlueprint(uploaded.source));
+    add(uploaded.referenceId, 'user', uploaded.angleDescription, uploaded.layout ?? await layoutFor(uploaded.referenceId, uploaded.source));
   }
   for (const selection of args.selections) {
     if (catalog.some(item => item.referenceId === selection.item.id)) continue;
     const stored = await args.storage.readImageById(selection.item.id);
     if (!stored) throw new Error(`Reference ${selection.item.id} is unavailable.`);
     add(selection.item.id, 'library', `${CREATIVE_CATEGORY_LABELS[selection.item.angle]}: ${selection.selectionReason}`,
-      await getOrAnalyzeLayoutBlueprint(stored));
+      await layoutFor(selection.item.id, stored));
   }
   return catalog;
 }

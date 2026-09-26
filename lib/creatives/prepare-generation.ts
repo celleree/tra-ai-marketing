@@ -17,6 +17,7 @@ import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
+import { checkpointPaidPreparation } from '@/lib/creatives/preparation-checkpoint';
 
 const buildPromptOnlyAnalysis = (
   context: string
@@ -87,9 +88,14 @@ export async function prepareCreativeGeneration(
   const { storage, generationSourceAsset, requestedSources, source, providerImageSource, videoFrameSet,
     generatedVideoFrameSelection, brandLogo, reserveLogoArea, logoOverlaySource } = await hydrateGenerationSources(data);
 
-  // Legacy HTTP requests remain single-shot: no hidden durable job or automatic source-analysis retry.
-  let next = await advancePlanningSourceAnalysis(data, undefined, () => {});
-  while (!next.complete) next = await advancePlanningSourceAnalysis(data, next.state, () => {});
+  let analysisStep = 0;
+  let next = await checkpointPaidPreparation(`source-analysis:${analysisStep++}`, { data },
+    () => advancePlanningSourceAnalysis(data, undefined, () => {}));
+  while (!next.complete) {
+    const state = next.state;
+    next = await checkpointPaidPreparation(`source-analysis:${analysisStep++}`, { data, state },
+      () => advancePlanningSourceAnalysis(data, state, () => {}));
+  }
   const sourceAnalysis = parsePlanningSourceAnalysis(next.state, requestedSources, true);
   const primaryId = generationSourceAsset?.media.id ?? videoFrameSet?.source.media.id;
   const primary = sourceAnalysis.entries.filter(entry => entry.source.mediaId === primaryId).map(entry => entry.result!);
@@ -102,17 +108,24 @@ export async function prepareCreativeGeneration(
 
   const library = (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
   const requestedReferenceCount = Math.min(8, data.variationCount, library.length);
-  if (requestedReferenceCount > 0) selectedReferences = await selectBestReferenceCreatives({
+  const selectionArgs = {
     candidates: buildReferenceCandidates(library, requestUrl), requestedCount: requestedReferenceCount,
     userContext: data.context, traSummary: analysis.summary, traPreserve: analysis.preserve,
-  });
+  };
+  if (requestedReferenceCount > 0) selectedReferences = await checkpointPaidPreparation('reference-shortlist', selectionArgs,
+    () => selectBestReferenceCreatives(selectionArgs));
   const uploadedCatalog = composedSourceCatalog(sourceAnalysis);
   let referenceCatalog = [...uploadedCatalog, ...await buildReferencePlanningCatalog({ storage,
     selections: selectedReferences.filter(selection => !uploadedCatalog.some(item => item.referenceId === selection.item.id)),
   })];
-  // Explicit resubmission only: a failed enrichment escapes this single request without retry.
-  let enrichedCatalog;
-  while ((enrichedCatalog = await advanceReferenceAngles(referenceCatalog, storage, () => {}))) referenceCatalog = enrichedCatalog;
+  let angleStep = 0;
+  while (true) {
+    const catalog = referenceCatalog;
+    const enriched = await checkpointPaidPreparation(`reference-angle:${angleStep++}`, catalog,
+      () => advanceReferenceAngles(catalog, storage, () => {}));
+    if (!enriched) break;
+    referenceCatalog = enriched;
+  }
   const referenceDirections = selectedReferences.length
     ? selectedReferences
         .map((selection) =>
@@ -181,7 +194,7 @@ export async function prepareCreativeGeneration(
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
   };
   const batchPlan = options.initialPlanOnly
-    ? await requestCreativeBatch(plannerArgs)
+    ? await checkpointPaidPreparation('initial-plan', plannerArgs, () => requestCreativeBatch(plannerArgs))
     : await planCreativeBatch(plannerArgs);
   if (!options.initialPlanOnly) {
     const diversityIssue = getCreativeDiversityIssue(batchPlan.creatives, batchPlan.portfolioAudit);
