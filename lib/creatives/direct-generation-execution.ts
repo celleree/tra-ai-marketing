@@ -44,7 +44,7 @@ export async function directGenerationExecution(runId: string, operatorId: strin
         return { ...existing, index: item.index, format: item.format,
           finalization: { status: 'SAVED', createdAt: existing.createdAt } } satisfies GeneratedCreative;
       }
-      return withImageAttemptScope({ runId, operationId: creativeId, budget: imageAttemptBudget(request.variationCount), storage },
+      return withImageAttemptScope({ runId, operationId: creativeId, creativeId, budget: imageAttemptBudget(request.variationCount), storage },
         () => renderPlannedCreative(item, context, { creativeId, assertCurrentWork }));
     }, { storage, safeToResume: true });
   } };
