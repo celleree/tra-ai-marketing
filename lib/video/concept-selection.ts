@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 
 export interface VideoConceptSelection {
@@ -128,13 +129,13 @@ export const selectVideoFramesForConcept = async (
   }));
   const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra')).trim();
   if (!model) throw new Error('Video selection model must be non-empty.');
-  const response = await (dependencies.request || fetch)('https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('video-concept-selection', 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS),
     body: JSON.stringify({ model, store: false, max_output_tokens: 2048, reasoning: { effort: 'low' }, input: [
       { role: 'developer', content: [{ type: 'input_text', text: rules }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ concept: brief, frames }) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_video_concept_selection', strict: true, schema: selectionSchema(frames.map((frame) => frame.id)) } } }),
-  });
+  }, dependencies.request || fetch);
   if (!response.ok) throw new Error(`Video concept selection failed (HTTP ${response.status}).`);
   const payload = await response.json() as { status?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
   const text = payload.output?.flatMap((item) => item.content || []).find((part) => part.type === 'output_text')?.text;
@@ -169,14 +170,14 @@ export const selectVideoFramesForConceptPool = async (
   }));
   const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra')).trim();
   if (!model) throw new Error('Video selection model must be non-empty.');
-  const response = await (dependencies.request || fetch)('https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('video-pool-selection', 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS),
     body: JSON.stringify({ model, store: false, max_output_tokens: 2048, reasoning: { effort: 'low' }, input: [
       { role: 'developer', content: [{ type: 'input_text', text: pooledRules }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ concept: brief, libraries }) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_video_concept_pool_selection', strict: true,
       schema: pooledSelectionSchema(libraries.map((entry) => entry.libraryId), [...new Set(libraries.flatMap((entry) => entry.frames.map((frame) => frame.id)))]) } } }),
-  });
+  }, dependencies.request || fetch);
   if (!response.ok) throw new Error(`Video concept selection failed (HTTP ${response.status}).`);
   const payload = await response.json() as { status?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
   const text = payload.output?.flatMap((item) => item.content || []).find((part) => part.type === 'output_text')?.text;

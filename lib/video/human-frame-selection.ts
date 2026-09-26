@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { createHash } from 'node:crypto';
 import { getJpegDimensions } from '@/lib/video/candidate-file-integrity';
 import { canonicalizeVideoSelectionPool, parseVideoConceptSelection, VIDEO_SELECTION_TIMEOUT_MS, type VideoConceptSelection,
@@ -282,10 +283,10 @@ export const selectVideoHumanFrameFromPool = async (
   if (Buffer.byteLength(body) > MAX_VISUAL_SELECTION_PAYLOAD_BYTES) {
     throw new Error(`Visual human selection exceeds the ${MAX_VISUAL_SELECTION_PAYLOAD_BYTES}-byte provider payload limit. No candidates were truncated.`);
   }
-  const response = await (dependencies.request || fetch)('https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('video-human-selection', 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS), body,
-  });
+  }, dependencies.request || fetch);
   if (!response.ok) throw new Error(`Video concept selection failed (HTTP ${response.status}).`);
   const payload = await response.json() as { status?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
   const text = payload.output?.flatMap((item) => item.content || []).find((part) => part.type === 'output_text')?.text;

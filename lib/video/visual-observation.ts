@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { getJpegDimensions } from '@/lib/video/candidate-file-integrity';
@@ -73,7 +74,7 @@ export const observeVideoFrameBytes = async (
   const model = dependencies.model.trim();
   if (!model) throw new Error('Video vision requires a non-empty model.');
   validateFrameBytes(candidate, bytes);
-  const response = await (dependencies.request || fetch)('https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('video-observation', 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(VIDEO_VISION_TIMEOUT_MS),
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'low' },
@@ -83,7 +84,7 @@ export const observeVideoFrameBytes = async (
       ],
       text: { format: { type: 'json_schema', name: 'tra_frame_observation', strict: true, schema: FRAME_OBSERVATION_SCHEMA } },
     }),
-  });
+  }, dependencies.request || fetch);
   if (!response.ok) throw new Error(`Video vision failed (HTTP ${response.status}).`);
   const payload = await response.json() as { status?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
   const text = payload.output?.flatMap((item) => item.content || []).find((part) => part.type === 'output_text')?.text;

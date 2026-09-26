@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import {
   CREATIVE_CATEGORIES,
@@ -115,7 +116,7 @@ export async function analyzeApprovedTraVideoFrames(args: {
       detail: 'high',
     })),
   ];
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('video-source-analysis', `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({

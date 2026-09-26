@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
     }
 
     const imageUrl = `data:${specimen.mimeType};base64,${specimen.buffer.toString('base64')}`;
-    const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+    const response = await fetchWithProviderUsage('font-analysis', `${OPENAI_BASE_URL}/responses`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
