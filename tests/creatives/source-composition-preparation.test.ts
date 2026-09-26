@@ -12,6 +12,7 @@ import { referenceCandidate } from '../fixtures/reference-catalog';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
+import { withPaidPreparationScope } from '@/lib/creatives/preparation-checkpoint';
 
 // The non-durable preparation helper stays disconnected from durable portfolio Video Intelligence.
 const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
@@ -89,6 +90,22 @@ const createHistoricalPortfolio = async (data: ReturnType<typeof request>, stora
 };
 
 describe('real preparation to Astra with composed sources', () => {
+  it('replays all completed source analysis, planning and audit without another paid call', async () => {
+    const scope = { runId: 'same-submission', storage: new MemoryPortfolioStorage() };
+    const run = () => withPaidPreparationScope(scope, () => prepareCreativeGeneration(request(), 'http://localhost'));
+    const first = await run(); const calls = [...operations];
+    const replay = await run();
+    expect(replay.batchPlan).toEqual(first.batchPlan); expect(replay.sourceAnalysis).toEqual(first.sourceAnalysis);
+    expect(operations).toEqual(calls); expect(outbound).toHaveLength(1); expect(mocks.audit).toHaveBeenCalledTimes(1);
+  });
+  it('retains earlier source checkpoints when a later provider outcome becomes unknown', async () => {
+    const scope = { runId: 'unknown-source', storage: new MemoryPortfolioStorage() };
+    mocks.image.mockRejectedValueOnce(new Error('Connection lost after provider admission'));
+    const run = () => withPaidPreparationScope(scope, () => prepareCreativeGeneration(request(), 'http://localhost'));
+    await expect(run()).rejects.toThrow('Connection lost'); const calls = [...operations];
+    await expect(run()).rejects.toThrow('unknown');
+    expect(operations).toEqual(calls); expect(mocks.image).toHaveBeenCalledTimes(1); expect(outbound).toHaveLength(0);
+  });
   it('keeps Proof retrieval bound to original Create direction across audit repair feedback', async () => {
     const userDirection = 'Create proof-led ads about wage garnishment.';
     const parsed = validateGenerateCreativeRequest({ context: userDirection, variationCount: 2,
