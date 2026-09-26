@@ -42,6 +42,14 @@ describe('image provider failure admission', () => {
     const storage = new MemoryPortfolioStorage(); await expect(run(storage)).rejects.toThrow('no repeat purchase');
     await expect(run(storage)).rejects.toThrow(); expect(fetch).toHaveBeenCalledTimes(1);
   });
+  it.each([[500, null, 'server_error'], [503, 'upstream_timeout', 'server_error'],
+    [503, null, 'service_unavailable_error'], [500, 'server_error', 'server_error']] as const)
+  ('keeps HTTP %i code %s/type %s unknown instead of inferring an overload rejection', async (status, code, type) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: { code, type } }, { status })));
+    const storage = new MemoryPortfolioStorage();
+    await expect(run(storage)).rejects.toThrow('unknown');
+    await expect(run(storage)).rejects.toThrow('UNKNOWN'); expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it.each([[429, 'rate_limit_exceeded'], [503, 'server_is_overloaded']] as const)
   ('reserves exactly one fallback after confirmed HTTP %i %s', async (status, code) => {
     const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ error: { code } }, { status }))

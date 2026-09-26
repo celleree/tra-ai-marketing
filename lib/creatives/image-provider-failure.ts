@@ -11,15 +11,14 @@ export async function imageProviderFailure(response: Response): Promise<Creative
   const code = typeof error?.code === 'string' ? error.code.toLowerCase() : '';
   const type = typeof error?.type === 'string' ? error.type.toLowerCase() : '';
   const terminal = /(?:billing|credit|quota|spend_limit|usage_limit|authentication|invalid_request|invalid_api_key|model_not_found)/.test(`${code} ${type}`);
-  const ambiguous = !terminal && (response.status === 408 || response.status === 504
-    || (response.status >= 500 && !['server_error', 'server_is_overloaded', 'model_overloaded'].includes(code)
-      && !['server_error', 'service_unavailable_error'].includes(type)));
+  const overloaded = response.status === 503 && code === 'server_is_overloaded';
+  const ambiguous = !terminal && (response.status === 408 || (response.status >= 500 && !overloaded));
   // A provider-requested delay is not permission for an immediate second paid call.
   const deferred = response.headers.has('Retry-After');
   const reason = terminal || ambiguous || deferred ? null
     : response.status === 429 && (code === 'rate_limit_exceeded' || (type === 'rate_limit_error' && !code))
       ? 'rate_limited'
-      : response.status >= 500 ? 'provider_unavailable' : null;
+      : overloaded ? 'provider_unavailable' : null;
   return new CreativeImageProviderError(`OpenAI image request failed (HTTP ${response.status}).`
     + (ambiguous ? ' Outcome is unknown; automatic replacement is disabled.' : ''),
   reason, ambiguous ? 'UNKNOWN' : 'FAILED', response.status);
