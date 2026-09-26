@@ -16,6 +16,20 @@ const parseBusyRetryAfterMs = (value: string | null) => {
   return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, MAX_BUSY_RETRY_AFTER_MS) : POLL_DELAY_MS;
 };
 
+/** Retain an unresolved browser submission across failed deliveries. */
+export function createPortfolioSubmitter() {
+  let pending: { command: Extract<Command, { action: 'create' }>; signature: string } | null = null;
+  return async (request: GenerateCreativeRequest) => {
+    const signature = JSON.stringify(request);
+    if (!pending || pending.signature !== signature) pending = { signature,
+      command: { action: 'create', request: structuredClone(request), submissionId: crypto.randomUUID() } };
+    const current = pending;
+    const response = await requestPortfolio(current.command);
+    if (pending === current) pending = null;
+    return response;
+  };
+}
+
 export async function requestPortfolio(command: Command): Promise<PortfolioResponse> {
   const response = await fetch(command.action === 'load' ? endpoint + '?id=' + encodeURIComponent(command.id) : endpoint, {
     method: command.action === 'load' ? 'GET' : command.action === 'create' ? 'POST' : 'PATCH', cache: 'no-store',
