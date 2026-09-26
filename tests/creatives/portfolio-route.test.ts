@@ -12,7 +12,8 @@ import { GET, POST, PATCH } from '@/app/api/creatives/portfolios/route';
 let job: CreativePortfolioJob;
 afterEach(() => { vi.unstubAllEnvs(); });
 const request = (body?: unknown, id?: string) => new Request('http://localhost/api/creatives/portfolios' + (id ? '?id=' + id : ''),
-  body === undefined ? undefined : { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+  body === undefined ? undefined : { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json',
+    'Idempotency-Key': '11111111-1111-4111-8111-111111111111' } });
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv('OPENAI_API_KEY', 'fixture');
   job = newCreativePortfolio(portfolioRequest());
@@ -41,7 +42,13 @@ describe('resumable portfolio API', () => {
     expect(body.job).not.toHaveProperty('request');
     expect(mocks.create.mock.calls[0][0].context).toContain('USER CREATIVE DIRECTION:');
     expect(mocks.advance).not.toHaveBeenCalled();
+    expect(mocks.create.mock.calls[0][3]).toEqual({ operatorId: 'signed-in-operator', id: '11111111-1111-4111-8111-111111111111' });
     expect((await POST(request(portfolioRequest(37)))).status).toBe(400);
+  });
+  it('rejects missing submission identity before creating work', async () => {
+    const input = request(portfolioRequest()); input.headers.delete('Idempotency-Key');
+    expect((await POST(input)).status).toBe(400);
+    expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
   });
   it('returns saved progress without disclosing broad context or the internal lease token', async () => {
     job.snapshot = portfolioSnapshot(job); job.lease = { id: 'private-token', slotIndex: 1, expiresAtMs: Date.now() + 10000 };

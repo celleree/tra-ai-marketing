@@ -20,6 +20,17 @@ const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED'
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('resumable portfolio browser controller', () => {
+  it('preserves a submission key across transport retry and changes it only for a new action', async () => {
+    const value = initial(); const fetcher = vi.fn().mockRejectedValueOnce(new Error('Lost response'))
+      .mockImplementation(async () => Response.json(value));
+    vi.stubGlobal('fetch', fetcher);
+    const command = { action: 'create' as const, request: portfolioRequest(), submissionId: crypto.randomUUID() };
+    await expect(requestPortfolio(command)).rejects.toThrow('Lost response');
+    await requestPortfolio(command);
+    await requestPortfolio({ ...command, submissionId: crypto.randomUUID() });
+    const keys = fetcher.mock.calls.map(([, options]) => options.headers['Idempotency-Key']);
+    expect(keys[0]).toBe(keys[1]); expect(keys[2]).not.toBe(keys[1]);
+  });
   it('parses bounded transient BUSY Retry-After timing without treating 429 as BUSY', async () => {
     const value = initial();
     const fetchMock = vi.fn()

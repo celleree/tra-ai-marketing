@@ -9,6 +9,7 @@ import { retryPortfolioWork, type CreativePortfolioJob } from '@/lib/creatives/p
 import { portfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { readPortfolioCreatives } from '@/lib/creatives/portfolio-results';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
+import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -19,6 +20,7 @@ const result = async (job: CreativePortfolioJob, status = 200, error?: string, r
     status, retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {});
 const failure = (error: unknown) => {
   if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body.' }, 400);
+  if (error instanceof SubmissionConflictError) return json({ error: error.message }, 409);
   if (error instanceof CreativeGenerationPreparationError) return json({ error: error.message }, error.status);
   console.error('Creative portfolio request failed', error);
   return json({ error: 'Creative portfolio request failed. Reload its saved progress before continuing.' }, 500);
@@ -42,8 +44,10 @@ export async function POST(request: Request) {
   try {
     const parsed = validateGenerateCreativeRequest(await request.json(), MAX_PORTFOLIO_CREATIVES);
     if (!parsed.success) return json({ error: parsed.error }, 400);
+    const submissionId = parseSubmissionId(request.headers.get(SUBMISSION_HEADER));
+    if (!submissionId) return json({ error: 'A valid Idempotency-Key is required to create a portfolio.' }, 400);
     assertGenerationAvailable(parsed.data);
-    return await result(await createCreativePortfolio(parsed.data), 201);
+    return await result(await createCreativePortfolio(parsed.data, undefined, undefined, { operatorId: access.userId, id: submissionId }), 201);
   } catch (error) { return failure(error); }
 }
 

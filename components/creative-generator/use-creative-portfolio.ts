@@ -32,7 +32,10 @@ export function useCreativePortfolio() {
       if (mounted.current) setRunning(false);
     }
   };
-  const start = (request: GenerateCreativeRequest) => execute(() => requestPortfolio({ action: 'create', request }), true);
+  const start = (request: GenerateCreativeRequest) => {
+    const submissionId = crypto.randomUUID();
+    return execute(() => requestPortfolio({ action: 'create', request, submissionId }), true);
+  };
   const resume = () => {
     const id = current.current?.job.id;
     if (id) return execute(() => requestPortfolio({ action: 'load', id }), true);
