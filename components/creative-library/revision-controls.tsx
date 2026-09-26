@@ -47,7 +47,6 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
   const [error, setError] = useState('');
   const [saved, setSaved] = useState<CreativeRecord | null>(null);
   const submission = useRef(createSubmissionIdentity('revision'));
-  const lastRequest = useRef<CreativeRevisionRequest | null>(null);
   const submitting = useRef(false);
 
   const submitRevision = async (body: CreativeRevisionRequest, mode: 'recover' | 'fresh' = 'recover') => {
@@ -56,7 +55,6 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
     setBusy(true);
     setError('');
     setSaved(null);
-    lastRequest.current = body;
     try {
       const companyProfile = readStoredRuntimeCompanyProfile();
       const requestBody = JSON.stringify({ ...body, companyProfile });
@@ -87,14 +85,14 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
     void submitRevision({ operation: 'EDIT', instruction: editInstruction.trim() });
   };
 
-  const submitOther = (event: FormEvent) => {
-    event.preventDefault();
-    const body: CreativeRevisionRequest = operation === 'PLACEMENT'
+  const otherRequest = (): CreativeRevisionRequest => operation === 'PLACEMENT'
       ? { operation, placement }
       : operation === 'REGENERATE'
         ? { operation }
         : { operation, instruction: instruction.trim() };
-    void submitRevision(body);
+  const submitOther = (event: FormEvent) => {
+    event.preventDefault();
+    void submitRevision(otherRequest());
   };
 
   if (!canRevise(creative)) {
@@ -118,6 +116,10 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
           <button className={styles.primaryButton} type="submit" disabled={busy || !editInstruction.trim()}>
             {busy ? 'Creating edit…' : 'Create edited creative'}
           </button>
+          {error && !busy ? <button type="button" className={styles.secondaryButton} disabled={!editInstruction.trim()}
+            onClick={() => void submitRevision({ operation: 'EDIT', instruction: editInstruction.trim() }, 'fresh')}>
+            Start a new paid edit
+          </button> : null}
         </form>
       ) : null}
 
@@ -146,15 +148,16 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
             <button className={styles.primaryButton} type="submit" disabled={busy || (operation === 'VARIATION' && !instruction.trim())}>
               {busy ? 'Creating and saving…' : 'Create and save new version'}
             </button>
+            {error && !busy ? <button type="button" className={styles.secondaryButton}
+              disabled={operation === 'VARIATION' && !instruction.trim()}
+              onClick={() => void submitRevision(otherRequest(), 'fresh')}>
+              Start a new paid version
+            </button> : null}
           </form>
         </details>
       ) : null}
 
       {error ? <p role="alert" className={styles.inlineError}>{error}</p> : null}
-      {error && !busy && lastRequest.current ? <button type="button" className={styles.secondaryButton}
-        onClick={() => void submitRevision(lastRequest.current!, 'fresh')}>
-        Start a new paid revision
-      </button> : null}
       {saved ? (
         <div className={styles.editedResult} role="status">
           <strong>Edited creative saved.</strong>
