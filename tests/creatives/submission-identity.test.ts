@@ -26,7 +26,7 @@ describe('browser submission lifecycle', () => {
     const storage = memory(), state = createSubmissionIdentity('generation', () => storage);
     const first = await state.forInput('same request');
     state.completeGeneration(first, 2, 1, 1); expect(await state.forInput('same request')).toBe(first);
-    state.reset(); const next = await state.forInput('same request'); expect(next).not.toBe(first);
+    const next = await state.forInput('same request', 'fresh'); expect(next).not.toBe(first);
     state.complete(first); expect(await state.forInput('same request')).toBe(next);
     state.completeGeneration(next, 2, 2, 0); expect(await state.forInput('same request')).not.toBe(next);
   });
@@ -36,13 +36,13 @@ describe('browser submission lifecycle', () => {
     const storage = memory(), state = createSubmissionIdentity('generation', () => storage);
     await state.forInput('request'); for (const key of storage.values.keys()) storage.values.set(key, 'corrupt');
     await expect(createSubmissionIdentity('generation', () => storage).forInput('request')).rejects.toThrow('session storage');
-    state.reset(); expect(parseSubmissionId(await state.forInput('request'))).not.toBeNull();
+    expect(parseSubmissionId(await state.forInput('request', 'fresh'))).not.toBeNull();
   });
   it('resets the selected unresolved action after switching among inputs', async () => {
     const storage = memory(), state = createSubmissionIdentity('revision', () => storage);
     const a = await state.forInput('A'), b = await state.forInput('B');
-    expect(await state.forInput('A')).toBe(a); state.reset();
-    expect(await state.forInput('A')).not.toBe(a);
+    // UI changed from B to A without first resolving/recovering A's intent.
+    expect(await state.forInput('A', 'fresh')).not.toBe(a);
     expect(await createSubmissionIdentity('revision', () => storage).forInput('B')).toBe(b);
   });
 });

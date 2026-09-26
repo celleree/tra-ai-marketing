@@ -48,9 +48,11 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
   const [saved, setSaved] = useState<CreativeRecord | null>(null);
   const submission = useRef(createSubmissionIdentity('revision'));
   const lastRequest = useRef<CreativeRevisionRequest | null>(null);
+  const submitting = useRef(false);
 
-  const submitRevision = async (body: CreativeRevisionRequest) => {
-    if (busy) return;
+  const submitRevision = async (body: CreativeRevisionRequest, mode: 'recover' | 'fresh' = 'recover') => {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError('');
     setSaved(null);
@@ -58,7 +60,7 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
     try {
       const companyProfile = readStoredRuntimeCompanyProfile();
       const requestBody = JSON.stringify({ ...body, companyProfile });
-      const submissionId = await submission.current.forInput(`${creative.id}:${requestBody}`);
+      const submissionId = await submission.current.forInput(`${creative.id}:${requestBody}`, mode);
       const response = await fetch(`/api/creatives/${creative.id}/revise`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [SUBMISSION_HEADER]: submissionId },
@@ -75,6 +77,7 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The new version could not be saved.');
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };
@@ -149,7 +152,7 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
 
       {error ? <p role="alert" className={styles.inlineError}>{error}</p> : null}
       {error && !busy && lastRequest.current ? <button type="button" className={styles.secondaryButton}
-        onClick={() => { submission.current.reset(); void submitRevision(lastRequest.current!); }}>
+        onClick={() => void submitRevision(lastRequest.current!, 'fresh')}>
         Start a new paid revision
       </button> : null}
       {saved ? (

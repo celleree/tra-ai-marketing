@@ -108,8 +108,9 @@ export function SelectedFrameGeneration({
   };
 
   const submission = useRef(createSubmissionIdentity('direct-generation'));
-  const generate = async () => {
-    if (generating) return;
+  const submitting = useRef(false);
+  const generate = async (mode: 'recover' | 'fresh' = 'recover') => {
+    if (submitting.current) return;
     const selectedFrames = selection.frames.filter((frame) =>
       selectedFrameIds.includes(frame.frameId)
     );
@@ -119,6 +120,7 @@ export function SelectedFrameGeneration({
       return;
     }
 
+    submitting.current = true;
     setGenerating(true);
     setError('');
     setFailures({});
@@ -151,7 +153,7 @@ export function SelectedFrameGeneration({
           variationCount: 2,
           placement,
         });
-      const submissionId = await submission.current.forInput(requestBody);
+      const submissionId = await submission.current.forInput(requestBody, mode);
       const response = await fetch('/api/creatives/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [SUBMISSION_HEADER]: submissionId },
@@ -223,6 +225,7 @@ export function SelectedFrameGeneration({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Creative generation failed.');
     } finally {
+      submitting.current = false;
       setGenerating(false);
     }
   };
@@ -252,7 +255,7 @@ export function SelectedFrameGeneration({
     </fieldset>
     <button className={styles.primary} type="button" onClick={() => void preview()} disabled={generating || previewing || selectedFrameIds.length < 1}>{previewing ? 'Extracting source frames…' : 'Preview source frames'}</button>
     <p className={styles.muted}>Extracted from the original video. No image generation.</p>
-    {error && !generating ? <button type="button" onClick={() => { submission.current.reset(); void generate(); }}>
+    {error && !generating ? <button type="button" onClick={() => void generate('fresh')}>
       Start a new paid generation
     </button> : null}
     {previews.length ? <section className={styles.generatedResults}>{previews.map((frame) => <article className={styles.frameChoice} key={frame.frameId}>
