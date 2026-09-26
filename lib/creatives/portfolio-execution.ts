@@ -12,6 +12,7 @@ import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelli
 import { VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
+import { imageAttemptBudget, withImageAttemptScope } from '@/lib/creatives/image-attempt-execution';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
@@ -56,6 +57,10 @@ export async function advanceCreativePortfolio(
   const job = await updateCreativePortfolio(id, current => claimCreativePortfolio(current, Date.now(), token).job, storage);
   if (job.lease?.id !== token) return { job };
   const slotIndex = job.lease.slotIndex;
+  const render = (...args: Parameters<typeof renderPlannedCreative>) => withImageAttemptScope({
+    runId: `portfolio:${job.id}`, operationId: args[2]!.creativeId!,
+    budget: imageAttemptBudget(job.request.variationCount), storage,
+  }, () => renderPlannedCreative(...args));
   const assertCurrentWork = async () => {
     const current = await readCreativePortfolio(id, storage);
     if (current?.lease?.id !== token || current.lease.expiresAtMs <= Date.now()) throw new Error('Portfolio work lease is no longer current.');
@@ -296,7 +301,7 @@ export async function advanceCreativePortfolio(
         sourceVideoContentHash: selectedFrames.sourceVideoContentHash,
         frames: selectedFrames.selectionProvenance,
       };
-      const creative = await renderPlannedCreative(concept, {
+      const creative = await render(concept, {
         ...context,
         videoFrameSet: selectedFrames,
         generatedVideoFrameSelection,
@@ -307,7 +312,7 @@ export async function advanceCreativePortfolio(
     const denied = await reserveWorkQuota('CREATIVE_GENERATION');
     if (denied) return denied;
     providerWorkStarted = true;
-    const creative = await renderPlannedCreative(concept, context, {
+    const creative = await render(concept, context, {
       creativeId: slot.creativeId,
       assertCurrentWork,
     });

@@ -12,6 +12,7 @@ import { createVideoIntelligenceAnalyzerFingerprint } from '@/lib/video/intellig
 import { videoIntelligenceJobId } from '@/lib/video/intelligence-job';
 import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 import { composePlanningCopyWithProof } from '@/lib/proof/planning-selection';
+import { fetchCreativeImage } from '@/lib/creatives/image-models';
 
 const mocks = vi.hoisted(() => ({ prepareStep: vi.fn(), plan: vi.fn(), audit: vi.fn(), restore: vi.fn(), render: vi.fn(), list: vi.fn(),
   videoStep: vi.fn(), sourceAnalysisStep: vi.fn(), projectVideo: vi.fn(), loadVideo: vi.fn(), selectVideo: vi.fn() }));
@@ -114,6 +115,26 @@ const readyPortfolio = async (
     ...current, snapshot, planning: { phase: 'READY_TO_RENDER' as const }, lease: null,
   }), storage);
 };
+
+it('retries portfolio finalization from saved purchased bytes without another image call', async () => {
+  const storage = new MemoryPortfolioStorage(); const job = await readyPortfolio(storage);
+  const finalize = mocks.render.getMockImplementation()!; let finalizations = 0;
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: 'c2F2ZWQ=' }] })));
+  mocks.render.mockImplementation(async (...args) => {
+    await fetchCreativeImage('https://api.openai.com/v1/images/generations', { method: 'POST',
+      body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', prompt: 'Same approved plan', size: '1024x1024' }) });
+    if (finalizations++ === 0) throw new Error('Interrupted finalization');
+    return finalize(...args);
+  });
+  try {
+    const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(failed.job.slots[0].status).toBe('RETRY_REQUIRED');
+    await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, 1), storage);
+    const recovered = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(recovered.job.slots[0].status).toBe('SAVED');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally { fetcher.mockRestore(); }
+});
 
 const composeD2Proof = (concept: any, length: number) => {
   const selectedProof = {

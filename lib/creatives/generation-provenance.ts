@@ -8,7 +8,7 @@ import {
   FALLBACK_CREATIVE_IMAGE_MODEL,
   PREFERRED_CREATIVE_IMAGE_MODEL,
   type CreativeImageRouting,
-} from '@/lib/creatives/image-models';
+} from '@/lib/creatives/image-routing';
 
 const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
