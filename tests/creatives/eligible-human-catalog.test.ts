@@ -10,7 +10,8 @@ const libraryId = (value: number) => `video-library:${hex(value)}`;
 const frameId = (value: number) => `video-frame:${hex(value)}`;
 
 const approvedHuman = (index: number, active = true): ApprovedHumanFrame => ({
-  version: 1,
+  version: 2,
+  sourceOverlay: { version: 2, status: 'CLEAN' },
   id: `human_${hex(index)}`,
   sourceName: `Source ${index}`,
   description: `Approved person ${index}`,

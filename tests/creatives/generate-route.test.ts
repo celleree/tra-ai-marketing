@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import sharp from 'sharp';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
@@ -133,9 +135,10 @@ const mediaId = (hex: string) => `media_${hex.repeat(32)}`;
 const contentHash = (buffer: Buffer) =>
   createHash('sha256').update(buffer).digest('hex');
 const selectionFor = (sourceVideoContentHash: string) => ({
-  libraryId: LIBRARY_ID,
+  version: 2 as const, libraryId: LIBRARY_ID,
   sourceVideoContentHash,
   frameIds: [LIBRARY_FRAME_ID],
+  sourceOverlays: [{ version: 2 as const, status: 'CLEAN' as const }],
 });
 
 const image = (hex: string): StoredCreativeSourceMediaFile => ({
@@ -779,7 +782,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     );
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
     for (const [call] of mocks.generateApprovedTraVideoFrameCreativeImage.mock.calls) {
-      expect(call.frames).toBe(selectedFrames);
+      expect(call.frames).toEqual(selectedFrames);
     }
     for (const { data } of events.filter(({ event }) => event === 'creative')) {
       expect(data.creative).toMatchObject({
@@ -882,14 +885,68 @@ describe('layout blueprint and final image-provider boundaries', () => {
         ...(problem === 'provider hash mismatch' ? { expectedProviderPngSha256: '0'.repeat(64) } : {}),
       };
       mocks.extractVideoSelectionFrames.mockImplementation(async source => ({ source, sourceVideoContentHash: hash,
-        frames: [frame], selectionProvenance: [] }));
-      const response = await POST(generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2, selectionFor(hash)));
-      expect(response.status).toBe(409);
+        frames: [frame], selectionProvenance: [{ frameIndex: 0, libraryFrameId: LIBRARY_FRAME_ID,
+          timestampMs: 250, approvedPngSha256: contentHash(PNG) }] }));
+      const assessed = selectionFor(hash);
+      const requestSelection = problem === 'missing assessment'
+        ? { libraryId: assessed.libraryId, sourceVideoContentHash: hash, frameIds: assessed.frameIds }
+        : problem === 'unsafe assessment' ? { ...assessed, sourceOverlays: [{ version: 2, status: 'UNSAFE' }] }
+          : assessed;
+      const response = await POST(generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2, requestSelection));
+      expect(response.status).toBe(problem === 'unsafe assessment' ? 400 : 409);
       expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
       expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
       expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
       expect(fetch).not.toHaveBeenCalled();
     });
+
+  it('attaches the pixel-only derivative of an explicitly assessed v2 edge crop', async () => {
+    const videoId = mediaId('9'); storedById[videoId] = video('9');
+    const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
+    const original = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#416589' } }).png().toBuffer();
+    const expected = await sharp(original).extract({ left: 0, top: 0, width: 100, height: 70 }).png().toBuffer();
+    const frame = { frameIndex: 0, timestampMs: 250, mimeType: 'image/png', buffer: original,
+      frameSha256: contentHash(original), byteLength: original.length, sourceRole: 'TRA_VIDEO',
+      sourceVideoMediaId: videoId, sourceVideoFileName: storedById[videoId].fileName,
+      sourceVideoContentHash, approvedHumanSource: true, cacheKey: null,
+      expectedCrop: { left: 0, top: 0, width: 100, height: 70 }, expectedProviderPngSha256: contentHash(expected) };
+    mocks.loadVideoSelectionContext.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: null });
+    mocks.extractVideoSelectionFrames.mockImplementation(async source => ({ source, sourceVideoContentHash,
+      frames: [frame], selectionProvenance: [{ frameIndex: 0, libraryFrameId: LIBRARY_FRAME_ID,
+        candidateFrameSha256: 'a'.repeat(64), timestampMs: 250, approvedPngSha256: contentHash(original) }] }));
+    mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2), creatives: [plannedCreative(1, 'approved-tra-human'), plannedCreative(2)] });
+    const attachments: Buffer[] = [];
+    mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(async ({ frames }) => {
+      const providerFrames = await prepareProviderVideoFrames(frames);
+      attachments.push(providerFrames[0].providerBuffer);
+      return { ...imageResultFor('TRA_VIDEO_FRAME_GENERATION'), providerFrames };
+    });
+    const response = await POST(generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2,
+      { ...selectionFor(sourceVideoContentHash), sourceOverlays: [{ version: 2, status: 'EDGE_CROP',
+        edge: 'BOTTOM', removePermille: 300, overlayDepthPermille: 280 }] }));
+    expect(response.status).toBe(200);
+    expect((await readStreamEvents(response)).at(-1)?.data.successfulCount).toBe(2);
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toEqual(expected);
+    expect((await sharp(attachments[0]).metadata()).height).toBe(70);
+  });
+
+  it('rejects a v2 decision whose fresh extracted frame order no longer matches before quota', async () => {
+    const videoId = mediaId('9'); storedById[videoId] = video('9');
+    const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
+    mocks.loadVideoSelectionContext.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: null });
+    mocks.extractVideoSelectionFrames.mockImplementation(async source => ({ source, sourceVideoContentHash,
+      frames: [{ frameIndex: 0, timestampMs: 250, mimeType: 'image/png', buffer: PNG,
+        frameSha256: contentHash(PNG), byteLength: PNG.length, sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: videoId, sourceVideoFileName: storedById[videoId].fileName,
+        sourceVideoContentHash, approvedHumanSource: true, cacheKey: null }],
+      selectionProvenance: [{ frameIndex: 0, libraryFrameId: `video-frame:${'f'.repeat(64)}` }] }));
+    const response = await POST(generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2, selectionFor(sourceVideoContentHash)));
+    expect(response.status).toBe(409);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+    expect(mocks.planCreativeBatch).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
+  });
 
   it('rejects explicit frames with TRA images before hydration or providers', async () => {
     const response = await POST(generationRequest([

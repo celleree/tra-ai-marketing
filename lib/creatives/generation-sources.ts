@@ -51,6 +51,9 @@ export async function hydrateGenerationSources(request: SourceRequest) {
   let generatedVideoFrameSelection: GeneratedVideoFrameSelection | undefined;
   if (request.videoFrameSelection && traVideoSource) {
     const selection = request.videoFrameSelection;
+    if (selection.version !== 2 || !selection.sourceOverlays || selection.sourceOverlays.length !== selection.frameIds.length) {
+      throw new CreativeGenerationPreparationError('Selected TRA video frames are unassessed. Reassess the exact frames before generation.', 409);
+    }
     if (videoSourceHash(traVideoSource) !== selection.sourceVideoContentHash) {
       throw new CreativeGenerationPreparationError('The selected TRA video frames are stale. Reanalyze the video and select frames again.', 409);
     }
@@ -59,7 +62,13 @@ export async function hydrateGenerationSources(request: SourceRequest) {
     if (context.library.id !== selection.libraryId) throw new CreativeGenerationPreparationError('The selected TRA video frame library does not match this request. Select frames again.', 409);
     try {
       const selected = await extractVideoSelectionFrames(traVideoSource, context, selection.frameIds);
-      videoFrameSet = selected;
+      if (selected.frames.length !== selection.frameIds.length || selected.selectionProvenance.length !== selection.frameIds.length
+        || selected.selectionProvenance.some((frame, index) => frame.libraryFrameId !== selection.frameIds[index]
+          || frame.frameIndex !== selected.frames[index].frameIndex || frame.timestampMs !== selected.frames[index].timestampMs
+          || frame.approvedPngSha256 !== selected.frames[index].frameSha256)) {
+        throw new Error('Selected TRA frame order or provenance changed. Reassess the exact frames.');
+      }
+      videoFrameSet = { ...selected, frames: selected.frames.map((frame, index) => ({ ...frame, sourceOverlay: selection.sourceOverlays![index] })) };
       generatedVideoFrameSelection = { libraryId: context.library.id, sourceVideoMediaId: traVideoSource.media.id,
         sourceVideoContentHash: selected.sourceVideoContentHash, frames: selected.selectionProvenance };
     } catch (error) {

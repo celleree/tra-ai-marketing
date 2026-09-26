@@ -11,7 +11,8 @@ import { GET, POST, PATCH } from '@/app/api/video/humans/route';
 
 const id = `human_${'f'.repeat(64)}`;
 const body = { mediaId: `media_${'a'.repeat(32)}`, videoFrameSelection: {
-  libraryId: `video-library:${'b'.repeat(64)}`, sourceVideoContentHash: 'c'.repeat(64), frameIds: [`video-frame:${'d'.repeat(64)}`],
+  version: 2, libraryId: `video-library:${'b'.repeat(64)}`, sourceVideoContentHash: 'c'.repeat(64), frameIds: [`video-frame:${'d'.repeat(64)}`],
+  sourceOverlays: [{ version: 2, status: 'CLEAN' }],
 }, previewPngSha256: 'e'.repeat(64), description: 'Approved visible presenter' };
 const request = (value?: unknown, query = '') => new Request(`http://localhost/api/video/humans${query}`,
   value === undefined ? undefined : { method: 'POST', body: JSON.stringify(value), headers: { 'Content-Type': 'application/json' } });

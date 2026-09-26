@@ -30,7 +30,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 it('loads exact saved B1 selection context from the frozen identity and artifact', async () => {
   complete();
-  expect(await loadSavedVideoSelectionContext(source, savedDependency)).toEqual({ library, manifest, representativeImages: [] });
+  expect(await loadSavedVideoSelectionContext(source, savedDependency)).toEqual({ library, manifest, representativeImages: [], librarySha256: resultSha });
   expect(mocks.read).toHaveBeenCalledWith(savedIdentity);
   expect(mocks.library).toHaveBeenCalledWith(savedIdentity, result);
   expect(mocks.preparation).toHaveBeenCalledWith({ ...preparation, expectedSourceVideoMediaId: source.media.id,
@@ -74,18 +74,16 @@ it.each([
   expect(mocks.library).not.toHaveBeenCalled(); expect(mocks.preparation).not.toHaveBeenCalled(); expect(mocks.legacy).not.toHaveBeenCalled();
 });
 
-it('keeps explicit human identity pixels intact only when existing observation has no source mark', async () => {
+it('never promotes sparse or even apparently empty B1 observations into source-overlay approval', async () => {
   const png = Buffer.from('original-pixels');
   const context = { library: { ...library, representativeFrames: [
-    { id: 'clear', observation: { visibleText: [], topics: ['person'], uncertainties: [] } },
-    { id: 'marked', observation: { visibleText: ['TRA'], topics: ['brand'], uncertainties: [] } },
+    { id: 'clear', observation: { visibleText: [], topics: [], uncertainties: [], summary: '', composition: '' } },
+    { id: 'marked', observation: { visibleText: [], topics: [], uncertainties: [], summary: 'TRA logo visible', composition: 'watermark in corner' } },
   ] }, manifest, representativeImages: [] } as never;
   mocks.preparedFrames.mockResolvedValue({ frames: [{ buffer: png }, { buffer: png }] });
   const selected = await extractVideoSelectionFrames(source, context, ['clear', 'marked']);
   expect(selected.frames[0].buffer).toBe(png);
-  expect(selected.frames.map(frame => frame.sourceOverlay)).toEqual([
-    { version: 2, status: 'CLEAN' }, { version: 2, status: 'UNSAFE' },
-  ]);
+  expect(selected.frames.map(frame => frame.sourceOverlay)).toEqual([undefined, undefined]);
 });
 
 it('fails closed when preparation validation rejects the saved analyzer binding', async () => {
@@ -102,8 +100,7 @@ it.each([
 ])('hydrates requested known saved frame IDs through the existing extraction path', async (frameIds) => {
   complete(); const context = await loadSavedVideoSelectionContext(source, savedDependency);
   mocks.preparedFrames.mockResolvedValue({ frames: frameIds.map(id => ({ id })) });
-  expect(await extractVideoSelectionFrames(source, context, frameIds)).toEqual({ frames: frameIds.map(id => ({ id,
-    sourceOverlay: { version: 2, status: 'UNSAFE' } })) });
+  expect(await extractVideoSelectionFrames(source, context, frameIds)).toEqual({ frames: frameIds.map(id => ({ id })) });
   expect(mocks.preparedFrames).toHaveBeenCalledWith(source, library, frameIds, manifest);
   expect(mocks.legacyFrames).not.toHaveBeenCalled();
 });
@@ -112,7 +109,7 @@ it('prefers complete durable context bound to the hydrated source and current an
   mocks.read.mockResolvedValue({ job: { phase: 'COMPLETE', preparation, result } });
   mocks.library.mockResolvedValue(library); mocks.preparation.mockResolvedValue({ manifest, representatives: [] });
   const context = await loadVideoSelectionContext(source);
-  expect(context).toEqual({ library, manifest, representativeImages: [] }); expect(mocks.legacy).not.toHaveBeenCalled();
+  expect(context).toEqual({ library, manifest, representativeImages: [], librarySha256: resultSha }); expect(mocks.legacy).not.toHaveBeenCalled();
   const identity = mocks.read.mock.calls[0][0];
   expect(identity).toMatchObject({ sourceVideoMediaId: source.media.id, sourceVideoContentHash: hash,
     analyzerFingerprint: { visionModel: 'current-model' } });
@@ -120,8 +117,7 @@ it('prefers complete durable context bound to the hydrated source and current an
   expect(mocks.preparation).toHaveBeenCalledWith({ ...preparation, expectedSourceVideoMediaId: source.media.id,
     expectedSourceVideoContentHash: hash, expectedAnalyzerFingerprintSha256: identity.analyzerFingerprint.sha256 });
   mocks.preparedFrames.mockResolvedValue({ frames: [{ id: 'fresh-png' }] });
-  expect(await extractVideoSelectionFrames(source, context!, ['chosen'])).toEqual({ frames: [{ id: 'fresh-png',
-    sourceOverlay: { version: 2, status: 'UNSAFE' } }] });
+  expect(await extractVideoSelectionFrames(source, context!, ['chosen'])).toEqual({ frames: [{ id: 'fresh-png' }] });
   expect(mocks.preparedFrames).toHaveBeenCalledWith(source, library, ['chosen'], manifest);
   expect(mocks.legacyFrames).not.toHaveBeenCalled();
 });

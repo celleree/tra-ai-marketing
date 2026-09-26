@@ -15,6 +15,7 @@ export interface VideoSelectionContext {
   library: VideoFrameLibrary;
   manifest: VideoIntelligencePreparationManifest | null;
   representativeImages: VideoSelectionRepresentativeImage[] | null;
+  librarySha256?: string;
 }
 
 export interface SavedVideoSelectionDependency {
@@ -48,7 +49,7 @@ export const loadVideoSelectionContext = async (source: HydratedTraVideoSource):
         expectedSourceVideoMediaId: identity.sourceVideoMediaId, expectedSourceVideoContentHash: identity.sourceVideoContentHash,
         expectedAnalyzerFingerprintSha256: identity.analyzerFingerprint.sha256 }),
     ]);
-    return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives) };
+    return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives), librarySha256: stored.job.result!.sha256 };
   }
   if (process.env.NODE_ENV === 'production') return null;
   const library = await loadVideoFrameLibrary(identity.sourceVideoMediaId, identity.sourceVideoContentHash);
@@ -79,21 +80,11 @@ export const loadSavedVideoSelectionContext = async (
       expectedSourceVideoMediaId: identity.sourceVideoMediaId, expectedSourceVideoContentHash: identity.sourceVideoContentHash,
       expectedAnalyzerFingerprintSha256: identity.analyzerFingerprint.sha256 }),
   ]);
-  return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives) };
+  return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives), librarySha256: artifact.sha256 };
 };
 
 export const extractVideoSelectionFrames = async (source: HydratedTraVideoSource, context: VideoSelectionContext, frameIds: readonly string[]) => {
-  const extracted = await (context.manifest
+  return context.manifest
     ? getApprovedPreparedSelectedTraVideoFrames(source, context.library, frameIds, context.manifest)
-    : getApprovedSelectedTraVideoFrames(source, context.library, frameIds));
-  // Explicit/curated selections have no B3 assessment. Existing B1 observations may admit only plainly
-  // unmarked frames; ambiguous or text-bearing frames need a new assessed selection before image editing.
-  return { ...extracted, frames: extracted.frames.map((frame, index) => {
-    const observation = context.library.representativeFrames.find(item => item.id === frameIds[index])?.observation;
-    const clean = observation && observation.visibleText.length === 0 && observation.uncertainties.length === 0
-      && !observation.topics.includes('brand') && !observation.topics.includes('on-screen text');
-    return { ...frame, sourceOverlay: clean
-      ? { version: 2 as const, status: 'CLEAN' as const }
-      : { version: 2 as const, status: 'UNSAFE' as const } };
-  }) };
+    : getApprovedSelectedTraVideoFrames(source, context.library, frameIds);
 };

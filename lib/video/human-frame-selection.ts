@@ -212,7 +212,7 @@ const parseAssessment = (value: unknown): VideoHumanFrameAssessment => {
   return { ...item, sourceOverlay: decision } as VideoHumanFrameAssessment;
 };
 
-const suitable = (item: VideoHumanFrameAssessment) => item.humanPresence === 'CLEAR'
+export const isSuitableVideoHumanFrameAssessment = (item: VideoHumanFrameAssessment) => item.humanPresence === 'CLEAR'
   && item.facialDetail === 'SUFFICIENT' && item.eyes === 'OPEN_OR_NOT_VISIBLE' && item.blur !== 'SEVERE'
   && item.occlusion === 'NONE_OR_MINOR' && item.expressionUsability === 'NATURAL_OR_NEUTRAL'
   && item.framing === 'USABLE' && item.compositionFit !== 'POOR' && item.sourceOverlay.status !== 'UNSAFE';
@@ -245,7 +245,7 @@ export const parseVideoHumanFrameSelectionOutcome = (
   }
   const compositionRank = { STRONG: 0, ACCEPTABLE: 1, POOR: 2 } as const;
   const blurRank = { CLEAR: 0, MODERATE: 1, SEVERE: 2 } as const;
-  const ranked = assessments.filter(suitable).map((assessment) => {
+  const ranked = assessments.filter(isSuitableVideoHumanFrameAssessment).map((assessment) => {
     const source = expected.get(`${assessment.libraryId}\u0000${assessment.frameId}`)!;
     return { assessment, source, reuseCount: reuseCounts.get(`${assessment.libraryId}\u0000${assessment.frameId}`) ?? 0 };
   }).sort((left, right) => compositionRank[left.assessment.compositionFit] - compositionRank[right.assessment.compositionFit]

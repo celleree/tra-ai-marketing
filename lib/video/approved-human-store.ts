@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
 import { parseApprovedHumanFrame, type ApprovedHumanFrame } from '@/lib/video/approved-human';
+import type { SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
 import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 
 const KEY = 'approved-humans/v1/index.json';
-export const approvedHumanId = (source: ApprovedHumanFrame['source']) => `human_${createHash('sha256')
+export const approvedHumanId = (source: ApprovedHumanFrame['source'], sourceOverlay?: SourceOverlayDecision) => `human_${createHash('sha256')
   .update(JSON.stringify([source.sourceVideoMediaId, source.sourceVideoContentHash, source.frames[0].libraryFrameId,
-    source.frames[0].approvedPngSha256, 'selected-png-v1'])).digest('hex')}`;
+    source.frames[0].approvedPngSha256, sourceOverlay ? 'selected-png-overlay-v2' : 'selected-png-v1',
+    ...(sourceOverlay ? [sourceOverlay] : [])])).digest('hex')}`;
+const recordId = (record: ApprovedHumanFrame) => approvedHumanId(record.source, record.version === 2 ? record.sourceOverlay : undefined);
 
 async function read(storage: VideoIntelligenceStorage) {
   const stored = await storage.read(KEY);
@@ -13,7 +16,7 @@ async function read(storage: VideoIntelligenceStorage) {
   const value = JSON.parse(stored.bytes.toString('utf8')) as { version?: unknown; records?: unknown[] };
   if (value.version !== 1 || !Array.isArray(value.records)) throw new Error('Approved-human library is invalid.');
   const records = value.records.map(parseApprovedHumanFrame);
-  if (records.some(record => !record || record.id !== approvedHumanId(record.source))
+  if (records.some(record => !record || record.id !== recordId(record))
     || new Set(records.map(record => record?.id)).size !== records.length) throw new Error('Approved-human records are invalid.');
   return { records: records as ApprovedHumanFrame[], etag: stored.etag };
 }
@@ -33,7 +36,7 @@ async function update(change: (records: ApprovedHumanFrame[]) => ApprovedHumanFr
 /** Caller must validate fresh source-bound PNGs and the operator's preview hash first. */
 export async function saveApprovedHumanFrame(input: ApprovedHumanFrame, storage = getVideoIntelligenceStorage()) {
   const record = parseApprovedHumanFrame(input);
-  if (!record || record.id !== approvedHumanId(record.source)) throw new Error('Invalid approved-human record.');
+  if (!record || record.id !== recordId(record)) throw new Error('Invalid approved-human record.');
   const records = await update(current => {
     const existing = current.find(item => item.id === record.id);
     if (existing) return current.map(item => item.id === record.id ? { ...item, active: true, updatedAt: record.updatedAt } : item);
