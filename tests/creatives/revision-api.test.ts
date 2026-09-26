@@ -9,6 +9,9 @@ import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
 import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import { referenceCandidate } from '../fixtures/reference-catalog';
+import { createHash } from 'node:crypto';
+import sharp from 'sharp';
+import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), logoGeometry: vi.fn(), eraseLogo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn(), proof: vi.fn() }));
 vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
@@ -31,6 +34,14 @@ const parentId = `creative_${'a'.repeat(32)}`;
 const mediaId = `media_${'b'.repeat(32)}`;
 const approvedHumanRecordId = `human_${'f'.repeat(64)}`;
 const generalizedHumanSourceId = approvedHumanSourceId(approvedHumanRecordId);
+const videoPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
+const videoPngHash = createHash('sha256').update(videoPng).digest('hex');
+const largePng = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#9c7049' } }).png().toBuffer();
+const largePngHash = createHash('sha256').update(largePng).digest('hex');
+const videoFrame = (): ApprovedTraVideoFrame => ({ frameIndex: 0, timestampMs: 1000, mimeType: 'image/png', buffer: videoPng,
+  frameSha256: videoPngHash, byteLength: videoPng.length, sourceRole: 'TRA_VIDEO', sourceVideoMediaId: mediaId,
+  sourceVideoFileName: `${mediaId}.mp4`, sourceVideoContentHash: 'f'.repeat(64), approvedHumanSource: true,
+  cacheKey: null, sourceOverlay: { version: 2, status: 'CLEAN' }, expectedProviderPngSha256: videoPngHash, expectedCrop: null });
 const strategy: CreativeStrategy = {
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer', painPoint: 'Unclear next steps', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Get clarity', cta: 'Consult us', offer: null,
   soWhat: { surfaceMessage: 'Organize your case', functionalConsequence: 'Understand your options', meaningfulOutcome: 'Move forward confidently' },
@@ -51,12 +62,13 @@ const generalizedHumanParent = (): CreativeRecord => {
   record.planning = { ...record.planning!, strategy: humanStrategy };
   record.identity = buildCreativeIdentity({ creativeId: record.id, operation: 'GENERATE', strategy: humanStrategy });
   record.videoFrameSelection = { libraryId:`video-library:${'a'.repeat(64)}`, sourceVideoMediaId:mediaId, sourceVideoContentHash:'f'.repeat(64),
-    frames:[{frameIndex:0,libraryFrameId:`video-frame:${'c'.repeat(64)}`,candidateFrameSha256:'d'.repeat(64),timestampMs:1000,approvedPngSha256:'e'.repeat(64)}] };
+    frames:[{frameIndex:0,libraryFrameId:`video-frame:${'c'.repeat(64)}`,candidateFrameSha256:'d'.repeat(64),timestampMs:1000,approvedPngSha256:videoPngHash}] };
   record.generationProvenance = {
     ...record.generationProvenance!,
     requestedSources: [{ role: 'TRA_VIDEO', mediaId, sha256: 'f'.repeat(64) }],
     attachedSource: { type: 'TRA_VIDEO_FRAMES', mediaId, sourceSha256: 'f'.repeat(64), selectionMode: 'USER_SELECTED',
-      frames: [{ timestampMs: 1000, approvedPngSha256: 'e'.repeat(64) }] },
+      frames: [{ timestampMs: 1000, approvedPngSha256: videoPngHash, providerPngSha256: videoPngHash,
+        sourceOverlay: { version: 2, status: 'CLEAN' }, crop: null }] },
   };
   return record;
 };
@@ -108,7 +120,17 @@ const caseStudyProofParent = (): CreativeRecord => {
 };
 const call = (body: unknown, creativeId = parentId) => POST(new Request('http://localhost/api/creatives/revise', { method: 'POST', body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
 const hydrate = (record: CreativeRecord) => ({ parent: { record, identity: record.identity, planning: record.planning, provenance: record.generationProvenance }, canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId, sha256: 'c'.repeat(64) }, originalApprovedSource: null, logoOverlay: null });
-const hydrateGeneralizedHuman = (record: CreativeRecord) => ({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[]} });
+const hydrateGeneralizedHuman = (record: CreativeRecord) => ({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[videoFrame()]} });
+const savedVideoParent = (mode: 'AUTOMATIC' | 'USER_SELECTED'): CreativeRecord => {
+  const record = generalizedHumanParent();
+  const selectedStrategy: CreativeStrategy = { ...strategy, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' } };
+  record.planning = { ...record.planning!, strategy: selectedStrategy };
+  record.identity = buildCreativeIdentity({ creativeId: record.id, operation: 'GENERATE', strategy: selectedStrategy });
+  if (record.generationProvenance?.attachedSource?.type === 'TRA_VIDEO_FRAMES') {
+    record.generationProvenance.attachedSource.selectionMode = mode;
+  }
+  return record;
+};
 beforeEach(() => {
   Object.values(mocks).forEach(mock => mock.mockReset());
   mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
@@ -213,7 +235,7 @@ describe('saved creative revision API', () => {
     record.videoFrameSelection = { libraryId:`video-library:${'a'.repeat(64)}`, sourceVideoMediaId:mediaId, sourceVideoContentHash:'b'.repeat(64),
       frames:[{frameIndex:0,libraryFrameId:`video-frame:${'c'.repeat(64)}`,candidateFrameSha256:'d'.repeat(64),timestampMs:1000,approvedPngSha256:'e'.repeat(64)}] };
     mocks.list.mockResolvedValue([record]);
-    mocks.hydrate.mockResolvedValue({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[]} });
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[videoFrame()]} });
     const response = await call({ operation:'EDIT', instruction:'Remove the person and make this a graphic ad.' });
     const { creative } = await response.json();
     expect(response.status).toBe(201);
@@ -238,6 +260,8 @@ describe('saved creative revision API', () => {
     expect(creative.planning.strategy).not.toHaveProperty('approvedHumanId');
     expect(mocks.human).toHaveBeenCalledWith(approvedHumanRecordId, record.videoFrameSelection);
     expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource).not.toBeNull();
+    expect(mocks.hydrate.mock.invocationCallOrder[0]).toBeLessThan(mocks.requireOperatorQuota.mock.invocationCallOrder[0]);
+    expect(mocks.requireOperatorQuota.mock.invocationCallOrder[0]).toBeLessThan(mocks.plan.mock.invocationCallOrder[0]);
     expect(creative.generationProvenance.attachedSource).toEqual(record.generationProvenance!.attachedSource);
     expect(creative.videoFrameSelection).toEqual(record.videoFrameSelection);
   });
@@ -270,6 +294,63 @@ describe('saved creative revision API', () => {
     expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource).toBeNull();
     expect(creative.generationProvenance.attachedSource).toBeNull();
     expect(creative).not.toHaveProperty('videoFrameSelection');
+  });
+  it.each([
+    ['EDIT', 'AUTOMATIC'], ['VARIATION', 'AUTOMATIC'],
+    ['EDIT', 'USER_SELECTED'], ['VARIATION', 'USER_SELECTED'],
+  ] as const)('%s detaches saved %s video-human frames when the final concept is non-human', async (operation, mode) => {
+    const record = savedVideoParent(mode);
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    const response = await call({ operation, instruction: 'Make this a graphic ad with no person.' });
+    expect(response.status).toBe(201);
+    const { creative } = await response.json();
+    expect(mocks.generate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      sources: expect.objectContaining({ originalApprovedSource: null }),
+      concept: expect.objectContaining({ strategy: expect.objectContaining({ execution: expect.objectContaining({ subjectSource: 'non-human' }) }) }),
+    }));
+    expect(creative.generationProvenance.attachedSource).toBeNull();
+    expect(creative).not.toHaveProperty('videoFrameSelection');
+  });
+  it('keeps a non-human TRA reference image source attached under its existing semantics', async () => {
+    const record = parent();
+    record.generationProvenance = { ...record.generationProvenance!, requestedSources: [{ role: 'TRA_REFERENCE', mediaId, sha256: 'a'.repeat(64) }],
+      attachedSource: { type: 'TRA_REFERENCE_IMAGE', mediaId, sha256: 'a'.repeat(64) } };
+    mocks.list.mockResolvedValue([record]);
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), originalApprovedSource: { kind: 'TRA_REFERENCE', source: { stored: { buffer: videoPng } } } });
+    const response = await call({ operation: 'EDIT', instruction: 'Keep the source image and use no person.' });
+    expect(response.status).toBe(201);
+    expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource?.kind).toBe('TRA_REFERENCE');
+    expect((await response.json()).creative.generationProvenance.attachedSource).toEqual(record.generationProvenance.attachedSource);
+  });
+  it.each(['unassessed', 'crop mismatch', 'provider hash mismatch'] as const)(
+    'rejects %s saved video frames before revision quota, planner and image provider', async problem => {
+      const record = savedVideoParent('AUTOMATIC');
+      const frame = videoFrame();
+      if (problem === 'unassessed') delete frame.sourceOverlay;
+      else {
+        frame.buffer = largePng; frame.frameSha256 = largePngHash; frame.byteLength = largePng.length;
+        frame.sourceOverlay = { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 400, overlayDepthPermille: 390 };
+        frame.expectedCrop = problem === 'crop mismatch'
+          ? { left: 0, top: 0, width: 100, height: 59 } : { left: 0, top: 0, width: 100, height: 60 };
+        frame.expectedProviderPngSha256 = '0'.repeat(64);
+      }
+      mocks.list.mockResolvedValue([record]);
+      mocks.hydrate.mockResolvedValue({ ...hydrate(record), originalApprovedSource: { kind: 'TRA_VIDEO_FRAMES', frames: [frame] } });
+      const response = await call({ operation: 'EDIT', instruction: 'Keep the person.' });
+      expect(response.status).toBe(409);
+      expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+      expect(mocks.plan).not.toHaveBeenCalled();
+      expect(mocks.generate).not.toHaveBeenCalled();
+      expect(mocks.saveImage).not.toHaveBeenCalled();
+    });
+  it('returns a historical hydration failure before revision quota or planner work', async () => {
+    mocks.hydrate.mockRejectedValueOnce(new CreativeRevisionHydrationError(
+      'This creative predates source-overlay assessment.', 409));
+    const response = await call({ operation: 'EDIT', instruction: 'Keep the person.' });
+    expect(response.status).toBe(409);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
   });
   it('fails closed on a malformed generalized human identity before provider work', async () => {
     const record = generalizedHumanParent();
@@ -525,15 +606,16 @@ describe('saved creative revision API', () => {
     mocks.list.mockResolvedValue([]);
     expect((await call({ operation: 'REGENERATE' })).status).toBe(404);
     expect(mocks.generate).not.toHaveBeenCalled();
-    expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(1);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
   });
-  it.each([429, 503])('rejects quota admission %i before creative storage, hydration, provider, or saving', async status => {
+  it.each([429, 503])('rejects quota admission %i after local hydration but before planning, provider, or saving', async status => {
     mocks.requireOperatorQuota.mockResolvedValue(new Response(JSON.stringify({ error: 'Quota unavailable.' }), { status }));
     const response = await call({ operation: 'REGENERATE' });
     expect(response.status).toBe(status);
     expect(mocks.requireOperatorQuota).toHaveBeenCalledWith('operator', 'CREATIVE_REVISION', 1);
-    expect(mocks.list).not.toHaveBeenCalled();
-    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.list).toHaveBeenCalledOnce();
+    expect(mocks.hydrate).toHaveBeenCalledOnce();
+    expect(mocks.plan).not.toHaveBeenCalled();
     expect(mocks.generate).not.toHaveBeenCalled();
     expect(mocks.saveImage).not.toHaveBeenCalled();
     expect(mocks.save).not.toHaveBeenCalled();

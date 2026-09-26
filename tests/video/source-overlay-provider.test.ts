@@ -68,5 +68,6 @@ describe('provider-bound source-overlay decision', () => {
         context: 'Synthetic portrait', copy: { headline: 'Talk with TRA' } })).rejects.toThrow('safe current overlay assessment');
     }
     expect(outbound).not.toHaveBeenCalled();
+    await expect(prepareProviderVideoFrames([])).rejects.toThrow('one to three assessed frames');
   });
 });

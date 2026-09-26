@@ -25,6 +25,7 @@ import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-v
 import { reserveOperatorQuota, OperatorQuotaUnavailableError } from '@/lib/quotas/operator-quota';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import type { VideoIntelligenceServiceDependencies } from '@/lib/video/intelligence-service';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
@@ -297,6 +298,10 @@ export async function advanceCreativePortfolio(
       }).catch(error => {
         const message = error instanceof Error ? error.message : 'Saved human-frame selection could not be hydrated.';
         throw new CreativeGenerationPreparationError(message, 409);
+      });
+      await prepareProviderVideoFrames(selectedFrames.frames).catch(error => {
+        const message = error instanceof Error ? error.message : 'Selected TRA video frames failed local validation.';
+        throw new CreativeGenerationPreparationError(`${message} Create a new portfolio with an assessed source frame.`, 409);
       });
       const denied = await reserveWorkQuota('CREATIVE_GENERATION');
       if (denied) return denied;

@@ -41,6 +41,9 @@ export async function generateCreativeRevisionImage(args: {
   logoGeometry?: CreativeLogoGeometry;
 }): Promise<ImageGenerationResult> {
   const { canvas, originalApprovedSource } = args.sources;
+  if (args.concept.strategy.execution.subjectSource === 'non-human' && originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES') {
+    throw new Error('Non-human revision cannot attach TRA video-human frames.');
+  }
   if (classifyCreativeCopyContract(args.concept as unknown as Record<string, unknown>).kind === 'INVALID') {
     throw new Error('Revision concept has an invalid separated ad/image copy contract.');
   }

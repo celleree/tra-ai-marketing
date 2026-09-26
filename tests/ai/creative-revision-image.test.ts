@@ -150,6 +150,13 @@ describe('revision image provider', () => {
     expect(await Promise.all(files().map(async file => Buffer.from(await file.arrayBuffer())))).toEqual([Buffer.from('canvas'), videoPng, videoPng]);
     expect(body().get('prompt')).toContain('Only these attachments may supply human identity');
   });
+  it('refuses a video-human attachment when the final revision concept is non-human', async () => {
+    const input = args();
+    input.sources.originalApprovedSource = { kind: 'TRA_VIDEO_FRAMES', source: {} as never, selectionMode: 'AUTOMATIC',
+      frames: [{ buffer: videoPng, mimeType: 'image/png' } as ApprovedTraVideoFrame] };
+    await expect(generateCreativeRevisionImage(input)).rejects.toThrow('Non-human revision cannot attach TRA video-human frames');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it('reattaches a saved pixel crop on revision and rejects derivative drift before HTTP', async () => {
     const original = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#986743' } }).png().toBuffer();
     const cropped = await sharp(original).extract({ left: 0, top: 0, width: 100, height: 60 }).png().toBuffer();

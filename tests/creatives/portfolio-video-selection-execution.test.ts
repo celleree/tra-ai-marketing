@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import sharp from 'sharp';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioPlan, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
@@ -30,16 +32,19 @@ const mediaId = `media_${'a'.repeat(32)}`;
 const sourceHash = 'b'.repeat(64);
 const libraryId = `video-library:${'c'.repeat(64)}`;
 const frameId = `video-frame:${'d'.repeat(64)}`;
+const framePng = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#9a7550' } }).png().toBuffer();
+const framePngHash = createHash('sha256').update(framePng).digest('hex');
 const selection = { version: 2 as const, libraryId, sourceVideoContentHash: sourceHash, frameIds: [frameId],
   sourceOverlays: [{ version: 2 as const, status: 'CLEAN' as const }] };
 const provenance = [{ frameIndex: 0, libraryFrameId: frameId, candidateFrameSha256: 'e'.repeat(64),
-  timestampMs: 1200, approvedPngSha256: 'f'.repeat(64) }];
+  timestampMs: 1200, approvedPngSha256: framePngHash }];
 const videoSource = { role: 'TRA_VIDEO', media: { id: mediaId, fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO',
   size: 5, url: '/source.mp4' }, stored: { fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO', buffer: Buffer.from('video') } };
 const selectedFrames = { source: videoSource, sourceVideoContentHash: sourceHash, durationMs: 2000, reused: false,
-  frames: [{ frameIndex: 0, timestampMs: 1200, mimeType: 'image/png', buffer: Buffer.from('png'), frameSha256: 'f'.repeat(64),
-    byteLength: 3, sourceRole: 'TRA_VIDEO', sourceVideoMediaId: mediaId, sourceVideoFileName: 'source.mp4',
-    sourceVideoContentHash: sourceHash, approvedHumanSource: true, cacheKey: null }], selectionProvenance: provenance };
+  frames: [{ frameIndex: 0, timestampMs: 1200, mimeType: 'image/png', buffer: framePng, frameSha256: framePngHash,
+    byteLength: framePng.length, sourceRole: 'TRA_VIDEO', sourceVideoMediaId: mediaId, sourceVideoFileName: 'source.mp4',
+    sourceVideoContentHash: sourceHash, approvedHumanSource: true, cacheKey: null,
+    sourceOverlay: { version: 2 as const, status: 'CLEAN' as const } }], selectionProvenance: provenance };
 const automaticRequest = (extra: Record<string, unknown> = {}) => ({ ...portfolioRequest(),
   sourceAssets: [{ role: 'TRA_VIDEO' as const, mediaId }], ...extra }) as any;
 const quotaGroups = () => mocks.quota.mock.calls.map(([arg]) => arg.group);
@@ -194,6 +199,22 @@ describe('durable portfolio B3 selection activation', () => {
     expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'CREATIVE_GENERATION']);
     expect(mocks.hydrate).toHaveBeenCalledOnce(); expect(mocks.render).not.toHaveBeenCalled();
   });
+
+  it.each(['crop mismatch', 'provider hash mismatch'] as const)(
+    'rejects %s before creative quota or rendering', async problem => {
+      const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
+      await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+      const frame = { ...selectedFrames.frames[0], sourceOverlay: { version: 2 as const, status: 'EDGE_CROP' as const,
+        edge: 'BOTTOM' as const, removePermille: 400, overlayDepthPermille: 390 },
+        expectedCrop: problem === 'crop mismatch' ? { left: 0, top: 0, width: 100, height: 59 }
+          : { left: 0, top: 0, width: 100, height: 60 }, expectedProviderPngSha256: '0'.repeat(64) };
+      mocks.hydrate.mockResolvedValueOnce({ ...selectedFrames, frames: [frame] });
+      const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+      expect(result.status).toBe(409);
+      expect(result.job.slots[0].status).toBe('RETRY_REQUIRED');
+      expect(quotaGroups()).toEqual(['VIDEO_SELECTION']);
+      expect(mocks.render).not.toHaveBeenCalled();
+    });
 
   it('returns BUSY as transient 202 with the parent lease released and no Retry-required slot', async () => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));

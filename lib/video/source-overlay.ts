@@ -22,8 +22,9 @@ export const cropForSourceOverlay = (decision: SourceOverlayDecision, width: num
 };
 
 /** The extracted approved PNG remains immutable; only this derivative may be attached to image edits. */
-export const prepareProviderVideoFrames = async (frames: readonly ApprovedTraVideoFrame[]): Promise<ProviderVideoFrame[]> =>
-  Promise.all(frames.map(async (frame) => {
+export const prepareProviderVideoFrames = async (frames: readonly ApprovedTraVideoFrame[]): Promise<ProviderVideoFrame[]> => {
+  if (frames.length < 1 || frames.length > 3) throw new Error('Approved TRA video source requires one to three assessed frames.');
+  return Promise.all(frames.map(async (frame) => {
     if (hash(frame.buffer) !== frame.frameSha256 || frame.byteLength !== frame.buffer.length) {
       throw new Error('Approved TRA video frame integrity changed before image attachment.');
     }
@@ -44,3 +45,4 @@ export const prepareProviderVideoFrames = async (frames: readonly ApprovedTraVid
     }
     return { ...frame, providerBuffer, providerPngSha256, crop };
   }));
+};
