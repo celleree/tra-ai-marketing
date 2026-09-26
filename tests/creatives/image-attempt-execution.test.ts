@@ -62,7 +62,7 @@ describe('paid image execution', () => {
   });
   it('resumes a confirmed primary failure and saved fallback without repeating either call', async () => {
     const owned = scope(); const fetcher = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response('{}', { status: 503 })).mockResolvedValueOnce(response());
+      .mockResolvedValueOnce(Response.json({ error: { code: 'server_is_overloaded' } }, { status: 503 })).mockResolvedValueOnce(response());
     const render = () => withImageAttemptScope(owned, () => runCreativeImageModelRoute({ operationType: 'PROMPT_GENERATION',
       generate: async model => {
         const result = await fetchCreativeImage(endpoint, request(model));
