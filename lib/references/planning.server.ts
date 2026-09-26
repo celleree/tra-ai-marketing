@@ -1,3 +1,4 @@
+import { emitProviderReuse } from '@/lib/ai/provider-telemetry';
 import { listAllReferenceLibrary } from '@/lib/references/storage';
 import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { createHash } from 'node:crypto';
@@ -53,6 +54,7 @@ export async function advanceReferenceAngles(
   }
   const cache = getLayoutBlueprintCache();
   let reusableAngle = await cache.readAngle(pending.sourceSha256, model);
+  if (reusableAngle) emitProviderReuse('source-reference-analysis', model);
   if (!reusableAngle) {
     onProviderOperationStart();
     const analysis = await analyzeReusableReferenceAngle(source);

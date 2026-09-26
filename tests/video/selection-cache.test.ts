@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import { selectVideoFramesFromPoolWithCache, selectVideoFramesWithCache } from '@/lib/video/selection-cache';
+import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 
 const library = { id: 'library', sourceVideoMediaId: 'media-video', sourceVideoContentHash: 'b'.repeat(64),
   representativeFrames: [{ id: 'frame-a', timestampMs: 100, qualityScore: 1,
@@ -34,9 +35,24 @@ const setup = () => {
   return { clock, storage, request, deps };
 };
 const pool = () => [{ library, librarySha256: artifactSha }, { library: secondLibrary, librarySha256: secondArtifactSha }];
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe('video selection cache', () => {
+  it('attributes a warm selection as reuse without another billed attempt or sensitive content', async () => {
+    const state = setup(); const logs = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const select = () => withProviderUsageContext({ portfolioId: 'portfolio-a', creativeId: 'creative-a' },
+      () => selectVideoFramesWithCache(library, artifactSha, 'PRIVATE_CONCEPT', state.deps));
+    await select(); await select();
+    expect(state.request).toHaveBeenCalledTimes(1);
+    const events = logs.mock.calls.map(([value]) => JSON.parse(String(value)));
+    expect(events.map(event => event.status)).toEqual(['started', 'succeeded', 'reused']);
+    expect(events.at(-1)).toMatchObject({ portfolioId: 'portfolio-a', creativeId: 'creative-a', model: 'frozen-selector',
+      stage: 'video-concept-selection', providerDispatched: false, usage: null, estimatedCostUsd: null });
+    expect(JSON.stringify(events)).not.toContain('PRIVATE_CONCEPT');
+    logs.mockImplementation(() => { throw new Error('sink unavailable'); });
+    expect(await select()).toHaveProperty('status', 'COMPLETE');
+    expect(state.request).toHaveBeenCalledTimes(1);
+  });
   it('reuses completed normalized concepts but isolates library digests and frozen models', async () => {
     const state = setup();
     const first = await selectVideoFramesWithCache(library, artifactSha, '  concept  ', state.deps);

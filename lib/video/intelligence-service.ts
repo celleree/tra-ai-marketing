@@ -1,3 +1,4 @@
+import { emitProviderReuse, withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 import { createHash } from 'node:crypto';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { hydrateCreativeSourceSelections } from '@/lib/media/source-hydration';
@@ -199,6 +200,7 @@ export const executeVideoIntelligenceStep = async (
     const source = await hydrateSource(input.mediaId, dependencies);
     const identity = currentIdentity(input.mediaId, createHash('sha256').update(source.stored.buffer).digest('hex'));
     const started = await startVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now });
+    if (!started.created && started.job.phase === 'COMPLETE') emitProviderReuse('video-job', undefined, { jobId: started.job.id });
     const job = started.created
       ? await (dependencies.preparation ?? runVideoIntelligencePreparationJob)(identity, started.job.lease!.id, source, { storage: dependencies.storage, now: dependencies.now })
       : started.job;
@@ -218,8 +220,9 @@ export const executeVideoIntelligenceStep = async (
       ? await retryVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now, expectedEtag: dependencies.expectedRetryEtag })
       : await claimVideoIntelligenceJob(identity, { storage: dependencies.storage, now: dependencies.now });
     const job = claim.status === 'WORK'
-      ? await runClaim(identity, claim.job, claim.leaseId, dependencies)
+      ? await withProviderUsageContext({ jobId: claim.job.id }, () => runClaim(identity, claim.job, claim.leaseId, dependencies))
       : claim.job;
+    if (claim.status !== 'WORK' && job.phase === 'COMPLETE') emitProviderReuse('video-job', undefined, { jobId: job.id });
     return statusFor(identity, job, now());
   } catch (error) {
     if (error instanceof Error && error.message === 'Video intelligence job does not exist.') {

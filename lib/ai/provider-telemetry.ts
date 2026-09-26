@@ -15,6 +15,12 @@ export function emitProviderUsage(meta: ProviderAttemptMetadata, outcome: Parame
   try { console.info(JSON.stringify(providerUsageEvent(meta, outcome))); } catch { /* telemetry unavailable */ }
 }
 
+/** A cache lookup is not a paid attempt and carries no usage or estimated cost. */
+export function emitProviderReuse(stage: string, model?: string, context: ProviderUsageContext = {}) {
+  try { emitProviderUsage({ ...providerUsageContext(), ...context, attemptId: randomUUID(), stage, endpoint: 'responses',
+    model, purpose: imageRenderPurpose() }, { status: 'reused' }); } catch { /* preserve cached behavior */ }
+}
+
 /** A start and terminal event share one attempt ID; aggregate by ID, never by log line. */
 export async function observeProviderAttempt(meta: ProviderAttemptMetadata, dispatch: () => Promise<Response>): Promise<Response> {
   emitProviderUsage(meta, { status: 'started' });
