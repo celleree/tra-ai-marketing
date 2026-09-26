@@ -175,6 +175,31 @@ it('admits one concurrent revision planner and blocks unknown planner outcomes o
   expect(mocks.plan).toHaveBeenCalledTimes(2); expect(mocks.generate).toHaveBeenCalledTimes(1);
 });
 
+it.each(['save acknowledgement', 'completion checkpoint'])('recovers persisted revision after lost %s without reinserting it', async failure => {
+  const saved: CreativeRecord[] = []; const original = parent();
+  mocks.list.mockImplementation(async () => [original, ...saved]);
+  mocks.save.mockImplementation(async records => {
+    if (saved.length) throw new Error('Duplicate creative ID');
+    saved.push(...records);
+    if (failure === 'save acknowledgement') throw new Error('Acknowledgement lost after persistence');
+    return records;
+  });
+  if (failure === 'completion checkpoint') {
+    const write = executionStorage.write.bind(executionStorage); let failed = false;
+    executionStorage.write = async (key, bytes, etag) => {
+      const value = JSON.parse(bytes.toString());
+      if (!failed && value.status === 'COMPLETE' && value.value?.creative) { failed = true; throw new Error('Checkpoint outage'); }
+      return write(key, bytes, etag);
+    };
+  }
+  const key = crypto.randomUUID();
+  expect((await call({ operation: 'REGENERATE' }, parentId, key)).status).toBe(500);
+  const replay = await call({ operation: 'REGENERATE' }, parentId, key);
+  expect(replay.status).toBe(201); expect(await replay.json()).toEqual({ creative: saved[0] });
+  expect(mocks.generate).toHaveBeenCalledTimes(1); expect(mocks.saveImage).toHaveBeenCalledTimes(1);
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+});
+
 it('reuses a purchased raw revision after finalization failure without another image request', async () => {
   const makeResult = mocks.generate.getMockImplementation()!;
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ data: [{ b64_json: 'cmF3' }] }));

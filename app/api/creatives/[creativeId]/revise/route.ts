@@ -50,7 +50,16 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       return true;
     }, { safeToResume: true });
     const result = await runDurableCheckpoint(runId, 'revision', intent, async assertCurrentWork => {
-    const parent = (await listCreatives()).find(record => record.id === parentId);
+    const id = 'creative_' + createHash('sha256').update(runId).digest('hex').slice(0, 32);
+    const records = await listCreatives();
+    const existing = records.find(record => record.id === id);
+    if (existing) {
+      if (existing.identity?.parentCreativeId !== parentId || existing.identity.operation !== parsed.data.operation) {
+        throw new SubmissionConflictError('Saved revision does not match this intent.');
+      }
+      return { creative: existing };
+    }
+    const parent = records.find(record => record.id === parentId);
     if (!parent) throw NextResponse.json({ error: 'Saved creative not found.' }, { status: 404 });
     const parentCopyMode = classifyCreativeCopyContract(parent as unknown as Record<string, unknown>);
     if (parentCopyMode.kind === 'INVALID') {
@@ -106,7 +115,6 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
       });
     }
-    const id = 'creative_' + createHash('sha256').update(runId).digest('hex').slice(0, 32);
     const instruction = 'instruction' in revision ? revision.instruction : undefined;
     let activeHumanRecordId = concept.strategy.approvedHumanId ?? null;
     if (concept.strategy.humanSourceId) {
