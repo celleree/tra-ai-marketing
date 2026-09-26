@@ -58,7 +58,7 @@ export async function advanceCreativePortfolio(
   if (job.lease?.id !== token) return { job };
   const slotIndex = job.lease.slotIndex;
   const render = (...args: Parameters<typeof renderPlannedCreative>) => withImageAttemptScope({
-    runId: `portfolio:${job.id}`, operationId: args[2]!.creativeId!,
+    runId: `portfolio:${job.id}`, operationId: args[2]!.creativeId!, jobId: job.id, portfolioId: job.id, creativeId: args[2]!.creativeId!,
     budget: imageAttemptBudget(job.request.variationCount), storage,
   }, () => renderPlannedCreative(...args));
   const assertCurrentWork = async () => {

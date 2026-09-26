@@ -150,7 +150,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
           buffer: await eraseCreativeBrandLogo(sourceSelection.canvas.buffer, parentLogoGeometry), mimeType: 'image/png' as const } }
       : sourceSelection;
     await assertCurrentWork();
-    const imageResult = await withImageAttemptScope({ runId, operationId: id, budget: imageAttemptBudget(1) }, () => generateCreativeRevisionImage({
+    const imageResult = await withImageAttemptScope({ runId, operationId: id, creativeId: id, budget: imageAttemptBudget(1) }, () => generateCreativeRevisionImage({
       sources: revisionSources,
       operation: revision.operation,
       concept: { format: concept.format, copy: conceptCopyMode.copy,
