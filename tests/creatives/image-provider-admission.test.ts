@@ -11,6 +11,7 @@ const offlineFetch = globalThis.fetch;
 const dispatch = vi.fn();
 const request = () => fetchCreativeImage(endpoint, {
   method: 'POST', headers: { Authorization: `Bearer ${key}` },
+  body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', prompt: 'Fixture', size: '1024x1024' }),
 });
 
 beforeEach(() => {
@@ -55,6 +56,8 @@ describe('live image provider admission', () => {
     await request();
     expect(dispatch).toHaveBeenCalledExactlyOnceWith(endpoint, {
       method: 'POST', headers: { Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', prompt: 'Fixture', size: '1024x1024',
+        quality: 'high', n: 1, output_format: 'png', stream: false, partial_images: 0 }),
     });
   });
 

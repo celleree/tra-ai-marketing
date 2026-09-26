@@ -99,6 +99,7 @@ describe('automatic creative image model routing', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('socket details')));
     await expect(fetchCreativeImage('https://api.openai.com/v1/images/generations', {
       method: 'POST',
+      body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', prompt: 'Fixture', size: '1024x1024' }),
     })).rejects.toMatchObject({ fallbackReason: 'network_failure' });
   });
 
