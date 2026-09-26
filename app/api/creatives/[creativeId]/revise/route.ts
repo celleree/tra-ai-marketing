@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
@@ -20,6 +20,9 @@ import { getMediaStorage } from '@/lib/media/local-storage';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { ProofRevalidationError, revalidateCreativeProofProvenanceForPaidWork, validateCreativeProofCopyConsistency } from '@/lib/proof/provenance';
+import { CheckpointUnavailableError, runDurableCheckpoint, submissionRunId } from '@/lib/creatives/durable-checkpoint';
+import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
+import { imageAttemptBudget, withImageAttemptScope } from '@/lib/creatives/image-attempt-execution';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -36,11 +39,28 @@ export async function POST(request: Request, context: { params: Promise<{ creati
   }
   const parsed = validateCreativeRevisionRequest(body);
   if (!parsed.success) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  const quotaDenied = await requireOperatorQuota(access.userId, 'CREATIVE_REVISION', 1);
-  if (quotaDenied) return quotaDenied;
+  const submissionId = parseSubmissionId(request.headers.get(SUBMISSION_HEADER));
+  if (!submissionId) return NextResponse.json({ error: 'A valid Idempotency-Key is required for a revision.' }, { status: 400 });
+  const runId = submissionRunId(access.userId, submissionId, `revision:${parentId}`);
+  const intent = { parentId, revision: parsed.data };
   try {
-    const parent = (await listCreatives()).find(record => record.id === parentId);
-    if (!parent) return NextResponse.json({ error: 'Saved creative not found.' }, { status: 404 });
+    await runDurableCheckpoint(runId, 'quota', intent, async () => {
+      const denied = await requireOperatorQuota(access.userId, 'CREATIVE_REVISION', 1);
+      if (denied) throw denied;
+      return true;
+    }, { safeToResume: true });
+    const result = await runDurableCheckpoint(runId, 'revision', intent, async assertCurrentWork => {
+    const id = 'creative_' + createHash('sha256').update(runId).digest('hex').slice(0, 32);
+    const records = await listCreatives();
+    const existing = records.find(record => record.id === id);
+    if (existing) {
+      if (existing.identity?.parentCreativeId !== parentId || existing.identity.operation !== parsed.data.operation) {
+        throw new SubmissionConflictError('Saved revision does not match this intent.');
+      }
+      return { creative: existing };
+    }
+    const parent = records.find(record => record.id === parentId);
+    if (!parent) throw NextResponse.json({ error: 'Saved creative not found.' }, { status: 404 });
     const parentCopyMode = classifyCreativeCopyContract(parent as unknown as Record<string, unknown>);
     if (parentCopyMode.kind === 'INVALID') {
       throw new CreativeRevisionHydrationError('Saved creative has an invalid separated ad/image copy contract.', 409);
@@ -69,7 +89,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     };
     let plannerModel = planning.model;
     if (revision.operation === 'EDIT' || revision.operation === 'VARIATION') {
-      const plan = await planCreativeRevision({
+      const planInput = {
         parent: { format: concept.format, copy: concept.copy,
           ...(concept.adCopy ? { adCopy: concept.adCopy } : {}),
           ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}),
@@ -80,7 +100,9 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         ...(parentLogoPlacement ? { logoPlacement: parentLogoPlacement } : {}),
         ...(proofProvenance ? { proofProvenance } : {}),
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}),
-      });
+      };
+      await assertCurrentWork();
+      const plan = await runDurableCheckpoint(runId, 'revision-plan', planInput, () => planCreativeRevision(planInput));
       concept = plan.concept;
       plannerModel = plan.plannerModel;
     }
@@ -93,7 +115,6 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
       });
     }
-    const id = `creative_${randomUUID().replaceAll('-', '')}`;
     const instruction = 'instruction' in revision ? revision.instruction : undefined;
     let activeHumanRecordId = concept.strategy.approvedHumanId ?? null;
     if (concept.strategy.humanSourceId) {
@@ -128,7 +149,8 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       ? { ...sourceSelection, canvas: { ...sourceSelection.canvas,
           buffer: await eraseCreativeBrandLogo(sourceSelection.canvas.buffer, parentLogoGeometry), mimeType: 'image/png' as const } }
       : sourceSelection;
-    const imageResult = await generateCreativeRevisionImage({
+    await assertCurrentWork();
+    const imageResult = await withImageAttemptScope({ runId, operationId: id, budget: imageAttemptBudget(1) }, () => generateCreativeRevisionImage({
       sources: revisionSources,
       operation: revision.operation,
       concept: { format: concept.format, copy: conceptCopyMode.copy,
@@ -138,11 +160,12 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       referenceCatalog: planning.referenceCatalog,
       ...(proofProvenance ? { proofProvenance } : {}),
       ...(logoGeometry ? { logoGeometry } : {}),
-    });
+    }));
     await validateGeneratedCreativeImage(imageResult.buffer, placement);
     const finalBuffer = sources.logoOverlay
       ? await compositeCreativeBrandLogo(imageResult.buffer, sources.logoOverlay.buffer, logoGeometry!)
       : imageResult.buffer;
+    await assertCurrentWork();
     const image = await storage.saveImage(new File([new Uint8Array(finalBuffer)], `tra-revision-${id}.png`, { type: 'image/png' }));
     const record: CreativeRecord = {
       id, createdAt: new Date().toISOString(), image, category: concept.strategy.category,
@@ -163,9 +186,18 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         ? { referenceImageId: concept.strategy.referenceSelection?.layoutSource ?? parent.referenceImageId } : {}),
       ...(!removedLibraryHuman && parent.videoFrameSelection ? { videoFrameSelection: parent.videoFrameSelection } : {}),
     };
+    await assertCurrentWork();
     const [saved] = await saveCreativeBatch([record]);
-    return NextResponse.json({ creative: saved }, { status: 201 });
+    return { creative: saved };
+    }, { safeToResume: true });
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof Response) return error;
+    if (error instanceof CheckpointUnavailableError || error instanceof SubmissionConflictError) {
+      const status = error instanceof CheckpointUnavailableError ? error.status : 409;
+      return NextResponse.json({ error: error.message }, { status, headers: { 'Cache-Control': 'private, no-store',
+        ...(status === 202 ? { 'Retry-After': '2' } : {}) } });
+    }
     if (error instanceof ProofRevalidationError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

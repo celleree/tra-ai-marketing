@@ -40,7 +40,7 @@ vi.mock('@/lib/quotas/require-quota', () => ({
   requireOperatorQuota: requireOperatorQuotaMock,
 }));
 
-vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: saveCreativeBatchMock }));
+vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: saveCreativeBatchMock, listCreatives: async () => [] }));
 
 vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
   ...(await original<typeof import('@/lib/creatives/generated-image-validation')>()),
