@@ -2,6 +2,7 @@ import { assertLiveImageGenerationAllowed } from '@/lib/creatives/image-provider
 import { imageRenderPurpose, prepareImageRenderRequest } from '@/lib/creatives/image-render-request';
 import { executeImageAttempt } from '@/lib/creatives/image-attempt-execution';
 import { CreativeImageProviderError, imageProviderFailure } from '@/lib/creatives/image-provider-failure';
+import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 export { CreativeImageProviderError, creativeImageHttpError, creativeImageMissingOutputError } from '@/lib/creatives/image-provider-failure';
 
 export * from '@/lib/creatives/image-routing';
@@ -42,7 +43,7 @@ export async function runCreativeImageModelRoute<T>(args: {
   const purpose = imageRenderPurpose();
   try {
     return {
-      value: await args.generate(PREFERRED_CREATIVE_IMAGE_MODEL),
+        value: await withProviderUsageContext({ operationType: args.operationType }, () => args.generate(PREFERRED_CREATIVE_IMAGE_MODEL)),
       routing: {
         operationType: args.operationType,
         preferredModel: PREFERRED_CREATIVE_IMAGE_MODEL,
@@ -56,7 +57,7 @@ export async function runCreativeImageModelRoute<T>(args: {
     const fallbackReason = transientReason(error);
     if (!fallbackReason || purpose !== 'production') throw error;
     return {
-      value: await args.generate(FALLBACK_CREATIVE_IMAGE_MODEL),
+      value: await withProviderUsageContext({ operationType: args.operationType }, () => args.generate(FALLBACK_CREATIVE_IMAGE_MODEL)),
       routing: {
         operationType: args.operationType,
         preferredModel: PREFERRED_CREATIVE_IMAGE_MODEL,
