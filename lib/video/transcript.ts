@@ -98,7 +98,7 @@ export const transcribeTraVideo = async (
   form.append('model', 'whisper-1');
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'segment');
-  const response = await fetchWithProviderUsage('video-transcription', 'https://api.openai.com/v1/audio/transcriptions', {
+  const response = await fetchWithProviderUsage('video-transcription', 'whisper-1', 'https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
     signal: AbortSignal.timeout(VIDEO_TRANSCRIPTION_TIMEOUT_MS),
   }, dependencies.request || fetch);

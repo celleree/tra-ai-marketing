@@ -283,7 +283,7 @@ export const selectVideoHumanFrameFromPool = async (
   if (Buffer.byteLength(body) > MAX_VISUAL_SELECTION_PAYLOAD_BYTES) {
     throw new Error(`Visual human selection exceeds the ${MAX_VISUAL_SELECTION_PAYLOAD_BYTES}-byte provider payload limit. No candidates were truncated.`);
   }
-  const response = await fetchWithProviderUsage('video-human-selection', 'https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('video-human-selection', model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS), body,
   }, dependencies.request || fetch);

@@ -303,7 +303,7 @@ export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteComp
   const root = await normalizeCompanyWebsiteUrl(rawUrl);
   const pages = await crawlWebsite(root);
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-5.6-terra';
-  const response = await fetchWithProviderUsage('company-website-analysis', `${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('company-website-analysis', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({

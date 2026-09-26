@@ -74,7 +74,7 @@ export const observeVideoFrameBytes = async (
   const model = dependencies.model.trim();
   if (!model) throw new Error('Video vision requires a non-empty model.');
   validateFrameBytes(candidate, bytes);
-  const response = await fetchWithProviderUsage('video-observation', 'https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('video-observation', model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(VIDEO_VISION_TIMEOUT_MS),
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'low' },

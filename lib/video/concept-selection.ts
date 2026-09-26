@@ -129,7 +129,7 @@ export const selectVideoFramesForConcept = async (
   }));
   const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra')).trim();
   if (!model) throw new Error('Video selection model must be non-empty.');
-  const response = await fetchWithProviderUsage('video-concept-selection', 'https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('video-concept-selection', model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS),
     body: JSON.stringify({ model, store: false, max_output_tokens: 2048, reasoning: { effort: 'low' }, input: [
       { role: 'developer', content: [{ type: 'input_text', text: rules }] },
@@ -170,7 +170,7 @@ export const selectVideoFramesForConceptPool = async (
   }));
   const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra')).trim();
   if (!model) throw new Error('Video selection model must be non-empty.');
-  const response = await fetchWithProviderUsage('video-pool-selection', 'https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('video-pool-selection', model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS),
     body: JSON.stringify({ model, store: false, max_output_tokens: 2048, reasoning: { effort: 'low' }, input: [
       { role: 'developer', content: [{ type: 'input_text', text: pooledRules }] },

@@ -116,7 +116,7 @@ export async function analyzeApprovedTraVideoFrames(args: {
       detail: 'high',
     })),
   ];
-  const response = await fetchWithProviderUsage('video-source-analysis', `${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('video-source-analysis', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({

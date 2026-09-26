@@ -57,14 +57,15 @@ export async function POST(request: Request) {
     }
 
     const imageUrl = `data:${specimen.mimeType};base64,${specimen.buffer.toString('base64')}`;
-    const response = await fetchWithProviderUsage('font-analysis', `${OPENAI_BASE_URL}/responses`, {
+    const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+    const response = await fetchWithProviderUsage('font-analysis', model, `${OPENAI_BASE_URL}/responses`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra',
+        model,
         store: false,
         input: [
           {

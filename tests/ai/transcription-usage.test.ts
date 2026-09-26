@@ -9,7 +9,7 @@ it('preserves multipart audio bytes, names, options and abort signal while recor
   const request = { method: 'POST', body: form, headers: { Authorization: 'Bearer PRIVATE_KEY' }, signal: new AbortController().signal };
   const response = Response.json({ text: 'PRIVATE_TRANSCRIPT', duration: 8.47, usage: { type: 'duration', seconds: 9 } });
   const dispatch = vi.fn<typeof fetch>(async () => response);
-  expect(await fetchWithProviderUsage('video-transcription', 'https://api.openai.com/v1/audio/transcriptions', request, dispatch)).toBe(response);
+  expect(await fetchWithProviderUsage('video-transcription', 'whisper-1', 'https://api.openai.com/v1/audio/transcriptions', request, dispatch)).toBe(response);
   expect(dispatch.mock.calls[0][1]).toBe(request); expect(dispatch.mock.calls[0][1]!.body).toBe(form);
   const event = JSON.parse(String(logs.mock.calls[1][0]));
   expect(event).toMatchObject({ endpoint: 'transcription', model: 'whisper-1', usage: { audioSeconds: 9 },
@@ -20,7 +20,7 @@ it('preserves multipart audio bytes, names, options and abort signal while recor
 it('does not treat top-level duration as reported billing usage', async () => {
   const logs = vi.spyOn(console, 'info').mockImplementation(() => {});
   const form = new FormData(); form.append('model', 'whisper-1');
-  await fetchWithProviderUsage('video-transcription', 'https://api.openai.com/v1/audio/transcriptions', { method: 'POST', body: form },
+  await fetchWithProviderUsage('video-transcription', 'whisper-1', 'https://api.openai.com/v1/audio/transcriptions', { method: 'POST', body: form },
     async () => Response.json({ duration: 8.47, text: 'PRIVATE' }));
   expect(JSON.parse(String(logs.mock.calls[1][0]))).toMatchObject({ usage: null, estimatedCostUsd: null });
 });
