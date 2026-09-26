@@ -46,6 +46,12 @@ export function fetchWithProviderUsage(stage: string, url: string, init: Request
   let model: unknown;
   try { model = init.body instanceof FormData ? init.body.get('model') : JSON.parse(String(init.body)).model; }
   catch { /* invalid provider requests still receive attempt attribution */ }
+  let purpose: ProviderAttemptMetadata['purpose'];
+  try { purpose = imageRenderPurpose(); }
+  catch {
+    // Image-only configuration errors must not block other provider operations.
+    purpose = process.env.VERCEL_ENV === 'production' && process.env.NODE_ENV === 'production' ? 'production' : 'diagnostic';
+  }
   return observeProviderAttempt({ ...providerUsageContext(), attemptId: randomUUID(), stage, endpoint,
-    model: typeof model === 'string' ? model : undefined, purpose: imageRenderPurpose(), retryIndex: 0 }, () => request(url, init));
+    model: typeof model === 'string' ? model : undefined, purpose, retryIndex: 0 }, () => request(url, init));
 }

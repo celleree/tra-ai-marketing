@@ -9,9 +9,16 @@ const request = { method: 'POST', headers: { Authorization: 'Bearer PRIVATE' }, 
 const response = () => Response.json({ status: 'completed', output: 'PRIVATE', service_tier: 'default', usage: {
   input_tokens: 100, input_tokens_details: { cached_tokens: 20, cache_write_tokens: 10 }, output_tokens: 5,
 } }, { headers: { 'x-request-id': 'req_plan' } });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe('planning usage attribution', () => {
+  it.each(['production', 'preview'])('preserves Responses dispatch with invalid image-only configuration in %s', async environment => {
+    vi.stubEnv('TRA_IMAGE_PURPOSE', 'invalid-image-purpose'); vi.stubEnv('VERCEL_ENV', environment); vi.stubEnv('NODE_ENV', 'production');
+    const logs = vi.spyOn(console, 'info').mockImplementation(() => {}); const dispatch = vi.fn(async () => response());
+    expect((await fetchWithProviderUsage('creative-plan', url, request, dispatch)).ok).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(logs.mock.calls[1][0])).purpose).toBe(environment === 'production' ? 'production' : 'diagnostic');
+  });
   it('preserves request/response and records batch usage without allocating creative billing', async () => {
     const logs = vi.spyOn(console, 'info').mockImplementation(() => {}); const result = response();
     const dispatch = vi.fn<typeof fetch>(async () => result);
