@@ -25,8 +25,7 @@ import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { EligibleProviderImageSource } from '@/lib/media/source-hydration';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
-import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
-import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
+import { resolvePlannedHumanVideoSource, type PlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ProviderVideoFrame } from '@/lib/video/source-overlay';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
@@ -69,16 +68,13 @@ const classifyPlannedCopy = (item: PlannedCreativeConcept): PlannedCopyMode => {
 export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   request, batchPlan, referenceCatalog, selectedReferences, requestedSources, analysisSources, logoOverlaySource,
   brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage,
-}: CreativeRenderContext, options: { creativeId?: string; assertCurrentWork?: () => Promise<void> } = {}): Promise<GeneratedCreative> {
+}: CreativeRenderContext, options: { creativeId?: string; assertCurrentWork?: () => Promise<void>;
+  preflightHumanVideo?: PlannedHumanVideoSource } = {}): Promise<GeneratedCreative> {
   const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
   if (!/^creative_[a-f0-9]{32}$/.test(creativeId)) throw new Error('Invalid reserved creative ID.');
   const copyMode = classifyPlannedCopy(item);
-  const humanRecordId = item.strategy.humanSourceId
-    ? parseApprovedHumanSourceId(item.strategy.humanSourceId)
-    : item.strategy.approvedHumanId ?? null;
-  if (item.strategy.humanSourceId && !humanRecordId) throw new Error('Unsupported or invalid human source ID.');
-  const human = humanRecordId ? await resolveApprovedHumanFrame(humanRecordId) : null;
-  const itemVideoFrames = human?.selected ?? (item.strategy.execution.subjectSource === 'approved-tra-human' ? videoFrameSet : null);
+  const { human, videoFrames: itemVideoFrames } = options.preflightHumanVideo
+    ?? await resolvePlannedHumanVideoSource(item, { videoFrameSet, providerImageSource });
   const itemImageSource = human ? null : providerImageSource;
   const itemFrameSelection = itemVideoFrames ? human?.record.source ?? generatedVideoFrameSelection : undefined;
   const itemRequestedSources = human ? [

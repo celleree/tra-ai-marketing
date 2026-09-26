@@ -82,10 +82,12 @@ export type PreparedCreativeGeneration = CreativeRenderContext & {
 
 /** Prepare the complete portfolio context. Durable portfolio execution may stop after the initial Astra plan. */
 export async function prepareCreativeGeneration(
-  data: ValidGenerateCreativeRequest, requestUrl: string, options: { initialPlanOnly?: boolean } = {},
+  data: ValidGenerateCreativeRequest, requestUrl: string, options: {
+    initialPlanOnly?: boolean; hydratedSources?: Awaited<ReturnType<typeof hydrateGenerationSources>>;
+  } = {},
 ): Promise<PreparedCreativeGeneration> {
   const { storage, generationSourceAsset, requestedSources, source, providerImageSource, videoFrameSet,
-    generatedVideoFrameSelection, brandLogo, reserveLogoArea, logoOverlaySource } = await hydrateGenerationSources(data);
+    generatedVideoFrameSelection, brandLogo, reserveLogoArea, logoOverlaySource } = options.hydratedSources ?? await hydrateGenerationSources(data);
 
   // Legacy HTTP requests remain single-shot: no hidden durable job or automatic source-analysis retry.
   let next = await advancePlanningSourceAnalysis(data, undefined, () => {});

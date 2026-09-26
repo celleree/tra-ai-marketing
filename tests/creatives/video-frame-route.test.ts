@@ -81,7 +81,7 @@ const HASH = createHash('sha256').update(REAL_ENCODED_MP4).digest('hex');
 const analysis = { summary: 'Approved TRA video source.', visibleText: [], visualStructure: 'Talking-head source context.', hookOrAngle: 'clarity', offerOrCta: 'consultation', styleNotes: 'Use identity, not old layout.', preserve: ['visible person identity'], avoid: ['old captions'], unknowns: [], dominantCategory: 'customer-problems' };
 const makeFrameSet = (source: unknown): ApprovedTraVideoFrameSet => ({
   source: source as ApprovedTraVideoFrameSet['source'], sourceVideoContentHash: HASH, durationMs: 10_000, reused: false,
-  frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', buffer: PNG, ...getVideoFrameIntegrity(PNG), sourceRole: 'TRA_VIDEO', sourceVideoMediaId: VIDEO_ID, sourceVideoFileName: `${VIDEO_ID}.mp4`, sourceVideoContentHash: HASH, approvedHumanSource: true, cacheKey: `derived/video-frames/${VIDEO_ID}/${HASH}/frame-000.png` }],
+  frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', buffer: PNG, ...getVideoFrameIntegrity(PNG), sourceRole: 'TRA_VIDEO', sourceVideoMediaId: VIDEO_ID, sourceVideoFileName: `${VIDEO_ID}.mp4`, sourceVideoContentHash: HASH, approvedHumanSource: true, sourceOverlay: { version: 2, status: 'CLEAN' }, cacheKey: `derived/video-frames/${VIDEO_ID}/${HASH}/frame-000.png` }],
 });
 const makeRequest = () => new Request('https://tra.example/api/creatives/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: 'Create clear TRA ads.', variationCount: 2, sourceAssets: [{ mediaId: VIDEO_ID, role: 'TRA_VIDEO' }] }) });
 
@@ -142,7 +142,9 @@ beforeEach(() => {
     reasoningEffort: 'medium',
   });
   generateApprovedTraVideoFrameCreativeImageMock.mockImplementation(
-    async ({ frames }) => ({ ...imageResult, providerFrames: frames })
+    async ({ frames }) => ({ ...imageResult, providerFrames: frames.map((frame: { buffer: Buffer }) => ({
+      ...frame, providerBuffer: frame.buffer, providerPngSha256: getVideoFrameIntegrity(frame.buffer).frameSha256, crop: null,
+    })) })
   );
   saveImageMock.mockResolvedValue({ id: `media_${'9'.repeat(32)}`, fileName: `media_${'9'.repeat(32)}.png`, originalName: 'generated.png', mimeType: 'image/png', size: PNG.length, url: '/generated.png' });
 });

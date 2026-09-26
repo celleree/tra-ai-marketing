@@ -9,12 +9,13 @@ import { HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from 
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
 const mocks = vi.hoisted(() => ({
-  restore: vi.fn(), render: vi.fn(), preflight: vi.fn(), select: vi.fn(), hydrate: vi.fn(), inventory: vi.fn(), list: vi.fn(), quota: vi.fn(),
+  restore: vi.fn(), render: vi.fn(), preflight: vi.fn(), select: vi.fn(), hydrate: vi.fn(), inventory: vi.fn(), list: vi.fn(), quota: vi.fn(), resolveHuman: vi.fn(),
 }));
 vi.mock('@/lib/creatives/portfolio-snapshot', async original => ({
   ...await original<typeof import('@/lib/creatives/portfolio-snapshot')>(), restoreCreativePortfolio: mocks.restore,
 }));
 vi.mock('@/lib/creatives/render-planned', () => ({ renderPlannedCreative: mocks.render }));
+vi.mock('@/lib/video/approved-human-service', () => ({ resolveApprovedHumanFrame: mocks.resolveHuman }));
 vi.mock('@/lib/creatives/portfolio-video-selection', async original => ({
   ...await original<typeof import('@/lib/creatives/portfolio-video-selection')>(),
   preflightPortfolioVideoFrames: mocks.preflight, selectPortfolioVideoFrames: mocks.select,
@@ -29,7 +30,7 @@ vi.mock('@/lib/quotas/operator-quota', async original => ({
 }));
 
 const mediaId = `media_${'a'.repeat(32)}`;
-const sourceHash = 'b'.repeat(64);
+const sourceHash = createHash('sha256').update(Buffer.from('video')).digest('hex');
 const libraryId = `video-library:${'c'.repeat(64)}`;
 const frameId = `video-frame:${'d'.repeat(64)}`;
 const framePng = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#9a7550' } }).png().toBuffer();
@@ -62,7 +63,7 @@ async function ready(storage: MemoryPortfolioStorage, request = automaticRequest
 }
 const contextFor = (job: Awaited<ReturnType<typeof ready>>, overrides: Record<string, unknown> = {}) => ({
   ...job.snapshot!, sourceAnalysis: { version: 1, entries: [] }, storage: {}, brandLogo: null, reserveLogoArea: false,
-  providerImageSource: undefined, videoFrameSet: { source: videoSource, frames: [{}] }, ...overrides,
+  providerImageSource: undefined, videoFrameSet: selectedFrames, ...overrides,
 }) as any;
 
 beforeEach(() => {
@@ -72,6 +73,7 @@ beforeEach(() => {
   mocks.inventory.mockResolvedValue([{ source: videoSource }]);
   mocks.preflight.mockResolvedValue({ status: 'READY' });
   mocks.select.mockResolvedValue({ status: 'COMPLETE', selection }); mocks.hydrate.mockResolvedValue(selectedFrames);
+  mocks.resolveHuman.mockResolvedValue({ record: { source: { sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash } }, selected: selectedFrames });
   mocks.render.mockImplementation(async (_concept, _context, options) => ({ id: options.creativeId }));
 });
 
@@ -88,6 +90,7 @@ describe('durable portfolio B3 selection activation', () => {
     expect(mocks.preflight).not.toHaveBeenCalled();
     expect(mocks.select).not.toHaveBeenCalled();
     expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.resolveHuman).not.toHaveBeenCalled();
     expect(quotaGroups()).toEqual(['CREATIVE_GENERATION']);
   });
 
@@ -317,5 +320,52 @@ describe('durable portfolio B3 selection activation', () => {
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.slots[0].status).toBe('SAVED'); expect(mocks.select).not.toHaveBeenCalled();
     expect(mocks.render).toHaveBeenCalledOnce(); expect(quotaGroups()).toEqual(['CREATIVE_GENERATION']);
+  });
+
+  it.each(['UNSAFE', 'crop mismatch', 'provider hash mismatch'] as const)(
+    'rejects an explicit saved %s frame before generation quota', async problem => {
+      const storage = new MemoryPortfolioStorage();
+      const job = await ready(storage, automaticRequest({ videoFrameSelection: selection }));
+      const frame = { ...selectedFrames.frames[0],
+        sourceOverlay: problem === 'UNSAFE' ? { version: 2 as const, status: 'UNSAFE' as const }
+          : { version: 2 as const, status: 'EDGE_CROP' as const, edge: 'BOTTOM' as const,
+            removePermille: 400, overlayDepthPermille: 390 },
+        ...(problem === 'crop mismatch' ? { expectedCrop: { left: 0, top: 0, width: 100, height: 59 } } : {}),
+        ...(problem === 'provider hash mismatch' ? { expectedProviderPngSha256: '0'.repeat(64) } : {}),
+      };
+      mocks.restore.mockResolvedValue(contextFor(job, { videoFrameSet: { ...selectedFrames, frames: [frame] } }));
+      const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+      expect(result).toMatchObject({ status: 409, job: { slots: [{ status: 'RETRY_REQUIRED' }, expect.anything()] } });
+      expect(quotaGroups()).toEqual([]);
+      expect(mocks.render).not.toHaveBeenCalled();
+    });
+
+  it.each(['humanSourceId', 'approvedHumanId'] as const)(
+    'rejects an unsafe curated %s before generation quota', async key => {
+      const storage = new MemoryPortfolioStorage(), job = await ready(storage);
+      const context = contextFor(job);
+      context.batchPlan.creatives[0].strategy[key] = key === 'humanSourceId'
+        ? approvedHumanSourceId(`human_${'1'.repeat(64)}`) : `human_${'1'.repeat(64)}`;
+      mocks.restore.mockResolvedValue(context);
+      mocks.resolveHuman.mockResolvedValue({ record: { source: {} }, selected: { ...selectedFrames,
+        frames: [{ ...selectedFrames.frames[0], sourceOverlay: { version: 2, status: 'UNSAFE' } }] } });
+      const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+      expect(result.status).toBe(409);
+      expect(result.job.slots[0].status).toBe('RETRY_REQUIRED');
+      expect(quotaGroups()).toEqual([]);
+      expect(mocks.render).not.toHaveBeenCalled();
+    });
+
+  it('renders an explicitly selected cleanly cropped frame after generation quota', async () => {
+    const storage = new MemoryPortfolioStorage();
+    const job = await ready(storage, automaticRequest({ videoFrameSelection: selection }));
+    const frame = { ...selectedFrames.frames[0], sourceOverlay: { version: 2 as const, status: 'EDGE_CROP' as const,
+      edge: 'BOTTOM' as const, removePermille: 400, overlayDepthPermille: 390 },
+      expectedCrop: { left: 0, top: 0, width: 100, height: 60 } };
+    mocks.restore.mockResolvedValue(contextFor(job, { videoFrameSet: { ...selectedFrames, frames: [frame] } }));
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.job.slots[0].status).toBe('SAVED');
+    expect(quotaGroups()).toEqual(['CREATIVE_GENERATION']);
+    expect(mocks.render.mock.calls[0][2].preflightHumanVideo.videoFrames.frames).toEqual([frame]);
   });
 });

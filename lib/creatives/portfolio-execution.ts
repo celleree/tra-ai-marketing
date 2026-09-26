@@ -12,6 +12,7 @@ import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelli
 import { HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
+import { preflightPlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
@@ -320,12 +321,16 @@ export async function advanceCreativePortfolio(
       return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
     }
 
+    const preflightHumanVideo = await preflightPlannedHumanVideoSource(concept, context).catch(error => {
+      throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'The approved human source could not be verified.', 409);
+    });
     const denied = await reserveWorkQuota('CREATIVE_GENERATION');
     if (denied) return denied;
     providerWorkStarted = true;
     const creative = await renderPlannedCreative(concept, context, {
       creativeId: slot.creativeId,
       assertCurrentWork,
+      preflightHumanVideo,
     });
     return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
   } catch (error) {
