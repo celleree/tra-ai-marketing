@@ -39,13 +39,10 @@ export async function observeProviderAttempt(meta: ProviderAttemptMetadata, disp
 }
 
 /** Preserve the exact fetch arguments and dependency injection; never inspect prompt content. */
-export function fetchWithProviderUsage(stage: string, url: string, init: RequestInit, request: typeof fetch = fetch) {
+export function fetchWithProviderUsage(stage: string, model: string, url: string, init: RequestInit, request: typeof fetch = fetch) {
   const endpoint = url === 'https://api.openai.com/v1/responses' ? 'responses'
     : url === 'https://api.openai.com/v1/audio/transcriptions' ? 'transcription' : null;
   if (!endpoint) throw new Error('Unsupported provider usage endpoint.');
-  let model: unknown;
-  try { model = init.body instanceof FormData ? init.body.get('model') : JSON.parse(String(init.body)).model; }
-  catch { /* invalid provider requests still receive attempt attribution */ }
   let purpose: ProviderAttemptMetadata['purpose'];
   try { purpose = imageRenderPurpose(); }
   catch {
@@ -53,5 +50,5 @@ export function fetchWithProviderUsage(stage: string, url: string, init: Request
     purpose = process.env.VERCEL_ENV === 'production' && process.env.NODE_ENV === 'production' ? 'production' : 'diagnostic';
   }
   return observeProviderAttempt({ ...providerUsageContext(), attemptId: randomUUID(), stage, endpoint,
-    model: typeof model === 'string' ? model : undefined, purpose, retryIndex: 0 }, () => request(url, init));
+    model, purpose, retryIndex: 0 }, () => request(url, init));
 }

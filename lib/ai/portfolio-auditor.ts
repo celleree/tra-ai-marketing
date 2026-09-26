@@ -18,7 +18,7 @@ export async function auditCreativePortfolio(concepts: PlannedCreativeConcept[])
     persona: strategy.persona, painPoint: strategy.painPoint, desiredOutcome: strategy.desiredOutcome,
     emotion: strategy.emotion, soWhat: strategy.soWhat, conceptDetails: strategy.conceptDetails, execution: strategy.execution,
   }));
-  const response = await fetchWithProviderUsage('portfolio-audit', 'https://api.openai.com/v1/responses', {
+  const response = await fetchWithProviderUsage('portfolio-audit', model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, reasoning: { effort: 'medium' }, store: false, max_output_tokens: 4096 + 256 * concepts.length,
       input: [ { role: 'developer', content: [{ type: 'input_text', text: RULES }] },

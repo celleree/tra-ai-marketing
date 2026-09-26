@@ -73,7 +73,7 @@ export async function classifyReferenceCreativeAngle(
     (angle) => `- ${angle}: ${CREATIVE_CATEGORY_LABELS[angle]} — ${ANGLE_GUIDE[angle]}`
   ).join('\n');
 
-  const response = await fetchWithProviderUsage('reference-classification', `${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('reference-classification', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,

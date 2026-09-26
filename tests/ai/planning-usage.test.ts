@@ -12,10 +12,17 @@ const response = () => Response.json({ status: 'completed', output: 'PRIVATE', s
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe('planning usage attribution', () => {
+  it('does not read or parse image-heavy request bodies for telemetry', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const untouched = { method: 'POST', get body(): string { throw new Error('Body must not be inspected'); } };
+    const dispatch = vi.fn<typeof fetch>(async () => response());
+    expect((await fetchWithProviderUsage('video-human-selection', 'gpt-6-astra', url, untouched, dispatch)).ok).toBe(true);
+    expect(dispatch.mock.calls[0][1]).toBe(untouched);
+  });
   it.each(['production', 'preview'])('preserves Responses dispatch with invalid image-only configuration in %s', async environment => {
     vi.stubEnv('TRA_IMAGE_PURPOSE', 'invalid-image-purpose'); vi.stubEnv('VERCEL_ENV', environment); vi.stubEnv('NODE_ENV', 'production');
     const logs = vi.spyOn(console, 'info').mockImplementation(() => {}); const dispatch = vi.fn(async () => response());
-    expect((await fetchWithProviderUsage('creative-plan', url, request, dispatch)).ok).toBe(true);
+    expect((await fetchWithProviderUsage('creative-plan', 'gpt-6-astra', url, request, dispatch)).ok).toBe(true);
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(logs.mock.calls[1][0])).purpose).toBe(environment === 'production' ? 'production' : 'diagnostic');
   });
@@ -23,7 +30,7 @@ describe('planning usage attribution', () => {
     const logs = vi.spyOn(console, 'info').mockImplementation(() => {}); const result = response();
     const dispatch = vi.fn<typeof fetch>(async () => result);
     expect(await withProviderUsageContext({ runId: 'run1', portfolioId: 'p1' },
-      () => fetchWithProviderUsage('creative-plan', url, request, dispatch))).toBe(result);
+      () => fetchWithProviderUsage('creative-plan', 'gpt-6-astra', url, request, dispatch))).toBe(result);
     expect(dispatch).toHaveBeenCalledExactlyOnceWith(url, request); expect(dispatch.mock.calls[0][1]).toBe(request);
     const events = logs.mock.calls.map(([value]) => JSON.parse(String(value)));
     expect(events[1]).toMatchObject({ stage: 'creative-plan', endpoint: 'responses', model: 'gpt-6-astra',
@@ -35,7 +42,7 @@ describe('planning usage attribution', () => {
     const logs = vi.spyOn(console, 'info').mockImplementation(() => {}); const dispatch = vi.fn(async () => response());
     const storage = new MemoryPortfolioStorage();
     const work = () => withPaidPreparationScope({ runId: 'run1', storage }, () => checkpointPaidPreparation('plan', {}, async () => {
-      await fetchWithProviderUsage('creative-plan', url, request, dispatch); return 'saved';
+      await fetchWithProviderUsage('creative-plan', 'gpt-6-astra', url, request, dispatch); return 'saved';
     }));
     expect(await work()).toBe('saved'); expect(await work()).toBe('saved');
     expect(dispatch).toHaveBeenCalledTimes(1); expect(logs).toHaveBeenCalledTimes(2);
@@ -44,14 +51,14 @@ describe('planning usage attribution', () => {
   it.each(['failed', 'incomplete', 'cancelled', 'in_progress'])("reports Responses status %s without dropping usage", async status => {
     const logs = vi.spyOn(console, 'info').mockImplementation(() => {});
     const result = Response.json({ status, usage: { input_tokens: 10 } });
-    expect(await fetchWithProviderUsage('creative-plan', url, request, async () => result)).toBe(result);
+    expect(await fetchWithProviderUsage('creative-plan', 'gpt-6-astra', url, request, async () => result)).toBe(result);
     expect(JSON.parse(String(logs.mock.calls[1][0]))).toMatchObject({ status: status === 'in_progress' ? 'unknown' : 'failed',
       usage: { inputTokens: 10 }, estimatedCostUsd: null });
   });
   it('isolates concurrent run attribution', async () => {
     const logs = vi.spyOn(console, 'info').mockImplementation(() => {});
     await Promise.all(['a', 'b'].map(runId => withProviderUsageContext({ runId },
-      () => fetchWithProviderUsage('plan', url, request, async () => { await Promise.resolve(); return response(); }))));
+      () => fetchWithProviderUsage('plan', 'gpt-6-astra', url, request, async () => { await Promise.resolve(); return response(); }))));
     const events = logs.mock.calls.map(([value]) => JSON.parse(String(value)));
     for (const run of ['a', 'b']) expect(events.filter(e => e.runId === run).map(e => e.status)).toEqual(['started', 'succeeded']);
   });

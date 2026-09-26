@@ -77,14 +77,15 @@ const imageDataUrl = (source: StoredMediaFile) =>
 export async function analyzeLayoutReference(
   source: StoredMediaFile
 ): Promise<LayoutBlueprint> {
-  const response = await fetchWithProviderUsage('layout-analysis', `${OPENAI_BASE_URL}/responses`, {
+  const model = getLayoutAnalysisModel();
+  const response = await fetchWithProviderUsage('layout-analysis', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: getLayoutAnalysisModel(),
+      model,
       store: false,
       reasoning: { effort: 'low' },
       input: [

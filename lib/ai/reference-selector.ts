@@ -171,7 +171,7 @@ export async function selectBestReferenceCreatives(args: {
     });
   }
 
-  const response = await fetchWithProviderUsage('reference-shortlist', `${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('reference-shortlist', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
