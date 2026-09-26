@@ -102,4 +102,10 @@ describe('live image provider admission', () => {
     vi.stubGlobal('fetch', vi.fn(offlineFetch));
     await expect(request()).rejects.toThrow('Image network dispatch is disabled in tests');
   });
+  it.each(['responses', 'audio/transcriptions'])('keeps %s offline even with credentials and image opt-in', async path => {
+    vi.stubEnv('TRA_LIVE_IMAGE_AUTHORIZATION', authorization);
+    vi.stubGlobal('fetch', vi.fn(offlineFetch));
+    await expect(fetch(`https://api.openai.com/v1/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${key}` } }))
+      .rejects.toThrow('Model network dispatch is disabled in tests');
+  });
 });

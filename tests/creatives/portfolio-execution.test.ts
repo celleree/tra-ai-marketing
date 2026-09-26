@@ -418,6 +418,14 @@ describe('bounded resumable portfolio execution', () => {
       && completed.job.planning.preparation.videoDependencies?.[0].completed).toBeDefined();
   });
   it('persists planning before completing 36 single-image steps without double-charging quotas', async () => {
+    const render = mocks.render.getMockImplementation()!;
+    const dispatch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ data: [{ b64_json: 'Zml4dHVyZQ==' }] }));
+    mocks.render.mockImplementation(async (...args) => {
+      await fetchCreativeImage('https://api.openai.com/v1/images/generations', { method: 'POST', body: JSON.stringify({
+        model: 'gpt-image-2.5-sunburst', prompt: `Offline concept ${args[0].index}`, size: '1024x1280',
+      }) });
+      return render(...args);
+    });
     const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(36), storage);
     let result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.planning).toMatchObject({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: true } });
@@ -439,12 +447,30 @@ describe('bounded resumable portfolio execution', () => {
     expect(mocks.plan).toHaveBeenCalledOnce();
     expect(mocks.audit).toHaveBeenCalledOnce();
     expect(mocks.render).toHaveBeenCalledTimes(36);
+    expect(dispatch).toHaveBeenCalledTimes(36);
+    for (const [, request] of dispatch.mock.calls) expect(JSON.parse(String(request?.body))).toMatchObject({
+      model: 'gpt-image-2.5-sunburst', quality: 'high', n: 1, stream: false, partial_images: 0, output_format: 'png',
+    });
+    dispatch.mockRestore();
     expect(records.map(record => record.id)).toEqual(job.slots.map(slot => slot.creativeId));
     const quotas = [...storage.data.entries()].filter(([key]) => key.startsWith('quotas/')).map(([, value]) => JSON.parse(value.bytes.toString()));
     expect(quotas).toEqual(expect.arrayContaining([
       expect.objectContaining({ group: 'CREATIVE_PLANNING', usedUnits: 36 }),
       expect.objectContaining({ group: 'CREATIVE_GENERATION', usedUnits: 36 }),
     ]));
+  });
+
+  it('caps automatic diversity work at one plan plus one repair and two audits, with zero images on repeated advance', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
+    mocks.audit.mockImplementation(async () => repeatedAudit());
+    for (let step = 0; step < 5; step++) await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    const failed = await readCreativePortfolio(job.id, storage);
+    expect(failed?.planningError).toBeTruthy(); expect(failed?.snapshot).toBeNull();
+    for (let retry = 0; retry < 2; retry++) {
+      await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    }
+    expect(mocks.plan).toHaveBeenCalledTimes(2); expect(mocks.audit).toHaveBeenCalledTimes(2);
+    expect(mocks.render).not.toHaveBeenCalled(); expect(records).toHaveLength(0);
   });
 
   it('attributes batch planning and audit to the portfolio without a fabricated per-creative allocation', async () => {
