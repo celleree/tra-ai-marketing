@@ -107,7 +107,7 @@ export function SelectedFrameGeneration({
     }
   };
 
-  const submission = useRef(createSubmissionIdentity());
+  const submission = useRef(createSubmissionIdentity('direct-generation'));
   const generate = async () => {
     if (generating) return;
     const selectedFrames = selection.frames.filter((frame) =>
@@ -151,7 +151,7 @@ export function SelectedFrameGeneration({
           variationCount: 2,
           placement,
         });
-      const submissionId = submission.current.forInput(requestBody);
+      const submissionId = await submission.current.forInput(requestBody);
       const response = await fetch('/api/creatives/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [SUBMISSION_HEADER]: submissionId },

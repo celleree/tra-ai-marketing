@@ -46,17 +46,19 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState<CreativeRecord | null>(null);
-  const submission = useRef(createSubmissionIdentity());
+  const submission = useRef(createSubmissionIdentity('revision'));
+  const lastRequest = useRef<CreativeRevisionRequest | null>(null);
 
   const submitRevision = async (body: CreativeRevisionRequest) => {
     if (busy) return;
     setBusy(true);
     setError('');
     setSaved(null);
+    lastRequest.current = body;
     try {
       const companyProfile = readStoredRuntimeCompanyProfile();
       const requestBody = JSON.stringify({ ...body, companyProfile });
-      const submissionId = submission.current.forInput(`${creative.id}:${requestBody}`);
+      const submissionId = await submission.current.forInput(`${creative.id}:${requestBody}`);
       const response = await fetch(`/api/creatives/${creative.id}/revise`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [SUBMISSION_HEADER]: submissionId },
@@ -146,6 +148,10 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
       ) : null}
 
       {error ? <p role="alert" className={styles.inlineError}>{error}</p> : null}
+      {error && !busy && lastRequest.current ? <button type="button" className={styles.secondaryButton}
+        onClick={() => { submission.current.reset(); void submitRevision(lastRequest.current!); }}>
+        Start a new paid revision
+      </button> : null}
       {saved ? (
         <div className={styles.editedResult} role="status">
           <strong>Edited creative saved.</strong>
