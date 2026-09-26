@@ -1,3 +1,4 @@
+import { emitProviderReuse } from '@/lib/ai/provider-telemetry';
 import { createHash, randomUUID } from 'node:crypto';
 import { canonicalizeVideoSelectionPool, parsePooledVideoConceptSelection, parseVideoConceptSelection, selectVideoFramesForConcept,
   selectVideoFramesForConceptPool, VIDEO_SELECTION_TIMEOUT_MS, type VideoConceptSelection, type VideoSelectionPoolBinding } from '@/lib/video/concept-selection';
@@ -85,7 +86,7 @@ export const selectVideoFramesWithCache = async (
   let owned: Extract<CacheRecord, { status: 'RUNNING' }> | undefined;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const current = await read(); const value = current?.value;
-    if (value?.status === 'COMPLETE') return { status: 'COMPLETE', selection: value.selection };
+    if (value?.status === 'COMPLETE') { emitProviderReuse('video-concept-selection', model); return { status: 'COMPLETE', selection: value.selection }; }
     if (value?.status === 'RUNNING' && value.lease.expiresAtMs > now()) return { status: 'BUSY' };
     if (value?.status === 'RETRY_REQUIRED' && !dependencies.retry) return { status: value.status, reason: value.reason };
     if (value?.status === 'RUNNING' && !dependencies.retry) {
@@ -157,7 +158,7 @@ export const selectVideoFramesFromPoolWithCache = async (
   let owned: Extract<PoolCacheRecord, { status: 'RUNNING' }> | undefined;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const current = await read(); const value = current?.value;
-    if (value?.status === 'COMPLETE') return { status: 'COMPLETE', selection: value.selection };
+    if (value?.status === 'COMPLETE') { emitProviderReuse('video-pool-selection', model); return { status: 'COMPLETE', selection: value.selection }; }
     if (value?.status === 'RUNNING' && value.lease.expiresAtMs > now()) return { status: 'BUSY' };
     if (value?.status === 'RETRY_REQUIRED' && !dependencies.retry) return { status: value.status, reason: value.reason };
     if (value?.status === 'RUNNING' && !dependencies.retry) {
@@ -246,9 +247,9 @@ export const preflightVideoHumanFrameFromPoolWithCache = async (
   reuseContext: VideoFrameReuseContext,
   dependencies: VideoSelectionCacheDependencies,
 ): Promise<VideoHumanSelectionPreflight> => {
-  const { imageCount, read } = visualSelectionCacheContext(bindings, concept, reuseContext, dependencies);
+  const { imageCount, read, model } = visualSelectionCacheContext(bindings, concept, reuseContext, dependencies);
   const current = await read();
-  if (current?.value.status === 'COMPLETE') return { status: 'COMPLETE', outcome: current.value.outcome };
+  if (current?.value.status === 'COMPLETE') { emitProviderReuse('video-human-selection', model); return { status: 'COMPLETE', outcome: current.value.outcome }; }
   requireVisualSelectionOutputBudget(imageCount);
   return { status: 'READY' };
 };
@@ -265,7 +266,7 @@ export const selectVideoHumanFrameFromPoolWithCache = async (
   let owned: Extract<VisualPoolCacheRecord, { status: 'RUNNING' }> | undefined;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const current = await read(); const value = current?.value;
-    if (value?.status === 'COMPLETE') return { status: 'COMPLETE', outcome: value.outcome };
+    if (value?.status === 'COMPLETE') { emitProviderReuse('video-human-selection', model); return { status: 'COMPLETE', outcome: value.outcome }; }
     if (value?.status === 'RUNNING' && value.lease.expiresAtMs > now()) return { status: 'BUSY' };
     if (value?.status === 'RETRY_REQUIRED' && !dependencies.retry) return { status: value.status, reason: value.reason };
     if (value?.status === 'RUNNING' && !dependencies.retry) {
