@@ -1,3 +1,5 @@
+import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
+import { createSubmissionIdentity } from '@/lib/creatives/submission-id';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
@@ -321,7 +323,7 @@ const generationRequest = (
 ) =>
   new Request('http://localhost/api/creatives/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
     body: JSON.stringify({
       sourceAssets,
       ...(companyProfile ? { companyProfile } : {}),
@@ -352,6 +354,77 @@ let storedById: Record<string, StoredCreativeSourceMediaFile>;
 let readMediaById: ReturnType<typeof vi.fn>;
 let readImageById: ReturnType<typeof vi.fn>;
 let saveImage: ReturnType<typeof vi.fn>;
+
+it('replays the same generation submission with unchanged IDs and zero additional paid work', async () => {
+  const request = generationRequest([]), duplicate = request.clone();
+  const first = await readStreamEvents(await POST(request));
+  const imageCalls = vi.mocked(fetch).mock.calls.length;
+  const replay = await readStreamEvents(await POST(duplicate));
+  expect(replay).toEqual(first); expect(vi.mocked(fetch)).toHaveBeenCalledTimes(imageCalls);
+  expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
+  expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(2);
+  expect(mocks.saveCreativeBatch).toHaveBeenCalledTimes(2);
+});
+
+it('recovers failed finalization from saved raw output under the same submission', async () => {
+  const request = generationRequest([]), duplicate = request.clone();
+  mocks.saveCreativeBatch.mockRejectedValueOnce(new Error('Finalization storage interruption'));
+  const first = await readStreamEvents(await POST(request));
+  expect(first.some(event => event.event === 'error')).toBe(true);
+  expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  const replay = await readStreamEvents(await POST(duplicate));
+  expect(replay.find(event => event.event === 'complete')?.data.successfulCount).toBe(2);
+  expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2); expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
+});
+
+it('admits one concurrent preparation and rejects changed or missing submission identity', async () => {
+  const request = generationRequest([]), duplicate = request.clone(), changed = request.clone();
+  const original = mocks.planCreativeBatch.getMockImplementation()!; let release!: () => void;
+  mocks.planCreativeBatch.mockImplementation(async (...args) => {
+    await new Promise<void>(resolve => { release = resolve; }); return original(...args);
+  });
+  const pending = POST(request);
+  await vi.waitFor(() => expect(release).toBeDefined());
+  expect((await POST(duplicate)).status).toBe(202);
+  release(); await readStreamEvents(await pending);
+  const body = await changed.json();
+  expect((await POST(new Request(changed.url, { method: 'POST', headers: changed.headers,
+    body: JSON.stringify({ ...body, context: 'Different request' }) }))).status).toBe(409);
+  const missing = generationRequest([]); missing.headers.delete('Idempotency-Key');
+  expect((await POST(missing)).status).toBe(400);
+  expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
+});
+
+it('never repeats an unknown planner outcome on retransmission', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/ai/creative-planner')>('@/lib/ai/creative-planner');
+  mocks.planCreativeBatch.mockImplementation(actual.planCreativeBatch);
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Provider response lost')));
+  const request = generationRequest([]), duplicate = request.clone();
+  expect((await POST(request)).status).toBe(500);
+  expect((await POST(duplicate)).status).toBe(409);
+  expect(fetch).toHaveBeenCalledTimes(1); expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();
+});
+
+it('retains browser recovery identity when a duplicate stream finishes while original renders are busy', async () => {
+  const identity = createSubmissionIdentity(), key = identity.forInput('same request');
+  const request = generationRequest([]); request.headers.set('Idempotency-Key', key);
+  const duplicate = request.clone(); const releases: Array<() => void> = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => {
+    releases.push(() => resolve(Response.json({ data: [{ b64_json: PNG.toString('base64') }] })));
+  })));
+  const original = await POST(request);
+  await vi.waitFor(() => expect(releases).toHaveLength(2));
+  const replay = await readStreamEvents(await POST(duplicate));
+  const incomplete = replay.find(event => event.event === 'complete')!.data;
+  expect(incomplete).toMatchObject({ successfulCount: 0, failedCount: 2 });
+  identity.completeGeneration(key, Number(incomplete.requestedCount), Number(incomplete.successfulCount), Number(incomplete.failedCount));
+  expect(identity.forInput('same request')).toBe(key);
+  releases.forEach(release => release());
+  const completed = (await readStreamEvents(original)).find(event => event.event === 'complete')!.data;
+  identity.completeGeneration(key, Number(completed.requestedCount), Number(completed.successfulCount), Number(completed.failedCount));
+  expect(identity.forInput('same request')).not.toBe(key);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
 
 it('uses a seeded document and rich concept from the real planner through rendering and saved planning without uploads', async () => {
   const { conceptDetails } = await import('../fixtures/creative-concept-details');
@@ -418,7 +491,7 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
   const fetchMock = vi.fn().mockResolvedValue(
     new Response(
       JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
+      { status: 200, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() } }
     )
   );
   vi.stubGlobal('fetch', fetchMock);
@@ -528,7 +601,7 @@ beforeEach(() => {
     vi.fn(async () =>
       new Response(
         JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        { status: 200, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() } }
       )
     )
   );
@@ -1527,7 +1600,7 @@ describe('progressive creative delivery', () => {
         active -= 1;
         return new Response(
           JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() } }
         );
       })
     );
@@ -1561,7 +1634,7 @@ describe('progressive creative delivery', () => {
         }
         return new Response(
           JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() } }
         );
       })
     );
@@ -1595,7 +1668,7 @@ describe('progressive creative delivery', () => {
     const response = await POST(
       new Request('http://localhost/api/creatives/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({ context: '', variationCount: 2 }),
       })
     );
@@ -1641,3 +1714,7 @@ describe('progressive creative delivery', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => offlineExecutionStorage }));
+let offlineExecutionStorage = new MemoryPortfolioStorage();
+beforeEach(() => { offlineExecutionStorage = new MemoryPortfolioStorage(); });

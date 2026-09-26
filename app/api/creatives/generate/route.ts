@@ -1,14 +1,13 @@
 import { assertGenerationAvailable, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
-import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
+import { directGenerationExecution } from '@/lib/creatives/direct-generation-execution';
 export { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
-import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
-import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
-import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
+import { CheckpointUnavailableError, submissionRunId } from '@/lib/creatives/durable-checkpoint';
+import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { CreativeSourceHydrationError } from '@/lib/media/source-hydration';
 import { TraVideoProcessingError } from '@/lib/video/ffmpeg';
 
@@ -37,19 +36,10 @@ export async function POST(request: Request) {
 
     assertGenerationAvailable(parsed.data);
 
-    const quotaDenied = await requireOperatorQuota(
-      access.userId,
-      'CREATIVE_GENERATION',
-      parsed.data.variationCount,
-    );
-    if (quotaDenied) return quotaDenied;
-
-    const planningQuotaDenied = await requireOperatorQuota(access.userId, 'CREATIVE_PLANNING', parsed.data.variationCount);
-    if (planningQuotaDenied) return planningQuotaDenied;
-
-    const renderContext = await prepareCreativeGeneration(parsed.data, request.url);
-    const creativePlan = renderContext.batchPlan.creatives;
-    const renderCreative = (item: PlannedCreativeConcept) => renderPlannedCreative(item, renderContext);
+    const submissionId = parseSubmissionId(request.headers.get(SUBMISSION_HEADER));
+    if (!submissionId) return NextResponse.json({ error: 'A valid Idempotency-Key is required for generation.' }, { status: 400 });
+    const runId = submissionRunId(access.userId, submissionId, 'direct-generation');
+    const { plan: creativePlan, render: renderCreative } = await directGenerationExecution(runId, access.userId, parsed.data, request.url);
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
@@ -122,6 +112,12 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof Response) return error;
+    if (error instanceof CheckpointUnavailableError || error instanceof SubmissionConflictError) {
+      const status = error instanceof CheckpointUnavailableError ? error.status : 409;
+      return NextResponse.json({ error: error.message }, { status, headers: { 'Cache-Control': 'private, no-store',
+        ...(status === 202 ? { 'Retry-After': '2' } : {}) } });
+    }
     if (error instanceof CreativeGenerationPreparationError || error instanceof CreativeSourceHydrationError || error instanceof TraVideoProcessingError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

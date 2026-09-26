@@ -1,5 +1,7 @@
 'use client';
 
+import { createSubmissionIdentity, SUBMISSION_HEADER } from '@/lib/creatives/submission-id';
+
 import { useEffect, useRef, useState } from 'react';
 import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
 import type { CreativePlacement } from '@/lib/creatives/placements';
@@ -105,6 +107,7 @@ export function SelectedFrameGeneration({
     }
   };
 
+  const submission = useRef(createSubmissionIdentity());
   const generate = async () => {
     if (generating) return;
     const selectedFrames = selection.frames.filter((frame) =>
@@ -133,10 +136,7 @@ export function SelectedFrameGeneration({
     try {
       const brand = readStoredBrandGuidance();
       const companyProfile = readStoredRuntimeCompanyProfile();
-      const response = await fetch('/api/creatives/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const requestBody = JSON.stringify({
           sourceAssets: [{ mediaId: media.id, role: 'TRA_VIDEO' }],
           videoFrameSelection: {
             libraryId: library.id,
@@ -150,7 +150,12 @@ export function SelectedFrameGeneration({
           context: conceptContext,
           variationCount: 2,
           placement,
-        }),
+        });
+      const submissionId = submission.current.forInput(requestBody);
+      const response = await fetch('/api/creatives/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [SUBMISSION_HEADER]: submissionId },
+        body: requestBody,
       });
       if (!response.ok || !isGenerationEventStream(response)) {
         const payload = await parseGenerationResponse(response);
@@ -211,6 +216,7 @@ export function SelectedFrameGeneration({
       });
 
       if (!receivedComplete) throw new Error('Creative generation ended before reporting completion.');
+      submission.current.completeGeneration(submissionId, 2, completedIndexes.current.size, failedIndexes.current.size);
       if (failedIndexes.current.size) {
         setError(`Completed ${completedIndexes.current.size} of 2 creatives. ${failedIndexes.current.size} failed.`);
       }
@@ -246,6 +252,9 @@ export function SelectedFrameGeneration({
     </fieldset>
     <button className={styles.primary} type="button" onClick={() => void preview()} disabled={generating || previewing || selectedFrameIds.length < 1}>{previewing ? 'Extracting source frames…' : 'Preview source frames'}</button>
     <p className={styles.muted}>Extracted from the original video. No image generation.</p>
+    {error && !generating ? <button type="button" onClick={() => { submission.current.reset(); void generate(); }}>
+      Start a new paid generation
+    </button> : null}
     {previews.length ? <section className={styles.generatedResults}>{previews.map((frame) => <article className={styles.frameChoice} key={frame.frameId}>
       {/* eslint-disable-next-line @next/next/no-img-element */}<img src={frame.url} alt={`Verified source video frame at ${(frame.timestampMs / 1000).toFixed(3)} seconds`} />
       <span><b>{(frame.timestampMs / 1000).toFixed(3)}s</b> Fresh source PNG</span>
