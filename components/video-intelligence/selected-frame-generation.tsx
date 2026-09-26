@@ -1,5 +1,7 @@
 'use client';
 
+import { createSubmissionIdentity, SUBMISSION_HEADER } from '@/lib/creatives/submission-id';
+
 import { useEffect, useRef, useState } from 'react';
 import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
 import type { CreativePlacement } from '@/lib/creatives/placements';
@@ -105,6 +107,7 @@ export function SelectedFrameGeneration({
     }
   };
 
+  const submission = useRef(createSubmissionIdentity());
   const generate = async () => {
     if (generating) return;
     const selectedFrames = selection.frames.filter((frame) =>
@@ -133,10 +136,7 @@ export function SelectedFrameGeneration({
     try {
       const brand = readStoredBrandGuidance();
       const companyProfile = readStoredRuntimeCompanyProfile();
-      const response = await fetch('/api/creatives/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const requestBody = JSON.stringify({
           sourceAssets: [{ mediaId: media.id, role: 'TRA_VIDEO' }],
           videoFrameSelection: {
             libraryId: library.id,
@@ -150,7 +150,12 @@ export function SelectedFrameGeneration({
           context: conceptContext,
           variationCount: 2,
           placement,
-        }),
+        });
+      const submissionId = submission.current.forInput(requestBody);
+      const response = await fetch('/api/creatives/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [SUBMISSION_HEADER]: submissionId },
+        body: requestBody,
       });
       if (!response.ok || !isGenerationEventStream(response)) {
         const payload = await parseGenerationResponse(response);
@@ -211,6 +216,7 @@ export function SelectedFrameGeneration({
       });
 
       if (!receivedComplete) throw new Error('Creative generation ended before reporting completion.');
+      submission.current.complete(submissionId);
       if (failedIndexes.current.size) {
         setError(`Completed ${completedIndexes.current.size} of 2 creatives. ${failedIndexes.current.size} failed.`);
       }
