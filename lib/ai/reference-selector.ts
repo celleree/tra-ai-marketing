@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { validateStoredMediaImage } from '@/lib/media/storage';
@@ -170,7 +171,7 @@ export async function selectBestReferenceCreatives(args: {
     });
   }
 
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('reference-shortlist', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,

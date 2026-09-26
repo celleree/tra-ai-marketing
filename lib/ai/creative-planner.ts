@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
@@ -270,7 +271,7 @@ export async function requestCreativeBatch(
   const outboundSourceAnalysis = sourceAnalysis && videoLinked?.customerInsights.length
     ? moveVideoLinkedPassagesOutOfSourceAnalysis(sourceAnalysis, videoLinked.customerInsights)
     : sourceAnalysis;
-  const response = await fetch(OPENAI_RESPONSES_URL, {
+  const response = await fetchWithProviderUsage(repair ? 'creative-plan-repair' : 'creative-plan', model, OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({

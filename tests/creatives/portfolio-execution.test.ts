@@ -13,6 +13,7 @@ import { videoIntelligenceJobId } from '@/lib/video/intelligence-job';
 import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 import { composePlanningCopyWithProof } from '@/lib/proof/planning-selection';
 import { fetchCreativeImage } from '@/lib/creatives/image-models';
+import { fetchWithProviderUsage, providerUsageContext } from '@/lib/ai/provider-telemetry';
 
 const mocks = vi.hoisted(() => ({ prepareStep: vi.fn(), plan: vi.fn(), audit: vi.fn(), restore: vi.fn(), render: vi.fn(), list: vi.fn(),
   videoStep: vi.fn(), sourceAnalysisStep: vi.fn(), projectVideo: vi.fn(), loadVideo: vi.fn(), selectVideo: vi.fn() }));
@@ -444,6 +445,22 @@ describe('bounded resumable portfolio execution', () => {
       expect.objectContaining({ group: 'CREATIVE_PLANNING', usedUnits: 36 }),
       expect.objectContaining({ group: 'CREATIVE_GENERATION', usedUnits: 36 }),
     ]));
+  });
+
+  it('attributes batch planning and audit to the portfolio without a fabricated per-creative allocation', async () => {
+    const logs = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const plan = mocks.plan.getMockImplementation()!, audit = mocks.audit.getMockImplementation()!;
+    const observed = async (stage: string) => fetchWithProviderUsage(stage, 'gpt-6-astra', 'https://api.openai.com/v1/responses', {},
+      async () => Response.json({ status: 'completed', usage: { input_tokens: 1 } }));
+    mocks.plan.mockImplementation(async (...args) => { await observed('creative-plan'); return plan(...args); });
+    mocks.audit.mockImplementation(async (...args) => { await observed('portfolio-audit'); return audit(...args); });
+    const storage = new MemoryPortfolioStorage(), job = await createCreativePortfolio(portfolioRequest(), storage);
+    for (let step = 0; step < 3; step += 1) await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    const events = logs.mock.calls.map(([value]) => JSON.parse(String(value)));
+    expect(events).toHaveLength(4);
+    for (const event of events) expect(event).toMatchObject({ runId: `portfolio:${job.id}`, jobId: job.id, portfolioId: job.id, creativeId: null });
+    expect(providerUsageContext()).toEqual({});
+    logs.mockRestore();
   });
 
   it('checkpoints pre-plan provider work before starting the next operation', async () => {

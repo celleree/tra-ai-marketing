@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import {
   CREATIVE_CATEGORIES,
   CREATIVE_CATEGORY_LABELS,
@@ -130,7 +131,7 @@ const analyzeCreative = async (
   schemaName: string
 ): Promise<CreativeReferenceAnalysis> => {
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('source-reference-analysis', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
@@ -275,7 +276,7 @@ export async function generateCreativeCopy(
       : null,
   }));
 
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('legacy-copy', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
