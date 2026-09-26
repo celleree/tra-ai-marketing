@@ -17,7 +17,10 @@ const provenance = [{ frameIndex: 0, libraryFrameId: frameId, candidateFrameSha2
   timestampMs: 1200, approvedPngSha256: 'e'.repeat(64) }];
 const frame = { frameIndex: 0, timestampMs: 1200, mimeType: 'image/png', buffer: Buffer.from('png'),
   frameSha256: 'e'.repeat(64), byteLength: 3, sourceRole: 'TRA_VIDEO', sourceVideoMediaId: mediaId,
-  sourceVideoFileName: 'source.mp4', sourceVideoContentHash: sourceHash, approvedHumanSource: true, cacheKey: null } as any;
+  sourceVideoFileName: 'source.mp4', sourceVideoContentHash: sourceHash, approvedHumanSource: true, cacheKey: null,
+  sourceOverlay: { version: 2, status: 'CLEAN' }, providerPngSha256: 'e'.repeat(64), crop: null } as any;
+const attachedFrames = [{ timestampMs: 1200, approvedPngSha256: 'e'.repeat(64),
+  providerPngSha256: 'e'.repeat(64), sourceOverlay: { version: 2, status: 'CLEAN' }, crop: null }];
 const selection = { libraryId: `video-library:${'f'.repeat(64)}`, sourceVideoMediaId: mediaId,
   sourceVideoContentHash: sourceHash, frames: provenance };
 const routing = { operationType: 'TRA_VIDEO_FRAME_GENERATION', preferredModel: 'gpt-image-2.5-sunburst',
@@ -82,8 +85,20 @@ describe('render planned video provenance', () => {
   it('saves automatic B3 provenance with exact selected-frame evidence', async () => {
     const creative = await render(false);
     expect(creative.generationProvenance!.attachedSource).toEqual({ type: 'TRA_VIDEO_FRAMES', mediaId,
-      sourceSha256: sourceHash, selectionMode: 'AUTOMATIC', frames: [{ timestampMs: 1200, approvedPngSha256: 'e'.repeat(64) }] });
+      sourceSha256: sourceHash, selectionMode: 'AUTOMATIC', frames: attachedFrames });
     expect(creative.videoFrameSelection).toEqual(selection);
+  });
+
+  it('saves original approval and actual provider crop/hash as separate evidence', async () => {
+    const sourceOverlay = { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 400,
+      overlayDepthPermille: 390 } as const;
+    const crop = { left: 0, top: 0, width: 100, height: 60 };
+    mocks.generate.mockResolvedValueOnce({ buffer: Buffer.from('image'), prompt: 'prompt', model: 'gpt-image-2.5-sunburst',
+      routing, providerFrames: [{ ...frame, sourceOverlay, providerPngSha256: '9'.repeat(64), crop }] });
+    const creative = await render(false);
+    expect(creative.generationProvenance!.attachedSource).toMatchObject({ frames: [{ timestampMs: 1200,
+      approvedPngSha256: 'e'.repeat(64), providerPngSha256: '9'.repeat(64), sourceOverlay, crop }] });
+    expect(creative.videoFrameSelection?.frames[0].approvedPngSha256).toBe('e'.repeat(64));
   });
 
   it('keeps explicit request video selection USER_SELECTED', async () => {
@@ -96,7 +111,7 @@ describe('render planned video provenance', () => {
     expect(mocks.generate.mock.calls[0][0].frames).toEqual([frame]);
     expect(creative.videoFrameSelection).toEqual(selection);
     expect(creative.generationProvenance!.attachedSource).toEqual({ type: 'TRA_VIDEO_FRAMES', mediaId,
-      sourceSha256: sourceHash, selectionMode: 'USER_SELECTED', frames: [{ timestampMs: 1200, approvedPngSha256: 'e'.repeat(64) }] });
+      sourceSha256: sourceHash, selectionMode: 'USER_SELECTED', frames: attachedFrames });
     expect(creative.planning!.strategy.humanSourceId).toBe(approvedHumanSourceId(humanId));
     expect(creative.planning!.strategy).not.toHaveProperty('approvedHumanId');
   });

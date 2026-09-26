@@ -11,7 +11,7 @@ import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-prepar
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
 import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
-import { canonicalizeVideoFrameReuseContext, type AutomaticVideoSelectionPolicy,
+import { HUMAN_FRAME_SELECTION_POLICY, canonicalizeVideoFrameReuseContext, type AutomaticVideoSelectionPolicy,
   type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
@@ -371,7 +371,13 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
     const slot = job.slots.find(slot => slot.index === slotIndex);
     if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');
     slot.status = 'PENDING'; delete slot.error;
-    if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
+    if (slot.videoSelection && job.snapshot.batchPlan.creatives[slot.index - 1]?.strategy.execution.subjectSource === 'approved-tra-human'
+      && (slot.videoSelection.version !== 2
+        || (slot.videoSelection.selectionPolicy === 'human-frame-visual-quality-v1')
+        || (slot.videoSelection.selectionPolicy === HUMAN_FRAME_SELECTION_POLICY
+          && slot.videoSelection.selection && slot.videoSelection.selection.version !== 2))) {
+      delete slot.videoSelection;
+    } else if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
     else if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;
   }
   job.updatedAtMs = now;

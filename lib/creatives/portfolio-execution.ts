@@ -9,7 +9,7 @@ import { stepPortfolioVideoDependency } from '@/lib/creatives/portfolio-video-ad
 import { hydratePortfolioVideoFrameSelection, portfolioVideoFrameReuseContext, portfolioVideoSelectionPolicy,
   preflightPortfolioVideoFrames, selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelligence-planning';
-import { VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
+import { HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
@@ -34,7 +34,7 @@ export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; s
 
 class InvalidPlannedCreativeCopyError extends CreativeGenerationPreparationError {}
 
-const noSuitableHumanFrameMessage = 'No suitable human frame was found. Create a new portfolio with a clearer approved source (open eyes, usable framing, and sufficient facial detail); saved creatives remain available.';
+const noSuitableHumanFrameMessage = 'No suitable human frame was found. Create a new portfolio with a clearer approved source (open eyes, usable framing, sufficient facial detail, and no unremovable source overlay); saved creatives remain available.';
 
 const assertValidPlannedCreativeCopy = (concept: Parameters<typeof classifyCreativeCopyContract>[0]) => {
   if (classifyCreativeCopyContract(concept).kind === 'INVALID') {
@@ -225,6 +225,13 @@ export async function advanceCreativePortfolio(
       && !context.providerImageSource
       && context.videoFrameSet !== null;
     if (automaticVideoSelection) {
+      if (slot.videoSelection && (slot.videoSelection.version !== 2
+        || slot.videoSelection.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY
+        || (slot.videoSelection.selection && slot.videoSelection.selection.version !== 2))) {
+        const message = 'Saved human-frame selection predates source-overlay assessment. Explicitly Retry this slot to select an assessed frame before image generation.';
+        return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token, message), storage),
+          error: message, status: 409 };
+      }
       if (!context.sourceAnalysis) {
         throw new CreativeGenerationPreparationError('Durable automatic video selection is missing its frozen B1 source analysis.', 409);
       }
@@ -283,14 +290,17 @@ export async function advanceCreativePortfolio(
           finishPortfolioVideoFrameSelection(current, token, selected.selection), storage) };
       }
 
-      const denied = await reserveWorkQuota('CREATIVE_GENERATION');
-      if (denied) return denied;
-      providerWorkStarted = true;
       const selectedFrames = await hydratePortfolioVideoFrameSelection({
         sourceAnalysis: context.sourceAnalysis,
         sources: videoSources,
         selection: slot.videoSelection.selection,
+      }).catch(error => {
+        const message = error instanceof Error ? error.message : 'Saved human-frame selection could not be hydrated.';
+        throw new CreativeGenerationPreparationError(message, 409);
       });
+      const denied = await reserveWorkQuota('CREATIVE_GENERATION');
+      if (denied) return denied;
+      providerWorkStarted = true;
       const generatedVideoFrameSelection: GeneratedVideoFrameSelection = {
         libraryId: slot.videoSelection.selection.libraryId,
         sourceVideoMediaId: selectedFrames.source.media.id,
@@ -325,7 +335,7 @@ export async function advanceCreativePortfolio(
     const current = await updateCreativePortfolio(id, value => {
       if (value.lease?.id !== token) return value;
       if (value.lease.expiresAtMs <= Date.now()) return claimCreativePortfolio(value).job;
-      return providerWorkStarted || error instanceof InvalidPlannedCreativeCopyError
+      return providerWorkStarted || error instanceof CreativeGenerationPreparationError || error instanceof InvalidPlannedCreativeCopyError
         ? failPortfolioWork(value, token, message)
         : releasePortfolioWork(value, token);
     }, storage);

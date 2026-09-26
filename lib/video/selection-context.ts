@@ -82,7 +82,18 @@ export const loadSavedVideoSelectionContext = async (
   return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives) };
 };
 
-export const extractVideoSelectionFrames = (source: HydratedTraVideoSource, context: VideoSelectionContext, frameIds: readonly string[]) =>
-  context.manifest
+export const extractVideoSelectionFrames = async (source: HydratedTraVideoSource, context: VideoSelectionContext, frameIds: readonly string[]) => {
+  const extracted = await (context.manifest
     ? getApprovedPreparedSelectedTraVideoFrames(source, context.library, frameIds, context.manifest)
-    : getApprovedSelectedTraVideoFrames(source, context.library, frameIds);
+    : getApprovedSelectedTraVideoFrames(source, context.library, frameIds));
+  // Explicit/curated selections have no B3 assessment. Existing B1 observations may admit only plainly
+  // unmarked frames; ambiguous or text-bearing frames need a new assessed selection before image editing.
+  return { ...extracted, frames: extracted.frames.map((frame, index) => {
+    const observation = context.library.representativeFrames.find(item => item.id === frameIds[index])?.observation;
+    const clean = observation && observation.visibleText.length === 0 && observation.uncertainties.length === 0
+      && !observation.topics.includes('brand') && !observation.topics.includes('on-screen text');
+    return { ...frame, sourceOverlay: clean
+      ? { version: 2 as const, status: 'CLEAN' as const }
+      : { version: 2 as const, status: 'UNSAFE' as const } };
+  }) };
+};

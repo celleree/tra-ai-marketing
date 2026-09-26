@@ -9,6 +9,7 @@ import {
   PREFERRED_CREATIVE_IMAGE_MODEL,
   type CreativeImageRouting,
 } from '@/lib/creatives/image-models';
+import { parseSourceOverlayDecision, type SourceCrop, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
 
 const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -29,7 +30,8 @@ export type CreativeGenerationProvenance = {
         mediaId: string;
         sourceSha256: string;
         selectionMode: 'AUTOMATIC' | 'USER_SELECTED';
-        frames: Array<{ timestampMs: number; approvedPngSha256: string }>;
+        frames: Array<{ timestampMs: number; approvedPngSha256: string;
+          providerPngSha256?: string; sourceOverlay?: SourceOverlayDecision; crop?: SourceCrop | null }>;
       };
   analysisSources: Array<
     | {
@@ -178,9 +180,20 @@ export const parseCreativeGenerationProvenance = (
       !requestedSource('TRA_VIDEO', source.mediaId, source.sourceSha256)
     ) return null;
     const frames = source.frames.map((frame) => {
-      if (!isRecord(frame) || !hasExactKeys(frame, ['timestampMs', 'approvedPngSha256'])) return null;
+      if (!isRecord(frame) || !(hasExactKeys(frame, ['timestampMs', 'approvedPngSha256'])
+        || hasExactKeys(frame, ['timestampMs', 'approvedPngSha256', 'providerPngSha256', 'sourceOverlay', 'crop']))) return null;
       if (typeof frame.timestampMs !== 'number' || !Number.isSafeInteger(frame.timestampMs) || frame.timestampMs < 0 || !isHash(frame.approvedPngSha256)) return null;
-      return { timestampMs: frame.timestampMs, approvedPngSha256: frame.approvedPngSha256 };
+      if (!('providerPngSha256' in frame)) return { timestampMs: frame.timestampMs, approvedPngSha256: frame.approvedPngSha256 };
+      const decision = parseSourceOverlayDecision(frame.sourceOverlay);
+      const crop = frame.crop;
+      if (!isHash(frame.providerPngSha256) || !decision || decision.status === 'UNSAFE'
+        || (decision.status === 'CLEAN' && (crop !== null || frame.providerPngSha256 !== frame.approvedPngSha256))
+        || (decision.status === 'EDGE_CROP' && (!isRecord(crop)
+          || !hasExactKeys(crop, ['left', 'top', 'width', 'height'])
+          || ![crop.left, crop.top, crop.width, crop.height].every(value => Number.isSafeInteger(value) && Number(value) >= 0)
+          || Number(crop.width) < 2 || Number(crop.height) < 2))) return null;
+      return { timestampMs: frame.timestampMs, approvedPngSha256: frame.approvedPngSha256,
+        providerPngSha256: frame.providerPngSha256, sourceOverlay: decision, crop: crop as SourceCrop | null };
     });
     if (frames.some((frame) => !frame)) return null;
     const validFrames = frames as NonNullable<Extract<CreativeGenerationProvenance['attachedSource'], { type: 'TRA_VIDEO_FRAMES' }>>['frames'];

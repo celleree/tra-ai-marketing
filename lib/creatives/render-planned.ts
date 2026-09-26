@@ -28,6 +28,7 @@ import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import { resolveApprovedHumanFrame } from '@/lib/video/approved-human-service';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import type { ProviderVideoFrame } from '@/lib/video/source-overlay';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
 import {
   revalidateSelectedProofForPaidWork,
@@ -104,7 +105,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     ? resolveCreativeLogoGeometry(request.placement, logoAnchor, logoPlacement.sourceWidth, logoPlacement.sourceHeight)
     : undefined;
   let imageResult: ImageGenerationResult;
-  let providerFrames: ApprovedTraVideoFrame[] | undefined;
+  let providerFrames: ProviderVideoFrame[] | undefined;
 
   await options.assertCurrentWork?.();
   const proofProvenance = await revalidateSelectedProofForPaidWork(item.selectedProof);
@@ -218,6 +219,9 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
             frames: providerFrames.map((frame) => ({
               timestampMs: frame.timestampMs,
               approvedPngSha256: frame.frameSha256,
+              providerPngSha256: frame.providerPngSha256,
+              sourceOverlay: frame.sourceOverlay!,
+              crop: frame.crop,
             })),
           }
         : null;

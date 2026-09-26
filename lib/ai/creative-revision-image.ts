@@ -12,6 +12,7 @@ import type { CreativeProofProvenance } from '@/lib/proof/provenance';
 import { parseCreativeStrategy } from '@/lib/creatives/strategy';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
 import type { CreativeLogoGeometry } from '@/lib/creatives/logo-placement';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 import {
   creativeImageHttpError,
   creativeImageMissingOutputError,
@@ -48,6 +49,8 @@ export async function generateCreativeRevisionImage(args: {
   }
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured.');
+  const providerVideoFrames = originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES'
+    ? await prepareProviderVideoFrames(originalApprovedSource.frames) : null;
   const spec = CREATIVE_PLACEMENT_SPECS[args.placement];
   const document = await prepareTaxDocumentReference(args.concept.strategy.execution.taxDocumentReference);
   const prompt = `Create an original static Tax Relief Advocates (TRA) ad at ${spec.width}x${spec.height}, aspect ratio ${spec.aspectRatio}.
@@ -56,7 +59,7 @@ ${formatCreativeSafeZoneRules(args.placement)}
 The FIRST attached image is the selected saved EDITING_CANVAS. It is generated editing context, never an approved human-identity source or evidence for factual claims.
 ${args.logoGeometry ? 'Its transparent rectangle is the deterministically removed prior logo panel. Reconstruct the surrounding background naturally through that cutout; do not retain or redraw the old logo or panel.' : ''}
 ${originalApprovedSource
-    ? 'The attachments named approved-tra-* are the separately validated original approved TRA reference or approved TRA video PNG frames. Only these attachments may supply human identity; preserve that identity without adding, blending or replacing people.'
+    ? 'The attachments named approved-tra-* are the separately validated original approved TRA reference or approved TRA video PNG frames or pixel-only edge crops. Only these attachments may supply human identity; preserve that identity without adding, blending or replacing people.'
     : 'There are no approved human source attachments. Do not depict any person, including a person visible in the editing canvas.'}
 ${args.concept.strategy.execution.subjectSource === 'non-human' ? 'The planned concept is non-human. Do not depict people even if original approved sources contain people.' : ''}
 No ad-layout reference, video-analysis JPEGs or logo artwork are attached as generation sources.
@@ -79,9 +82,9 @@ ${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''}`;
       if (originalApprovedSource?.kind === 'TRA_REFERENCE') {
         const source = originalApprovedSource.source.stored;
         append(form, source.buffer, source.mimeType, `approved-tra-source-${source.fileName}`);
-      } else if (originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES') {
-        originalApprovedSource.frames.forEach((frame, index) =>
-          append(form, frame.buffer, frame.mimeType, `approved-tra-frame-${index + 1}.png`));
+      } else if (providerVideoFrames) {
+        providerVideoFrames.forEach((frame, index) =>
+          append(form, frame.providerBuffer, frame.mimeType, `approved-tra-frame-${index + 1}.png`));
       }
       document?.appendTo(form);
       const response = await fetchCreativeImage('https://api.openai.com/v1/images/edits', {

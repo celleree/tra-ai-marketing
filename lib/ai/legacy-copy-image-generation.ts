@@ -19,6 +19,7 @@ import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import { selectProviderVideoFrames, type VideoImageGenerationResult } from '@/lib/ai/video-frame-generation';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
@@ -204,17 +205,17 @@ export async function generateLegacyApprovedTraVideoFrameCreativeImage(args: {
   copy: CreativeCopy;
   logoGeometry?: CreativeLogoGeometry;
 }): Promise<VideoImageGenerationResult> {
-  const frames = selectProviderVideoFrames(args.frames);
+  const frames = await prepareProviderVideoFrames(selectProviderVideoFrames(args.frames));
   const placementId = args.placement ?? 'SQUARE_1_1';
   const placement = CREATIVE_PLACEMENT_SPECS[placementId];
   const document = await prepareTaxDocumentReference(args.taxDocumentReference);
-  const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attachments named approved-tra-video-* are server-extracted still frames from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels or third-party people are attached. ${document?.prompt ?? ''} Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. One-ad render brief: ${args.context}. Headline: ${args.copy.headline}. Primary text: ${args.copy.primaryText}. Description: ${args.copy.description}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(placementId)}`;
+  const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attachments named approved-tra-video-* are server-extracted still frames or pixel-only edge crops from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels or third-party people are attached. ${document?.prompt ?? ''} Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. One-ad render brief: ${args.context}. Headline: ${args.copy.headline}. Primary text: ${args.copy.primaryText}. Description: ${args.copy.description}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(placementId)}`;
   const result = await runImageEdit({
     operationType: 'TRA_VIDEO_FRAME_GENERATION',
     prompt,
     providerSize: placement.providerSize,
     images: frames.map((frame) => ({
-      buffer: frame.buffer,
+      buffer: frame.providerBuffer,
       mimeType: 'image/png',
       fileName: `approved-tra-video-${frame.sourceVideoMediaId}-${frame.timestampMs}ms.png`,
     })),

@@ -5,9 +5,12 @@ import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 import { referenceCandidate } from '../fixtures/reference-catalog';
 import { resolveReferenceSelection } from '@/lib/references/planning';
 import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
+import { createHash } from 'node:crypto';
+import sharp from 'sharp';
 
 type Args = Parameters<typeof generateCreativeRevisionImage>[0];
 const fetchMock = vi.fn();
+const videoPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const args = (): Args => ({
   operation: 'EDIT', placement: 'PORTRAIT_4_5',
   companyProfile: { knowledgeBase: { companySummary: 'PRIVATE_COMPANY_SUMMARY' }, guardrails: { requiredDisclaimers: 'results vary.' } },
@@ -139,10 +142,29 @@ describe('revision image provider', () => {
   it('retains the exact approved video frame subset and order', async () => {
     const input = args();
     input.concept.strategy.execution.subjectSource = 'approved-tra-human';
-    input.sources.originalApprovedSource = { kind: 'TRA_VIDEO_FRAMES', source: {} as never, selectionMode: 'USER_SELECTED', frames: ['last', 'first'].map(value => ({ buffer: Buffer.from(value), mimeType: 'image/png' } as ApprovedTraVideoFrame)) };
+    input.sources.originalApprovedSource = { kind: 'TRA_VIDEO_FRAMES', source: {} as never, selectionMode: 'USER_SELECTED', frames: ['last', 'first'].map((value, index) => ({
+      buffer: videoPng, mimeType: 'image/png', frameSha256: createHash('sha256').update(videoPng).digest('hex'), byteLength: videoPng.length,
+      timestampMs: index, sourceOverlay: { version: 2, status: 'CLEAN' }, sourceVideoFileName: value,
+    } as ApprovedTraVideoFrame)) };
     await generateCreativeRevisionImage(input);
-    expect(await Promise.all(files().map(async file => Buffer.from(await file.arrayBuffer()).toString()))).toEqual(['canvas', 'last', 'first']);
+    expect(await Promise.all(files().map(async file => Buffer.from(await file.arrayBuffer())))).toEqual([Buffer.from('canvas'), videoPng, videoPng]);
     expect(body().get('prompt')).toContain('Only these attachments may supply human identity');
+  });
+  it('reattaches a saved pixel crop on revision and rejects derivative drift before HTTP', async () => {
+    const original = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#986743' } }).png().toBuffer();
+    const cropped = await sharp(original).extract({ left: 0, top: 0, width: 100, height: 60 }).png().toBuffer();
+    const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+    const input = args(); input.concept.strategy.execution.subjectSource = 'approved-tra-human';
+    input.sources.originalApprovedSource = { kind: 'TRA_VIDEO_FRAMES', source: {} as never, selectionMode: 'AUTOMATIC',
+      frames: [{ buffer: original, mimeType: 'image/png', frameSha256: digest(original), byteLength: original.length,
+        sourceOverlay: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 400, overlayDepthPermille: 390 },
+        expectedCrop: { left: 0, top: 0, width: 100, height: 60 }, expectedProviderPngSha256: digest(cropped) } as ApprovedTraVideoFrame] };
+    await generateCreativeRevisionImage(input);
+    expect(Buffer.from(await files()[1].arrayBuffer())).toEqual(cropped);
+    fetchMock.mockClear();
+    input.sources.originalApprovedSource.frames[0].expectedProviderPngSha256 = '0'.repeat(64);
+    await expect(generateCreativeRevisionImage(input)).rejects.toThrow('pixels changed');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
   it.each(['EDIT', 'PLACEMENT', 'REGENERATE', 'VARIATION'] as const)('expresses %s intent and always prefers Sunburst', async operation => {
     await generateCreativeRevisionImage({ ...args(), operation, placement: 'VERTICAL_9_16' });

@@ -108,10 +108,13 @@ describe('portfolio video selection adapter', () => {
 
   it('hydrates only persisted frame IDs from the exact frozen dependency without provider selection', async () => {
     const rows = [row(5), row(6)], state = setup(rows), chosen = rows[1];
-    const frameIds = chosen.library.representativeFrames.map((frame) => frame.id); const extracted = { exact: true };
+    const frameIds = chosen.library.representativeFrames.map((frame) => frame.id);
+    const extracted = { exact: true, frames: frameIds.map(frameId => ({ frameId })) };
     mocks.extractFrames.mockResolvedValue(extracted); const fetchSpy = vi.fn(); vi.stubGlobal('fetch', fetchSpy);
     expect(await hydratePortfolioVideoFrameSelection({ sourceAnalysis: state.sourceAnalysis, sources: state.sources,
-      selection: { libraryId: chosen.library.id, sourceVideoContentHash: chosen.identity.sourceVideoContentHash, frameIds } })).toBe(extracted);
+      selection: { version: 2, libraryId: chosen.library.id, sourceVideoContentHash: chosen.identity.sourceVideoContentHash,
+        frameIds, sourceOverlays: frameIds.map(() => ({ version: 2, status: 'CLEAN' })) } })).toMatchObject({ exact: true,
+      frames: frameIds.map(frameId => ({ frameId, sourceOverlay: { version: 2, status: 'CLEAN' } })) });
     expect(mocks.loadContext).toHaveBeenCalledTimes(1); expect(mocks.loadContext.mock.calls[0][1]).toEqual({ identity: chosen.identity, artifact: chosen.artifact });
     expect(mocks.extractFrames.mock.calls[0][2]).toEqual(frameIds); expect(fetchSpy).not.toHaveBeenCalled();
   });

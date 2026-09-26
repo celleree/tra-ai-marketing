@@ -30,7 +30,8 @@ const mediaId = `media_${'a'.repeat(32)}`;
 const sourceHash = 'b'.repeat(64);
 const libraryId = `video-library:${'c'.repeat(64)}`;
 const frameId = `video-frame:${'d'.repeat(64)}`;
-const selection = { libraryId, sourceVideoContentHash: sourceHash, frameIds: [frameId] };
+const selection = { version: 2 as const, libraryId, sourceVideoContentHash: sourceHash, frameIds: [frameId],
+  sourceOverlays: [{ version: 2 as const, status: 'CLEAN' as const }] };
 const provenance = [{ frameIndex: 0, libraryFrameId: frameId, candidateFrameSha256: 'e'.repeat(64),
   timestampMs: 1200, approvedPngSha256: 'f'.repeat(64) }];
 const videoSource = { role: 'TRA_VIDEO', media: { id: mediaId, fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO',
@@ -60,7 +61,7 @@ const contextFor = (job: Awaited<ReturnType<typeof ready>>, overrides: Record<st
 }) as any;
 
 beforeEach(() => {
-  vi.clearAllMocks(); vi.unstubAllEnvs();
+  vi.resetAllMocks(); vi.unstubAllEnvs();
   vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'selector-model-a');
   mocks.list.mockResolvedValue([]); mocks.quota.mockResolvedValue({ allowed: true });
   mocks.inventory.mockResolvedValue([{ source: videoSource }]);
@@ -191,7 +192,7 @@ describe('durable portfolio B3 selection activation', () => {
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result).toMatchObject({ status: 429, retryAfterSeconds: 23, job: { lease: null } });
     expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'CREATIVE_GENERATION']);
-    expect(mocks.hydrate).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
+    expect(mocks.hydrate).toHaveBeenCalledOnce(); expect(mocks.render).not.toHaveBeenCalled();
   });
 
   it('returns BUSY as transient 202 with the parent lease released and no Retry-required slot', async () => {
@@ -239,6 +240,24 @@ describe('durable portfolio B3 selection activation', () => {
     const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(failed.job.slots[0]).toMatchObject({ status: 'RETRY_REQUIRED', videoSelection: { selection } });
     expect(mocks.render).not.toHaveBeenCalled(); expect(mocks.select).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks a saved v1 human choice before quota and reselects only after explicit Retry', async () => {
+    const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
+    await updateCreativePortfolio(job.id, current => {
+      const next = structuredClone(current);
+      next.slots[0].videoSelection = { version: 2, selectionModel: 'old-model',
+        selectionPolicy: 'human-frame-visual-quality-v1', reuseContext: { version: 1, frames: [] },
+        selection: { libraryId, sourceVideoContentHash: sourceHash, frameIds: [frameId] } };
+      return next;
+    }, storage);
+    const blocked = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(blocked).toMatchObject({ status: 409, job: { slots: [{ status: 'RETRY_REQUIRED' }, expect.any(Object)] } });
+    expect(quotaGroups()).toEqual([]); expect(mocks.render).not.toHaveBeenCalled();
+    await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, 1), storage);
+    const selected = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(selected.job.slots[0]).toMatchObject({ status: 'PENDING', videoSelection: { selection } });
+    expect(mocks.select).toHaveBeenCalledOnce();
   });
 
   it('keeps a generalized approved human isolated from automatic B3 selection', async () => {

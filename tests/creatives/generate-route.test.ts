@@ -498,7 +498,9 @@ beforeEach(() => {
   );
   mocks.generateApprovedTraReferenceCreativeImage.mockResolvedValue(imageResultFor('TRA_REFERENCE_GENERATION'));
   mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(
-    async ({ frames }) => ({ ...imageResultFor('TRA_VIDEO_FRAME_GENERATION'), providerFrames: [frames.at(-1)] })
+    async ({ frames }) => { const frame = frames.at(-1); return { ...imageResultFor('TRA_VIDEO_FRAME_GENERATION'),
+      providerFrames: [{ ...frame, providerBuffer: frame.buffer, providerPngSha256: frame.frameSha256, crop: null,
+        sourceOverlay: frame.sourceOverlay ?? { version: 2, status: 'CLEAN' } }] }; }
   );
   mocks.loadVideoSelectionContext.mockResolvedValue(null);
   mocks.getApprovedTraVideoFrames.mockImplementation(async (source) => ({
@@ -519,6 +521,7 @@ beforeEach(() => {
         sourceVideoFileName: source.media.fileName,
         sourceVideoContentHash: contentHash(source.stored.buffer),
         approvedHumanSource: true,
+        sourceOverlay: { version: 2, status: 'CLEAN' },
         cacheKey: `derived/video-frames/${source.media.id}/${contentHash(source.stored.buffer)}/frame-${String(frameIndex).padStart(3, '0')}.png`,
       })
     ),
@@ -707,6 +710,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
         sourceVideoFileName: storedById[videoId].fileName,
         sourceVideoContentHash,
         approvedHumanSource: true,
+        sourceOverlay: { version: 2, status: 'CLEAN' },
         cacheKey: `derived/video-frames/${videoId}/${sourceVideoContentHash}/frame-000.png`,
       },
     ];
@@ -1396,7 +1400,8 @@ describe('progressive creative delivery', () => {
     const humanId = `human_${'a'.repeat(64)}`; const traId = mediaId('4'); const videoId = mediaId('3');
     storedById[traId] = image('4');
     const frame = { frameIndex:0,timestampMs:1000,mimeType:'image/png',buffer:PNG,frameSha256:contentHash(PNG),byteLength:PNG.length,
-      sourceRole:'TRA_VIDEO',sourceVideoMediaId:videoId,sourceVideoFileName:`${videoId}.mp4`,sourceVideoContentHash:'b'.repeat(64),approvedHumanSource:true,cacheKey:null };
+      sourceRole:'TRA_VIDEO',sourceVideoMediaId:videoId,sourceVideoFileName:`${videoId}.mp4`,sourceVideoContentHash:'b'.repeat(64),approvedHumanSource:true,cacheKey:null,
+      sourceOverlay:{version:2,status:'CLEAN'} };
     const source = { libraryId:`video-library:${'c'.repeat(64)}`,sourceVideoMediaId:videoId,sourceVideoContentHash:'b'.repeat(64),
       frames:[{frameIndex:0,libraryFrameId:`video-frame:${'d'.repeat(64)}`,candidateFrameSha256:'e'.repeat(64),timestampMs:1000,approvedPngSha256:contentHash(PNG)}] };
     mocks.humanOptions.mockResolvedValue([{id:humanId,sourceName:'TRA video',description:'Approved explanatory presenter'}]);

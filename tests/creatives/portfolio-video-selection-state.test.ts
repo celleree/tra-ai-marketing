@@ -67,6 +67,11 @@ describe('portfolio video selection persistence', () => {
     expect(mixed.status).toBe('WORK'); expect(mixed.job.lease?.slotIndex).toBe(2);
     const terminal = structuredClone(blocked); terminal.slots[1].status = 'SAVED';
     expect(claimCreativePortfolio(terminal, 4_400).status).toBe('BLOCKED');
+    const historical = structuredClone(blocked);
+    if (historical.slots[0].videoSelection?.version === 2) {
+      historical.slots[0].videoSelection.selectionPolicy = 'human-frame-visual-quality-v1';
+    }
+    expect(parse(historical)).toEqual(historical);
   });
 
   it('freezes visual policy and same-portfolio reuse inputs across reload and explicit retry', () => {
