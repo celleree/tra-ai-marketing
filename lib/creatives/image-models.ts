@@ -1,4 +1,5 @@
 import { assertLiveImageGenerationAllowed } from '@/lib/creatives/image-provider-admission';
+import { imageRenderPurpose, prepareImageRenderRequest } from '@/lib/creatives/image-render-request';
 
 export const PREFERRED_CREATIVE_IMAGE_MODEL = 'gpt-image-2.5-sunburst' as const;
 export const FALLBACK_CREATIVE_IMAGE_MODEL = 'gpt-image-2.5-flare' as const;
@@ -63,8 +64,9 @@ export async function fetchCreativeImage(
   init: RequestInit
 ) {
   assertLiveImageGenerationAllowed();
+  const request = prepareImageRenderRequest(input, init);
   try {
-    return await fetch(input, init);
+    return await fetch(input, request);
   } catch (error) {
     if (error instanceof TypeError) {
       throw new CreativeImageProviderError(
@@ -85,6 +87,7 @@ export async function runCreativeImageModelRoute<T>(args: {
   operationType: CreativeImageOperationType;
   generate: (model: CreativeImageModel) => Promise<T>;
 }): Promise<{ value: T; routing: CreativeImageRouting }> {
+  const purpose = imageRenderPurpose();
   try {
     return {
       value: await args.generate(PREFERRED_CREATIVE_IMAGE_MODEL),
@@ -99,7 +102,7 @@ export async function runCreativeImageModelRoute<T>(args: {
     };
   } catch (error) {
     const fallbackReason = transientReason(error);
-    if (!fallbackReason) throw error;
+    if (!fallbackReason || purpose === 'diagnostic') throw error;
     return {
       value: await args.generate(FALLBACK_CREATIVE_IMAGE_MODEL),
       routing: {
