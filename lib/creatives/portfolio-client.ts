@@ -2,7 +2,7 @@ import type { GenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { parseCreative } from '@/lib/creatives/parse-generation-response';
 import { parsePortfolioProgress, type PortfolioProgress } from '@/lib/creatives/portfolio-progress';
-import { SUBMISSION_HEADER } from '@/lib/creatives/submission-id';
+import { createSubmissionIdentity, SUBMISSION_HEADER, type SubmissionStorage } from '@/lib/creatives/submission-id';
 
 export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number };
 type Command = { action: 'create'; request: GenerateCreativeRequest; submissionId: string } | { action: 'load' | 'advance'; id: string }
@@ -17,15 +17,13 @@ const parseBusyRetryAfterMs = (value: string | null) => {
 };
 
 /** Retain an unresolved browser submission across failed deliveries. */
-export function createPortfolioSubmitter() {
-  let pending: { command: Extract<Command, { action: 'create' }>; signature: string } | null = null;
+export function createPortfolioSubmitter(storage?: () => SubmissionStorage) {
+  const identity = createSubmissionIdentity('portfolio', storage);
   return async (request: GenerateCreativeRequest) => {
-    const signature = JSON.stringify(request);
-    if (!pending || pending.signature !== signature) pending = { signature,
-      command: { action: 'create', request: structuredClone(request), submissionId: crypto.randomUUID() } };
-    const current = pending;
-    const response = await requestPortfolio(current.command);
-    if (pending === current) pending = null;
+    const command = { action: 'create' as const, request: structuredClone(request),
+      submissionId: await identity.forInput(JSON.stringify(request)) };
+    const response = await requestPortfolio(command);
+    identity.complete(command.submissionId);
     return response;
   };
 }

@@ -4,6 +4,8 @@ import { portfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { portfolioRequest } from '../fixtures/creative-portfolio';
 
+const session = () => { const values = new Map<string, string>(); return { getItem: (key: string) => values.get(key) ?? null,
+  setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } }; };
 const initial = (): PortfolioResponse => ({ job: portfolioProgress(newCreativePortfolio(portfolioRequest())), creatives: [] });
 const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>): PortfolioResponse => ({
   job: { ...value.job, planReady: true, planningPhase: 'READY_TO_RENDER', preparationFingerprint: undefined, lease: null,
@@ -24,16 +26,16 @@ describe('resumable portfolio browser controller', () => {
     const value = initial(); const fetcher = vi.fn().mockRejectedValueOnce(new Error('Lost response'))
       .mockImplementation(async () => Response.json(value));
     vi.stubGlobal('fetch', fetcher);
-    const submit = createPortfolioSubmitter();
+    const storage = session(); const submit = createPortfolioSubmitter(() => storage);
     await expect(submit(portfolioRequest())).rejects.toThrow('Lost response');
-    await submit(portfolioRequest());
-    await submit(portfolioRequest());
+    await createPortfolioSubmitter(() => storage)(portfolioRequest());
+    await createPortfolioSubmitter(() => storage)(portfolioRequest());
     const keys = fetcher.mock.calls.map(([, options]) => options.headers['Idempotency-Key']);
     expect(keys[0]).toBe(keys[1]); expect(keys[2]).not.toBe(keys[1]);
   });
   it('allocates a new submission when inputs change after a failed delivery', async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error('Lost response')); vi.stubGlobal('fetch', fetcher);
-    const submit = createPortfolioSubmitter();
+    const storage = session(); const submit = createPortfolioSubmitter(() => storage);
     await expect(submit(portfolioRequest())).rejects.toThrow();
     await expect(submit({ ...portfolioRequest(), context: 'A different deliberate request' })).rejects.toThrow();
     expect(fetcher.mock.calls[0][1].headers['Idempotency-Key']).not.toBe(fetcher.mock.calls[1][1].headers['Idempotency-Key']);
