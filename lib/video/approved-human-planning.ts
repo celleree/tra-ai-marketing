@@ -16,7 +16,7 @@ export async function loadApprovedHumanOptions(): Promise<ApprovedHumanOption[]>
     console.warn('Approved-human catalog unavailable; planning without library human options.');
     return [];
   }
-  const records = available.filter(record => record.active)
+  const records = available.filter(record => record.active && record.version === 2)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   const sourceContexts = new Map<string, Promise<{ hash: string; context: Awaited<ReturnType<typeof loadVideoSelectionContext>> } | null>>();
   const result: ApprovedHumanOption[] = [];

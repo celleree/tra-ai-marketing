@@ -16,6 +16,7 @@ import { validateCreativeRevisionRequest } from '@/lib/creatives/revision-reques
 import { CreativeRevisionHydrationError, hydrateSavedCreativeRevisionContext } from '@/lib/creatives/revision-source-hydration';
 import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import { requireActiveHumanSelection } from '@/lib/video/approved-human-service';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 import { isSafeCreativeId, listCreatives, saveCreativeBatch } from '@/lib/creatives/storage';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import type { CreativeRecord } from '@/lib/creatives/generated';
@@ -45,11 +46,6 @@ export async function POST(request: Request, context: { params: Promise<{ creati
   const runId = submissionRunId(access.userId, submissionId, `revision:${parentId}`);
   const intent = { parentId, revision: parsed.data };
   try {
-    await runDurableCheckpoint(runId, 'quota', intent, async () => {
-      const denied = await requireOperatorQuota(access.userId, 'CREATIVE_REVISION', 1);
-      if (denied) throw denied;
-      return true;
-    }, { safeToResume: true });
     const id = 'creative_' + createHash('sha256').update(runId).digest('hex').slice(0, 32);
     const result = await withProviderUsageContext({ runId, creativeId: id, operationId: id, operationType: parsed.data.operation },
       () => runDurableCheckpoint(runId, 'revision', intent, async assertCurrentWork => {
@@ -72,6 +68,16 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       : undefined;
     const storage = getMediaStorage();
     const sources = await hydrateSavedCreativeRevisionContext(parent, storage);
+    if (sources.originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES') {
+      try { await prepareProviderVideoFrames(sources.originalApprovedSource.frames); }
+      catch (error) { throw new CreativeRevisionHydrationError(
+        error instanceof Error ? error.message : 'Saved TRA video frames failed local validation.', 409); }
+    }
+    await runDurableCheckpoint(runId, 'quota', intent, async () => {
+      const denied = await requireOperatorQuota(access.userId, 'CREATIVE_REVISION', 1);
+      if (denied) throw denied;
+      return true;
+    }, { safeToResume: true });
     const { planning, provenance } = sources.parent;
     const revision = parsed.data;
     const placement = revision.operation === 'PLACEMENT' ? revision.placement : parent.placement!;
@@ -135,6 +141,9 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       : buildCreativeIdentity({ creativeId: id, operation: revision.operation, parent });
     const removedLibraryHuman = !!(planning.strategy.humanSourceId || planning.strategy.approvedHumanId)
       && concept.strategy.execution.subjectSource === 'non-human';
+    const removedVideoHuman = concept.strategy.execution.subjectSource === 'non-human'
+      && sources.originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES';
+    const removedHumanSource = removedLibraryHuman || removedVideoHuman;
     const logoPlacement = sources.logoOverlay
       ? placement === parent.placement ? parentLogoPlacement!
         : await resolveCreativeBrandLogoPlacementContext(sources.logoOverlay.buffer, placement)
@@ -146,7 +155,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       ? resolveCreativeLogoGeometry(parent.placement!, parentLogoAnchor,
           parentLogoPlacement.sourceWidth, parentLogoPlacement.sourceHeight)
       : undefined;
-    const sourceSelection = removedLibraryHuman ? { ...sources, originalApprovedSource: null } : sources;
+    const sourceSelection = removedHumanSource ? { ...sources, originalApprovedSource: null } : sources;
     const revisionSources = parentLogoGeometry
       ? { ...sourceSelection, canvas: { ...sourceSelection.canvas,
           buffer: await eraseCreativeBrandLogo(sourceSelection.canvas.buffer, parentLogoGeometry), mimeType: 'image/png' as const } }
@@ -181,12 +190,12 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}) },
       generationProvenance: {
         ...provenance, imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
-        ...(removedLibraryHuman ? { attachedSource: null } : {}),
+        ...(removedHumanSource ? { attachedSource: null } : {}),
         revision: { parentCreativeId: parentId, canvasMediaId: sources.canvas.mediaId, canvasSha256: sources.canvas.sha256, ...(instruction ? { instruction } : {}) },
       },
       ...((concept.strategy.referenceSelection ? concept.strategy.referenceSelection.layoutSource : parent.referenceImageId)
         ? { referenceImageId: concept.strategy.referenceSelection?.layoutSource ?? parent.referenceImageId } : {}),
-      ...(!removedLibraryHuman && parent.videoFrameSelection ? { videoFrameSelection: parent.videoFrameSelection } : {}),
+      ...(!removedHumanSource && parent.videoFrameSelection ? { videoFrameSelection: parent.videoFrameSelection } : {}),
     };
     await assertCurrentWork();
     const [saved] = await saveCreativeBatch([record]);

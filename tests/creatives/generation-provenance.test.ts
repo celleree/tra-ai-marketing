@@ -96,6 +96,22 @@ describe('creative generation provenance', () => {
     expect(parseCreativeGenerationProvenance(value)).toBeNull();
   });
 
+  it('round trips original and cropped provider pixels without treating a legacy record as assessed', () => {
+    const value = provenance();
+    value.attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: videoId, sourceSha256: hash('b'),
+      selectionMode: 'AUTOMATIC', frames: [{ timestampMs: 1333, approvedPngSha256: hash('1'),
+        providerPngSha256: hash('2'), sourceOverlay: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM',
+          removePermille: 400, overlayDepthPermille: 390 }, crop: { left: 0, top: 0, width: 100, height: 60 } }] };
+    expect(parseCreativeGenerationProvenance(JSON.parse(JSON.stringify(value)))?.attachedSource).toEqual(value.attachedSource);
+    const changed = structuredClone(value);
+    if (changed.attachedSource?.type === 'TRA_VIDEO_FRAMES') changed.attachedSource.frames[0].crop = null;
+    expect(parseCreativeGenerationProvenance(changed)).toBeNull();
+    const legacy = provenance();
+    legacy.attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: videoId, sourceSha256: hash('b'),
+      selectionMode: 'AUTOMATIC', frames: [{ timestampMs: 1333, approvedPngSha256: hash('1') }] };
+    expect(parseCreativeGenerationProvenance(legacy)?.attachedSource).toEqual(legacy.attachedSource);
+  });
+
   it.each([
     ['invalid media ID', (value: ReturnType<typeof provenance>) => { value.requestedSources[0].mediaId = '../media'; }],
     ['uppercase hash', (value: ReturnType<typeof provenance>) => { value.requestedSources[0].sha256 = hash('A'); }],

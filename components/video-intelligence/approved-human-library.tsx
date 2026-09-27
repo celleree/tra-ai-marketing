@@ -23,6 +23,7 @@ export function HumanFrameApproval({ mediaId, selection, onApproved }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [approved, setApproved] = useState(false);
+  const [assessmentRetry, setAssessmentRetry] = useState(false);
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
@@ -34,8 +35,16 @@ export function HumanFrameApproval({ mediaId, selection, onApproved }: {
     try {
       if (approve) {
         if (!preview || !loaded) return;
+        const assessmentResponse = await fetch('/api/video/intelligence/source-overlay-assessment', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: next.signal,
+          body: JSON.stringify({ mediaId, videoFrameSelection: selection, ...(assessmentRetry ? { retry: true } : {}) }),
+        });
+        const assessmentPayload = await assessmentResponse.clone().json();
+        setAssessmentRetry(Boolean(assessmentPayload.retryRequired));
+        const assessment = await readJson(assessmentResponse);
         await readJson(await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: next.signal,
-          body: JSON.stringify({ mediaId, videoFrameSelection: selection, previewPngSha256: preview.hash, description: notes }) }));
+          body: JSON.stringify({ mediaId, videoFrameSelection: assessment.videoFrameSelection,
+            previewPngSha256: preview.hash, description: notes }) }));
         if (!next.signal.aborted) { setApproved(true); onApproved(); }
       } else {
         setPreview(null); setLoaded(false); setApproved(false);
@@ -59,7 +68,8 @@ export function HumanFrameApproval({ mediaId, selection, onApproved }: {
     <label htmlFor={notesId}>Appearance, pose and useful framing</label>
     <textarea className={styles.approvalNotes} id={notesId} value={notes} maxLength={500} disabled={busy || approved} onChange={event => setNotes(event.target.value)} />
     <button type="button" className={styles.primary} disabled={busy || !loaded || !notes.trim() || approved} onClick={() => void act(true)}>
-      {busy ? 'Working…' : approved ? 'Approved for reuse' : 'Approve this human frame'}
+      {busy ? 'Working…' : approved ? 'Approved for reuse' : assessmentRetry
+        ? 'Retry assessment and approve (uses API)' : 'Assess and approve this human frame (uses API)'}
     </button>
     {error ? <p role="alert" className={styles.error}>{error}</p> : null}
     {approved ? <p role="status">Saved to the approved TRA human library.</p> : null}
@@ -98,12 +108,13 @@ export function ApprovedHumanLibrary({ revision }: { revision: number }) {
     <div className={styles.frameGrid}>{records.map(record => <article key={record.id} className={styles.frame}>
       <img loading="lazy" src={`${endpoint}?preview=${encodeURIComponent(record.id)}`} alt={record.description} />
       <strong>{record.sourceName}</strong>
-      <p>{(record.source.frames[0].timestampMs / 1000).toFixed(2)}s · {record.active ? 'Active' : 'Inactive'}</p>
+      <p>{(record.source.frames[0].timestampMs / 1000).toFixed(2)}s · {record.version === 1
+        ? 'Unassessed · reapprove from the source video' : record.active ? 'Active' : 'Inactive'}</p>
       <p>{record.description}</p>
       <small>Source: {record.source.sourceVideoMediaId}</small>
-      <button type="button" className={styles.secondary} disabled={!!busy} onClick={() => void toggle(record)}>
+      {record.version === 2 || record.active ? <button type="button" className={styles.secondary} disabled={!!busy} onClick={() => void toggle(record)}>
         {busy === record.id ? 'Working…' : record.active ? 'Deactivate' : 'Reactivate'}
-      </button>
+      </button> : null}
     </article>)}</div>
   </section>;
 }

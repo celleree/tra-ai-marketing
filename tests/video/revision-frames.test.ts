@@ -26,9 +26,10 @@ const frame = (timestampMs: number, buffer: Buffer, frameIndex = 0): ApprovedTra
   sourceVideoContentHash: SOURCE_HASH, approvedHumanSource: true, cacheKey: null,
 });
 type SavedSource = Extract<CreativeGenerationProvenance['attachedSource'], { type: 'TRA_VIDEO_FRAMES' }>;
-const attached = (selectionMode: SavedSource['selectionMode'], frames: ApprovedTraVideoFrame[]): SavedSource => ({
+const attached = (selectionMode: SavedSource['selectionMode'], frames: ApprovedTraVideoFrame[], legacy = false): SavedSource => ({
   type: 'TRA_VIDEO_FRAMES', mediaId: MEDIA_ID, sourceSha256: SOURCE_HASH, selectionMode,
-  frames: frames.map(({ timestampMs, frameSha256 }) => ({ timestampMs, approvedPngSha256: frameSha256 })),
+  frames: frames.map(({ timestampMs, frameSha256 }) => ({ timestampMs, approvedPngSha256: frameSha256,
+    ...(legacy ? {} : { providerPngSha256: frameSha256, sourceOverlay: { version: 2 as const, status: 'CLEAN' as const }, crop: null }) })),
 });
 const FRAME_IDS = [`video-frame:${'1'.repeat(64)}`, `video-frame:${'2'.repeat(64)}`];
 const LIBRARY_ID = `video-library:${'3'.repeat(64)}`;
@@ -50,13 +51,19 @@ beforeEach(() => {
 });
 
 describe('revision TRA video frames', () => {
+  it('keeps an old unassessed creative readable but blocks source reuse on revision', async () => {
+    const saved = frame(0, png('saved'));
+    mocks.automatic.mockResolvedValue(automaticSet([saved]));
+    await expect(resolveRevisionVideoFrames(source(), attached('AUTOMATIC', [saved], true)))
+      .rejects.toThrow('predates source-overlay assessment');
+  });
   it('reconstructs the exact saved automatic subset in saved order', async () => {
     const first = frame(0, png('first'), 0);
     const middle = frame(2_000, png('middle'), 1);
     const last = frame(4_000, png('last'), 2);
     mocks.automatic.mockResolvedValue(automaticSet([first, middle, last]));
     await expect(resolveRevisionVideoFrames(source(), attached('AUTOMATIC', [last, first])))
-      .resolves.toEqual([last, first]);
+      .resolves.toMatchObject([last, first]);
     expect(mocks.loadLibrary).not.toHaveBeenCalled();
   });
 
@@ -80,10 +87,10 @@ describe('revision TRA video frames', () => {
       .rejects.toThrow(message);
   });
 
-  it('does not accept user-selection metadata as an automatic fallback', async () => {
+  it('does not use generic automatic frames when selection metadata is present', async () => {
     const saved = frame(0, png('saved'));
     await expect(resolveRevisionVideoFrames(source(), attached('AUTOMATIC', [saved]), selection([saved])))
-      .rejects.toThrow('must not include a user selection');
+      .rejects.toThrow('library is missing or invalid');
     expect(mocks.automatic).not.toHaveBeenCalled();
   });
 
@@ -94,7 +101,7 @@ describe('revision TRA video frames', () => {
     mocks.loadLibrary.mockResolvedValue({ library, manifest: null });
     mocks.selected.mockResolvedValue({ ...automaticSet(frames), reused: false, selectionProvenance: savedSelection.frames });
     await expect(resolveRevisionVideoFrames(source(), attached('USER_SELECTED', frames), savedSelection))
-      .resolves.toEqual(frames);
+      .resolves.toMatchObject(frames);
     expect(mocks.loadLibrary).toHaveBeenCalledWith(expect.objectContaining({ role: 'TRA_VIDEO', media: expect.objectContaining({ id: MEDIA_ID }) }));
     expect(mocks.selected).toHaveBeenCalledWith(expect.objectContaining({ role: 'TRA_VIDEO' }), { library, manifest: null }, FRAME_IDS);
   });

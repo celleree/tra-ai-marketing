@@ -163,6 +163,7 @@ describe('approved TRA final image-provider boundary', () => {
       sourceVideoFileName: `${mediaId}.mp4`,
       sourceVideoContentHash: 'e'.repeat(64),
       approvedHumanSource: true,
+      sourceOverlay: { version: 2, status: 'CLEAN' },
       cacheKey: `derived/video-frames/${mediaId}/${'e'.repeat(64)}/frame-000.png`,
     };
     const fetchMock = vi.fn().mockResolvedValue(
@@ -196,6 +197,6 @@ describe('approved TRA final image-provider boundary', () => {
     expectImageCopyOnly(String(formData.get('prompt')));
     expect(result.prompt).toBe(formData.get('prompt'));
     expect(result.model).toBe(formData.get('model'));
-    expect(result.providerFrames).toEqual([frame]);
+    expect(result.providerFrames).toMatchObject([frame]);
   });
 });

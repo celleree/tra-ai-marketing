@@ -11,7 +11,7 @@ import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-prepar
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
 import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
-import { canonicalizeVideoFrameReuseContext, type AutomaticVideoSelectionPolicy,
+import { HUMAN_FRAME_SELECTION_POLICY, canonicalizeVideoFrameReuseContext, type AutomaticVideoSelectionPolicy,
   type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
@@ -102,6 +102,14 @@ export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date
   if (job.lease) {
     if (job.lease.expiresAtMs > now) return { status: 'BUSY', job };
     return { status: 'RETRY_REQUIRED', job: { ...failed(job, 'Previous work was interrupted; its provider outcome may be uncertain. Explicit retry is required.'), updatedAtMs: now } };
+  }
+  // Older portfolios may have blocked a graphic concept during unnecessary human-frame selection.
+  // No image provider work occurred for a blocked slot, so it can proceed with its frozen plan.
+  if (job.snapshot) for (const slot of job.slots) {
+    const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
+    if (slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy?.execution?.subjectSource === 'non-human') {
+      slot.status = 'PENDING'; delete slot.error; delete slot.videoSelection;
+    }
   }
   const slot = job.snapshot ? job.slots.find(slot => slot.status === 'PENDING') : undefined;
   if (!job.snapshot && job.planningError) return { status: 'RETRY_REQUIRED', job };
@@ -305,6 +313,8 @@ export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: stri
   const job = structuredClone(current);
   const slot = job.slots.find(slot => slot.index === lease.slotIndex);
   if (!job.snapshot || !slot || slot.creativeId !== creativeId || slot.status !== 'PENDING') throw new Error('Portfolio result does not match the reserved creative.');
+  const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
+  if (concept?.strategy?.execution?.subjectSource === 'non-human') delete slot.videoSelection;
   if (slot.videoSelection && (!slot.videoSelection.selection || slot.videoSelection.retryAuthorization
     || !parseGenerateVideoFrameSelection(slot.videoSelection.selection))) {
     throw new Error('Completed video frame selection is required before saving this creative.');
@@ -361,7 +371,13 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
     const slot = job.slots.find(slot => slot.index === slotIndex);
     if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');
     slot.status = 'PENDING'; delete slot.error;
-    if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
+    if (slot.videoSelection && job.snapshot.batchPlan.creatives[slot.index - 1]?.strategy.execution.subjectSource === 'approved-tra-human'
+      && (slot.videoSelection.version !== 2
+        || (slot.videoSelection.selectionPolicy === 'human-frame-visual-quality-v1')
+        || (slot.videoSelection.selectionPolicy === HUMAN_FRAME_SELECTION_POLICY
+          && slot.videoSelection.selection && slot.videoSelection.selection.version !== 2))) {
+      delete slot.videoSelection;
+    } else if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
     else if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;
   }
   job.updatedAtMs = now;

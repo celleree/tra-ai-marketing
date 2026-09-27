@@ -86,9 +86,11 @@ const humanBindings = (restored: readonly Restored[]) => restored.map(({ context
   return { library: context.library, librarySha256, representativeImages: context.representativeImages };
 });
 
-const generationSelection = (selection: import('@/lib/video/concept-selection').VideoConceptSelection) => {
-  const parsed = parseGenerateVideoFrameSelection({ libraryId: selection.libraryId,
-    sourceVideoContentHash: selection.sourceVideoContentHash, frameIds: selection.frames.map((frame) => frame.frameId) });
+const generationSelection = (outcome: Extract<import('@/lib/video/human-frame-selection').VideoHumanFrameSelectionOutcome, { status: 'SELECTED' }>) => {
+  const selection = outcome.selection;
+  const parsed = parseGenerateVideoFrameSelection({ version: 2, libraryId: selection.libraryId,
+    sourceVideoContentHash: selection.sourceVideoContentHash, frameIds: selection.frames.map((frame) => frame.frameId),
+    sourceOverlays: [outcome.selectedSourceOverlay] });
   if (!parsed) throw new Error('Cached visual human-frame selection cannot be persisted for generation.');
   return parsed;
 };
@@ -107,7 +109,7 @@ export async function preflightPortfolioVideoFrames(
     createPortfolioVideoSelectionConcept(input.finalConcept), input.reuseContext, input.cache);
   if (result.status === 'READY') return result;
   if (result.outcome.status === 'NO_SUITABLE_HUMAN') return { status: 'NO_SUITABLE_HUMAN' };
-  return { status: 'COMPLETE', selection: generationSelection(result.outcome.selection) };
+  return { status: 'COMPLETE', selection: generationSelection(result.outcome) };
 }
 
 export async function selectPortfolioVideoFrames(
@@ -125,7 +127,7 @@ export async function selectPortfolioVideoFrames(
     const result = await selectVideoHumanFrameFromPoolWithCache(humanBindings(restored), concept, reuseContext, input.cache);
     if (result.status !== 'COMPLETE') return result;
     if (result.outcome.status === 'NO_SUITABLE_HUMAN') return { status: 'NO_SUITABLE_HUMAN' };
-    return { status: 'COMPLETE', selection: generationSelection(result.outcome.selection) };
+    return { status: 'COMPLETE', selection: generationSelection(result.outcome) };
   }
   const result = await selectVideoFramesFromPoolWithCache(restored.map(({ context, librarySha256 }) => ({ library: context.library, librarySha256 })),
     concept, input.cache);
@@ -148,5 +150,9 @@ export async function hydratePortfolioVideoFrameSelection(
   const restored = await restoreOne(input.sources, dependency);
   const known = new Set(restored.context.library.representativeFrames.map((frame) => frame.id));
   if (selection.frameIds.some((frameId) => !known.has(frameId))) throw new Error('Persisted video selection contains an unknown frame ID.');
-  return extractVideoSelectionFrames(restored.source, restored.context, selection.frameIds);
+  if (selection.version !== 2 || !selection.sourceOverlays) {
+    throw new Error('Saved human-frame selection predates source-overlay assessment. Retry this slot to reassess frames before rendering.');
+  }
+  const extracted = await extractVideoSelectionFrames(restored.source, restored.context, selection.frameIds);
+  return { ...extracted, frames: extracted.frames.map((frame, index) => ({ ...frame, sourceOverlay: selection.sourceOverlays![index] })) };
 }

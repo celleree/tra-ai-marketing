@@ -199,6 +199,8 @@ const brandOneCreative = async (
   creative: GeneratedCreative,
   logoUrl: string
 ): Promise<GeneratedCreative> => {
+  // The server render path already saved the official overlay on this image.
+  if (creative.generationProvenance?.logoOverlaySource) return creative;
   const creativeUrl = `/api/media/files/${creative.image.fileName}`;
   const safeLogoUrl = toSameOriginMediaUrl(logoUrl);
   const creativeSource = await fetchDrawableImage(

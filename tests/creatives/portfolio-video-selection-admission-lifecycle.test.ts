@@ -82,6 +82,7 @@ const assessments = (pool: ReturnType<typeof visualPool>) => pool.library.repres
   libraryId: pool.library.id, frameId: frame.id, humanPresence: 'CLEAR', facialDetail: 'SUFFICIENT',
   eyes: 'OPEN_OR_NOT_VISIBLE', blur: 'CLEAR', occlusion: 'NONE_OR_MINOR', expressionUsability: 'NATURAL_OR_NEUTRAL',
   framing: 'USABLE', compositionFit: 'STRONG', observableReason: 'Visible suitable frame.',
+  sourceOverlay: { version: 2, status: 'CLEAN' },
 }));
 const unsuitableAssessments = (pool: ReturnType<typeof visualPool>) => assessments(pool).map((assessment) => ({
   ...assessment, eyes: 'CLOSED_OR_BLINKING', observableReason: 'Eyes are closed in this frame.',

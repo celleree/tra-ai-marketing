@@ -20,7 +20,7 @@ export type EligibleHumanCandidate =
   | (EligibleHumanIdentity & {
       kind: 'APPROVED_HUMAN_RECORD';
       recordId: string;
-      recordVersion: 1;
+      recordVersion: 2;
       sourceName: string;
       description: string;
       libraryId: string;
@@ -114,7 +114,7 @@ export function buildEligibleHumanCatalog(input: EligibleHumanCatalogInput): Eli
   const candidates: EligibleHumanCandidate[] = [];
 
   for (const record of input.approvedHumans) {
-    if (!record.active) continue;
+    if (!record.active || record.version !== 2) continue;
     const frame = record.source.frames[0];
     candidates.push({
       identityVersion: 1,

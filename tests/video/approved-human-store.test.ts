@@ -18,6 +18,17 @@ class MemoryStorage implements VideoIntelligenceStorage {
   }
 }
 describe('approved human records', () => {
+  it('stores v2 decisions under a distinct identity and rejects decision/source mismatch', async () => {
+    const storage = new MemoryStorage(); const old = fixture();
+    const overlay = { version: 2 as const, status: 'EDGE_CROP' as const,
+      edge: 'BOTTOM' as const, removePermille: 200, overlayDepthPermille: 180 };
+    const assessed: ApprovedHumanFrame = { ...old, version: 2, id: approvedHumanId(old.source, overlay), sourceOverlay: overlay };
+    await saveApprovedHumanFrame(old, storage);
+    await saveApprovedHumanFrame(assessed, storage);
+    expect(await listApprovedHumanFrames(storage)).toHaveLength(2);
+    await expect(saveApprovedHumanFrame({ ...assessed, sourceOverlay: { version: 2, status: 'CLEAN' } }, storage))
+      .rejects.toThrow('Invalid approved-human record');
+  });
   it('persists stable identity once and retains approval/source provenance across deactivation and reactivation', async () => {
     const storage = new MemoryStorage(); const record = fixture();
     await saveApprovedHumanFrame(record, storage);

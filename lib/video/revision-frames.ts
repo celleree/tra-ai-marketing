@@ -107,7 +107,11 @@ const exactSavedSubset = (
       );
     }
     used.add(match.index);
-    return match.frame;
+    if (!expected.sourceOverlay || !expected.providerPngSha256 || expected.crop === undefined) {
+      throw new Error('This creative predates source-overlay assessment. Start a new creative with an assessed human frame before revising.');
+    }
+    return { ...match.frame, sourceOverlay: expected.sourceOverlay,
+      expectedProviderPngSha256: expected.providerPngSha256, expectedCrop: expected.crop };
   });
 };
 
@@ -118,10 +122,7 @@ export async function resolveRevisionVideoFrames(
 ): Promise<ApprovedTraVideoFrame[]> {
   const video = validateSavedSource(source, attachedSource);
 
-  if (attachedSource.selectionMode === 'AUTOMATIC') {
-    if (selection !== undefined) {
-      throw new Error('Automatic TRA video frame provenance must not include a user selection.');
-    }
+  if (attachedSource.selectionMode === 'AUTOMATIC' && selection === undefined) {
     const approved = await getApprovedTraVideoFrames(video);
     if (approved.sourceVideoContentHash !== attachedSource.sourceSha256) {
       throw new Error('The approved TRA video frame set does not match the saved source.');
@@ -136,7 +137,7 @@ export async function resolveRevisionVideoFrames(
 
   const savedSelection = parseGeneratedVideoFrameSelection(selection);
   if (!savedSelection) {
-    throw new Error('User-selected TRA video frames require valid saved selection provenance.');
+    throw new Error('Selected TRA video frames require valid saved selection provenance.');
   }
   if (
     savedSelection.sourceVideoMediaId !== attachedSource.mediaId ||

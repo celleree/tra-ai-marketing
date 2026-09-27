@@ -8,7 +8,8 @@ vi.mock('@/lib/video/preview-availability', () => ({ isDurableVideoIntelligenceA
 vi.mock('@/lib/video/selection-context', () => ({ loadVideoSelectionContext: mocks.context }));
 import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
 
-const record = (index = 1) => ({ id: `human_${index.toString(16).padStart(64, '0')}`, active: true,
+const record = (index = 1) => ({ version: 2, sourceOverlay: { version: 2, status: 'CLEAN' },
+  id: `human_${index.toString(16).padStart(64, '0')}`, active: true,
   description: 'Approved visible presenter', sourceName: 'TRA source', updatedAt: '2026-09-10T00:00:00.000Z',
   source: { sourceVideoMediaId: 'source', sourceVideoContentHash: 'hash', libraryId: 'library',
     frames: [{ libraryFrameId: `frame-${index}`, candidateFrameSha256: `candidate-${index}`, timestampMs: index * 1000, approvedPngSha256: `png-${index}` }] } });
