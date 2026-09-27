@@ -7,6 +7,7 @@ import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
 import type { TemporaryVideoFrameCandidateSet } from '@/lib/video/candidate-types';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
+import { videoCandidateFrameId, type VideoCandidateFrameBinding } from '@/lib/video/generation-selection-contract';
 import { isStructurallyValidPng } from '@/lib/video/frame-cache';
 import {
   createVideoIntelligenceAnalyzerFingerprint,
@@ -139,6 +140,45 @@ const meanPixelDifference = async (left: Buffer, right: Buffer) => {
 };
 
 describe('prepared selected TRA video frames', () => {
+  const neighborBinding = (): VideoCandidateFrameBinding => {
+    const representative = offset.library.representativeFrames[0];
+    const candidate = offset.library.candidates.find((entry) => entry.candidateIndex !== representative.candidateIndex)!;
+    return { frameId: videoCandidateFrameId(offset.library.sourceVideoContentHash, candidate.timestampMs, candidate.frameSha256),
+      representativeFrameId: representative.id, candidateIndex: candidate.candidateIndex,
+      timestampMs: candidate.timestampMs, frameSha256: candidate.frameSha256 };
+  };
+
+  it('regenerates and verifies a non-representative JPEG, then extracts fresh PNG with exact group provenance', async () => {
+    const binding = neighborBinding();
+    const selected = await getApprovedPreparedSelectedTraVideoFrames(offsetSource, offset.library, [binding], offset.manifest);
+    expect(selected.selectionProvenance).toEqual([{ frameIndex: 0, libraryFrameId: binding.frameId,
+      representativeFrameId: binding.representativeFrameId, candidateIndex: binding.candidateIndex,
+      candidateFrameSha256: binding.frameSha256, timestampMs: binding.timestampMs,
+      approvedPngSha256: selected.frames[0].frameSha256 }]);
+    expect(isStructurallyValidPng(selected.frames[0].buffer)).toBe(true);
+    expect(selected.frames[0].buffer.equals(offset.jpegs[0])).toBe(false);
+  }, 30_000);
+
+  it('rejects neighbor group, timestamp, hash, or regenerated analysis drift before PNG extraction', async () => {
+    const binding = neighborBinding();
+    for (const changed of [
+      { ...binding, representativeFrameId: 'other-group' },
+      { ...binding, timestampMs: binding.timestampMs + 1 },
+      { ...binding, frameSha256: '0'.repeat(64) },
+    ]) {
+      await expect(getApprovedPreparedSelectedTraVideoFrames(offsetSource, offset.library, [changed], offset.manifest))
+        .rejects.toThrow();
+    }
+    const library = structuredClone(offset.library);
+    const manifest = structuredClone(offset.manifest);
+    library.candidates[binding.candidateIndex].frameSha256 = '0'.repeat(64);
+    manifest.candidates[binding.candidateIndex].frameSha256 = '0'.repeat(64);
+    await expect(getApprovedPreparedSelectedTraVideoFrames(offsetSource, library, [
+      { ...binding, frameSha256: '0'.repeat(64), frameId: videoCandidateFrameId(library.sourceVideoContentHash, binding.timestampMs, '0'.repeat(64)) },
+    ], manifest)).rejects.toThrow('drifted');
+    expect(helpers.extract).not.toHaveBeenCalled();
+  }, 30_000);
+
   it('concurrently extracts ordered interval and scene PNGs equivalent to legacy output', async () => {
     const ids = [...scene.library.representativeFrames].reverse().map(({ id }) => id);
     const [prepared, legacy] = await Promise.all([

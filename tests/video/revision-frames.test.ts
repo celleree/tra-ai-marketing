@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import type { HydratedCreativeSourceAsset } from '@/lib/media/source-hydration';
-import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { videoCandidateFrameId, type GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { resolveRevisionVideoFrames } from '@/lib/video/revision-frames';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 
@@ -104,6 +104,33 @@ describe('revision TRA video frames', () => {
       .resolves.toMatchObject(frames);
     expect(mocks.loadLibrary).toHaveBeenCalledWith(expect.objectContaining({ role: 'TRA_VIDEO', media: expect.objectContaining({ id: MEDIA_ID }) }));
     expect(mocks.selected).toHaveBeenCalledWith(expect.objectContaining({ role: 'TRA_VIDEO' }), { library, manifest: null }, FRAME_IDS);
+  });
+
+  it('reconstructs an actual group neighbor and rejects changed candidate or library identity', async () => {
+    const saved = frame(1_000, png('neighbor'));
+    const candidateHash = '4'.repeat(64);
+    const actualId = videoCandidateFrameId(SOURCE_HASH, saved.timestampMs, candidateHash);
+    const savedSelection: GeneratedVideoFrameSelection = { libraryId: LIBRARY_ID,
+      sourceVideoMediaId: MEDIA_ID, sourceVideoContentHash: SOURCE_HASH, librarySha256: '5'.repeat(64),
+      frames: [{ frameIndex: 0, libraryFrameId: actualId, representativeFrameId: FRAME_IDS[0],
+        candidateIndex: 7, candidateFrameSha256: candidateHash, timestampMs: saved.timestampMs,
+        approvedPngSha256: saved.frameSha256 }] };
+    const attachedSource: SavedSource = { ...attached('USER_SELECTED', [saved]), libraryId: LIBRARY_ID,
+      librarySha256: '5'.repeat(64), frames: [{ ...attached('USER_SELECTED', [saved]).frames[0],
+        libraryFrameId: actualId, representativeFrameId: FRAME_IDS[0], candidateIndex: 7,
+        candidateFrameSha256: candidateHash }] };
+    mocks.loadLibrary.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: {}, librarySha256: '5'.repeat(64) });
+    mocks.selected.mockResolvedValue({ ...automaticSet([saved]), selectionProvenance: savedSelection.frames });
+    await expect(resolveRevisionVideoFrames(source(), attachedSource, savedSelection)).resolves.toMatchObject([saved]);
+    expect(mocks.selected).toHaveBeenCalledWith(expect.anything(), expect.anything(), [{
+      frameId: actualId, representativeFrameId: FRAME_IDS[0], candidateIndex: 7,
+      timestampMs: 1_000, frameSha256: candidateHash }]);
+    await expect(resolveRevisionVideoFrames(source(), { ...attachedSource,
+      frames: [{ ...attachedSource.frames[0], candidateIndex: 8 }] }, savedSelection))
+      .rejects.toThrow('does not match this creative provenance');
+    mocks.loadLibrary.mockResolvedValue({ library: { id: LIBRARY_ID }, manifest: {}, librarySha256: '6'.repeat(64) });
+    await expect(resolveRevisionVideoFrames(source(), attachedSource, savedSelection))
+      .rejects.toThrow('library is missing or invalid');
   });
 
   it.each([
