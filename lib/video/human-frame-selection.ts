@@ -6,9 +6,11 @@ import { canonicalizeVideoSelectionPool, parseVideoConceptSelection, VIDEO_SELEC
   type VideoSelectionPoolBinding } from '@/lib/video/concept-selection';
 
 export const HUMAN_FRAME_SELECTION_POLICY = 'human-frame-visual-quality-v2' as const;
+export const CANDIDATE_HUMAN_FRAME_SELECTION_POLICY = 'human-frame-candidate-suitability-v3' as const;
 export const LEGACY_HUMAN_FRAME_SELECTION_POLICY = 'human-frame-visual-quality-v1' as const;
 export const METADATA_FRAME_SELECTION_POLICY = 'metadata-frame-selection-v1' as const;
-export type AutomaticVideoSelectionPolicy = typeof HUMAN_FRAME_SELECTION_POLICY | typeof LEGACY_HUMAN_FRAME_SELECTION_POLICY | typeof METADATA_FRAME_SELECTION_POLICY;
+export type AutomaticVideoSelectionPolicy = typeof HUMAN_FRAME_SELECTION_POLICY | typeof CANDIDATE_HUMAN_FRAME_SELECTION_POLICY
+  | typeof LEGACY_HUMAN_FRAME_SELECTION_POLICY | typeof METADATA_FRAME_SELECTION_POLICY;
 export const MAX_VISUAL_SELECTION_IMAGES = 1_500;
 export const MAX_VISUAL_SELECTION_PAYLOAD_BYTES = 512_000_000;
 export const MAX_VISUAL_SELECTION_IMAGE_TOKENS = 240_000;

@@ -10,7 +10,7 @@ import { stepPortfolioVideoDependency } from '@/lib/creatives/portfolio-video-ad
 import { hydratePortfolioVideoFrameSelection, portfolioVideoFrameReuseContext, portfolioVideoSelectionPolicy,
   preflightPortfolioVideoFrames, selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import { projectCompletedVideoIntelligence } from '@/lib/creatives/video-intelligence-planning';
-import { HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
+import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { preflightPlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
@@ -19,6 +19,7 @@ import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { blockPortfolioVideoSelection, checkpointPortfolioPreparation, checkpointPortfolioVideoSelectionAttempt, claimCreativePortfolio,
+  continuePortfolioVideoFrameSelection,
   finishPortfolioAuditFailure, finishPortfolioAuditForRepair, finishPortfolioInitialPlan, finishPortfolioPlan,
   finishPortfolioPreparation, finishPortfolioPreparationFailure, finishPortfolioRepair, finishPortfolioSlot,
   finishPortfolioVideoFrameSelection, failPortfolioWork, releasePortfolioWork, resolvePortfolioVideoSelectionAttempt,
@@ -238,8 +239,8 @@ async function advancePortfolio(
       && context.videoFrameSet !== null;
     if (automaticVideoSelection) {
       if (slot.videoSelection && (slot.videoSelection.version !== 2
-        || slot.videoSelection.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY
-        || (slot.videoSelection.selection && slot.videoSelection.selection.version !== 2))) {
+        || slot.videoSelection.selectionPolicy !== CANDIDATE_HUMAN_FRAME_SELECTION_POLICY
+        || (slot.videoSelection.selection && slot.videoSelection.selection.version !== 3))) {
         const message = 'Saved human-frame selection predates source-overlay assessment. Explicitly Retry this slot to select an assessed frame before image generation.';
         return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token, message), storage),
           error: message, status: 409 };
@@ -271,6 +272,13 @@ async function advancePortfolio(
           error: noSuitableHumanFrameMessage,
           status: 409,
         };
+        if (preflight.status === 'BUSY') return { job: await updateCreativePortfolio(id,
+          current => releasePortfolioWork(current, token), storage), status: 202, retryAfterSeconds: 2 };
+        if (preflight.status === 'RETRY_REQUIRED') return { job: await updateCreativePortfolio(id, current => {
+          const checkpointed = checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job;
+          return failPortfolioWork(checkpointed, token,
+            `Video frame selection requires explicit Retry (${preflight.reason}).`);
+        }, storage) };
         const denied = await reserveWorkQuota('VIDEO_SELECTION');
         if (denied) return denied;
         await updateCreativePortfolio(id, current => checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job, storage);
@@ -290,6 +298,9 @@ async function advancePortfolio(
           status: 202,
           retryAfterSeconds: 2,
         };
+        if (selected.status === 'CONTINUE') return { job: await updateCreativePortfolio(id,
+          current => continuePortfolioVideoFrameSelection(current, token), storage),
+          status: 202, retryAfterSeconds: 1 };
         if (selected.status === 'RETRY_REQUIRED') {
           return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token,
             `Video frame selection requires explicit Retry (${selected.reason}).`), storage) };
@@ -323,6 +334,8 @@ async function advancePortfolio(
         sourceVideoMediaId: selectedFrames.source.media.id,
         sourceVideoContentHash: selectedFrames.sourceVideoContentHash,
         frames: selectedFrames.selectionProvenance,
+        ...(slot.videoSelection.selection.version === 3
+          ? { librarySha256: slot.videoSelection.selection.librarySha256 } : {}),
       };
       const creative = await render(concept, {
         ...context,

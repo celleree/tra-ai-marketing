@@ -14,7 +14,7 @@ import {
 } from '@/lib/creatives/portfolio-job';
 import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import type { GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
-import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY } from '@/lib/video/human-frame-selection';
+import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY } from '@/lib/video/human-frame-selection';
 import { portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 
 const videoRequest = () => ({
@@ -78,10 +78,10 @@ describe('portfolio video selection persistence', () => {
     const reuseContext = { version: 1 as const, frames: [{ libraryId: selection.libraryId,
       frameId: selection.frameIds[0], useCount: 1 }] };
     const attempted = checkpointPortfolioVideoSelectionAttempt(leased(), 'slot', {
-      selectionModel: 'selection-model-a', selectionPolicy: HUMAN_FRAME_SELECTION_POLICY, reuseContext,
+      selectionModel: 'selection-model-a', selectionPolicy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, reuseContext,
     }, 4_100);
     expect(attempted.job.slots[0].videoSelection).toEqual({ version: 2, selectionModel: 'selection-model-a',
-      selectionPolicy: HUMAN_FRAME_SELECTION_POLICY, reuseContext });
+      selectionPolicy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, reuseContext });
     expect(parse(attempted.job)).toEqual(attempted.job);
     const failed = failPortfolioWork(attempted.job, 'slot', 'Selection outcome uncertain', 4_200);
     const retried = retryPortfolioWork(failed, 1, 5_000);
@@ -91,7 +91,7 @@ describe('portfolio video selection persistence', () => {
     }, 5_200);
     expect(resumed.retry).toBe(true);
     expect(resumed.selectionModel).toBe('selection-model-a');
-    expect(resumed.selectionPolicy).toBe(HUMAN_FRAME_SELECTION_POLICY);
+    expect(resumed.selectionPolicy).toBe(CANDIDATE_HUMAN_FRAME_SELECTION_POLICY);
     expect(resumed.reuseContext).toEqual(reuseContext);
     expect(parse(resumed.job)).toEqual(resumed.job);
   });

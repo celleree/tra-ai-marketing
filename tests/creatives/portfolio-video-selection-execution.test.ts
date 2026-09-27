@@ -5,7 +5,8 @@ import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioPlan, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
-import { HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
+import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
+import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
 const mocks = vi.hoisted(() => ({
@@ -32,13 +33,16 @@ vi.mock('@/lib/quotas/operator-quota', async original => ({
 const mediaId = `media_${'a'.repeat(32)}`;
 const sourceHash = createHash('sha256').update(Buffer.from('video')).digest('hex');
 const libraryId = `video-library:${'c'.repeat(64)}`;
-const frameId = `video-frame:${'d'.repeat(64)}`;
+const candidateFrameSha256 = 'e'.repeat(64), librarySha256 = 'f'.repeat(64), timestampMs = 1200;
+const frameId = videoCandidateFrameId(sourceHash, timestampMs, candidateFrameSha256);
 const framePng = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#9a7550' } }).png().toBuffer();
 const framePngHash = createHash('sha256').update(framePng).digest('hex');
-const selection = { version: 2 as const, libraryId, sourceVideoContentHash: sourceHash, frameIds: [frameId],
+const selection = { version: 3 as const, libraryId, sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash,
+  librarySha256, frameIds: [frameId], candidateBindings: [{ frameId, representativeFrameId: frameId,
+    candidateIndex: 0, timestampMs, frameSha256: candidateFrameSha256 }],
   sourceOverlays: [{ version: 2 as const, status: 'CLEAN' as const }] };
-const provenance = [{ frameIndex: 0, libraryFrameId: frameId, candidateFrameSha256: 'e'.repeat(64),
-  timestampMs: 1200, approvedPngSha256: framePngHash }];
+const provenance = [{ frameIndex: 0, libraryFrameId: frameId, candidateFrameSha256,
+  timestampMs, approvedPngSha256: framePngHash, representativeFrameId: frameId, candidateIndex: 0 }];
 const videoSource = { role: 'TRA_VIDEO', media: { id: mediaId, fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO',
   size: 5, url: '/source.mp4' }, stored: { fileName: 'source.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO', buffer: Buffer.from('video') } };
 const selectedFrames = { source: videoSource, sourceVideoContentHash: sourceHash, durationMs: 2000, reused: false,
@@ -116,7 +120,7 @@ describe('durable portfolio B3 selection activation', () => {
     const storage = new MemoryPortfolioStorage(), job = await ready(storage); mocks.restore.mockResolvedValue(contextFor(job));
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.slots[0]).toMatchObject({ status: 'PENDING', videoSelection: { version: 2,
-      selectionModel: 'selector-model-a', selectionPolicy: HUMAN_FRAME_SELECTION_POLICY,
+      selectionModel: 'selector-model-a', selectionPolicy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY,
       reuseContext: { version: 1, frames: [] }, selection } });
     expect(result.job.lease).toBeNull(); expect(mocks.render).not.toHaveBeenCalled();
     expect(quotaGroups()).toEqual(['VIDEO_SELECTION']);
@@ -133,9 +137,9 @@ describe('durable portfolio B3 selection activation', () => {
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(mocks.select).toHaveBeenCalledTimes(2);
-    expect(mocks.select.mock.calls[0][0]).toMatchObject({ selectionPolicy: HUMAN_FRAME_SELECTION_POLICY,
+    expect(mocks.select.mock.calls[0][0]).toMatchObject({ selectionPolicy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY,
       reuseContext: { version: 1, frames: [] } });
-    expect(mocks.select.mock.calls[1][0]).toMatchObject({ selectionPolicy: HUMAN_FRAME_SELECTION_POLICY,
+    expect(mocks.select.mock.calls[1][0]).toMatchObject({ selectionPolicy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY,
       reuseContext: { version: 1, frames: [{ libraryId, frameId, useCount: 1 }] } });
   });
 
@@ -146,7 +150,7 @@ describe('durable portfolio B3 selection activation', () => {
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result).toMatchObject({ status: 409, error: expect.stringContaining('No suitable human frame') });
     expect(result.job.slots[0]).toMatchObject({ status: 'BLOCKED',
-      videoSelection: { selectionPolicy: HUMAN_FRAME_SELECTION_POLICY } });
+      videoSelection: { selectionPolicy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY } });
     expect(result.job.lease).toBeNull(); expect(() => retryPortfolioWork(result.job, 1)).toThrow('does not require a retry');
     expect(quotaGroups()).toEqual(['VIDEO_SELECTION']); expect(mocks.render).not.toHaveBeenCalled();
   });
@@ -180,7 +184,8 @@ describe('durable portfolio B3 selection activation', () => {
     expect(result.job.slots[0].status).toBe('SAVED'); expect(mocks.select).toHaveBeenCalledTimes(1);
     expect(mocks.hydrate).toHaveBeenCalledWith(expect.objectContaining({ selection }));
     expect(mocks.render.mock.calls[0][1]).toMatchObject({ videoFrameSet: selectedFrames,
-      generatedVideoFrameSelection: { libraryId, sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash, frames: provenance } });
+      generatedVideoFrameSelection: { libraryId, sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash,
+        librarySha256, frames: provenance } });
     expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'CREATIVE_GENERATION']);
   });
 

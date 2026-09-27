@@ -30,7 +30,8 @@ afterEach(() => vi.unstubAllEnvs());
 
 it('loads exact saved B1 selection context from the frozen identity and artifact', async () => {
   complete();
-  expect(await loadSavedVideoSelectionContext(source, savedDependency)).toEqual({ library, manifest, representativeImages: [], librarySha256: resultSha });
+  expect(await loadSavedVideoSelectionContext(source, savedDependency)).toEqual({ library, manifest, representativeImages: [],
+    librarySha256: resultSha, preparationSha256: preparation.manifestSha256 });
   expect(mocks.read).toHaveBeenCalledWith(savedIdentity);
   expect(mocks.library).toHaveBeenCalledWith(savedIdentity, result);
   expect(mocks.preparation).toHaveBeenCalledWith({ ...preparation, expectedSourceVideoMediaId: source.media.id,
@@ -109,7 +110,8 @@ it('prefers complete durable context bound to the hydrated source and current an
   mocks.read.mockResolvedValue({ job: { phase: 'COMPLETE', preparation, result } });
   mocks.library.mockResolvedValue(library); mocks.preparation.mockResolvedValue({ manifest, representatives: [] });
   const context = await loadVideoSelectionContext(source);
-  expect(context).toEqual({ library, manifest, representativeImages: [], librarySha256: resultSha }); expect(mocks.legacy).not.toHaveBeenCalled();
+  expect(context).toEqual({ library, manifest, representativeImages: [], librarySha256: resultSha,
+    preparationSha256: preparation.manifestSha256 }); expect(mocks.legacy).not.toHaveBeenCalled();
   const identity = mocks.read.mock.calls[0][0];
   expect(identity).toMatchObject({ sourceVideoMediaId: source.media.id, sourceVideoContentHash: hash,
     analyzerFingerprint: { visionModel: 'current-model' } });
