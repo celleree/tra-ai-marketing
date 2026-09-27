@@ -1,3 +1,4 @@
+import { emitProviderReuse } from '@/lib/ai/provider-telemetry';
 import { assertDeploymentRuntimeConsistent } from '@/lib/runtime/deployment';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -141,7 +142,9 @@ export const analyzeTraVideoIntelligence = async (
   }
   const pending = (async () => {
     const cached = options.force ? null : await loadVideoFrameLibrary(source.media.id, hash, root);
-    if (cached?.analysisModels.vision.length === 1 && cached.analysisModels.vision[0] === model) return { library: cached, reused: true };
+    if (cached?.analysisModels.vision.length === 1 && cached.analysisModels.vision[0] === model) {
+      emitProviderReuse('video-library', model, { operationId: cached.id }); return { library: cached, reused: true };
+    }
     options.onProgress?.('Extracting and checking candidate frames');
     const library = await withTemporaryTraVideoFrameCandidates(source, async (set) => {
     const technical = await analyzeTemporaryVideoCandidates(set);

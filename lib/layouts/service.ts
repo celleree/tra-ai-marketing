@@ -1,3 +1,4 @@
+import { emitProviderReuse } from '@/lib/ai/provider-telemetry';
 import { analyzeReferenceCreative } from '@/lib/ai/openai';
 import { validAnalysis } from '@/lib/creatives/planning-source-parser';
 import { createHash } from 'crypto';
@@ -259,6 +260,7 @@ export async function getOrAnalyzeLayoutBlueprint(
   const cached = await activeCache.read(contentHash, analyzerModel);
 
   if (cached) {
+    emitProviderReuse('layout-analysis', analyzerModel);
     return { blueprint: cached, contentHash, analyzerModel, cacheHit: true };
   }
 
@@ -280,7 +282,7 @@ export async function getOrAnalyzeContextualLayoutAngle(
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
   const activeCache = getLayoutBlueprintCache();
   const cached = await activeCache.readContextualAngle(hash, contextHash, model);
-  if (cached !== null) return cached;
+  if (cached !== null) { emitProviderReuse('source-reference-analysis', model); return cached; }
   onProviderOperationStart();
   const analysis = await analyzeReferenceCreative(source, context);
   if (!validAnalysis(analysis)) throw new Error('Invalid contextual analysis.');
