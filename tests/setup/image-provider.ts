@@ -9,6 +9,9 @@ globalThis.fetch = (input, init) => {
     && process.env.TRA_LIVE_IMAGE_AUTHORIZATION !== 'allow-paid-image-generation') {
     return Promise.reject(new Error('Image network dispatch is disabled in tests; mock fetch or explicitly authorize paid images.'));
   }
+  if (url.hostname === 'api.openai.com' && !url.pathname.startsWith('/v1/images/')) {
+    return Promise.reject(new Error('Model network dispatch is disabled in tests; mock the provider boundary.'));
+  }
   return networkFetch(input, init);
 };
 
