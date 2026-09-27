@@ -11,6 +11,7 @@ import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import { referenceCandidate } from '../fixtures/reference-catalog';
 import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
 import { fetchCreativeImage } from '@/lib/creatives/image-models';
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 
 let executionStorage = new MemoryPortfolioStorage();
 vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => executionStorage }));
@@ -151,6 +152,22 @@ it.each([
   const replay = await call(body, parentId, key); expect(await replay.json()).toEqual(firstBody);
   expect(mocks.plan).toHaveBeenCalledTimes(Number(plans)); expect(mocks.generate).toHaveBeenCalledTimes(1);
   expect(mocks.save).toHaveBeenCalledTimes(1); expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(1);
+});
+
+it('attributes paid revision planning to the reserved run and child creative, including replay', async () => {
+  const logs = vi.spyOn(console, 'info').mockImplementation(() => {}), plan = mocks.plan.getMockImplementation()!;
+  mocks.plan.mockImplementation(async (...args) => {
+    await fetchWithProviderUsage('revision-plan', 'gpt-6-astra', 'https://api.openai.com/v1/responses', {},
+      async () => Response.json({ status: 'completed', usage: { input_tokens: 1 } }));
+    return plan(...args);
+  });
+  const key = crypto.randomUUID(), body = { operation: 'EDIT', instruction: 'Simplify the headline' };
+  const result = await (await call(body, parentId, key)).json(); await call(body, parentId, key);
+  const events = logs.mock.calls.map(([value]) => JSON.parse(String(value)));
+  expect(events).toHaveLength(2);
+  for (const event of events) expect(event).toMatchObject({ runId: expect.any(String), creativeId: result.creative.id,
+    operationId: result.creative.id, operationType: 'EDIT', portfolioId: null });
+  logs.mockRestore();
 });
 
 it('preserves fresh deliberate regeneration while rejecting mutation of an existing intent', async () => {
