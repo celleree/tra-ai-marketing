@@ -15,6 +15,7 @@ import type { PreparedCreativeGeneration } from '@/lib/creatives/prepare-generat
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
+import { withPaidPreparationScope } from '@/lib/creatives/preparation-checkpoint';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: vi.fn(async (concepts: unknown[]) => portfolioAudit(concepts.length)) }));
 const proofMocks = vi.hoisted(() => ({ load: vi.fn() }));
@@ -428,6 +429,21 @@ describe('creative batch planner', () => {
     vi.mocked(auditCreativePortfolio).mockResolvedValueOnce(repeated).mockResolvedValueOnce(repeated);
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow('after one planning repair');
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+  it('checkpoints initial plan, audit, targeted repair and re-audit separately for transport replay', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const repeated = { ...portfolioAudit(), groups: [{ conceptIndexes: [1, 2], proposition: 'Same outcome', distinction: 'Paraphrases' }] };
+    vi.mocked(auditCreativePortfolio).mockClear().mockResolvedValueOnce(repeated);
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const input = JSON.parse(JSON.parse(String(init?.body)).input[1].content[0].text);
+      return okResponse({ creatives: input.replacementIndexes ? [concept(2)] : [concept(1), concept(2)] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const scope = { runId: 'repair-submission', storage: new MemoryPortfolioStorage() };
+    const run = () => withPaidPreparationScope(scope, () => planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false }));
+    const first = await run(); expect(await run()).toEqual(first);
+    expect(fetchMock).toHaveBeenCalledTimes(2); expect(auditCreativePortfolio).toHaveBeenCalledTimes(2);
+    expect(scope.storage.data.size).toBe(4);
   });
   it('passes the exact deterministic duplicate defect to targeted repair even when audit groups are singletons', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');

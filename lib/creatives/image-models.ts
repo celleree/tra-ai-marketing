@@ -1,72 +1,29 @@
-export const PREFERRED_CREATIVE_IMAGE_MODEL = 'gpt-image-2.5-sunburst' as const;
-export const FALLBACK_CREATIVE_IMAGE_MODEL = 'gpt-image-2.5-flare' as const;
+import { assertLiveImageGenerationAllowed } from '@/lib/creatives/image-provider-admission';
+import { imageRenderPurpose, prepareImageRenderRequest } from '@/lib/creatives/image-render-request';
+import { executeImageAttempt } from '@/lib/creatives/image-attempt-execution';
+import { CreativeImageProviderError, imageProviderFailure } from '@/lib/creatives/image-provider-failure';
+import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
+export { CreativeImageProviderError, creativeImageHttpError, creativeImageMissingOutputError } from '@/lib/creatives/image-provider-failure';
 
-export type CreativeImageModel =
-  | typeof PREFERRED_CREATIVE_IMAGE_MODEL
-  | typeof FALLBACK_CREATIVE_IMAGE_MODEL;
-
-export const CREATIVE_IMAGE_OPERATION_TYPES = [
-  'PROMPT_GENERATION',
-  'LAYOUT_REFERENCE_GENERATION',
-  'TRA_REFERENCE_GENERATION',
-  'TRA_VIDEO_FRAME_GENERATION',
-  'EDIT',
-  'REGENERATE',
-  'VARIATION',
-  'PLACEMENT',
-] as const;
-
-export type CreativeImageOperationType =
-  (typeof CREATIVE_IMAGE_OPERATION_TYPES)[number];
-
-export type CreativeImageRouting = {
-  operationType: CreativeImageOperationType;
-  preferredModel: CreativeImageModel;
-  actualModel: CreativeImageModel;
-  fallbackUsed: boolean;
-  fallbackFromModel: CreativeImageModel | null;
-  fallbackReason: string | null;
-};
-
-export class CreativeImageProviderError extends Error {
-  constructor(
-    message: string,
-    readonly fallbackReason: string | null
-  ) {
-    super(message);
-    this.name = 'CreativeImageProviderError';
-  }
-}
-
-export const creativeImageHttpError = (status: number, message: string) =>
-  new CreativeImageProviderError(
-    message,
-    status === 408
-      ? 'provider_timeout'
-      : status === 429
-        ? 'rate_limited'
-        : status >= 500
-          ? 'provider_unavailable'
-          : null
-  );
-
-export const creativeImageMissingOutputError = () =>
-  new CreativeImageProviderError(
-    'OpenAI returned no generated image.',
-    'missing_provider_output'
-  );
+export * from '@/lib/creatives/image-routing';
+import { PREFERRED_CREATIVE_IMAGE_MODEL, FALLBACK_CREATIVE_IMAGE_MODEL,
+  type CreativeImageModel, type CreativeImageOperationType, type CreativeImageRouting } from '@/lib/creatives/image-routing';
 
 export async function fetchCreativeImage(
   input: string,
   init: RequestInit
 ) {
+  assertLiveImageGenerationAllowed();
+  const request = prepareImageRenderRequest(input, init);
   try {
-    return await fetch(input, init);
+    const response = await executeImageAttempt(input, request, () => fetch(input, request));
+    if (!response.ok) throw await imageProviderFailure(response);
+    return response;
   } catch (error) {
     if (error instanceof TypeError) {
       throw new CreativeImageProviderError(
         'OpenAI image request could not reach the provider.',
-        'network_failure'
+        null, 'UNKNOWN'
       );
     }
     throw error;
@@ -74,7 +31,8 @@ export async function fetchCreativeImage(
 }
 
 const transientReason = (error: unknown) => {
-  if (error instanceof CreativeImageProviderError) return error.fallbackReason;
+  if (error instanceof CreativeImageProviderError && error.outcome === 'FAILED'
+    && ['rate_limited', 'provider_unavailable'].includes(error.fallbackReason ?? '')) return error.fallbackReason;
   return null;
 };
 
@@ -82,9 +40,10 @@ export async function runCreativeImageModelRoute<T>(args: {
   operationType: CreativeImageOperationType;
   generate: (model: CreativeImageModel) => Promise<T>;
 }): Promise<{ value: T; routing: CreativeImageRouting }> {
+  const purpose = imageRenderPurpose();
   try {
     return {
-      value: await args.generate(PREFERRED_CREATIVE_IMAGE_MODEL),
+        value: await withProviderUsageContext({ operationType: args.operationType }, () => args.generate(PREFERRED_CREATIVE_IMAGE_MODEL)),
       routing: {
         operationType: args.operationType,
         preferredModel: PREFERRED_CREATIVE_IMAGE_MODEL,
@@ -96,9 +55,9 @@ export async function runCreativeImageModelRoute<T>(args: {
     };
   } catch (error) {
     const fallbackReason = transientReason(error);
-    if (!fallbackReason) throw error;
+    if (!fallbackReason || purpose !== 'production') throw error;
     return {
-      value: await args.generate(FALLBACK_CREATIVE_IMAGE_MODEL),
+      value: await withProviderUsageContext({ operationType: args.operationType }, () => args.generate(FALLBACK_CREATIVE_IMAGE_MODEL)),
       routing: {
         operationType: args.operationType,
         preferredModel: PREFERRED_CREATIVE_IMAGE_MODEL,
@@ -110,15 +69,3 @@ export async function runCreativeImageModelRoute<T>(args: {
     };
   }
 }
-
-export const isCreativeImageModel = (
-  value: unknown
-): value is CreativeImageModel =>
-  value === PREFERRED_CREATIVE_IMAGE_MODEL ||
-  value === FALLBACK_CREATIVE_IMAGE_MODEL;
-
-export const isCreativeImageOperationType = (
-  value: unknown
-): value is CreativeImageOperationType =>
-  typeof value === 'string' &&
-  CREATIVE_IMAGE_OPERATION_TYPES.includes(value as CreativeImageOperationType);

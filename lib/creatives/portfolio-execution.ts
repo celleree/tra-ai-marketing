@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 import { isDeepStrictEqual } from 'node:util';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
@@ -13,6 +14,7 @@ import { HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from 
 import { snapshotCreativePortfolio, restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { preflightPlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
+import { imageAttemptBudget, withImageAttemptScope } from '@/lib/creatives/image-attempt-execution';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { reconcilePortfolioResults } from '@/lib/creatives/portfolio-results';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
@@ -48,7 +50,11 @@ const assertValidPlannedCreativeCopy = (concept: Parameters<typeof classifyCreat
 };
 
 /** One persisted provider-capable planning step OR one image; no background loop or automatic failed-provider retry. */
-export async function advanceCreativePortfolio(
+export function advanceCreativePortfolio(...args: Parameters<typeof advancePortfolio>) {
+  return withProviderUsageContext({ runId: `portfolio:${args[0]}`, jobId: args[0], portfolioId: args[0] }, () => advancePortfolio(...args));
+}
+
+async function advancePortfolio(
   id: string, operatorId: string, requestUrl: string, storage?: VideoIntelligenceStorage,
   options: { deadlineAtMs?: number; video?: Omit<VideoIntelligenceServiceDependencies, 'storage' | 'deadlineAtMs'> } = {},
 ): Promise<PortfolioStepResult> {
@@ -58,6 +64,10 @@ export async function advanceCreativePortfolio(
   const job = await updateCreativePortfolio(id, current => claimCreativePortfolio(current, Date.now(), token).job, storage);
   if (job.lease?.id !== token) return { job };
   const slotIndex = job.lease.slotIndex;
+  const render = (...args: Parameters<typeof renderPlannedCreative>) => withImageAttemptScope({
+    runId: `portfolio:${job.id}`, operationId: args[2]!.creativeId!, jobId: job.id, portfolioId: job.id, creativeId: args[2]!.creativeId!,
+    budget: imageAttemptBudget(job.request.variationCount), storage,
+  }, () => renderPlannedCreative(...args));
   const assertCurrentWork = async () => {
     const current = await readCreativePortfolio(id, storage);
     if (current?.lease?.id !== token || current.lease.expiresAtMs <= Date.now()) throw new Error('Portfolio work lease is no longer current.');
@@ -266,14 +276,15 @@ export async function advanceCreativePortfolio(
         await updateCreativePortfolio(id, current => checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job, storage);
         await assertCurrentWork();
         providerWorkStarted = true;
-        const selected = await selectPortfolioVideoFrames({
-          sourceAnalysis: context.sourceAnalysis,
+        const sourceAnalysis = context.sourceAnalysis;
+        const selected = await withProviderUsageContext({ creativeId: slot.creativeId }, () => selectPortfolioVideoFrames({
+          sourceAnalysis,
           sources: videoSources,
           finalConcept: concept,
           selectionPolicy: attempt.selectionPolicy,
           reuseContext: attempt.reuseContext,
           cache,
-        });
+        }));
         if (selected.status === 'BUSY') return {
           job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
           status: 202,
@@ -313,7 +324,7 @@ export async function advanceCreativePortfolio(
         sourceVideoContentHash: selectedFrames.sourceVideoContentHash,
         frames: selectedFrames.selectionProvenance,
       };
-      const creative = await renderPlannedCreative(concept, {
+      const creative = await render(concept, {
         ...context,
         videoFrameSet: selectedFrames,
         generatedVideoFrameSelection,
@@ -327,7 +338,7 @@ export async function advanceCreativePortfolio(
     const denied = await reserveWorkQuota('CREATIVE_GENERATION');
     if (denied) return denied;
     providerWorkStarted = true;
-    const creative = await renderPlannedCreative(concept, context, {
+    const creative = await render(concept, context, {
       creativeId: slot.creativeId,
       assertCurrentWork,
       preflightHumanVideo,

@@ -54,6 +54,16 @@ See [Clerk access restrictions](https://clerk.com/docs/guides/secure/restricting
 - Store `OPENAI_API_KEY` server-side.
 - Model override variable names and current defaults are defined by `.env.example` and source code.
 
+### Image admission, durable recovery and usage events
+
+Server-only image authorization and purpose are independent; `.env.example` documents their exact values. Keep local/Preview offline unless a paid run is explicitly authorized. Diagnostics use LOW Sunburst and no fallback; staging smoke and production use HIGH. Deployed production keeps its existing admission. Review and smoke approval are operational gates, not a browser-selectable override.
+
+Paid image attempts and raw results use the existing environment-isolated video-intelligence storage with conditional writes. Configure staging R2 access before authorizing spend. Unknown provider outcomes are retained and never automatically repurchased; missing/corrupt purchased results fail closed. Local storage ownership is process-local; deployed ownership relies on R2 conditional writes. This does not promise exactly-once provider billing.
+
+Server logs emit `tra_provider_usage` events with allowlisted metadata and a versioned estimate. Count unique dispatched attempt IDs, not start/terminal log lines; `reused` events add no request or cost. A missing terminal event or usage category is unknown, never free. Keep unknown-cost attempts separate from known estimates and reconcile provider billing independently. `confirmedBilledCostUsd` is not populated from estimates. Model/tier prices and supported categories are centralized in `lib/ai/provider-pricing.ts`; update that version/source when rates change. Do not retain prompts, pixels, transcripts or credentials in usage exports.
+
+Browser recovery requires session storage and retains only a request digest and UUID in the current tab. Retry or refresh keeps an unresolved paid intent; completing it or choosing an explicit new paid action permits fresh work. Do not clear session storage during recovery. Review the offline corpus in `tests/fixtures/cost-regression-corpus.md`; actual creative quality and cost per accepted output require a separately authorized staging run and human review.
+
 ## Meta
 
 - Store `META_ACCESS_TOKEN` server-side.

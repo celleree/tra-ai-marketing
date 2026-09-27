@@ -12,6 +12,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    setupFiles: ['./tests/setup/image-provider.ts'],
+    // Preserve final-render fixtures without granting live provider admission.
+    env: { TRA_IMAGE_PURPOSE: 'production' },
     include: ['tests/**/*.test.ts'],
   },
 });

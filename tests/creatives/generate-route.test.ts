@@ -1,3 +1,5 @@
+import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
+import { createSubmissionIdentity } from '@/lib/creatives/submission-id';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
@@ -26,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   compositeCreativeBrandLogo: vi.fn(),
   resolveCreativeBrandLogoPlacementContext: vi.fn(),
   saveCreativeBatch: vi.fn(),
+  listCreatives: vi.fn(),
   validateGeneratedCreativeImage: vi.fn(),
   analyzeTraSourceCreative: vi.fn(),
   analyzeReferenceCreative: vi.fn(),
@@ -58,7 +61,7 @@ vi.mock('@/lib/creatives/brand-logo.server', () => ({
   compositeCreativeBrandLogo: mocks.compositeCreativeBrandLogo,
   resolveCreativeBrandLogoPlacementContext: mocks.resolveCreativeBrandLogoPlacementContext,
 }));
-vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveCreativeBatch }));
+vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: mocks.saveCreativeBatch, listCreatives: mocks.listCreatives }));
 vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.listProofRecords }));
 
 vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
@@ -324,7 +327,7 @@ const generationRequest = (
 ) =>
   new Request('http://localhost/api/creatives/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
     body: JSON.stringify({
       sourceAssets,
       ...(companyProfile ? { companyProfile } : {}),
@@ -355,6 +358,96 @@ let storedById: Record<string, StoredCreativeSourceMediaFile>;
 let readMediaById: ReturnType<typeof vi.fn>;
 let readImageById: ReturnType<typeof vi.fn>;
 let saveImage: ReturnType<typeof vi.fn>;
+
+it('replays the same generation submission with unchanged IDs and zero additional paid work', async () => {
+  const request = generationRequest([]), duplicate = request.clone();
+  const first = await readStreamEvents(await POST(request));
+  const imageCalls = vi.mocked(fetch).mock.calls.length;
+  const replay = await readStreamEvents(await POST(duplicate));
+  expect(replay).toEqual(first); expect(vi.mocked(fetch)).toHaveBeenCalledTimes(imageCalls);
+  expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
+  expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(2);
+  expect(mocks.saveCreativeBatch).toHaveBeenCalledTimes(2);
+});
+
+it('recovers failed finalization from saved raw output under the same submission', async () => {
+  const request = generationRequest([]), duplicate = request.clone();
+  mocks.saveCreativeBatch.mockRejectedValueOnce(new Error('Finalization storage interruption'));
+  const first = await readStreamEvents(await POST(request));
+  expect(first.some(event => event.event === 'error')).toBe(true);
+  expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  const replay = await readStreamEvents(await POST(duplicate));
+  expect(replay.find(event => event.event === 'complete')?.data.successfulCount).toBe(2);
+  expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2); expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
+});
+
+it('recovers direct generation after creative persistence succeeds but its acknowledgement is lost', async () => {
+  const saved: Array<Record<string, any>> = [];
+  mocks.listCreatives.mockImplementation(async () => saved);
+  mocks.saveCreativeBatch.mockImplementation(async records => {
+    if (records.some((record: { id: string }) => saved.some(existing => existing.id === record.id))) throw new Error('Duplicate creative ID');
+    saved.push(...records); throw new Error('Acknowledgement lost after persistence');
+  });
+  const request = generationRequest([]), duplicate = request.clone();
+  const first = await readStreamEvents(await POST(request));
+  expect(first.find(event => event.event === 'complete')?.data.failedCount).toBe(2);
+  const replay = await readStreamEvents(await POST(duplicate));
+  expect(replay.find(event => event.event === 'complete')?.data.successfulCount).toBe(2);
+  expect(mocks.saveCreativeBatch).toHaveBeenCalledTimes(2); expect(saveImage).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(2); expect(saved).toHaveLength(2);
+});
+
+it('admits one concurrent preparation and rejects changed or missing submission identity', async () => {
+  const request = generationRequest([]), duplicate = request.clone(), changed = request.clone();
+  const original = mocks.planCreativeBatch.getMockImplementation()!; let release!: () => void;
+  mocks.planCreativeBatch.mockImplementation(async (...args) => {
+    await new Promise<void>(resolve => { release = resolve; }); return original(...args);
+  });
+  const pending = POST(request);
+  await vi.waitFor(() => expect(release).toBeDefined());
+  expect((await POST(duplicate)).status).toBe(202);
+  release(); await readStreamEvents(await pending);
+  const body = await changed.json();
+  expect((await POST(new Request(changed.url, { method: 'POST', headers: changed.headers,
+    body: JSON.stringify({ ...body, context: 'Different request' }) }))).status).toBe(409);
+  const missing = generationRequest([]); missing.headers.delete('Idempotency-Key');
+  expect((await POST(missing)).status).toBe(400);
+  expect(mocks.planCreativeBatch).toHaveBeenCalledTimes(1);
+});
+
+it('never repeats an unknown planner outcome on retransmission', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/ai/creative-planner')>('@/lib/ai/creative-planner');
+  mocks.planCreativeBatch.mockImplementation(actual.planCreativeBatch);
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Provider response lost')));
+  const request = generationRequest([]), duplicate = request.clone();
+  expect((await POST(request)).status).toBe(500);
+  expect((await POST(duplicate)).status).toBe(409);
+  expect(fetch).toHaveBeenCalledTimes(1); expect(mocks.saveCreativeBatch).not.toHaveBeenCalled();
+});
+
+it('retains browser recovery identity when a duplicate stream finishes while original renders are busy', async () => {
+  const values = new Map<string, string>();
+  const identity = createSubmissionIdentity('generation', () => ({ getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); }, removeItem: key => { values.delete(key); } }));
+  const key = await identity.forInput('same request');
+  const request = generationRequest([]); request.headers.set('Idempotency-Key', key);
+  const duplicate = request.clone(); const releases: Array<() => void> = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => {
+    releases.push(() => resolve(Response.json({ data: [{ b64_json: PNG.toString('base64') }] })));
+  })));
+  const original = await POST(request);
+  await vi.waitFor(() => expect(releases).toHaveLength(2));
+  const replay = await readStreamEvents(await POST(duplicate));
+  const incomplete = replay.find(event => event.event === 'complete')!.data;
+  expect(incomplete).toMatchObject({ successfulCount: 0, failedCount: 2 });
+  identity.completeGeneration(key, Number(incomplete.requestedCount), Number(incomplete.successfulCount), Number(incomplete.failedCount));
+  expect(await identity.forInput('same request')).toBe(key);
+  releases.forEach(release => release());
+  const completed = (await readStreamEvents(original)).find(event => event.event === 'complete')!.data;
+  identity.completeGeneration(key, Number(completed.requestedCount), Number(completed.successfulCount), Number(completed.failedCount));
+  expect(await identity.forInput('same request')).not.toBe(key);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
 
 it('uses a seeded document and rich concept from the real planner through rendering and saved planning without uploads', async () => {
   const { conceptDetails } = await import('../fixtures/creative-concept-details');
@@ -421,7 +514,7 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
   const fetchMock = vi.fn().mockResolvedValue(
     new Response(
       JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
+      { status: 200, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() } }
     )
   );
   vi.stubGlobal('fetch', fetchMock);
@@ -466,6 +559,7 @@ beforeEach(() => {
   mocks.resolveCreativeBrandLogoPlacementContext.mockImplementation(async (_logo, placement) =>
     ({ placement, sourceWidth: 200, sourceHeight: 100 }));
   mocks.saveCreativeBatch.mockReset().mockImplementation(async (records) => records);
+  mocks.listCreatives.mockReset().mockResolvedValue([]);
   mocks.validateGeneratedCreativeImage.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
   storedById = {};
@@ -534,7 +628,7 @@ beforeEach(() => {
     vi.fn(async () =>
       new Response(
         JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        { status: 200, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() } }
       )
     )
   );
@@ -900,7 +994,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(fetch).not.toHaveBeenCalled();
     });
 
-  it('attaches the pixel-only derivative of an explicitly assessed v2 edge crop', async () => {
+  it('replays an assessed edge crop without paid work and rejects changed provider pixels', async () => {
     const videoId = mediaId('9'); storedById[videoId] = video('9');
     const sourceVideoContentHash = contentHash(storedById[videoId].buffer);
     const original = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#416589' } }).png().toBuffer();
@@ -921,11 +1015,24 @@ describe('layout blueprint and final image-provider boundaries', () => {
       attachments.push(providerFrames[0].providerBuffer);
       return { ...imageResultFor('TRA_VIDEO_FRAME_GENERATION'), providerFrames };
     });
-    const response = await POST(generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2,
+    const request = generationRequest([{ mediaId: videoId, role: 'TRA_VIDEO' }], undefined, 2,
       { ...selectionFor(sourceVideoContentHash), sourceOverlays: [{ version: 2, status: 'EDGE_CROP',
-        edge: 'BOTTOM', removePermille: 300, overlayDepthPermille: 280 }] }));
+        edge: 'BOTTOM', removePermille: 300, overlayDepthPermille: 280 }] });
+    const response = await POST(request.clone());
     expect(response.status).toBe(200);
-    expect((await readStreamEvents(response)).at(-1)?.data.successfulCount).toBe(2);
+    const first = await readStreamEvents(response);
+    expect(first.at(-1)?.data.successfulCount).toBe(2);
+    const imageCalls = vi.mocked(fetch).mock.calls.length;
+    const replay = await readStreamEvents(await POST(request.clone()));
+    expect(replay).toHaveLength(first.length);
+    expect(replay).toEqual(expect.arrayContaining(first));
+    expect(mocks.planCreativeBatch).toHaveBeenCalledOnce();
+    expect(mocks.requireOperatorQuota.mock.calls.map(([, group]) => group)).toEqual(['CREATIVE_PLANNING', 'CREATIVE_GENERATION']);
+    frame.expectedProviderPngSha256 = '0'.repeat(64);
+    expect((await POST(request.clone())).status).toBe(409);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(imageCalls);
+    expect(mocks.planCreativeBatch).toHaveBeenCalledOnce();
+    expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(2);
     expect(attachments).toHaveLength(1);
     expect(attachments[0]).toEqual(expected);
     expect((await sharp(attachments[0]).metadata()).height).toBe(70);
@@ -1522,8 +1629,10 @@ describe('progressive creative delivery', () => {
         sourceVideoMediaId: videoId, sourceVideoFileName: `${videoId}.mp4`, sourceVideoContentHash: hash,
         approvedHumanSource: true, cacheKey: null, sourceOverlay: { version: 2, status: 'UNSAFE' } }],
     } });
-    const response = await POST(generationRequest([]));
+    const request = generationRequest([]);
+    const response = await POST(request.clone());
     expect(response.status).toBe(409);
+    expect((await POST(request.clone())).status).toBe(409);
     expect(mocks.requireOperatorQuota.mock.calls.map(([, group]) => group)).toEqual(['CREATIVE_PLANNING']);
     expect(mocks.planCreativeBatch).toHaveBeenCalledOnce();
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
@@ -1645,7 +1754,7 @@ describe('progressive creative delivery', () => {
         active -= 1;
         return new Response(
           JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() } }
         );
       })
     );
@@ -1679,7 +1788,7 @@ describe('progressive creative delivery', () => {
         }
         return new Response(
           JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() } }
         );
       })
     );
@@ -1713,7 +1822,7 @@ describe('progressive creative delivery', () => {
     const response = await POST(
       new Request('http://localhost/api/creatives/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({ context: '', variationCount: 2 }),
       })
     );
@@ -1759,3 +1868,7 @@ describe('progressive creative delivery', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => offlineExecutionStorage }));
+let offlineExecutionStorage = new MemoryPortfolioStorage();
+beforeEach(() => { offlineExecutionStorage = new MemoryPortfolioStorage(); });

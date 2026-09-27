@@ -1,3 +1,4 @@
+import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
@@ -39,7 +40,7 @@ vi.mock('@/lib/quotas/require-quota', () => ({
   requireOperatorQuota: requireOperatorQuotaMock,
 }));
 
-vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: saveCreativeBatchMock }));
+vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: saveCreativeBatchMock, listCreatives: async () => [] }));
 
 vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
   ...(await original<typeof import('@/lib/creatives/generated-image-validation')>()),
@@ -83,7 +84,7 @@ const makeFrameSet = (source: unknown): ApprovedTraVideoFrameSet => ({
   source: source as ApprovedTraVideoFrameSet['source'], sourceVideoContentHash: HASH, durationMs: 10_000, reused: false,
   frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', buffer: PNG, ...getVideoFrameIntegrity(PNG), sourceRole: 'TRA_VIDEO', sourceVideoMediaId: VIDEO_ID, sourceVideoFileName: `${VIDEO_ID}.mp4`, sourceVideoContentHash: HASH, approvedHumanSource: true, sourceOverlay: { version: 2, status: 'CLEAN' }, cacheKey: `derived/video-frames/${VIDEO_ID}/${HASH}/frame-000.png` }],
 });
-const makeRequest = () => new Request('https://tra.example/api/creatives/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: 'Create clear TRA ads.', variationCount: 2, sourceAssets: [{ mediaId: VIDEO_ID, role: 'TRA_VIDEO' }] }) });
+const makeRequest = () => new Request('https://tra.example/api/creatives/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ context: 'Create clear TRA ads.', variationCount: 2, sourceAssets: [{ mediaId: VIDEO_ID, role: 'TRA_VIDEO' }] }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -227,3 +228,6 @@ describe('creative generation TRA video integration', () => {
     expect(generateApprovedTraVideoFrameCreativeImageMock).not.toHaveBeenCalled();
   });
 });
+vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => offlineExecutionStorage }));
+let offlineExecutionStorage = new MemoryPortfolioStorage();
+beforeEach(() => { offlineExecutionStorage = new MemoryPortfolioStorage(); });

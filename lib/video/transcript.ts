@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { createHash } from 'node:crypto';
 import { validateStoredMedia } from '@/lib/media/storage';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
@@ -97,10 +98,10 @@ export const transcribeTraVideo = async (
   form.append('model', 'whisper-1');
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'segment');
-  const response = await (dependencies.request || fetch)('https://api.openai.com/v1/audio/transcriptions', {
+  const response = await fetchWithProviderUsage('video-transcription', 'whisper-1', 'https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
     signal: AbortSignal.timeout(VIDEO_TRANSCRIPTION_TIMEOUT_MS),
-  });
+  }, dependencies.request || fetch);
   if (!response.ok) throw new Error(`Video transcription failed (HTTP ${response.status}). Check audio, API access, and limits.`);
   return {
     version: 1, model: 'whisper-1', sourceVideoMediaId: source.media.id, sourceVideoContentHash,

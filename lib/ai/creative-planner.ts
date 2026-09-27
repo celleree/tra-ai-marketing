@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
@@ -13,6 +14,7 @@ import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-par
 import { approvedHumanSourceId, isApprovedHumanId, parseApprovedHumanSourceId, type ApprovedHumanOption } from '@/lib/video/approved-human';
 import { TAX_DOCUMENT_PLANNING_GUIDANCE } from '@/lib/references/tax-documents';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
+import { checkpointPaidPreparation } from '@/lib/creatives/preparation-checkpoint';
 import { getCreativeDiversityIssue, getCreativeDiversityRepairPlan, type CreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
 import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { referenceSelectionSchema, resolveReferenceSelection, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
@@ -269,7 +271,7 @@ export async function requestCreativeBatch(
   const outboundSourceAnalysis = sourceAnalysis && videoLinked?.customerInsights.length
     ? moveVideoLinkedPassagesOutOfSourceAnalysis(sourceAnalysis, videoLinked.customerInsights)
     : sourceAnalysis;
-  const response = await fetch(OPENAI_RESPONSES_URL, {
+  const response = await fetchWithProviderUsage(repair ? 'creative-plan-repair' : 'creative-plan', model, OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -389,28 +391,29 @@ export const creativeRepairFeedback = (
 ) => `\nPORTFOLIO REPAIR: ${issue}\nPreserve strong ideas; replace repeated hypotheses with genuinely different grounded propositions. Do not relabel or paraphrase duplicates.\n${JSON.stringify(portfolioAudit)}`;
 
 export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise<CreativeBatchPlan> {
-  const initialPlan = await requestCreativeBatch(args);
-  const initialAudit = await auditCreativePortfolio(initialPlan.creatives);
+  const initialPlan = await checkpointPaidPreparation('initial-plan', args, () => requestCreativeBatch(args));
+  const initialAudit = await checkpointPaidPreparation('initial-audit', initialPlan.creatives, () => auditCreativePortfolio(initialPlan.creatives));
   const initialIssue = getCreativeDiversityIssue(initialPlan.creatives, initialAudit);
   if (!initialIssue) return { ...initialPlan, portfolioAudit: initialAudit };
 
   const repairPlan = getCreativeDiversityRepairPlan(initialPlan.creatives, initialAudit);
   if (!repairPlan.replacementIndexes.length) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${initialIssue}. No images were generated.`);
   const lockedConcepts = initialPlan.creatives.filter(concept => !repairPlan.replacementIndexes.includes(concept.index));
-  const replacements = await requestCreativeBatch(args, {
+  const repair = {
     repairPlan,
     existingPortfolio: initialPlan.creatives,
     lockedConcepts,
     portfolioAudit: initialAudit,
     plannerModel: initialPlan.plannerModel,
-  });
+  };
+  const replacements = await checkpointPaidPreparation('targeted-repair', { args, repair }, () => requestCreativeBatch(args, repair));
   const replacementMap = new Map(replacements.creatives.map(concept => [concept.index, concept]));
   const repairedPlan: CreativeBatchPlan = {
     creatives: initialPlan.creatives.map(concept => replacementMap.get(concept.index) ?? concept),
     plannerModel: initialPlan.plannerModel,
     reasoningEffort: initialPlan.reasoningEffort,
   };
-  const repairedAudit = await auditCreativePortfolio(repairedPlan.creatives);
+  const repairedAudit = await checkpointPaidPreparation('repair-audit', repairedPlan.creatives, () => auditCreativePortfolio(repairedPlan.creatives));
   const repairedIssue = getCreativeDiversityIssue(repairedPlan.creatives, repairedAudit);
   if (repairedIssue) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${repairedIssue}. No images were generated.`);
   return { ...repairedPlan, portfolioAudit: repairedAudit };
