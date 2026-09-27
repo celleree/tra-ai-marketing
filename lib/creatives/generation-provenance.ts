@@ -10,6 +10,7 @@ import {
   type CreativeImageRouting,
 } from '@/lib/creatives/image-routing';
 import { parseSourceOverlayDecision, type SourceCrop, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
+import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
 
 const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -30,8 +31,12 @@ export type CreativeGenerationProvenance = {
         mediaId: string;
         sourceSha256: string;
         selectionMode: 'AUTOMATIC' | 'USER_SELECTED';
+        libraryId?: string;
+        librarySha256?: string;
         frames: Array<{ timestampMs: number; approvedPngSha256: string;
-          providerPngSha256?: string; sourceOverlay?: SourceOverlayDecision; crop?: SourceCrop | null }>;
+          providerPngSha256?: string; sourceOverlay?: SourceOverlayDecision; crop?: SourceCrop | null;
+          libraryFrameId?: string; representativeFrameId?: string; candidateIndex?: number;
+          candidateFrameSha256?: string }>;
       };
   analysisSources: Array<
     | {
@@ -170,7 +175,8 @@ export const parseCreativeGenerationProvenance = (
   } else if (isRecord(value.attachedSource) && value.attachedSource.type === 'TRA_VIDEO_FRAMES') {
     const source = value.attachedSource;
     if (
-      !hasExactKeys(source, ['type', 'mediaId', 'sourceSha256', 'selectionMode', 'frames']) ||
+      !(hasExactKeys(source, ['type', 'mediaId', 'sourceSha256', 'selectionMode', 'frames'])
+        || hasExactKeys(source, ['type', 'mediaId', 'sourceSha256', 'selectionMode', 'libraryId', 'librarySha256', 'frames'])) ||
       !isMediaId(source.mediaId) ||
       !isHash(source.sourceSha256) ||
       (source.selectionMode !== 'AUTOMATIC' && source.selectionMode !== 'USER_SELECTED') ||
@@ -179,10 +185,22 @@ export const parseCreativeGenerationProvenance = (
       source.frames.length > 3 ||
       !requestedSource('TRA_VIDEO', source.mediaId, source.sourceSha256)
     ) return null;
+    const candidateAddressed = 'librarySha256' in source;
+    if (candidateAddressed && (typeof source.libraryId !== 'string' || !/^video-library:[a-f0-9]{64}$/.test(source.libraryId)
+      || !isHash(source.librarySha256))) return null;
     const frames = source.frames.map((frame) => {
       if (!isRecord(frame) || !(hasExactKeys(frame, ['timestampMs', 'approvedPngSha256'])
-        || hasExactKeys(frame, ['timestampMs', 'approvedPngSha256', 'providerPngSha256', 'sourceOverlay', 'crop']))) return null;
+        || hasExactKeys(frame, ['timestampMs', 'approvedPngSha256', 'providerPngSha256', 'sourceOverlay', 'crop'])
+        || hasExactKeys(frame, ['timestampMs', 'approvedPngSha256', 'providerPngSha256', 'sourceOverlay', 'crop',
+          'libraryFrameId', 'representativeFrameId', 'candidateIndex', 'candidateFrameSha256']))) return null;
       if (typeof frame.timestampMs !== 'number' || !Number.isSafeInteger(frame.timestampMs) || frame.timestampMs < 0 || !isHash(frame.approvedPngSha256)) return null;
+      if (candidateAddressed !== ('candidateIndex' in frame)) return null;
+      if (candidateAddressed && (typeof frame.libraryFrameId !== 'string' || !/^video-frame:[a-f0-9]{64}$/.test(frame.libraryFrameId)
+        || typeof frame.representativeFrameId !== 'string' || !/^video-frame:[a-f0-9]{64}$/.test(frame.representativeFrameId)
+        || !Number.isSafeInteger(frame.candidateIndex) || Number(frame.candidateIndex) < 0
+        || !isHash(frame.candidateFrameSha256)
+        || frame.libraryFrameId !== videoCandidateFrameId(source.sourceSha256 as string,
+          frame.timestampMs as number, frame.candidateFrameSha256))) return null;
       if (!('providerPngSha256' in frame)) return { timestampMs: frame.timestampMs, approvedPngSha256: frame.approvedPngSha256 };
       const decision = parseSourceOverlayDecision(frame.sourceOverlay);
       const crop = frame.crop;
@@ -193,12 +211,17 @@ export const parseCreativeGenerationProvenance = (
           || ![crop.left, crop.top, crop.width, crop.height].every(value => Number.isSafeInteger(value) && Number(value) >= 0)
           || Number(crop.width) < 2 || Number(crop.height) < 2))) return null;
       return { timestampMs: frame.timestampMs, approvedPngSha256: frame.approvedPngSha256,
-        providerPngSha256: frame.providerPngSha256, sourceOverlay: decision, crop: crop as SourceCrop | null };
+        providerPngSha256: frame.providerPngSha256, sourceOverlay: decision, crop: crop as SourceCrop | null,
+        ...(candidateAddressed ? { libraryFrameId: frame.libraryFrameId as string,
+          representativeFrameId: frame.representativeFrameId as string,
+          candidateIndex: frame.candidateIndex as number, candidateFrameSha256: frame.candidateFrameSha256 as string } : {}) };
     });
     if (frames.some((frame) => !frame)) return null;
     const validFrames = frames as NonNullable<Extract<CreativeGenerationProvenance['attachedSource'], { type: 'TRA_VIDEO_FRAMES' }>>['frames'];
     if (new Set(validFrames.map((frame) => `${frame.timestampMs}:${frame.approvedPngSha256}`)).size !== validFrames.length) return null;
-    attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: source.mediaId, sourceSha256: source.sourceSha256, selectionMode: source.selectionMode, frames: validFrames };
+    attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: source.mediaId, sourceSha256: source.sourceSha256,
+      selectionMode: source.selectionMode, frames: validFrames,
+      ...(candidateAddressed ? { libraryId: source.libraryId as string, librarySha256: source.librarySha256 as string } : {}) };
   } else {
     return null;
   }

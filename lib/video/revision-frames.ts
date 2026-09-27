@@ -142,18 +142,25 @@ export async function resolveRevisionVideoFrames(
   if (
     savedSelection.sourceVideoMediaId !== attachedSource.mediaId ||
     savedSelection.sourceVideoContentHash !== attachedSource.sourceSha256 ||
+    savedSelection.librarySha256 !== attachedSource.librarySha256 ||
+    (savedSelection.librarySha256 !== undefined && savedSelection.libraryId !== attachedSource.libraryId) ||
     savedSelection.frames.length !== attachedSource.frames.length ||
-    savedSelection.frames.some((frame, index) =>
-      frame.timestampMs !== attachedSource.frames[index].timestampMs ||
-      frame.approvedPngSha256 !== attachedSource.frames[index].approvedPngSha256
-    )
+    savedSelection.frames.some((frame, index) => {
+      const attached = attachedSource.frames[index];
+      return frame.timestampMs !== attached.timestampMs || frame.approvedPngSha256 !== attached.approvedPngSha256
+        || (savedSelection.librarySha256 !== undefined && (frame.libraryFrameId !== attached.libraryFrameId
+          || frame.representativeFrameId !== attached.representativeFrameId
+          || frame.candidateIndex !== attached.candidateIndex
+          || frame.candidateFrameSha256 !== attached.candidateFrameSha256));
+    })
   ) {
     throw new Error('The saved TRA video selection does not match this creative provenance.');
   }
 
   const context = await loadVideoSelectionContext(video);
   const library = context?.library;
-  if (!library || library.id !== savedSelection.libraryId) {
+  if (!library || library.id !== savedSelection.libraryId
+    || (savedSelection.librarySha256 !== undefined && context?.librarySha256 !== savedSelection.librarySha256)) {
     throw new Error(
       'The saved TRA video frame library is missing or invalid. Reanalyze the video before revising this creative.'
     );
@@ -161,7 +168,11 @@ export async function resolveRevisionVideoFrames(
   const approved = await extractVideoSelectionFrames(
     video,
     context!,
-    savedSelection.frames.map((frame) => frame.libraryFrameId)
+    savedSelection.librarySha256
+      ? savedSelection.frames.map((frame) => ({ frameId: frame.libraryFrameId,
+        representativeFrameId: frame.representativeFrameId!, candidateIndex: frame.candidateIndex!,
+        timestampMs: frame.timestampMs, frameSha256: frame.candidateFrameSha256 }))
+      : savedSelection.frames.map((frame) => frame.libraryFrameId)
   );
   if (
     approved.sourceVideoContentHash !== attachedSource.sourceSha256 ||
@@ -173,7 +184,9 @@ export async function resolveRevisionVideoFrames(
         frame.libraryFrameId !== expected.libraryFrameId ||
         frame.candidateFrameSha256 !== expected.candidateFrameSha256 ||
         frame.timestampMs !== expected.timestampMs ||
-        frame.approvedPngSha256 !== expected.approvedPngSha256
+        frame.approvedPngSha256 !== expected.approvedPngSha256 ||
+        (savedSelection.librarySha256 !== undefined && (frame.candidateIndex !== expected.candidateIndex
+          || frame.representativeFrameId !== expected.representativeFrameId))
       );
     })
   ) {

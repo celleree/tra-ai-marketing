@@ -212,12 +212,20 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
             selectionMode: human || request.videoFrameSelection
               ? 'USER_SELECTED'
               : 'AUTOMATIC',
-            frames: providerFrames.map((frame) => ({
+            ...(itemFrameSelection?.librarySha256 ? { libraryId: itemFrameSelection.libraryId,
+              librarySha256: itemFrameSelection.librarySha256 } : {}),
+            frames: providerFrames.map((frame, index) => ({
               timestampMs: frame.timestampMs,
               approvedPngSha256: frame.frameSha256,
               providerPngSha256: frame.providerPngSha256,
               sourceOverlay: frame.sourceOverlay!,
               crop: frame.crop,
+              ...(itemFrameSelection?.librarySha256 ? {
+                libraryFrameId: itemFrameSelection.frames[index].libraryFrameId,
+                representativeFrameId: itemFrameSelection.frames[index].representativeFrameId!,
+                candidateIndex: itemFrameSelection.frames[index].candidateIndex!,
+                candidateFrameSha256: itemFrameSelection.frames[index].candidateFrameSha256,
+              } : {}),
             })),
           }
         : null;

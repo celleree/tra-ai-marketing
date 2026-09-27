@@ -1,5 +1,6 @@
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
+import type { VideoCandidateFrameBinding } from '@/lib/video/generation-selection-contract';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
 import type { VideoIntelligenceArtifactReference, VideoIntelligenceJobIdentity } from '@/lib/video/intelligence-job';
 import { readVideoIntelligenceJob } from '@/lib/video/intelligence-job-store';
@@ -83,7 +84,8 @@ export const loadSavedVideoSelectionContext = async (
   return { library, manifest: loaded.manifest, representativeImages: bindRepresentativeImages(library, loaded.representatives), librarySha256: artifact.sha256 };
 };
 
-export const extractVideoSelectionFrames = async (source: HydratedTraVideoSource, context: VideoSelectionContext, frameIds: readonly string[]) => {
+export const extractVideoSelectionFrames = async (source: HydratedTraVideoSource, context: VideoSelectionContext,
+  frameIds: readonly string[] | readonly VideoCandidateFrameBinding[]) => {
   return context.manifest
     ? getApprovedPreparedSelectedTraVideoFrames(source, context.library, frameIds, context.manifest)
     : getApprovedSelectedTraVideoFrames(source, context.library, frameIds);
