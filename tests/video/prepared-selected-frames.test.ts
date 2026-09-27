@@ -28,6 +28,7 @@ vi.mock('@/lib/video/selected-frames', async (importOriginal) => {
 
 import { getApprovedPreparedSelectedTraVideoFrames } from '@/lib/video/prepared-selected-frames';
 import { getApprovedSelectedTraVideoFrames } from '@/lib/video/selected-frames';
+import { loadVideoCandidateAnalysisImage } from '@/lib/video/selection-context';
 import { REAL_SCENE_CHANGE_MP4 } from '@/tests/fixtures/video-candidate-scene';
 
 const source = (buffer: Buffer, marker: string): HydratedTraVideoSource => {
@@ -130,6 +131,22 @@ beforeAll(async () => {
 beforeEach(() => {
   helpers.extract.mockReset();
   helpers.extract.mockImplementation(helpers.actualExtract);
+});
+
+it('regenerates a non-representative analysis JPEG from the original and rejects frozen candidate drift', async () => {
+  const representative = offset.library.representativeFrames[0];
+  const candidate = offset.library.candidates.find((item) => item.candidateIndex !== representative.candidateIndex)!;
+  const expected = await withTemporaryTraVideoFrameCandidates(offsetSource, async (set) =>
+    readFile(set.candidates[candidate.candidateIndex].temporaryPath), {}, offset.manifest.analyzerFingerprint.candidatePolicy);
+  const context = { library: offset.library, manifest: offset.manifest, representativeImages: null };
+  const regenerated = await loadVideoCandidateAnalysisImage(offsetSource, context, candidate.candidateIndex);
+  expect(regenerated.bytes.equals(expected)).toBe(true);
+  expect(regenerated).toMatchObject({ representativeFrameId: representative.id, candidateIndex: candidate.candidateIndex,
+    timestampMs: candidate.timestampMs, frameSha256: candidate.frameSha256 });
+  const changed = structuredClone(offset.manifest);
+  changed.candidates[candidate.candidateIndex].frameSha256 = 'f'.repeat(64);
+  await expect(loadVideoCandidateAnalysisImage(offsetSource, { ...context, manifest: changed }, candidate.candidateIndex))
+    .rejects.toThrow('frozen TRA video preparation');
 });
 
 const meanPixelDifference = async (left: Buffer, right: Buffer) => {

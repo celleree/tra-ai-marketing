@@ -11,7 +11,7 @@ import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-prepar
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
 import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
-import { HUMAN_FRAME_SELECTION_POLICY, canonicalizeVideoFrameReuseContext, type AutomaticVideoSelectionPolicy,
+import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, canonicalizeVideoFrameReuseContext, type AutomaticVideoSelectionPolicy,
   type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
@@ -335,6 +335,15 @@ export function releasePortfolioWork(current: CreativePortfolioJob, leaseId: str
   return { ...structuredClone(current), lease: null, updatedAtMs: now };
 }
 
+/** Candidate assessment is durably saved before this lease is released for the next bounded step. */
+export function continuePortfolioVideoFrameSelection(current: CreativePortfolioJob, leaseId: string, now = Date.now()) {
+  const { slot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (slot.videoSelection?.version !== 2 || slot.videoSelection.selection) {
+    throw new Error('Candidate assessment continuation requires a frozen unfinished selection.');
+  }
+  return { ...structuredClone(current), lease: null, updatedAtMs: now };
+}
+
 /** An explicit operator action; successful slots and the completed plan are never reset. */
 export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: number | null, now = Date.now()) {
   if (current.lease) throw new Error('Portfolio work is still leased.');
@@ -372,10 +381,9 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
     if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');
     slot.status = 'PENDING'; delete slot.error;
     if (slot.videoSelection && job.snapshot.batchPlan.creatives[slot.index - 1]?.strategy.execution.subjectSource === 'approved-tra-human'
-      && (slot.videoSelection.version !== 2
-        || (slot.videoSelection.selectionPolicy === 'human-frame-visual-quality-v1')
-        || (slot.videoSelection.selectionPolicy === HUMAN_FRAME_SELECTION_POLICY
-          && slot.videoSelection.selection && slot.videoSelection.selection.version !== 2))) {
+      && (slot.videoSelection.version === 1
+        || slot.videoSelection.selectionPolicy === HUMAN_FRAME_SELECTION_POLICY
+        || slot.videoSelection.selectionPolicy === 'human-frame-visual-quality-v1')) {
       delete slot.videoSelection;
     } else if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
     else if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;

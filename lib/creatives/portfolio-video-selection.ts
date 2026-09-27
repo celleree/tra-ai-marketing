@@ -5,10 +5,11 @@ import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/vid
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { videoSourceHash } from '@/lib/video/library-service';
+import { advanceCandidateHumanSelection, planCandidateHumanSelection } from '@/lib/video/candidate-human-selection';
 import { preflightVideoHumanFrameFromPoolWithCache, selectVideoFramesFromPoolWithCache, selectVideoHumanFrameFromPoolWithCache,
   type VideoSelectionCacheDependencies } from '@/lib/video/selection-cache';
 import { extractVideoSelectionFrames, loadSavedVideoSelectionContext, type VideoSelectionContext } from '@/lib/video/selection-context';
-import { HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY, createVideoFrameReuseContext,
+import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY, createVideoFrameReuseContext,
   type AutomaticVideoSelectionPolicy, type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 
 const MAX_CONCEPT_EXCERPT = 160;
@@ -19,15 +20,16 @@ const excerpt = (value: string) => value.length <= MAX_CONCEPT_EXCERPT ? value
 type Restored = { source: HydratedTraVideoSource; context: VideoSelectionContext; librarySha256: string };
 export type PortfolioVideoSelectionResult =
   | { status: 'BUSY' }
+  | { status: 'CONTINUE' }
   | { status: 'RETRY_REQUIRED'; reason: 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME' }
   | { status: 'NO_SUITABLE_HUMAN' }
   | { status: 'COMPLETE'; selection: GenerateVideoFrameSelection };
 export type PortfolioVideoSelectionPreflight = { status: 'READY' }
-  | Extract<PortfolioVideoSelectionResult, { status: 'COMPLETE' | 'NO_SUITABLE_HUMAN' }>;
+  | Exclude<PortfolioVideoSelectionResult, { status: 'CONTINUE' }>;
 
 export const portfolioVideoSelectionPolicy = (concept: PlannedCreativeConcept): AutomaticVideoSelectionPolicy =>
   concept.strategy.execution?.subjectSource === 'approved-tra-human'
-    ? HUMAN_FRAME_SELECTION_POLICY
+    ? CANDIDATE_HUMAN_FRAME_SELECTION_POLICY
     : METADATA_FRAME_SELECTION_POLICY;
 
 export const portfolioVideoFrameReuseContext = (selections: readonly GenerateVideoFrameSelection[]): VideoFrameReuseContext =>
@@ -103,8 +105,15 @@ export async function preflightPortfolioVideoFrames(
 ): Promise<PortfolioVideoSelectionPreflight> {
   const expectedPolicy = portfolioVideoSelectionPolicy(input.finalConcept);
   if (input.selectionPolicy !== expectedPolicy) throw new Error('Frozen automatic video selection policy does not match the final concept.');
-  if (input.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY) return { status: 'READY' };
+  if (input.selectionPolicy !== CANDIDATE_HUMAN_FRAME_SELECTION_POLICY
+    && input.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY) return { status: 'READY' };
   const restored = await Promise.all(completedDependencies(input.sourceAnalysis).map((dependency) => restoreOne(input.sources, dependency)));
+  if (input.selectionPolicy === CANDIDATE_HUMAN_FRAME_SELECTION_POLICY) {
+    const planned = await planCandidateHumanSelection(restored.map(({ source, context }) => ({ source, context })),
+      createPortfolioVideoSelectionConcept(input.finalConcept), input.reuseContext, input.cache.model, input.cache);
+    return planned.status === 'READY' ? { status: 'READY' } : planned.status === 'CONTINUE'
+      ? { status: 'READY' } : planned;
+  }
   const result = await preflightVideoHumanFrameFromPoolWithCache(humanBindings(restored),
     createPortfolioVideoSelectionConcept(input.finalConcept), input.reuseContext, input.cache);
   if (result.status === 'READY') return result;
@@ -123,6 +132,11 @@ export async function selectPortfolioVideoFrames(
   const reuseContext = input.reuseContext ?? { version: 1 as const, frames: [] };
   if (selectionPolicy !== expectedPolicy) throw new Error('Frozen automatic video selection policy does not match the final concept.');
   const concept = createPortfolioVideoSelectionConcept(input.finalConcept);
+  if (selectionPolicy === CANDIDATE_HUMAN_FRAME_SELECTION_POLICY) {
+    const sources = restored.map(({ source, context }) => ({ source, context }));
+    const plan = await planCandidateHumanSelection(sources, concept, reuseContext, input.cache.model, input.cache);
+    return plan.status === 'READY' ? advanceCandidateHumanSelection(plan, input.cache) : plan;
+  }
   if (selectionPolicy === HUMAN_FRAME_SELECTION_POLICY) {
     const result = await selectVideoHumanFrameFromPoolWithCache(humanBindings(restored), concept, reuseContext, input.cache);
     if (result.status !== 'COMPLETE') return result;
@@ -148,11 +162,18 @@ export async function hydratePortfolioVideoFrameSelection(
   const dependency = matches[0];
   if (dependency.identity.sourceVideoContentHash !== selection.sourceVideoContentHash) throw new Error('Persisted video selection source content hash does not match the frozen B1 dependency.');
   const restored = await restoreOne(input.sources, dependency);
-  const known = new Set(restored.context.library.representativeFrames.map((frame) => frame.id));
-  if (selection.frameIds.some((frameId) => !known.has(frameId))) throw new Error('Persisted video selection contains an unknown frame ID.');
-  if (selection.version !== 2 || !selection.sourceOverlays) {
+  if (selection.version === 3 && (selection.sourceVideoMediaId !== restored.source.media.id
+    || selection.librarySha256 !== restored.librarySha256 || !selection.candidateBindings)) {
+    throw new Error('Persisted video candidate selection does not match the frozen dependency.');
+  }
+  if (selection.version !== 3) {
+    const known = new Set(restored.context.library.representativeFrames.map((frame) => frame.id));
+    if (selection.frameIds.some((frameId) => !known.has(frameId))) throw new Error('Persisted video selection contains an unknown frame ID.');
+  }
+  if ((selection.version !== 2 && selection.version !== 3) || !selection.sourceOverlays) {
     throw new Error('Saved human-frame selection predates source-overlay assessment. Retry this slot to reassess frames before rendering.');
   }
-  const extracted = await extractVideoSelectionFrames(restored.source, restored.context, selection.frameIds);
+  const extracted = await extractVideoSelectionFrames(restored.source, restored.context,
+    selection.version === 3 ? selection.candidateBindings! : selection.frameIds);
   return { ...extracted, frames: extracted.frames.map((frame, index) => ({ ...frame, sourceOverlay: selection.sourceOverlays![index] })) };
 }

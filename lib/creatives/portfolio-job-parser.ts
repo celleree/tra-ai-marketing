@@ -15,7 +15,7 @@ import { videoPlanningSelectorBinding } from '@/lib/creatives/video-intelligence
 import { parseReferenceCatalog } from '@/lib/references/planning';
 import { isApprovedHumanId } from '@/lib/video/approved-human';
 import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
-import { HUMAN_FRAME_SELECTION_POLICY, LEGACY_HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY,
+import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, LEGACY_HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY,
   canonicalizeVideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 import { isSelectedPlanningProof } from '@/lib/proof/planning-selection';
 import { isCreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
@@ -26,7 +26,8 @@ const time = (value: unknown) => Number.isSafeInteger(value) && Number(value) >=
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const exact = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every(key => key in value);
-const automaticVideoSelectionPolicies = new Set<string>([HUMAN_FRAME_SELECTION_POLICY, LEGACY_HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY]);
+const automaticVideoSelectionPolicies = new Set<string>([CANDIDATE_HUMAN_FRAME_SELECTION_POLICY,
+  HUMAN_FRAME_SELECTION_POLICY, LEGACY_HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY]);
 const validVideoSelectorBindings = (value: unknown, context: string) => {
   if (!record(value) || !Array.isArray(value.entries)) return false;
   const expected = videoPlanningSelectorBinding(context);
@@ -68,7 +69,8 @@ const validSlotVideoSelection = (value: unknown, slotStatus: string, job: Creati
     } catch { return false; }
   }
   if (slotStatus === 'BLOCKED' && (value.version !== 2
-    || (value.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY
+    || (value.selectionPolicy !== CANDIDATE_HUMAN_FRAME_SELECTION_POLICY
+      && value.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY
       && value.selectionPolicy !== LEGACY_HUMAN_FRAME_SELECTION_POLICY))) return false;
   if (hasRetry) {
     if (slotStatus !== 'PENDING' || !record(value.retryAuthorization) || !exact(value.retryAuthorization, ['version'])
