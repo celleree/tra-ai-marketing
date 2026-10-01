@@ -142,6 +142,19 @@ describe('persisted draft frame and claim choices', () => {
     expect(loaded.profileSource).toBe('OPERATOR_SNAPSHOT'); expect(loaded.issues).toContainEqual(expect.objectContaining({ source: 'COMPANY_PROFILE' }));
     expect(loaded.draft).toEqual(saved.draft);
   });
+  it('retains draft choices and revision during a Proof read outage and allows deselection', async () => {
+    const saved = await save(); mocks.proofs.mockRejectedValue(new Error('Proof index read unavailable'));
+    const response = await route.GET(new Request(`http://localhost/api/video/review-selection?id=${saved.draft.id}`));
+    expect(response.status).toBe(200); const loaded = await response.json();
+    expect(loaded.draft).toEqual(saved.draft); expect(loaded.revision).toBe(saved.revision);
+    expect(loaded.issues).toEqual([2, 3].map(index => ({ source: 'CLAIM', index,
+      message: 'Selected Proof source is unavailable: Proof index read unavailable' })));
+    await expect(save()).rejects.toThrow('Proof index read unavailable');
+    const cleared = await saveVideoReviewDraft({ id: saved.draft.id, expectedRevision: loaded.revision,
+      choices: { ...saved.draft.choices, claims: [] } });
+    expect((await loadVideoReviewDraft(cleared.draft.id)).issues).toEqual([]);
+    expect(cleared.draft.claimSnapshots).toEqual([]);
+  });
 });
 
 describe('review selection API', () => {

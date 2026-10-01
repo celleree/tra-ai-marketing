@@ -55,10 +55,16 @@ export const loadVideoReviewDraft = async (id: string, dependencies: ReviewSourc
   const video = choices.video ? await loadReviewVideoSource(choices.video, dependencies).catch(error => {
     issues.push({ source: 'VIDEO', message: error instanceof Error ? error.message : 'Video source is unavailable.' }); return null;
   }) : null;
-  const proofs = await loadReviewProofSources(choices);
+  let proofReadFailure: string | undefined;
+  const proofs = await loadReviewProofSources(choices).catch(error => {
+    proofReadFailure = error instanceof Error ? error.message : 'Proof Library is unavailable.'; return [];
+  });
   if (video) choices.frames?.forEach((binding, index) => { try { validateReviewFrame(binding, video); }
     catch (error) { issues.push({ source: 'VIDEO', index, message: (error as Error).message }); } });
   choices.claims?.forEach((reference, index) => { try {
+    if (reference.type === 'PROOF' && proofReadFailure !== undefined) {
+      throw new ReviewSelectionError(`Selected Proof source is unavailable: ${proofReadFailure}`, 409);
+    }
     const current = hydrateReviewClaim(reference, choices, video, proofs);
     if (!isDeepStrictEqual(current, saved.draft.claimSnapshots[index])) throw new ReviewSelectionError('Selected source context changed.', 409);
   } catch (error) { issues.push({ source: 'CLAIM', index, message: (error as Error).message }); } });
