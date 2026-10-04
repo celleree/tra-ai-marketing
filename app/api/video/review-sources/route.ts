@@ -7,7 +7,7 @@ import { CreativeSourceHydrationError } from '@/lib/media/source-hydration';
 import { discoverVideoReviewSource } from '@/lib/video/review-source-discovery';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300;
 const headers = { 'Cache-Control': 'private, no-store' };
 export async function GET(request: Request) {
   const denied = await requireOperatorAccess(); if (denied) return denied;
