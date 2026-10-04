@@ -11,6 +11,7 @@ export function useVideoReviewDraft() {
   const mounted = useRef(false);
   const lastId = useRef<string | null>(null);
   const restoring = useRef<Promise<unknown>>(Promise.resolve());
+  const removedSources = useRef(new Set<string>());
   const client = useRef<ReturnType<typeof createReviewDraftClient> | null>(null);
   if (!client.current) client.current = createReviewDraftClient({
     onChange: next => { if (mounted.current) setState(next); },
@@ -22,26 +23,35 @@ export function useVideoReviewDraft() {
       window.history.replaceState(null, '', url);
     },
   });
+  const restore = async (id: string) => {
+    await client.current!.load(id);
+    const choices = client.current!.getState().choices;
+    if (choices?.video && removedSources.current.has(choices.video.locator.sourceVideoMediaId)) {
+      await client.current!.save(replaceReviewVideo(choices, null));
+    }
+  };
   useEffect(() => {
     mounted.current = true;
     const url = new URL(window.location.href);
     let id: string | null;
     try { id = reviewDraftIdForReopen(url, window.localStorage); } catch { id = reviewDraftIdForReopen(url); }
     lastId.current = id;
-    if (id !== null) restoring.current = client.current!.load(id).catch(() => undefined);
+    if (id !== null) restoring.current = restore(id).catch(() => undefined);
     return () => { mounted.current = false; };
   }, []);
   const replaceVideo = async (video: ReviewVideoReference | null) => {
+    if (video) removedSources.current.delete(video.locator.sourceVideoMediaId);
     await restoring.current;
     const choices = client.current!.getState().choices;
     if (choices) return client.current!.save(replaceReviewVideo(choices, video)).catch(() => undefined);
   };
   const removeVideo = async (mediaId: string) => {
+    removedSources.current.add(mediaId);
     await restoring.current;
     if (client.current!.getState().choices?.video?.locator.sourceVideoMediaId === mediaId) return replaceVideo(null);
   };
   return { state, save: client.current.save, reload: () => {
     const id = lastId.current;
-    if (id) return client.current!.load(id).catch(() => undefined);
+    if (id) return restoring.current = restore(id).catch(() => undefined);
   }, replaceVideo, removeVideo };
 }

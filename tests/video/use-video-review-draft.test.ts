@@ -20,7 +20,9 @@ beforeEach(() => {
   vi.resetAllMocks(); mocks.effects = []; values = new Map(); replace = vi.fn();
   vi.stubGlobal('window', { location: { href: `http://localhost/?review=${id}` }, history: { replaceState: replace },
     localStorage: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } } });
-  request = vi.fn<typeof fetch>().mockImplementation(async () => Response.json(response)); vi.stubGlobal('fetch', request);
+  request = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => init?.method === 'POST'
+    ? Response.json({ ...response, draft: { ...response.draft, choices: JSON.parse(init.body as string).choices }, revision: 'revision-2', issues: [] })
+    : Response.json(response)); vi.stubGlobal('fetch', request);
 });
 afterEach(() => { expect(request.mock.calls.every(([url]) => String(url).startsWith('/api/video/review-selection'))).toBe(true);
   vi.unstubAllGlobals(); });
@@ -61,5 +63,21 @@ describe('Create-owned saved review lifecycle', () => {
     expect(mocks.update.mock.calls.at(-1)![0].error).toContain('Temporarily unavailable');
     await hook.reload(); expect(request).toHaveBeenCalledTimes(2);
     expect(mocks.update.mock.calls.at(-1)![0].saved).toEqual(response);
+  });
+  it('retains removal intent when initial restoration fails and clears dependent choices after a successful reload', async () => {
+    let resolve!: (response: Response) => void;
+    request.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
+    const { hook } = mount(); const removal = hook.removeVideo(mediaId); await Promise.resolve();
+    resolve(Response.json({ error: 'Connection unavailable' }, { status: 503 })); await removal;
+    expect(request).toHaveBeenCalledTimes(1);
+    request.mockImplementation(async (_url, init) => init?.method === 'POST'
+      ? Response.json({ ...response, draft: { ...response.draft, choices: JSON.parse(init.body as string).choices }, revision: 'revision-2', issues: [] })
+      : Response.json(response));
+    await hook.reload();
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(request.mock.calls[2][1]!.body as string)).toMatchObject({ id, expectedRevision: 'revision-1',
+      choices: { video: null, frames: [], claims: [] } });
+    expect(mocks.update.mock.calls.at(-1)![0]).toMatchObject({ choices: { video: null, frames: [], claims: [] },
+      saved: { revision: 'revision-2' }, error: '' });
   });
 });
