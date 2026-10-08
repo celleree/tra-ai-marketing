@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
+import { VideoReviewPanel } from '@/components/creative-generator/video-review-panel';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
 import { useVideoReviewDraft } from '@/components/creative-generator/use-video-review-draft';
@@ -106,7 +107,7 @@ export function CreativeGenerator() {
     .map(slot => [slot.index, slot.error || 'Could not be completed.']));
   const displayGenerationError = creationMode === 'generate' ? portfolio.error || generationError : generationError;
 
-  const ready = Boolean(context.trim());
+  const ready = Boolean(context.trim()) && videoReview.canGenerate();
 
   useEffect(() => {
     if (handoffConsumedRef.current) return;
@@ -172,7 +173,7 @@ export function CreativeGenerator() {
   };
 
   const generate = async () => {
-    if (!context.trim() || generating) return;
+    if (!context.trim() || generating || !videoReview.canGenerate()) return;
     setGenerationError('');
     try {
       const brand = readStoredBrandGuidance();
@@ -193,6 +194,7 @@ export function CreativeGenerator() {
   useEffect(() => {
     if (
       !handoffGenerate ||
+      !videoReview.canGenerate() ||
       !context.trim() ||
       generating ||
       handoffGenerationStartedRef.current
@@ -203,7 +205,7 @@ export function CreativeGenerator() {
     handoffGenerationStartedRef.current = true;
     setHandoffGenerate(false);
     void generate();
-  }, [handoffGenerate, context, sourceAssets, variationCount]);
+  }, [handoffGenerate, context, sourceAssets, variationCount, ready, generating]);
 
   return (
     <main className="workspace-shell">
@@ -291,11 +293,16 @@ export function CreativeGenerator() {
                   />
                 )}
 
-                {creationMode === 'generate' ? <PortfolioProgressPanel portfolio={portfolio} /> : null}
+                {creationMode === 'generate' ? <>
+                  <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} />
+                  <PortfolioProgressPanel portfolio={portfolio} canAdvance={videoReview.canGenerate} />
+                </> : null}
                 {videoReview.state.error || videoReview.state.saved?.issues.length ? (
                   <div role="alert" className="error-message">
                     <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ')}</p>
                     <button type="button" disabled={videoReview.state.pending > 0} onClick={() => void videoReview.reload()}>Reload saved review</button>
+                    {videoReview.state.saved?.issues.length ? <button type="button" disabled={generating || videoReview.state.pending > 0 || Boolean(videoReview.state.error)}
+                      onClick={() => void videoReview.clearUnavailable()}>Remove unavailable material</button> : null}
                   </div>
                 ) : null}
                 {displayGenerationError ? (

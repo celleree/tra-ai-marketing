@@ -10,7 +10,7 @@ const videoLabel = {
 } as const;
 const activeVideoPhases = new Set(['PREPARING', 'TRANSCRIBING', 'OBSERVING', 'FINALIZING']);
 
-export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<typeof useCreativePortfolio> }) {
+export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: { portfolio: ReturnType<typeof useCreativePortfolio>; canAdvance?: () => boolean }) {
   const job = portfolio.response?.job;
   if (!job) return null;
 
@@ -56,17 +56,17 @@ export function PortfolioProgressPanel({ portfolio }: { portfolio: ReturnType<ty
     <div className={styles.actions}>
       {portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.stopped} onClick={portfolio.stop}>
         {portfolio.stopped ? 'Stopping generation…' : 'Stop generation'}
-      </button> : portfolioCanAdvance(job) ? <button type="button" className="button button-primary" onClick={() => void portfolio.resume()}>Resume generation</button> : null}
+      </button> : portfolioCanAdvance(job) ? <button type="button" className="button button-primary" disabled={!canAdvance()} onClick={() => { if (canAdvance()) void portfolio.resume(); }}>Resume generation</button> : null}
       <a href={`?portfolio=${job.id}`} target="_blank" rel="noreferrer">Open saved portfolio</a>
     </div>
 
     {retryFailure ? <div className={styles.failures} aria-live="polite">
       <p>Retrying failed work may make another paid call.</p>
-      {job.planningError ? <p>{job.planningError} <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease)}
-        onClick={() => void portfolio.retry(null)}>Retry planning</button></p> : null}
+      {job.planningError ? <p>{job.planningError} <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease) || !canAdvance()}
+        onClick={() => { if (canAdvance()) void portfolio.retry(null); }}>Retry planning</button></p> : null}
       {failed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}{' '}
-        <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease)}
-          onClick={() => void portfolio.retry(slot.index)}>Retry creative {slot.index}</button></p>)}
+        <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease) || !canAdvance()}
+          onClick={() => { if (canAdvance()) void portfolio.retry(slot.index); }}>Retry creative {slot.index}</button></p>)}
     </div> : null}
     {blocked.length ? <div className={styles.failures} aria-live="polite">
       {blocked.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error}</p>)}
