@@ -28,6 +28,20 @@ afterEach(() => { expect(request.mock.calls.every(([url]) => String(url).startsW
   vi.unstubAllGlobals(); });
 
 describe('Create-owned saved review lifecycle', () => {
+  it('derives edits from restored choices and blocks generation synchronously through pending/failed saves', async () => {
+    let resolve!: (response: Response) => void;
+    request.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
+    const { hook } = mount();
+    const editing = hook.update(response.draft.choices.video as never, choices => ({ ...choices, frames: [] }));
+    expect(hook.canGenerate()).toBe(false); await Promise.resolve(); expect(request).toHaveBeenCalledTimes(1);
+    resolve(Response.json({ ...response, issues: [] })); await editing;
+    expect(JSON.parse(request.mock.calls[1][1]!.body as string).choices.claims).toEqual(response.draft.choices.claims);
+    expect(hook.canGenerate()).toBe(true);
+    request.mockRejectedValueOnce(new Error('Save failed'));
+    const failure = hook.update(response.draft.choices.video as never, choices => ({ ...choices, frames: [] }));
+    expect(hook.canGenerate()).toBe(false); await failure; expect(hook.canGenerate()).toBe(false);
+    request.mockResolvedValueOnce(Response.json({ ...response, issues: [] })); await hook.reload(); expect(hook.canGenerate()).toBe(true);
+  });
   it('loads URL choices and issues, remembers only the ID, and restores on browser fallback reopen without saves or paid work', async () => {
     const first = mount(); await settled();
     expect(mocks.update.mock.calls.at(-1)![0]).toMatchObject({ choices: response.draft.choices, saved: response });

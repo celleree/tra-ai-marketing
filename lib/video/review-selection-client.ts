@@ -25,8 +25,9 @@ export const replaceReviewVideo = (choices: ReviewSelectionChoices, video: Revie
 
 /** One queue owns server revisions. A failed/uncertain write requires a server reload before any further save. */
 export const createReviewDraftClient = (options: { request?: typeof fetch; onChange?: (state: ReviewDraftClientState) => void;
-  onSaved?: (id: string) => void } = {}) => {
+  onSaved?: (id: string) => void; onCreated?: (id: string) => void; createId?: () => string } = {}) => {
   let state = structuredClone(EMPTY_REVIEW_CLIENT_STATE), tail = Promise.resolve(), blocked = false, edit = 0;
+  let draftId: string | null = null;
   const publish = (patch: Partial<ReviewDraftClientState>) => {
     state = { ...state, ...patch }; options.onChange?.(structuredClone(state));
   };
@@ -49,6 +50,7 @@ export const createReviewDraftClient = (options: { request?: typeof fetch; onCha
     return result;
   };
   const load = (id: string) => {
+    draftId = id;
     const version = ++edit;
     return enqueue(async () => {
       if (!/^review_[a-f0-9]{32}$/.test(id)) throw new Error('Review draft ID is invalid.');
@@ -59,15 +61,31 @@ export const createReviewDraftClient = (options: { request?: typeof fetch; onCha
     });
   };
   const save = (choices: ReviewSelectionChoices) => {
+    if (!draftId) {
+      draftId = (options.createId ?? (() => `review_${crypto.randomUUID().replaceAll('-', '')}`))();
+      options.onCreated?.(draftId);
+    }
     const snapshot = structuredClone(choices), version = ++edit;
     publish({ choices: snapshot });
     return enqueue(async () => {
       if (blocked) throw new Error('Review state needs a server reload.');
-      const saved = await request('/api/video/review-selection', { id: state.saved?.draft.id ?? null,
+      const saved = await request('/api/video/review-selection', { id: state.saved?.draft.id ?? draftId,
         expectedRevision: state.saved?.revision ?? null, choices: snapshot });
       publish({ saved, ...(edit === version ? { choices: saved.draft.choices } : {}), error: '', conflict: false });
       options.onSaved?.(saved.draft.id); return saved;
     });
   };
-  return { load, save, getState: () => structuredClone(state) };
+  const recover = () => enqueue(async () => {
+    if (!draftId) return;
+    try {
+      const saved = await request(`/api/video/review-selection?id=${encodeURIComponent(draftId)}`);
+      blocked = false; publish({ saved, choices: saved.draft.choices, error: '', conflict: false });
+      options.onSaved?.(saved.draft.id);
+    } catch (error) {
+      // A first write may never have reached storage. Keep visible choices for an explicit retry.
+      if (state.saved || (error as { status?: number }).status !== 404) throw error;
+      blocked = false; publish({ error: '', conflict: false });
+    }
+  });
+  return { load, save, recover, getState: () => structuredClone(state) };
 };

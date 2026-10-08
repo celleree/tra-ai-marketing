@@ -1,0 +1,11 @@
+.card { margin-top: 16px; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.heading strong { color: #17212b; font-size: 15px; }
+.heading span, .metadata { color: #687585; font-size: 12px; }
+.frames { display: flex; gap: 12px; overflow-x: auto; padding: 12px 0; }
+.frame { flex: 0 0 112px; cursor: pointer; font-size: 12px; }
+.frame img { display: block; width: 112px; height: 80px; border-radius: 8px; object-fit: cover; margin-bottom: 6px; }
+.frame input { accent-color: #17212b; }
+.nearby { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; }
+.advanced { display: inline-block; margin-top: 16px; color: #687585; font-size: 12px; }
+@media (max-width: 600px) { .frame { flex-basis: 92px; } .frame img { width: 92px; height: 68px; } }

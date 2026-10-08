@@ -70,6 +70,21 @@ describe('server-authoritative review draft restoration', () => {
 });
 
 describe('serialized conditional review writes', () => {
+  it('recovers a committed first write after a lost response using its stable ID and server revision', async () => {
+    const request = vi.fn<typeof fetch>().mockRejectedValueOnce(new Error('Connection lost')).mockResolvedValueOnce(Response.json(saved()));
+    const client = createReviewDraftClient({ request, createId: () => id });
+    await expect(client.save(selected())).rejects.toThrow('Connection lost');
+    expect(JSON.parse(request.mock.calls[0][1]!.body as string).id).toBe(id);
+    await client.recover(); expect(request.mock.calls[1][0]).toBe(`/api/video/review-selection?id=${id}`);
+    expect(client.getState()).toMatchObject({ error: '', saved: { revision: 'revision-1' }, choices: selected() });
+  });
+  it('keeps visible first choices after authoritative 404, allowing explicit retry with the same ID', async () => {
+    const request = vi.fn<typeof fetch>().mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce(Response.json({ error: 'Not found' }, { status: 404 })).mockResolvedValueOnce(Response.json(saved()));
+    const client = createReviewDraftClient({ request, createId: () => id });
+    await expect(client.save(selected())).rejects.toThrow(); await client.recover(); await client.save(client.getState().choices!);
+    expect(request.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => JSON.parse(init!.body as string).id)).toEqual([id, id]);
+  });
   it('serializes writes, uses returned revisions and prevents an old response from replacing newer operator choices', async () => {
     const first = deferred<Response>();
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(saved())).mockImplementationOnce(() => first.promise)
@@ -85,9 +100,9 @@ describe('serialized conditional review writes', () => {
   });
   it('queues initial creation once, then saves subsequent choices under the returned draft ID', async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(saved())).mockResolvedValueOnce(Response.json(saved(selected(), 'revision-2')));
-    const client = createReviewDraftClient({ request }); await Promise.all([client.save(selected()), client.save(selected())]);
+    const client = createReviewDraftClient({ request, createId: () => id }); await Promise.all([client.save(selected()), client.save(selected())]);
     expect(request.mock.calls.map(([, init]) => JSON.parse(init!.body as string))).toEqual([
-      { id: null, expectedRevision: null, choices: selected() }, { id, expectedRevision: 'revision-1', choices: selected() }]);
+      { id, expectedRevision: null, choices: selected() }, { id, expectedRevision: 'revision-1', choices: selected() }]);
   });
   it.each([409, 503])('stops queued saves after HTTP %s, preserves newest local choices and reloads before writing again', async status => {
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(saved())).mockResolvedValueOnce(Response.json({ error: 'Changed or unavailable' }, { status }));
