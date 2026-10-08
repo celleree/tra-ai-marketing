@@ -14,7 +14,7 @@ const video = { locator: { sourceVideoMediaId: mediaId }, libraryId: 'library' }
 const bindings = Array.from({ length: 5 }, (_, candidateIndex) => ({ frameId: `frame-${candidateIndex}`, representativeFrameId: `representative-${candidateIndex}`,
   candidateIndex, timestampMs: candidateIndex * 4000, frameSha256: `${candidateIndex}` }));
 const source = { status: { phase: 'COMPLETE' }, review: { video, frameBindings: bindings,
-  library: { representativeFrames: bindings.slice(0, 4).map(binding => ({ ...binding, thumbnailDataUrl: `data:image/jpeg;base64,${binding.frameId}` })) } } } as unknown as ReviewSource;
+  onScreenStatements: [], library: { transcript: { segments: [] }, representativeFrames: bindings.slice(0, 4).map(binding => ({ ...binding, thumbnailDataUrl: `data:image/jpeg;base64,${binding.frameId}` })) } } } as unknown as ReviewSource;
 let draft: ReturnType<typeof useVideoReviewDraft>, request: ReturnType<typeof vi.fn<typeof fetch>>;
 const render = () => { hooks.cursor = 0; hooks.effects = []; return VideoReviewPanel({ videos: [{ id: mediaId, name: 'Source' }], draft }); };
 const nodes = (tree: unknown): ReactElement<Record<string, unknown>>[] => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(nodes)
@@ -93,7 +93,7 @@ describe('native Create frame review', () => {
     (collapse.props.onClick as () => void)(); expect(html()).toContain('Video material · 0 frames');
     const edit = nodes(render()).find(node => node.type === 'button' && node.props.children === 'Edit')!;
     (edit.props.onClick as () => void)(); expect(draft.state.choices).toEqual(choices);
-    draft.state.saved = { issues: [] } as never; expect(html()).toContain('Saved ✓');
+    draft.state.saved = { issues: [], draft: { claimSnapshots: [] } } as never; expect(html()).toContain('Saved ✓');
     draft.state.pending = 1; expect(html()).toContain('Saving…');
     draft.state.pending = 0; draft.state.error = 'Save failed'; expect(html()).toContain('Save failed');
     draft.state.conflict = true; expect(html()).toContain('Conflict / reload required');
