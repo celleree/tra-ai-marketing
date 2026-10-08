@@ -107,20 +107,14 @@ Detailed planning/implementation-cycle/review/handoff rules live in `docs/agent-
 
 ## Model and reasoning routing
 
-Optimize for the lowest expected total cost of a correct, verified result, including retries and rework. Choose model and reasoning effort independently.
+**TRA coding-agent model allowlist (hard rule):** Only GPT-6 Luna (`gpt-6-luna`) and GPT-6.1 Sol (`gpt-6.1-sol`) are authorized for Codex launcher sessions, workers, subagents, implementation/repair, orchestration and fresh independent reviews. Never launch or silently fall back to any other coding model, including GPT-6 Sol, GPT-6 Astra, Terra, or GPT-5.6 variants. If an allowed model is unavailable or its exact ID cannot be confirmed, stop and report the blocker. This scope is coding agents only; do not change the application's existing image/AI provider models.
 
-Starting points:
-- Luna: mechanical/repetitive work, extraction/classification, targeted inspection, very easy tasks, and obvious narrow repairs.
-- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation, and known bounded UI/runtime repairs.
-- Sol: difficult but bounded planning, debugging, unfamiliar subsystems, complex implementation, substantial review.
-- Astra: architecture, cross-phase decisions, difficult root-cause debugging, high-risk review, large-context orchestration, repeated failures, expensive mistakes.
+Optimize for the lowest expected total cost of a correct, verified result:
+- **GPT-6 Luna:** mechanical and repetitive work, inspection, routing, simple local edits/tests and launch/setup verification. Prefer Low/Medium reasoning.
+- **GPT-6.1 Sol:** difficult implementation/debugging, cross-slice integration, architecture and high-risk independent review. Prefer Medium/High reasoning as needed.
+- For the overnight Video Review supervisor, both implementations and fresh independent reviews default to `gpt-6.1-sol`; `gpt-6-luna` is an explicitly allowed override for a suitable role. The supervisor must validate the exact allowlist at start and resume.
 
-Reasoning: Low for straightforward/local work, Medium for normal implementation/investigation, High for difficult ambiguity/integration/consequential review, Extra-high only when clearly justified.
-
-Before using very high reasoning on a lower-tier model, compare the next model tier at Low/Medium and choose the route with lower expected total cost. If a preferred route is unavailable, use the next-cheapest configuration likely to succeed. Repeated repository-specific evidence may override these defaults.
-
-Do not retry a failed model/reasoning configuration unchanged without new evidence. Escalate only when difficulty, ambiguity, context, risk, or failed verification warrants it.
-Do not escalate model tier merely because a reviewer found a defect. Route the repair by the remaining diagnosis/implementation difficulty: known mechanical fixes stay Luna/Terra; Sol/Astra are reserved for genuinely harder reasoning, integration, architecture, or risk.
+Choose reasoning separately; do not escalate to a forbidden model under any circumstances. Do not repeat a failed model/reasoning configuration unchanged without new evidence. Fresh independent reviewer context is required where review policy calls for it, including when implementation and review use the same model.
 
 The coordinating agent owns the concrete Codex route; detailed launch/handoff format lives in `docs/agent-workflow.md`.
 
