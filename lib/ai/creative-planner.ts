@@ -3,6 +3,7 @@ import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
+import type { VideoReviewHandoff } from '@/lib/creatives/review-handoff';
 import { parseCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
 import { loadVideoLinkedPlanningInputs, moveVideoLinkedPassagesOutOfSourceAnalysis } from '@/lib/proof/video-linked-planning';
@@ -35,6 +36,7 @@ const MAX_TEXT_LENGTH = 1000;
 const planningOutputTokens = (count: number) => 4096 + 1536 * count;
 
 const PLANNER_RULES = `
+operatorSelectedSourceGuidance, when supplied, is the operator's immutable source-priority snapshot for this portfolio, including repairs. Preserve exact selected wording, timestamps, surrounding qualifications, source identity and restrictions. These are draft creative inputs, never advertising approval or a replacement for proofCatalog/proofSelection. A selected Proof field, verified fact, transcript or on-screen claim does not authorize a quote, attribution, testimonial, promise or factual claim. Only the existing approved evidence path can do that. Frame observations are analysis-only and may describe a representative rather than the exact candidate; they never grant human approval or permission to attach pixels. MANUAL_CLOSED_POOL identifies the complete reviewed frame pool; do not substitute other video frames. AUTOMATIC retains normal source selection. Follow company guardrails and keep this guidance out of render instructions except for supported, deliberately planned creative content.
 Plan a batch of original static Meta ad concepts for Tax Relief Advocates (TRA).
 ${TAX_DOCUMENT_PLANNING_GUIDANCE}
 Consider alternatives internally; return the strongest concepts first. Select distinct fits to approved TRA context, without performance predictions or calling concepts likely winners.
@@ -199,6 +201,7 @@ const parseConcept = (
 };
 
 export type CreativeBatchPlannerArgs = {
+  operatorSelectedSourceGuidance?: VideoReviewHandoff['operatorSelectedSourceGuidance'];
   count: number;
   context: string;
   proofRetrievalQuery?: string;
@@ -283,6 +286,7 @@ export async function requestCreativeBatch(
         { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
           creativeContext: args.context,
+          ...(args.operatorSelectedSourceGuidance ? { operatorSelectedSourceGuidance: args.operatorSelectedSourceGuidance } : {}),
           requestedCount: expectedIndexes.length,
           ...(repair ? {
             portfolioCount: args.count,
@@ -392,7 +396,9 @@ export const creativeRepairFeedback = (
 
 export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise<CreativeBatchPlan> {
   const initialPlan = await checkpointPaidPreparation('initial-plan', args, () => requestCreativeBatch(args));
-  const initialAudit = await checkpointPaidPreparation('initial-audit', initialPlan.creatives, () => auditCreativePortfolio(initialPlan.creatives));
+  const initialAudit = await checkpointPaidPreparation('initial-audit', args.operatorSelectedSourceGuidance
+    ? { concepts: initialPlan.creatives, guidance: args.operatorSelectedSourceGuidance } : initialPlan.creatives,
+    () => auditCreativePortfolio(initialPlan.creatives, args.operatorSelectedSourceGuidance));
   const initialIssue = getCreativeDiversityIssue(initialPlan.creatives, initialAudit);
   if (!initialIssue) return { ...initialPlan, portfolioAudit: initialAudit };
 
@@ -413,7 +419,9 @@ export async function planCreativeBatch(args: CreativeBatchPlannerArgs): Promise
     plannerModel: initialPlan.plannerModel,
     reasoningEffort: initialPlan.reasoningEffort,
   };
-  const repairedAudit = await checkpointPaidPreparation('repair-audit', repairedPlan.creatives, () => auditCreativePortfolio(repairedPlan.creatives));
+  const repairedAudit = await checkpointPaidPreparation('repair-audit', args.operatorSelectedSourceGuidance
+    ? { concepts: repairedPlan.creatives, guidance: args.operatorSelectedSourceGuidance } : repairedPlan.creatives,
+    () => auditCreativePortfolio(repairedPlan.creatives, args.operatorSelectedSourceGuidance));
   const repairedIssue = getCreativeDiversityIssue(repairedPlan.creatives, repairedAudit);
   if (repairedIssue) throw new Error(`Portfolio remains insufficiently distinct after one planning repair: ${repairedIssue}. No images were generated.`);
   return { ...repairedPlan, portfolioAudit: repairedAudit };

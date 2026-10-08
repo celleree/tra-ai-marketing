@@ -1,4 +1,5 @@
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+import type { VideoReviewHandoff, VideoReviewReference } from '@/lib/creatives/review-handoff';
 import {
   CREATIVE_CATEGORIES,
   type CreativeCategoryId,
@@ -23,6 +24,7 @@ import {
 } from '@/lib/video/generation-selection-contract';
 
 export type GenerateCreativeRequest = {
+  videoReview?: VideoReviewReference;
   sourceAssets?: CreativeSourceSelection[];
   brandLogoMediaId?: string;
   brandColors?: string[];
@@ -41,6 +43,8 @@ export type ValidGenerateCreativeRequest = Omit<
   sourceAssets: CreativeSourceSelection[];
   placement: CreativePlacement;
   proofRetrievalQuery?: string;
+  /** Server-resolved at durable admission; never accepted from the client. */
+  reviewHandoff?: VideoReviewHandoff;
 };
 
 export type PlannedCreative = {
@@ -92,6 +96,14 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
   }
 
   const body = input as Record<string, unknown>;
+  const review = body.videoReview as Record<string, unknown> | undefined;
+  if (body.reviewHandoff !== undefined || (review !== undefined && (maximumCount !== MAX_PORTFOLIO_CREATIVES
+    || !review || typeof review !== 'object' || Array.isArray(review)
+    || Object.keys(review).length !== 2 || typeof review.draftId !== 'string' || !/^review_[a-f0-9]{32}$/.test(review.draftId)
+    || typeof review.revision !== 'string' || !review.revision.trim() || review.revision.length > 1024
+    || body.videoFrameSelection !== undefined))) {
+    return { success: false, error: 'Use a saved videoReview ID/revision through portfolios without videoFrameSelection or client handoff data.' };
+  }
 
   if (body.mediaId !== undefined || body.uploadMode !== undefined) {
     return {
@@ -217,6 +229,7 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
   return {
     success: true,
     data: {
+      ...(review ? { videoReview: { draftId: review.draftId as string, revision: review.revision as string } } : {}),
       sourceAssets,
       placement,
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),

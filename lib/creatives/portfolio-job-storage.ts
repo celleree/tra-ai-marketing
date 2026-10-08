@@ -7,6 +7,7 @@ import { isPortfolioId, parseCreativePortfolioJob } from '@/lib/creatives/portfo
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
+import { resolveVideoReviewHandoff } from '@/lib/creatives/review-handoff';
 
 const key = (id: string) => {
   if (!isPortfolioId(id)) throw new Error('Invalid creative portfolio ID.');
@@ -26,20 +27,31 @@ export async function readCreativePortfolio(id: string, storage = getVideoIntell
 }
 export async function createCreativePortfolio(request: ValidGenerateCreativeRequest, storage = getVideoIntelligenceStorage(), now = Date.now(),
   submission?: { operatorId: string; id: string }) {
-  const job = newCreativePortfolio(request, now);
+  // Reconcile the same admitted intent before touching the mutable review draft again.
+  const { reviewHandoff: _handoff, ...intent } = request;
+  const matches = (existing: CreativePortfolioJob) => {
+    const { reviewHandoff: _saved, ...savedIntent } = existing.request;
+    return isDeepStrictEqual(savedIntent, intent);
+  };
+  let portfolioId: string | undefined;
   if (submission) {
     const id = parseSubmissionId(submission.id);
     if (!id || !submission.operatorId) throw new SubmissionConflictError('Invalid portfolio submission identity.');
-    job.id = 'portfolio_' + createHash('sha256').update(JSON.stringify([submission.operatorId, id])).digest('hex').slice(0, 32);
-    const existing = await readCreativePortfolio(job.id, storage);
+    portfolioId = 'portfolio_' + createHash('sha256').update(JSON.stringify([submission.operatorId, id])).digest('hex').slice(0, 32);
+    const existing = await readCreativePortfolio(portfolioId, storage);
     if (existing) {
-      if (!isDeepStrictEqual(existing.request, request)) throw new SubmissionConflictError('Submission inputs changed. Start a new portfolio.');
+      if (!matches(existing)) throw new SubmissionConflictError('Submission inputs changed. Start a new portfolio.');
       return existing;
     }
   }
+  const reviewHandoff = intent.videoReview ? await resolveVideoReviewHandoff({ ...intent.videoReview,
+    traVideoMediaIds: intent.sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => source.mediaId),
+    currentCompanyProfile: intent.companyProfile }, { storage }) : undefined;
+  const job = newCreativePortfolio({ ...intent, ...(reviewHandoff ? { reviewHandoff } : {}) }, now);
+  if (portfolioId) job.id = portfolioId;
   if (!await storage.write(key(job.id), bytes(job), null)) {
     const existing = submission ? await readCreativePortfolio(job.id, storage) : null;
-    if (!existing || !isDeepStrictEqual(existing.request, request)) throw new SubmissionConflictError('Creative portfolio submission could not be reconciled.');
+    if (!existing || !matches(existing)) throw new SubmissionConflictError('Creative portfolio submission could not be reconciled.');
     return existing;
   }
   return job;

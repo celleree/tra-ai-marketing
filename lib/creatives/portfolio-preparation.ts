@@ -272,6 +272,7 @@ export async function advancePortfolioPreparation(
     ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, data.placement)
     : undefined;
   const plannerArgs = {
+    ...(data.reviewHandoff ? { operatorSelectedSourceGuidance: data.reviewHandoff.operatorSelectedSourceGuidance } : {}),
     count: data.variationCount,
     context: generationContext,
     proofRetrievalQuery: data.proofRetrievalQuery,
