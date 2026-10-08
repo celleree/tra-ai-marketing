@@ -106,9 +106,16 @@ class Supervisor:
             self.run.stop_check()
             snap = self.snapshot(p)
             passed, values = check_snapshot(snap['pr'], p['head'], snap['checks'], snap['statuses'])
+            ids = {name: max((x.get('id', 0) for x in snap['checks'] if x['name'] == name), default=0)
+                   for name in ('verify', 'pr-reviewability')}
+            if p.get('after_check_ids'):
+                passed = passed and all(ids[name] > old for name, old in p['after_check_ids'].items())
             p['ci'] = {'head': p['head'], 'checks': values, 'verified_at': time.time(), 'passed': passed}
+            p['ci']['check_ids'] = ids
             self.save('Wait for exact-HEAD GitHub CI and Vercel')
             if passed:
+                p.pop('after_check_ids', None)
+                self.save()
                 return
             if time.monotonic() >= deadline:
                 raise Blocked('Required GitHub CI/Vercel checks missing or pending at timeout')
@@ -378,6 +385,8 @@ class Supervisor:
                     if updated != body:
                         path = self.run.root / f'{p["name"]}-review-body.md'
                         path.write_text(updated)
+                        p['after_check_ids'] = p['ci']['check_ids']
+                        self.save('Record review metadata and wait for triggered CI reruns')
                         command(['gh', 'api', '--method', 'PATCH', f'repos/{REPO}/pulls/{p["pr"]}',
                                  '-F', f'body=@{path}'])
                 p['step'] = 'final-ci'

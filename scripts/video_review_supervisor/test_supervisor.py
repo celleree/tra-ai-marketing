@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from contracts import SCHEMA, validate
 from runtime import Blocked, Run, atomic, read
@@ -186,6 +187,41 @@ class SupervisorTests(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn('dry-run proof', result.stderr)
+
+    def test_real_pr_body_matches_ci_metadata_contract(self):
+        run = Run(self.root)
+        run.state = {'repo': str(self.root), 'dry_run': False, 'phase': 0}
+        p = {'worktree': str(self.root), 'head': 'a' * 40, 'branch': 'codex/fixture',
+             'name': 'slice-2', 'base': 'b' * 40, 'tests': ['offline checks'], 'dependencies': [],
+             'result': {'large_pr_justification': 'Coherent unit', 'review_order': ['contracts', 'tests']}}
+        try:
+            with patch('supervisor.git'), patch('supervisor.command'), patch('supervisor.github', side_effect=[[], [{'number': 1}]]):
+                Supervisor(run).publish(p)
+            body = (self.root / 'slice-2-pr.md').read_text()
+            self.assertIn('\n- Large PR justification: ', body)
+            self.assertIn('\n- Review order: ', body)
+        finally:
+            run.close()
+
+    def test_metadata_update_requires_new_ci_runs(self):
+        run = Run(self.root)
+        run.state = {'repo': str(self.root), 'dry_run': True, 'ci_timeout': 0}
+        p = {'head': 'abc', 'after_check_ids': {'verify': 1, 'pr-reviewability': 2}}
+        snapshot = {'pr': {'head': {'sha': 'abc'}, 'base': {'ref': 'staging'}, 'state': 'open'},
+                    'checks': [{'id': i, 'name': name, 'head_sha': 'abc', 'status': 'completed', 'conclusion': 'success'}
+                               for i, name in ((1, 'verify'), (2, 'pr-reviewability'))],
+                    'statuses': [{'context': 'Vercel', 'state': 'success'}]}
+        try:
+            supervisor = Supervisor(run)
+            with patch.object(supervisor, 'snapshot', return_value=snapshot):
+                with self.assertRaises(Blocked):
+                    supervisor.ci(p)
+                for check in snapshot['checks']:
+                    check['id'] += 10
+                supervisor.ci(p)
+                self.assertNotIn('after_check_ids', p)
+        finally:
+            run.close()
 
 
 if __name__ == '__main__':
