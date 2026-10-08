@@ -5,12 +5,14 @@ import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/vid
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { videoSourceHash } from '@/lib/video/library-service';
-import { advanceCandidateHumanSelection, planCandidateHumanSelection } from '@/lib/video/candidate-human-selection';
+import { advanceCandidateHumanSelection, planCandidateHumanSelection, planManualCandidateHumanSelection } from '@/lib/video/candidate-human-selection';
 import { preflightVideoHumanFrameFromPoolWithCache, selectVideoFramesFromPoolWithCache, selectVideoHumanFrameFromPoolWithCache,
   type VideoSelectionCacheDependencies } from '@/lib/video/selection-cache';
 import { extractVideoSelectionFrames, loadSavedVideoSelectionContext, type VideoSelectionContext } from '@/lib/video/selection-context';
 import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY, createVideoFrameReuseContext,
   type AutomaticVideoSelectionPolicy, type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
+
+import { assertReviewedFrameSelection, type VideoReviewHandoff } from '@/lib/creatives/review-handoff';
 
 const MAX_CONCEPT_EXCERPT = 160;
 const normalizeText = (value: unknown) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
@@ -81,6 +83,24 @@ const restoreOne = async (
   return { source, context, librarySha256: completed.artifact.sha256 };
 };
 
+/** Restore only the reviewed video when manual choices exist; every identity remains frozen. */
+const restorePool = async (sources: readonly HydratedTraVideoSource[], sourceAnalysis: PlanningSourceAnalysisState,
+  reviewChoices?: VideoReviewHandoff['choices']) => {
+  const dependencies = completedDependencies(sourceAnalysis);
+  if (!reviewChoices?.frames?.length) return Promise.all(dependencies.map(dependency => restoreOne(sources, dependency)));
+  const video = reviewChoices.video;
+  const matches = dependencies.filter(item => item.identity.sourceVideoMediaId === video?.locator.sourceVideoMediaId);
+  const dependency = matches[0];
+  if (!video || matches.length !== 1 || dependency.identity.sourceVideoContentHash !== video.locator.sourceVideoContentHash
+    || dependency.identity.analyzerFingerprint.sha256 !== video.locator.analyzerFingerprintSha256
+    || dependency.completed!.library.id !== video.libraryId || dependency.completed!.artifact.sha256 !== video.librarySha256) {
+    throw new Error('Manual closed-pool video does not match its frozen B1 dependency.');
+  }
+  const restored = await restoreOne(sources, dependency);
+  if (restored.context.preparationSha256 !== video.preparationSha256) throw new Error('Manual closed-pool preparation changed.');
+  return [restored];
+};
+
 const humanBindings = (restored: readonly Restored[]) => restored.map(({ context, librarySha256 }) => {
   if (!context.representativeImages) {
     throw new Error('Automatic human-frame selection requires source-bound preparation images; reanalyze the uploaded video.');
@@ -101,15 +121,17 @@ const generationSelection = (outcome: Extract<import('@/lib/video/human-frame-se
 export async function preflightPortfolioVideoFrames(
   input: { sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
     finalConcept: PlannedCreativeConcept; selectionPolicy: AutomaticVideoSelectionPolicy;
-    reuseContext: VideoFrameReuseContext; cache: VideoSelectionCacheDependencies },
+    reuseContext: VideoFrameReuseContext; cache: VideoSelectionCacheDependencies; reviewChoices?: VideoReviewHandoff['choices'] },
 ): Promise<PortfolioVideoSelectionPreflight> {
   const expectedPolicy = portfolioVideoSelectionPolicy(input.finalConcept);
   if (input.selectionPolicy !== expectedPolicy) throw new Error('Frozen automatic video selection policy does not match the final concept.');
   if (input.selectionPolicy !== CANDIDATE_HUMAN_FRAME_SELECTION_POLICY
     && input.selectionPolicy !== HUMAN_FRAME_SELECTION_POLICY) return { status: 'READY' };
-  const restored = await Promise.all(completedDependencies(input.sourceAnalysis).map((dependency) => restoreOne(input.sources, dependency)));
+  const restored = await restorePool(input.sources, input.sourceAnalysis, input.reviewChoices);
   if (input.selectionPolicy === CANDIDATE_HUMAN_FRAME_SELECTION_POLICY) {
-    const planned = await planCandidateHumanSelection(restored.map(({ source, context }) => ({ source, context })),
+    const planned = input.reviewChoices?.frames?.length
+      ? await planManualCandidateHumanSelection(restored[0], input.reviewChoices.frames, input.reuseContext, input.cache.model, input.cache)
+      : await planCandidateHumanSelection(restored.map(({ source, context }) => ({ source, context })),
       createPortfolioVideoSelectionConcept(input.finalConcept), input.reuseContext, input.cache.model, input.cache);
     return planned.status === 'READY' ? { status: 'READY' } : planned.status === 'CONTINUE'
       ? { status: 'READY' } : planned;
@@ -124,9 +146,9 @@ export async function preflightPortfolioVideoFrames(
 export async function selectPortfolioVideoFrames(
   input: { sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
     finalConcept: PlannedCreativeConcept; selectionPolicy?: AutomaticVideoSelectionPolicy;
-    reuseContext?: VideoFrameReuseContext; cache: VideoSelectionCacheDependencies },
+    reuseContext?: VideoFrameReuseContext; cache: VideoSelectionCacheDependencies; reviewChoices?: VideoReviewHandoff['choices'] },
 ): Promise<PortfolioVideoSelectionResult> {
-  const restored = await Promise.all(completedDependencies(input.sourceAnalysis).map((dependency) => restoreOne(input.sources, dependency)));
+  const restored = await restorePool(input.sources, input.sourceAnalysis, input.reviewChoices);
   const expectedPolicy = portfolioVideoSelectionPolicy(input.finalConcept);
   const selectionPolicy = input.selectionPolicy ?? expectedPolicy;
   const reuseContext = input.reuseContext ?? { version: 1 as const, frames: [] };
@@ -134,7 +156,9 @@ export async function selectPortfolioVideoFrames(
   const concept = createPortfolioVideoSelectionConcept(input.finalConcept);
   if (selectionPolicy === CANDIDATE_HUMAN_FRAME_SELECTION_POLICY) {
     const sources = restored.map(({ source, context }) => ({ source, context }));
-    const plan = await planCandidateHumanSelection(sources, concept, reuseContext, input.cache.model, input.cache);
+    const plan = input.reviewChoices?.frames?.length
+      ? await planManualCandidateHumanSelection(sources[0], input.reviewChoices.frames, reuseContext, input.cache.model, input.cache)
+      : await planCandidateHumanSelection(sources, concept, reuseContext, input.cache.model, input.cache);
     return plan.status === 'READY' ? advanceCandidateHumanSelection(plan, input.cache) : plan;
   }
   if (selectionPolicy === HUMAN_FRAME_SELECTION_POLICY) {
@@ -153,15 +177,18 @@ export async function selectPortfolioVideoFrames(
 }
 
 export async function hydratePortfolioVideoFrameSelection(
-  input: { sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[]; selection: GenerateVideoFrameSelection },
+  input: { sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[]; selection: GenerateVideoFrameSelection; reviewChoices?: VideoReviewHandoff['choices'] },
 ) {
   const selection = parseGenerateVideoFrameSelection(input.selection);
   if (!selection) throw new Error('Persisted portfolio video frame selection is invalid.');
+  assertReviewedFrameSelection(input.reviewChoices, selection);
   const matches = completedDependencies(input.sourceAnalysis).filter((dependency) => dependency.completed!.library.id === selection.libraryId);
   if (matches.length !== 1) throw new Error('Persisted video selection has unknown or ambiguous frozen library ownership.');
   const dependency = matches[0];
   if (dependency.identity.sourceVideoContentHash !== selection.sourceVideoContentHash) throw new Error('Persisted video selection source content hash does not match the frozen B1 dependency.');
-  const restored = await restoreOne(input.sources, dependency);
+  const restored = input.reviewChoices?.frames?.length
+    ? (await restorePool(input.sources, input.sourceAnalysis, input.reviewChoices))[0]
+    : await restoreOne(input.sources, dependency);
   if (selection.version === 3 && (selection.sourceVideoMediaId !== restored.source.media.id
     || selection.librarySha256 !== restored.librarySha256 || !selection.candidateBindings)) {
     throw new Error('Persisted video candidate selection does not match the frozen dependency.');

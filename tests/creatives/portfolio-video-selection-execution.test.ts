@@ -10,8 +10,11 @@ import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, V
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
 const mocks = vi.hoisted(() => ({
-  restore: vi.fn(), render: vi.fn(), preflight: vi.fn(), select: vi.fn(), hydrate: vi.fn(), inventory: vi.fn(), list: vi.fn(), quota: vi.fn(), resolveHuman: vi.fn(),
+  restore: vi.fn(), render: vi.fn(), preflight: vi.fn(), select: vi.fn(), hydrate: vi.fn(), inventory: vi.fn(), list: vi.fn(), quota: vi.fn(), resolveHuman: vi.fn(), reviewDraft: vi.fn(), reviewSource: vi.fn(),
 }));
+vi.mock('@/lib/video/review-selection-store', () => ({ loadVideoReviewDraftWithFrameContext: mocks.reviewDraft }));
+vi.mock('@/lib/video/review-selection-sources', async original => ({ ...await original<typeof import('@/lib/video/review-selection-sources')>(),
+  loadReviewVideoSource: mocks.reviewSource }));
 vi.mock('@/lib/creatives/portfolio-snapshot', async original => ({
   ...await original<typeof import('@/lib/creatives/portfolio-snapshot')>(), restoreCreativePortfolio: mocks.restore,
 }));
@@ -373,4 +376,53 @@ describe('durable portfolio B3 selection activation', () => {
     expect(quotaGroups()).toEqual(['CREATIVE_GENERATION']);
     expect(mocks.render.mock.calls[0][2].preflightHumanVideo.videoFrames.frames).toEqual([frame]);
   });
+});
+
+const manualRequest = (frames: typeof selection.candidateBindings | null = selection.candidateBindings) => {
+  const video = { locator: { version: 1, sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash,
+    analyzerFingerprintSha256: '1'.repeat(64) }, libraryId, librarySha256, preparationSha256: '2'.repeat(64) };
+  const draftId = `review_${'3'.repeat(32)}`;
+  mocks.reviewSource.mockResolvedValue({});
+  mocks.reviewDraft.mockResolvedValue({ revision: 'saved', issues: [], transcriptContext: null,
+    selectedFrameContexts: frames?.map(binding => ({ binding })) ?? null,
+    draft: { id: draftId, choices: { video, frames, claims: null, companyProfile: null }, claimSnapshots: [] } });
+  return automaticRequest({ videoReview: { draftId, revision: 'saved' } });
+};
+
+it('manual review takes priority over catalog/image sources through saved selection and Resume', async () => {
+  const storage = new MemoryPortfolioStorage(), job = await ready(storage, manualRequest());
+  const context = contextFor(job, { providerImageSource: { media: { id: 'other' } }, videoFrameSet: null });
+  context.batchPlan.creatives[0].strategy.humanSourceId = approvedHumanSourceId(`human_${'4'.repeat(64)}`);
+  mocks.restore.mockResolvedValue(context);
+  const selected = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(selected.job.slots[0].videoSelection?.selection).toEqual(selection);
+  expect(mocks.select.mock.calls[0][0].reviewChoices).toEqual(job.request.reviewHandoff!.choices);
+  mocks.reviewDraft.mockRejectedValue(new Error('Mutable draft cannot be reloaded'));
+  const rendered = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(rendered.job.slots[0].status).toBe('SAVED'); expect(mocks.select).toHaveBeenCalledOnce();
+  expect(mocks.render.mock.calls[0][1]).toMatchObject({ providerImageSource: undefined, videoFrameSet: selectedFrames });
+  expect(mocks.render.mock.calls[0][2].preflightHumanVideo).toEqual({ human: null, videoFrames: selectedFrames });
+  expect(mocks.resolveHuman).not.toHaveBeenCalled(); expect(mocks.reviewDraft).toHaveBeenCalledOnce();
+  expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'CREATIVE_GENERATION']);
+});
+
+it('manual assessment failure requires explicit Retry and retains the same frozen pool', async () => {
+  const storage = new MemoryPortfolioStorage(), job = await ready(storage, manualRequest()); mocks.restore.mockResolvedValue(contextFor(job));
+  mocks.select.mockResolvedValueOnce({ status: 'RETRY_REQUIRED', reason: 'PROVIDER_FAILED' });
+  const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(failed.job.slots[0].status).toBe('RETRY_REQUIRED');
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.select.mock.calls.filter(([input]) => input.finalConcept.index === 1)).toHaveLength(1);
+  await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, 1), storage);
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.select.mock.calls.at(-1)![0]).toMatchObject({ reviewChoices: job.request.reviewHandoff!.choices, cache: { retry: true } });
+  expect(mocks.render).not.toHaveBeenCalled();
+});
+
+it.each([null, []])('keeps automatic rendering available with empty manual pool %j', async frames => {
+  const storage = new MemoryPortfolioStorage(), job = await ready(storage, manualRequest(frames)); mocks.restore.mockResolvedValue(contextFor(job));
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.select).toHaveBeenCalledOnce(); expect(mocks.render).toHaveBeenCalledOnce();
+  expect(mocks.render.mock.calls[0][2].preflightHumanVideo).toBeUndefined();
 });

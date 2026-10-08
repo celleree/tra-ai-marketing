@@ -237,18 +237,15 @@ async function advancePortfolio(
     const slot = job.slots[slotIndex - 1];
     const concept = context.batchPlan.creatives[slotIndex - 1];
     assertValidPlannedCreativeCopy(concept);
-    if (job.request.reviewHandoff?.operatorSelectedSourceGuidance.frameMode === 'MANUAL_CLOSED_POOL'
-      && concept.strategy.execution.subjectSource === 'approved-tra-human') {
-      throw new CreativeGenerationPreparationError('Reviewed frames require closed-pool visual assessment and fresh PNG handoff before rendering. Automatic substitution is unavailable.', 409);
-    }
-    const automaticVideoSelection = job.videoPreparationVersion === 1
+    const reviewChoices = job.request.reviewHandoff?.choices;
+    const manualVideoSelection = Boolean(reviewChoices?.frames?.length)
+      && concept.strategy.execution.subjectSource === 'approved-tra-human';
+    const durableVideoSelection = job.videoPreparationVersion === 1
       && concept.strategy.execution.subjectSource === 'approved-tra-human'
-      && !job.request.videoFrameSelection
-      && !concept.strategy.approvedHumanId
-      && !concept.strategy.humanSourceId
-      && !context.providerImageSource
-      && context.videoFrameSet !== null;
-    if (automaticVideoSelection) {
+      && (manualVideoSelection || (!job.request.videoFrameSelection
+        && !concept.strategy.approvedHumanId && !concept.strategy.humanSourceId
+        && !context.providerImageSource && context.videoFrameSet !== null));
+    if (durableVideoSelection) {
       if (slot.videoSelection && (slot.videoSelection.version !== 2
         || slot.videoSelection.selectionPolicy !== CANDIDATE_HUMAN_FRAME_SELECTION_POLICY
         || (slot.videoSelection.selection && slot.videoSelection.selection.version !== 3))) {
@@ -272,7 +269,10 @@ async function advancePortfolio(
         const cache = { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}) };
         const preflight = await preflightPortfolioVideoFrames({ sourceAnalysis: context.sourceAnalysis,
           sources: videoSources, finalConcept: concept, selectionPolicy: attempt.selectionPolicy,
-          reuseContext: attempt.reuseContext, cache });
+          reuseContext: attempt.reuseContext, cache, reviewChoices }).catch(error => {
+          if (!manualVideoSelection) throw error;
+          throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'Manual frame assessment is unavailable.', 409);
+        });
         if (preflight.status === 'COMPLETE') return { job: await updateCreativePortfolio(id, current => {
           const checkpointed = checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job;
           return finishPortfolioVideoFrameSelection(checkpointed, token, preflight.selection);
@@ -302,7 +302,7 @@ async function advancePortfolio(
           finalConcept: concept,
           selectionPolicy: attempt.selectionPolicy,
           reuseContext: attempt.reuseContext,
-          cache,
+          cache, reviewChoices,
         }));
         if (selected.status === 'BUSY') return {
           job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
@@ -328,7 +328,7 @@ async function advancePortfolio(
       const selectedFrames = await hydratePortfolioVideoFrameSelection({
         sourceAnalysis: context.sourceAnalysis,
         sources: videoSources,
-        selection: slot.videoSelection.selection,
+        selection: slot.videoSelection.selection, reviewChoices,
       }).catch(error => {
         const message = error instanceof Error ? error.message : 'Saved human-frame selection could not be hydrated.';
         throw new CreativeGenerationPreparationError(message, 409);
@@ -352,7 +352,9 @@ async function advancePortfolio(
         ...context,
         videoFrameSet: selectedFrames,
         generatedVideoFrameSelection,
-      }, { creativeId: slot.creativeId, assertCurrentWork });
+        ...(manualVideoSelection ? { providerImageSource: undefined } : {}),
+      }, { creativeId: slot.creativeId, assertCurrentWork,
+        ...(manualVideoSelection ? { preflightHumanVideo: { human: null, videoFrames: selectedFrames } } : {}) });
       return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
     }
 

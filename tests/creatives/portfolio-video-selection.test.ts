@@ -1,10 +1,12 @@
+import sharp from 'sharp';
+import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
-const mocks = vi.hoisted(() => ({ loadContext: vi.fn(), extractFrames: vi.fn() }));
-vi.mock('@/lib/video/selection-context', () => ({ loadSavedVideoSelectionContext: mocks.loadContext, extractVideoSelectionFrames: mocks.extractFrames }));
-import { createPortfolioVideoSelectionConcept, hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
+const mocks = vi.hoisted(() => ({ loadContext: vi.fn(), extractFrames: vi.fn(), candidateImage: vi.fn() }));
+vi.mock('@/lib/video/selection-context', () => ({ loadSavedVideoSelectionContext: mocks.loadContext, extractVideoSelectionFrames: mocks.extractFrames, loadVideoCandidateAnalysisImage: mocks.candidateImage }));
+import { createPortfolioVideoSelectionConcept, hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames, preflightPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
@@ -143,4 +145,69 @@ describe('portfolio video selection adapter', () => {
     const eleven = Array.from({ length: 11 }, (_, index) => row(index + 40));
     await expect(selectPortfolioVideoFrames({ sourceAnalysis: sourceAnalysis(eleven), sources: eleven.map((entry) => entry.source), finalConcept: planned(), cache: state.cache })).rejects.toThrow('between 1 and 10');
   });
+});
+
+const manualSetup = async () => {
+  const item = row(80), other = row(81), state = setup([item, other]);
+  const image = await sharp({ create: { width: 96, height: 96, channels: 3, background: '#a57755' } }).jpeg().toBuffer();
+  const sourceHash = item.identity.sourceVideoContentHash;
+  const candidates = [0, 1].map(candidateIndex => ({ candidateIndex, timestampMs: candidateIndex * 1000,
+    frameSha256: sha(image), width: 96, height: 96 }));
+  const bindings = candidates.map(candidate => ({ ...candidate, frameId: videoCandidateFrameId(sourceHash, candidate.timestampMs, candidate.frameSha256),
+    representativeFrameId: videoCandidateFrameId(sourceHash, 0, sha(image)) })).map(({ width: _w, height: _h, ...binding }) => binding);
+  const library = { ...item.library, candidates, representativeFrames: [{ ...item.library.representativeFrames[0],
+    id: bindings[0].frameId, candidateIndex: 0, candidateIndexes: [0, 1] }] };
+  const context = { library, librarySha256: item.artifact.sha256, preparationSha256: sha('preparation'),
+    manifest: { candidates, groups: [{ representativeIndex: 0, candidateIndexes: [0, 1] }] },
+    representativeImages: [{ ...candidates[0], frameId: bindings[0].frameId, bytes: image }] };
+  mocks.loadContext.mockResolvedValue(context);
+  mocks.candidateImage.mockImplementation(async (_source, _context, index) => ({ ...candidates[index], bytes: image }));
+  state.request.mockImplementation(async () => Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+    humanPresence: 'CLEAR', facialDetail: 'SUFFICIENT', eyes: 'OPEN_OR_NOT_VISIBLE', blur: 'CLEAR',
+    occlusion: 'NONE_OR_MINOR', expressionUsability: 'NATURAL_OR_NEUTRAL', framing: 'USABLE', observableReason: 'Usable portrait',
+    sourceOverlay: { status: 'CLEAN', edge: 'NONE', removePermille: 0, overlayDepthPermille: 0 },
+  }) }] }] }));
+  const reviewChoices = { video: { libraryId: library.id, librarySha256: item.artifact.sha256, preparationSha256: context.preparationSha256,
+    locator: { version: 1 as const, sourceVideoMediaId: item.source.media.id, sourceVideoContentHash: sourceHash,
+      analyzerFingerprintSha256: item.identity.analyzerFingerprint.sha256 } }, frames: [bindings[0]], claims: null, companyProfile: null };
+  const finalConcept = { ...planned(), strategy: { ...planned().strategy, execution: { subjectSource: 'approved-tra-human' } } } as PlannedCreativeConcept;
+  return { ...state, finalConcept, reviewChoices, bindings, context, item };
+};
+
+it('selects only the reviewed source, checkpoints assessment, and hydrates exact manual bindings without provider replay', async () => {
+  const input = await manualSetup();
+  const selected = await selectPortfolioVideoFrames(input);
+  expect(selected.status).toBe('COMPLETE'); if (selected.status !== 'COMPLETE') throw new Error('Missing selection');
+  expect(selected.selection).toMatchObject({ version: 3, candidateBindings: [input.bindings[0]] });
+  expect(mocks.loadContext).toHaveBeenCalledOnce(); expect(mocks.loadContext.mock.calls[0][0]).toBe(input.item.source);
+  expect(await preflightPortfolioVideoFrames({ ...input, selectionPolicy: 'human-frame-candidate-suitability-v3',
+    reuseContext: { version: 1, frames: [] } })).toEqual(selected);
+  mocks.extractFrames.mockResolvedValue({ frames: [{ buffer: Buffer.from('fresh PNG') }], selectionProvenance: [] });
+  const hydrated = await hydratePortfolioVideoFrameSelection({ ...input, selection: selected.selection });
+  expect(mocks.extractFrames.mock.calls[0][2]).toEqual(input.reviewChoices.frames);
+  expect(hydrated.frames[0]).toMatchObject({ sourceOverlay: { version: 2, status: 'CLEAN' } });
+  expect(input.request).toHaveBeenCalledOnce();
+  await expect(hydratePortfolioVideoFrameSelection({ ...input, reviewChoices: { ...input.reviewChoices, frames: [input.bindings[1]] },
+    selection: selected.selection })).rejects.toThrow('closed-pool');
+  expect(mocks.extractFrames).toHaveBeenCalledOnce();
+});
+
+it.each(['sourceVideoMediaId', 'sourceVideoContentHash', 'analyzerFingerprintSha256', 'librarySha256', 'preparationSha256'])
+('rejects manual %s drift before assessment or extraction', async field => {
+  const input = await manualSetup();
+  if (field in input.reviewChoices.video.locator) (input.reviewChoices.video.locator as any)[field] = '9'.repeat(64);
+  else (input.reviewChoices.video as any)[field] = '9'.repeat(64);
+  await expect(selectPortfolioVideoFrames(input)).rejects.toThrow(/closed-pool/);
+  expect(input.request).not.toHaveBeenCalled(); expect(mocks.extractFrames).not.toHaveBeenCalled();
+});
+
+it('forwards frozen reuse counts through manual selection and read-only preflight without repeat assessments', async () => {
+  const input = await manualSetup(); input.reviewChoices.frames = input.bindings;
+  const first = await selectPortfolioVideoFrames(input);
+  expect(first).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [input.bindings[0].frameId] } });
+  const reuseContext = { version: 1 as const, frames: [{ libraryId: input.item.library.id, frameId: input.bindings[0].frameId, useCount: 1 }] };
+  const second = await selectPortfolioVideoFrames({ ...input, reuseContext });
+  expect(second).toMatchObject({ status: 'COMPLETE', selection: { candidateBindings: [input.bindings[1]] } });
+  expect(await preflightPortfolioVideoFrames({ ...input, reuseContext, selectionPolicy: 'human-frame-candidate-suitability-v3' })).toEqual(second);
+  expect(input.request).toHaveBeenCalledTimes(2); expect(mocks.candidateImage.mock.calls[0][2]).toBe(1);
 });
