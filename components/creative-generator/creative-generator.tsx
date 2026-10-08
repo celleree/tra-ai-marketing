@@ -310,9 +310,9 @@ export function CreativeGenerator() {
                   <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} />
                   <PortfolioProgressPanel portfolio={portfolio} />
                 </> : null}
-                {videoReview.state.error || videoReview.state.saved?.issues.length ? (
+                {videoReview.state.error || videoReview.state.saved?.issues.length || (displayGenerationError && videoReview.state.saved) ? (
                   <div role="alert" className="error-message">
-                    <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ')}</p>
+                    <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ') || displayGenerationError}</p>
                     <button type="button" disabled={videoReview.state.pending > 0} onClick={() => void videoReview.reload()}>Reload saved review</button>
                     {videoReview.state.saved?.issues.length ? <button type="button" disabled={generating || videoReview.state.pending > 0 || Boolean(videoReview.state.error)}
                       onClick={() => void videoReview.clearUnavailable()}>Remove unavailable material</button> : null}

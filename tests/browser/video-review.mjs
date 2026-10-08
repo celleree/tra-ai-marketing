@@ -48,7 +48,6 @@ async function scenario(name, options, run) {
     let value = {}, status = 200;
     if (path === '/api/video/review-selection') {
       if (options.missingDraft) { status = 404; value = { error: 'Review draft was not found.' }; }
-      else if (options.invalidRevision) { status = 409; value = { error: 'Review draft changed. Reload before saving.' }; }
       else { if (request.method() === 'POST') { choices = body.choices; revision = 'revision-2'; issue = undefined; } value = response(); }
     } else if (path === '/api/video/intelligence/jobs') {
       if (request.method() === 'POST') { videoActions.push(body.action); phase = 'COMPLETE'; value = { phase, locator: video.locator, busy: false }; }
@@ -66,7 +65,8 @@ async function scenario(name, options, run) {
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') submissions.push(body);
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
-      value = { job: job(state), creatives: [] };
+      if (options.invalidRevision && request.method() === 'POST') { status = 409; value = { error: 'Review draft changed. Reload the saved review before generating.' }; }
+      else value = { job: job(state), creatives: [] };
     }
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) });
   });
@@ -130,10 +130,10 @@ try {
     else { await page.getByRole('button', { name: phase === 'RETRY_REQUIRED' ? 'Retry video preparation' : 'Resume video preparation' }).click();
       await page.getByText('Video material ready').waitFor(); assert.deepEqual(videoActions, [phase === 'RETRY_REQUIRED' ? 'RETRY' : 'ADVANCE']); }
   });
-  for (const options of [{ issue: 'Source hash changed.' }, { missingMedia: true }, { missingDraft: true }, { invalidRevision: true }])
+  for (const options of [{ issue: 'Source hash changed.' }, { missingMedia: true }, { missingDraft: true }])
     await scenario(`Reject ${JSON.stringify(options)}`, options, async ({ page, submissions }) => {
       await page.locator('textarea').fill('Create concepts.'); assert.equal(await generateButton(page).isDisabled(), true); assert.deepEqual(submissions, []);
-      if (options.missingDraft || options.invalidRevision) {
+      if (options.missingDraft) {
         await page.getByRole('button', { name: 'Reload saved review' }).click();
         await page.waitForFunction(() => !document.body.textContent.includes('Saving…'));
         assert.equal(await generateButton(page).isDisabled(), true);
@@ -143,6 +143,16 @@ try {
         await page.getByRole('button', { name: 'Remove unavailable videos' }).click();
       }
     });
+  await scenario('Stale revision rejected at Create submission with direct reload recovery', { invalidRevision: true }, async ({ page, submissions, calls }) => {
+    await ready(page); await generateButton(page).click();
+    await page.getByRole('button', { name: 'Reload saved review' }).waitFor();
+    assert.equal(submissions.length, 1);
+    assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method === 'PATCH'), false);
+    const loads = calls.filter(([path, method]) => path === '/api/video/review-selection' && method === 'GET').length;
+    await page.getByRole('button', { name: 'Reload saved review' }).click();
+    await page.waitForFunction(() => !document.body.textContent.includes('Saving…'));
+    assert.equal(calls.filter(([path, method]) => path === '/api/video/review-selection' && method === 'GET').length, loads + 1);
+  });
   for (const portfolioState of ['PENDING', 'RETRY_REQUIRED', 'SAVED']) await scenario(`Saved portfolio ${portfolioState}`, { portfolioState }, async ({ page, calls }) => {
     await page.evaluate(() => localStorage.setItem('tra-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
     await page.getByRole('region', { name: 'Saved portfolio progress' }).waitFor();
