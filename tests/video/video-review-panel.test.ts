@@ -16,7 +16,7 @@ const bindings = Array.from({ length: 5 }, (_, candidateIndex) => ({ frameId: `f
 const source = { status: { phase: 'COMPLETE' }, review: { video, frameBindings: bindings,
   onScreenStatements: [], library: { transcript: { segments: [] }, representativeFrames: bindings.slice(0, 4).map(binding => ({ ...binding, thumbnailDataUrl: `data:image/jpeg;base64,${binding.frameId}` })) } } } as unknown as ReviewSource;
 let draft: ReturnType<typeof useVideoReviewDraft>, request: ReturnType<typeof vi.fn<typeof fetch>>;
-const render = () => { hooks.cursor = 0; hooks.effects = []; return VideoReviewPanel({ videos: [{ id: mediaId, name: 'Source' }], draft }); };
+const render = (videos = [{ id: mediaId, name: 'Source' }]) => { hooks.cursor = 0; hooks.effects = []; return VideoReviewPanel({ videos, draft }); };
 const nodes = (tree: unknown): ReactElement<Record<string, unknown>>[] => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(nodes)
   : 'props' in tree ? [tree as ReactElement<Record<string, unknown>>, ...nodes((tree as ReactElement<{ children?: unknown }>).props.children)] : [];
 const run = (effect: number) => { const cleanup = hooks.effects[effect](); if (cleanup) hooks.cleanups.push(cleanup); };
@@ -98,5 +98,21 @@ describe('native Create frame review', () => {
     draft.state.pending = 0; draft.state.error = 'Save failed'; expect(html()).toContain('Save failed');
     draft.state.conflict = true; expect(html()).toContain('Conflict / reload required');
     hooks.cursor = 0; expect(VideoReviewPanel({ videos: [], draft: { ...draft, state: { ...draft.state, choices: null } } })).toBeNull();
+  });
+  it('counts retained non-video statements after switching to another completed video', async () => {
+    const otherId = `media_${'b'.repeat(32)}`;
+    draft.state.choices!.claims = [{ type: 'PROOF', proofId: 'review' }, { type: 'PROOF', proofId: 'case-study' },
+      { type: 'COMPANY_PROFILE', field: 'servicesOffers' }, { type: 'VIDEO_TRANSCRIPT', startSegmentIndex: 0, endSegmentIndex: 0 }] as never;
+    await loaded();
+    const videos = [{ id: mediaId, name: 'Source' }, { id: otherId, name: 'Other' }];
+    const select = nodes(render(videos)).find(node => node.type === 'select')!;
+    (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: otherId } });
+    expect(hooks.values[0]).toBe(otherId);
+    const otherSource = { ...source, review: { ...source.review, video: { ...video, locator: { sourceVideoMediaId: otherId } } } };
+    request.mockResolvedValueOnce(Response.json(otherSource)); render(videos); run(0);
+    await vi.waitFor(() => expect(hooks.values[1]).toEqual(otherSource));
+    const collapse = nodes(render(videos)).find(node => node.type === 'button' && node.props.children === 'Collapse')!;
+    (collapse.props.onClick as () => void)();
+    expect(renderToStaticMarkup(render(videos))).toContain('Video material · 0 frames · 3 statements');
   });
 });

@@ -76,6 +76,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
     })).finally(() => { if (!controller.signal.aborted) setPreviewBusy(false); });
     return () => controller.abort();
   }, [JSON.stringify(previewIndexes), mediaId, review]);
+  const selectedClaims = draft.state.choices?.claims?.filter(reference => matching || !reference.type.startsWith('VIDEO_')) ?? [];
   if (!mediaId) return null;
   const frameChoice = (binding: VideoCandidateFrameBinding, thumbnail: string) => <label key={binding.frameId} className={styles.frame}>
     <img src={thumbnail} alt={`Video frame at ${reviewTime(binding.timestampMs)}`} />
@@ -86,7 +87,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
     {videos.length > 1 ? <label>Video <select value={mediaId} disabled={disabled || draft.state.pending > 0} onChange={event => { setActive(event.target.value); setCandidate(null); }}>
       {videos.map(video => <option key={video.id} value={video.id}>{video.name}</option>)}
     </select></label> : null}
-    <div className={styles.heading}><strong>{review ? collapsed ? `Video material · ${frames.length} frames · ${matching ? draft.state.choices?.claims?.length ?? 0 : 0} statements` : 'Video material ready' : 'Video material'}</strong>
+    <div className={styles.heading}><strong>{review ? collapsed ? `Video material · ${frames.length} frames · ${selectedClaims.length} statements` : 'Video material ready' : 'Video material'}</strong>
       <span role="status">{draft.state.pending ? 'Saving…' : draft.state.conflict ? 'Conflict / reload required' : draft.state.error ? 'Save failed'
         : matching && draft.state.saved ? 'Saved ✓' : ''}</span>
       {review ? <button type="button" className="button button-secondary" disabled={!collapsed && !draft.canGenerate()}

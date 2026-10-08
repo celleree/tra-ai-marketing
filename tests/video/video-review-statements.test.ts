@@ -68,4 +68,13 @@ describe('exact source statements and progressive context', () => {
     const references = Array.from({ length: 50 }, (_, index) => ({ type: 'VIDEO_TRANSCRIPT' as const, startSegmentIndex: index, endSegmentIndex: index }));
     expect(toggleReviewClaim(references, selected.reference)).toBe(references);
   });
+  it('retains Review, Case Study and Company Profile claims while excluding stale video claims after a switch', async () => {
+    await load();
+    const retained = sources.statements.filter(statement => !statement.reference.type.startsWith('VIDEO_')).map(statement => statement.reference);
+    draft.state.choices!.claims = [...retained, { type: 'VIDEO_TRANSCRIPT', startSegmentIndex: 0, endSegmentIndex: 0 }];
+    draft.state.choices!.video = { ...review.video, locator: { ...review.video.locator, sourceVideoMediaId: 'previous-video' } };
+    const checks = nodes(render()).filter(node => node.type === 'input');
+    expect(checks.map(check => check.props.checked)).toEqual([false, false, false, true, true, true]);
+    expect(renderToStaticMarkup(render())).toContain('3 selected');
+  });
 });
