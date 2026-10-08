@@ -3,10 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactElement } from 'react';
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, effects: [] as Array<() => void | (() => void)>, cleanups: [] as Array<() => void> }));
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(),
+  useRef: (value: unknown) => ({ current: value }),
   useState: (value: unknown) => { const slot = hooks.cursor++; if (!(slot in hooks.values)) hooks.values[slot] = value;
     return [hooks.values[slot], (next: unknown) => { hooks.values[slot] = typeof next === 'function' ? next(hooks.values[slot]) : next; }]; },
   useEffect: (effect: () => void | (() => void)) => { hooks.effects.push(effect); } }));
-import { VideoReviewPanel, toggleReviewFrame, type ReviewSource } from '@/components/creative-generator/video-review-panel';
+import { SavedVideoReviewSummary, VideoReviewPanel, toggleReviewFrame, type ReviewSource } from '@/components/creative-generator/video-review-panel';
 import type { useVideoReviewDraft } from '@/components/creative-generator/use-video-review-draft';
 
 const mediaId = `media_${'a'.repeat(32)}`;
@@ -33,6 +34,18 @@ afterEach(() => { hooks.cleanups.forEach(cleanup => cleanup()); vi.unstubAllGlob
 const loaded = async () => { render(); run(0); await vi.waitFor(() => expect(hooks.values[1]).toEqual(source)); };
 
 describe('native Create frame review', () => {
+  it('displays the frozen saved review independently of unsaved choices and source discovery', () => {
+    const saved = { draft: { id: 'review-a', choices: { ...draft.state.choices, frames: [bindings[2]] },
+      claimSnapshots: [{ wording: 'Exact frozen A wording.' }] }, revision: 'revision-a', issues: [{ source: 'VIDEO', message: 'A missing' }] };
+    draft.state.saved = saved as never;
+    draft.state.choices = { video: { locator: { sourceVideoMediaId: 'video-b' } }, frames: [], claims: [], companyProfile: null } as never;
+    const markup = renderToStaticMarkup(SavedVideoReviewSummary({ draft }));
+    expect(markup).toContain('data-video-id="' + mediaId + '"');
+    expect(markup).toContain('data-review-id="review-a"'); expect(markup).toContain('data-review-revision="revision-a"');
+    expect(markup).toContain('data-frame-id="frame-2"'); expect(markup).toContain('Selected frame at 00:08');
+    expect(markup).toContain('Exact frozen A wording.'); expect(markup).not.toContain('video-b');
+    expect(draft.state.saved).toBe(saved); expect(draft.update).not.toHaveBeenCalled(); expect(request).not.toHaveBeenCalled();
+  });
   it('renders cold Create with no video or restored source without touching a null source', () => {
     expect(VideoReviewPanel({ videos: [], draft: { ...draft, state: { ...draft.state, choices: null } } })).toBeNull();
     expect(request).not.toHaveBeenCalled();

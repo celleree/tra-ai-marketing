@@ -70,6 +70,13 @@ describe('server-authoritative review draft restoration', () => {
 });
 
 describe('serialized conditional review writes', () => {
+  it('keeps a missing reopened draft blocked after reload rather than silently discarding the revision', async () => {
+    const request = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ error: 'Draft missing' }, { status: 404 }));
+    const client = createReviewDraftClient({ request });
+    await expect(client.load(id)).rejects.toThrow('Draft missing');
+    await expect(client.recover()).rejects.toThrow('Draft missing');
+    expect(client.getState().error).toContain('Draft missing');
+  });
   it('recovers a committed first write after a lost response using its stable ID and server revision', async () => {
     const request = vi.fn<typeof fetch>().mockRejectedValueOnce(new Error('Connection lost')).mockResolvedValueOnce(Response.json(saved()));
     const client = createReviewDraftClient({ request, createId: () => id });
