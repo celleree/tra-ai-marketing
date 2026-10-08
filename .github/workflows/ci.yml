@@ -24,6 +24,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Supervisor model policy and failure tests
+        run: python3 -m unittest discover -s scripts/video_review_supervisor -p 'test_*.py' -v
       - name: Typecheck
         run: npm run typecheck
       - name: Tests
