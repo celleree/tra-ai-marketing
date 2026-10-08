@@ -32,6 +32,12 @@ def api(path):
     return github('api', f'repos/{REPO}/{path}')
 
 
+def github_items(path, expression):
+    # gh 2.45 supports --paginate/--jq, but not the newer --slurp flag.
+    output = command(['gh', 'api', '--paginate', f'repos/{REPO}/{path}', '--jq', expression + ' | @json'])
+    return [json.loads(line) for line in output.splitlines() if line.strip()]
+
+
 def check_snapshot(pr, head, checks, statuses):
     if pr['head']['sha'] != head or pr['base']['ref'] != 'staging' or pr['state'] != 'open':
         raise Blocked('PR HEAD/base/state drifted; refusing stale evidence')
@@ -75,6 +81,9 @@ class Supervisor:
                 raise Blocked(f'Installed Codex lacks {flag}')
         command(['codex', 'login', 'status'])
         command(['gh', 'auth', 'status'])
+        gh_help = command(['gh', 'api', '--help'])
+        if '--paginate' not in gh_help or '--jq' not in gh_help:
+            raise Blocked('GitHub CLI lacks supported paginated JSON query options')
         command(['git', 'config', 'user.name'], self.repo)
         command(['git', 'config', 'user.email'], self.repo)
         if api('branches/staging')['commit']['sha'] != BASE:
@@ -104,12 +113,9 @@ class Supervisor:
         if self.fake:
             return read(self.run.root / 'fake-github.json')[p['branch']]
         pr = api(f'pulls/{p["pr"]}')
-        pages = github('api', '--paginate', '--slurp',
-                       f'repos/{REPO}/commits/{p["head"]}/check-runs?per_page=100')
-        statuses = github('api', '--paginate', '--slurp',
-                          f'repos/{REPO}/commits/{p["head"]}/statuses?per_page=100')
-        return {'pr': pr, 'checks': [x for page in pages for x in page['check_runs']],
-                'statuses': [x for page in statuses for x in page]}
+        checks = github_items(f'commits/{p["head"]}/check-runs?per_page=100', '.check_runs[]')
+        statuses = github_items(f'commits/{p["head"]}/statuses?per_page=100', '.[]')
+        return {'pr': pr, 'checks': checks, 'statuses': statuses}
 
     def ci(self, p, wait=True):
         deadline = time.monotonic() + (self.s['ci_timeout'] if wait else 0)

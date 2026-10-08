@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from contracts import SCHEMA, validate
 from runtime import Blocked, Run, atomic, read
-from supervisor import Supervisor, check_snapshot, git
+from supervisor import Supervisor, check_snapshot, git, github_items
 
 SCRIPT = str(Path(__file__).with_name('supervisor.py'))
 
@@ -231,6 +231,12 @@ class SupervisorTests(unittest.TestCase):
             self.assertIn('\n- Review order: ', body)
         finally:
             run.close()
+
+    def test_github_cli_pagination_uses_installed_supported_flags(self):
+        with patch('supervisor.command', return_value='{"id":1}\n{"id":2}') as call:
+            self.assertEqual(github_items('commits/abc/check-runs', '.check_runs[]'), [{'id': 1}, {'id': 2}])
+            self.assertNotIn('--slurp', call.call_args.args[0])
+            self.assertIn('--paginate', call.call_args.args[0])
 
     def test_metadata_update_requires_new_ci_runs(self):
         run = Run(self.root)
