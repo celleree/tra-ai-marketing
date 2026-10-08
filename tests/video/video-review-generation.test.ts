@@ -5,7 +5,8 @@ vi.mock('react', async original => ({ ...await original<typeof import('react')>(
   useRef: (value: unknown) => ({ current: value }), useState: (value: unknown) => [value === '' ? 'A creative prompt' : value, () => {}] }));
 vi.mock('@/components/creative-generator/use-video-review-draft', () => ({ useVideoReviewDraft: () => ({
   state: { error: '', pending: 0, saved: mocks.saved }, canGenerate: () => mocks.settled,
-  generationReference: () => mocks.saved ? { draftId: mocks.saved.draft.id, revision: mocks.saved.revision } : undefined }) }));
+  profileChanged: () => false, generationReference: () => mocks.saved ? { draftId: mocks.saved.draft.id, revision: mocks.saved.revision } : undefined }) }));
+vi.mock('@/components/creative-generator/use-saved-video-sources', () => ({ useSavedVideoSources: () => ({ pending: false, error: '' }) }));
 vi.mock('@/components/creative-generator/use-creative-portfolio', () => ({ useCreativePortfolio: () => ({
   running: false, start: mocks.start, resume: mocks.resume, retry: mocks.retry, response: null }) }));
 vi.mock('@/lib/creatives/brand-guidance', () => ({ readStoredBrandGuidance: () => ({ colors: [], fontGuidance: [] }) }));

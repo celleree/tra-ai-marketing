@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactElement } from 'react';
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, effects: [] as Array<() => void | (() => void)>, cleanups: [] as Array<() => void> }));
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(),
+  useRef: (value: unknown) => ({ current: value }),
   useState: (value: unknown) => { const slot = hooks.cursor++; if (!(slot in hooks.values)) hooks.values[slot] = value;
     return [hooks.values[slot], (next: unknown) => { hooks.values[slot] = typeof next === 'function' ? next(hooks.values[slot]) : next; }]; },
   useEffect: (effect: () => void | (() => void)) => { hooks.effects.push(effect); } }));

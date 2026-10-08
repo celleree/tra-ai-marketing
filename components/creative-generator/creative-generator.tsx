@@ -6,6 +6,7 @@ import { CreativeLibrary } from '@/components/creative-library/creative-library'
 import { VideoReviewPanel } from '@/components/creative-generator/video-review-panel';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
+import { useSavedVideoSources } from '@/components/creative-generator/use-saved-video-sources';
 import { useVideoReviewDraft } from '@/components/creative-generator/use-video-review-draft';
 import { PortfolioProgressPanel } from '@/components/creative-generator/portfolio-progress-panel';
 import type { CreativePlacement } from '@/lib/creatives/placements';
@@ -98,6 +99,7 @@ export function CreativeGenerator() {
   const handoffGenerationStartedRef = useRef(false);
   const portfolio = useCreativePortfolio();
   const videoReview = useVideoReviewDraft();
+  const videos = useSavedVideoSources(sourceAssets, setSourceAssets, videoReview);
   const generating = portfolio.running;
   const savedPortfolio = portfolio.response?.job;
   const creatives = creationMode === 'generate' ? portfolio.response?.creatives ?? [] : uploadedCreatives;
@@ -107,7 +109,7 @@ export function CreativeGenerator() {
     .map(slot => [slot.index, slot.error || 'Could not be completed.']));
   const displayGenerationError = creationMode === 'generate' ? portfolio.error || generationError : generationError;
 
-  const ready = Boolean(context.trim()) && videoReview.canGenerate();
+  const ready = Boolean(context.trim()) && !videos.pending && !videos.error && videoReview.canGenerate();
 
   useEffect(() => {
     if (handoffConsumedRef.current) return;
@@ -141,7 +143,7 @@ export function CreativeGenerator() {
     mediaId: string,
     role: CreativeSourceRole
   ) => {
-    if (role !== 'TRA_VIDEO') void videoReview.removeVideo(mediaId);
+    if (role !== 'TRA_VIDEO') { videos.forget(mediaId); void videoReview.removeVideo(mediaId); }
     setSourceAssets((current) =>
       current.map((source) =>
         source.media.id === mediaId ? { ...source, role } : source
@@ -152,6 +154,7 @@ export function CreativeGenerator() {
   };
 
   const handleSourceRemoved = (mediaId: string) => {
+    videos.forget(mediaId);
     void videoReview.removeVideo(mediaId);
     setSourceAssets((current) =>
       current.filter((source) => source.media.id !== mediaId)
@@ -173,7 +176,7 @@ export function CreativeGenerator() {
   };
 
   const generate = async () => {
-    if (!context.trim() || generating || !videoReview.canGenerate()) return;
+    if (!ready || generating || !videoReview.canGenerate()) return;
     setGenerationError('');
     try {
       const brand = readStoredBrandGuidance();
@@ -196,7 +199,7 @@ export function CreativeGenerator() {
   useEffect(() => {
     if (
       !handoffGenerate ||
-      !videoReview.canGenerate() ||
+      !ready ||
       !context.trim() ||
       generating ||
       handoffGenerationStartedRef.current
@@ -296,6 +299,14 @@ export function CreativeGenerator() {
                 )}
 
                 {creationMode === 'generate' ? <>
+                  {videos.pending ? <p role="status">Restoring saved videos…</p> : null}
+                  {videos.error ? <div role="alert"><p>{videos.error}</p>
+                    <button type="button" disabled={videos.pending || generating} onClick={videos.reload}>Reload saved videos</button>
+                    <button type="button" disabled={videos.pending || generating} onClick={() => void videos.clearUnavailable()}>Remove unavailable videos</button>
+                  </div> : null}
+                  {videoReview.profileChanged() ? <div role="alert"><p>Company Profile changed. Saved selected wording is preserved. Use the current Profile and reselect its statements before generating.</p>
+                    <button type="button" disabled={generating || videoReview.state.pending > 0} onClick={() => void videoReview.useCurrentProfile()}>Use current Company Profile</button>
+                  </div> : null}
                   <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} />
                   <PortfolioProgressPanel portfolio={portfolio} />
                 </> : null}
