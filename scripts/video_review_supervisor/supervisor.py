@@ -16,6 +16,16 @@ from sandbox import options as sandbox_options
 
 HERE = Path(__file__).resolve().parent
 REQUIRED = {'verify', 'pr-reviewability', 'Vercel'}
+ALLOWED_CODEX_MODELS = frozenset({'gpt-6-luna', 'gpt-6.1-sol'})
+DEFAULT_CODEX_MODEL = 'gpt-6.1-sol'
+
+
+def validate_models(model, review_model):
+    """Hard cost guard for all Codex workers; never fall back to another model."""
+    for role, value in (('implementation model', model), ('review model', review_model)):
+        if not isinstance(value, str) or value not in ALLOWED_CODEX_MODELS:
+            raise Blocked(f'{role} {value!r} is not permitted; only gpt-6-luna and gpt-6.1-sol are allowed')
+
 FORBIDDEN = ('AGENTS.md', 'docs/agent-workflow.md', 'docs/parallel-coding.md',
              '.github/', '.env', 'scripts/video_review_supervisor/')
 
@@ -69,6 +79,7 @@ class Supervisor:
         self.run.save()
 
     def preflight(self):
+        validate_models(self.s.get('model'), self.s.get('review_model'))
         if self.s['code_digest'] != digest():
             raise Blocked('Supervisor code changed since start; use a newly verified run')
         if self.fake:
@@ -454,6 +465,7 @@ class Supervisor:
 
 
 def initialize(run, args):
+    validate_models(args.model, args.review_model)
     if run.state:
         raise Blocked('Run already exists; use resume')
     if not args.dry_run:
@@ -493,8 +505,8 @@ def main():
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--dry-run-proof')
     parser.add_argument('--retry-worker', action='store_true', help='On resume only: retry a diagnosed failed worker in a fresh context (bounded)')
-    parser.add_argument('--model', default='gpt-6-sol')
-    parser.add_argument('--review-model', default='gpt-6-astra')
+    parser.add_argument('--model', default=DEFAULT_CODEX_MODEL, choices=sorted(ALLOWED_CODEX_MODELS))
+    parser.add_argument('--review-model', default=DEFAULT_CODEX_MODEL, choices=sorted(ALLOWED_CODEX_MODELS))
     parser.add_argument('--worker-timeout', type=int, default=5400)
     parser.add_argument('--ci-timeout', type=int, default=1800)
     args = parser.parse_args()
