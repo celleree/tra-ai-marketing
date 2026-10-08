@@ -14,10 +14,10 @@ checkouts. Paths below are the tested machine's locations. `start` runs in the f
 python3 -m unittest discover -s scripts/video_review_supervisor -p 'test_*.py' -v
 
 # Complete offline rehearsal; use a fresh directory each time supervisor code changes.
-python3 scripts/video_review_supervisor/supervisor.py start --dry-run --run-dir /home/arund/dev/tra-supervisor-evidence/dry-run-final
+python3 scripts/video_review_supervisor/supervisor.py start --dry-run --run-dir /home/arund/dev/tra-supervisor-evidence/dry-run-model-policy
 
 # Overnight launch (the dry-run directory above must have completed with this exact code).
-nohup python3 /home/arund/dev/tra-video-review-supervisor/scripts/video_review_supervisor/supervisor.py start --repo /home/arund/dev/tra-video-review-supervisor --run-dir /home/arund/dev/tra-video-review-overnight --dry-run-proof /home/arund/dev/tra-supervisor-evidence/dry-run-final > /home/arund/dev/tra-supervisor-evidence/overnight.log 2>&1 < /dev/null &
+nohup python3 /home/arund/dev/tra-video-review-supervisor/scripts/video_review_supervisor/supervisor.py start --repo /home/arund/dev/tra-video-review-supervisor --run-dir /home/arund/dev/tra-video-review-overnight --dry-run-proof /home/arund/dev/tra-supervisor-evidence/dry-run-model-policy --model gpt-6.1-sol --review-model gpt-6.1-sol > /home/arund/dev/tra-supervisor-evidence/overnight.log 2>&1 < /dev/null &
 
 python3 scripts/video_review_supervisor/supervisor.py status --run-dir /home/arund/dev/tra-video-review-overnight
 python3 scripts/video_review_supervisor/supervisor.py stop --run-dir /home/arund/dev/tra-video-review-overnight
@@ -37,8 +37,13 @@ execution authority. Do not delete locks, worktrees, receipts, or checkpoints to
   Live staging drift stops the run for explicit reconciliation; no automatic base sync.
 - Phases: Slice 2 admission/planning/persistence; Slice 3 manual frame generation;
   Slice 4 UI/restoration/browser tests; independent read-only integrated review.
-- Implementation defaults to Sol/high, independent review to Astra/high. Override with
-  `--model` / `--review-model` at start; configuration is frozen in the checkpoint.
+- Codex worker model policy is a strict allowlist: `gpt-6-luna` and `gpt-6.1-sol` only.
+  Both implementation and independent review default to `gpt-6.1-sol` / high reasoning.
+  `--model` / `--review-model` may choose **only** those two exact IDs; all older variants,
+  Astra, Terra, unsupported names and silent fallbacks are rejected before a worker starts.
+  Configuration is frozen at `start` and revalidated on `resume`; if a model is unavailable,
+  the run blocks rather than switching models. This restricts Codex coding agents only,
+  not the application's existing provider/model choices.
 - Every implementation/review/repair uses a new `codex exec --ephemeral` execution, a task-specific
   prompt and `--output-schema`, JSONL events and a separate result file. Each phase owns an isolated
   feature branch/worktree; repairs preserve that phase's worktree in a new conversation. Each review
@@ -97,6 +102,9 @@ Authenticated Codex ChatGPT access and `gh` repo access, Git identity, supported
 Linux sandbox, Node/npm, ffmpeg/ffprobe, sufficient disk, package registry access, Git push/PR
 permission and a working Vercel preview integration are required. Real `start` reruns offline
 unit tests and requires a completed dry-run receipt matching the exact supervisor source digest.
+Any supervisor-code change invalidates the previous dry-run proof and exact-HEAD independent
+review. Before an unattended run, rerun offline tests/dry-run and obtain a fresh exact-HEAD
+independent review and green CI/Vercel.
 Missing prerequisite/checks block the run. Account quotas can still interrupt overnight work.
 No production credentials, provider generation, publishing, merges or production smoke tests
 are authorized by this tool. Browser integration tests must use local fixtures/mocks; if required
