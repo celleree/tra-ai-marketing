@@ -135,7 +135,7 @@ export const planManualCandidateHumanSelection = async (source: CandidateSelecti
   dependencies: CandidateAssessmentDependencies): Promise<CandidateSelectionPlan> => {
   const { library, manifest, librarySha256, preparationSha256 } = source.context;
   if (!manifest || !librarySha256 || !preparationSha256 || !model.trim()
-    || bindings.length < 1 || bindings.length > 3 || new Set(bindings.map(item => item.frameId)).size !== bindings.length) {
+    || bindings.length < 1 || new Set(bindings.map(item => item.frameId)).size !== bindings.length) {
     throw new Error('Manual closed-pool selection requires exact frozen frame bindings and preparation.');
   }
   // Validate the entire pool before reading assessments or starting any provider work.
