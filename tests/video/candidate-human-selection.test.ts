@@ -189,8 +189,8 @@ describe('bounded candidate human selection', () => {
 describe('manual candidate closed pool', () => {
   const manualBinding = (index: number) => ({ frameId: representativeId(index), representativeFrameId: representativeId(0),
     candidateIndex: index, timestampMs: candidates[index].timestampMs, frameSha256: candidates[index].frameSha256 });
-  const manualStep = async (indexes: number[], state: ReturnType<typeof setup>, retry = false) => {
-    const next = await planManualCandidateHumanSelection(binding()[0], indexes.map(manualBinding),
+  const manualStep = async (indexes: number[], state: ReturnType<typeof setup>, retry = false, used = reuse()) => {
+    const next = await planManualCandidateHumanSelection(binding()[0], indexes.map(manualBinding), used,
       state.dependencies.model, { ...state.dependencies, retry });
     return next.status === 'READY' ? advanceCandidateHumanSelection(next, { ...state.dependencies, retry }) : next;
   };
@@ -226,10 +226,46 @@ describe('manual candidate closed pool', () => {
     expect(state.request).toHaveBeenCalledTimes(2);
   });
 
+  it('uses two suitable manual frames across creatives, then reuses cached assessments with the saved counts', async () => {
+    const state = setup(assessment(), assessment());
+    expect(await manualStep([0, 3], state)).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(0)] } });
+    expect(await manualStep([0, 3], state, false, reuse(representativeId(0)))).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(3)] } });
+    expect(state.request).toHaveBeenCalledTimes(2);
+    const used = reuse(representativeId(0), representativeId(3)); used.frames[0].useCount = 2;
+    expect(await manualStep([0, 3], state, false, used)).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(3)] } });
+    expect(await manualStep([0, 3], state, false, { version: 1, frames: used.frames.map(item => ({ ...item, libraryId: 'other-library' })) }))
+      .toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(0)] } });
+    expect(state.request).toHaveBeenCalledTimes(2);
+  });
+
+  it('reuses the only suitable manual frame after rejecting an unused unsafe member', async () => {
+    const state = setup(assessment(), assessment({ sourceOverlay: { status: 'UNSAFE', edge: 'NONE', removePermille: 0, overlayDepthPermille: 0 } }));
+    expect((await manualStep([1], state)).status).toBe('COMPLETE');
+    const used = reuse(representativeId(1));
+    expect(await manualStep([1, 3], state, false, used)).toEqual({ status: 'CONTINUE' });
+    expect(await manualStep([1, 3], state, false, used)).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(1)] } });
+    expect(await manualStep([1], state, false, used)).toMatchObject({ status: 'COMPLETE' });
+    expect(state.request).toHaveBeenCalledTimes(2);
+    expect(mocks.neighbor.mock.calls.map(call => call[2])).toEqual([1, 3]);
+  });
+
+  it('keeps saved reuse preference through failed assessment, Resume and explicit Retry', async () => {
+    const state = setup(assessment(), assessment());
+    await manualStep([0, 3], state);
+    const used = reuse(representativeId(0));
+    state.request.mockResolvedValueOnce(new Response(null, { status: 429 }));
+    expect(await manualStep([0, 3], state, false, used)).toMatchObject({ status: 'RETRY_REQUIRED' });
+    expect(await manualStep([0, 3], state, false, used)).toMatchObject({ status: 'RETRY_REQUIRED' });
+    expect(state.request).toHaveBeenCalledTimes(2);
+    expect(await manualStep([0, 3], state, true, used)).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(3)] } });
+    expect(await manualStep([0, 3], state, false, used)).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(3)] } });
+    expect(state.request).toHaveBeenCalledTimes(3);
+  });
+
   it.each(['candidateIndex', 'timestampMs', 'frameSha256', 'representativeFrameId'])('rejects %s drift before assessment', async field => {
     const state = setup(assessment()), selected = manualBinding(1);
     (selected as any)[field] = field.endsWith('Index') || field.endsWith('Ms') ? 999 : 'f'.repeat(64);
-    await expect(planManualCandidateHumanSelection(binding()[0], [manualBinding(0), selected],
+    await expect(planManualCandidateHumanSelection(binding()[0], [manualBinding(0), selected], reuse(),
       state.dependencies.model, state.dependencies)).rejects.toThrow('candidate and technical group');
     expect(state.request).not.toHaveBeenCalled(); expect(mocks.neighbor).not.toHaveBeenCalled();
   });

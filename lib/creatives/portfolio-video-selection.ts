@@ -130,7 +130,7 @@ export async function preflightPortfolioVideoFrames(
   const restored = await restorePool(input.sources, input.sourceAnalysis, input.reviewChoices);
   if (input.selectionPolicy === CANDIDATE_HUMAN_FRAME_SELECTION_POLICY) {
     const planned = input.reviewChoices?.frames?.length
-      ? await planManualCandidateHumanSelection(restored[0], input.reviewChoices.frames, input.cache.model, input.cache)
+      ? await planManualCandidateHumanSelection(restored[0], input.reviewChoices.frames, input.reuseContext, input.cache.model, input.cache)
       : await planCandidateHumanSelection(restored.map(({ source, context }) => ({ source, context })),
       createPortfolioVideoSelectionConcept(input.finalConcept), input.reuseContext, input.cache.model, input.cache);
     return planned.status === 'READY' ? { status: 'READY' } : planned.status === 'CONTINUE'
@@ -157,7 +157,7 @@ export async function selectPortfolioVideoFrames(
   if (selectionPolicy === CANDIDATE_HUMAN_FRAME_SELECTION_POLICY) {
     const sources = restored.map(({ source, context }) => ({ source, context }));
     const plan = input.reviewChoices?.frames?.length
-      ? await planManualCandidateHumanSelection(sources[0], input.reviewChoices.frames, input.cache.model, input.cache)
+      ? await planManualCandidateHumanSelection(sources[0], input.reviewChoices.frames, reuseContext, input.cache.model, input.cache)
       : await planCandidateHumanSelection(sources, concept, reuseContext, input.cache.model, input.cache);
     return plan.status === 'READY' ? advanceCandidateHumanSelection(plan, input.cache) : plan;
   }

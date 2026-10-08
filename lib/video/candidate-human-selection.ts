@@ -131,7 +131,7 @@ export const advanceCandidateHumanSelection = async (plan: Extract<CandidateSele
 
 /** Manual choices are a closed pool, including exact nonrepresentative candidates; never widen it. */
 export const planManualCandidateHumanSelection = async (source: CandidateSelectionSource,
-  bindings: readonly VideoCandidateFrameBinding[], model: string,
+  bindings: readonly VideoCandidateFrameBinding[], reuseContext: VideoFrameReuseContext, model: string,
   dependencies: CandidateAssessmentDependencies): Promise<CandidateSelectionPlan> => {
   const { library, manifest, librarySha256, preparationSha256 } = source.context;
   if (!manifest || !librarySha256 || !preparationSha256 || !model.trim()
@@ -140,8 +140,12 @@ export const planManualCandidateHumanSelection = async (source: CandidateSelecti
   }
   // Validate the entire pool before reading assessments or starting any provider work.
   bindings.forEach(binding => validateReviewFrame(binding, { library, manifest }));
-  for (const binding of bindings) {
-    const candidate: CandidateOption = { source, binding, useCount: 0, identity: {
+  const reuse = canonicalizeVideoFrameReuseContext(reuseContext);
+  const useCounts = new Map(reuse.frames.filter(item => item.libraryId === library.id).map(item => [item.frameId, item.useCount]));
+  // Intrinsically suitable members are comparable; retain operator order when counts tie.
+  const ordered = [...bindings].sort((a, b) => (useCounts.get(a.frameId) ?? 0) - (useCounts.get(b.frameId) ?? 0));
+  for (const binding of ordered) {
+    const candidate: CandidateOption = { source, binding, useCount: useCounts.get(binding.frameId) ?? 0, identity: {
       policy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, model,
       sourceVideoMediaId: library.sourceVideoMediaId, sourceVideoContentHash: library.sourceVideoContentHash,
       librarySha256, preparationSha256, representativeFrameId: binding.representativeFrameId,

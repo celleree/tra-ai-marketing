@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
-const mocks = vi.hoisted(() => ({ loadContext: vi.fn(), extractFrames: vi.fn() }));
-vi.mock('@/lib/video/selection-context', () => ({ loadSavedVideoSelectionContext: mocks.loadContext, extractVideoSelectionFrames: mocks.extractFrames }));
+const mocks = vi.hoisted(() => ({ loadContext: vi.fn(), extractFrames: vi.fn(), candidateImage: vi.fn() }));
+vi.mock('@/lib/video/selection-context', () => ({ loadSavedVideoSelectionContext: mocks.loadContext, extractVideoSelectionFrames: mocks.extractFrames, loadVideoCandidateAnalysisImage: mocks.candidateImage }));
 import { createPortfolioVideoSelectionConcept, hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames, preflightPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
@@ -161,7 +161,8 @@ const manualSetup = async () => {
     manifest: { candidates, groups: [{ representativeIndex: 0, candidateIndexes: [0, 1] }] },
     representativeImages: [{ ...candidates[0], frameId: bindings[0].frameId, bytes: image }] };
   mocks.loadContext.mockResolvedValue(context);
-  state.request.mockResolvedValue(Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+  mocks.candidateImage.mockImplementation(async (_source, _context, index) => ({ ...candidates[index], bytes: image }));
+  state.request.mockImplementation(async () => Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({
     humanPresence: 'CLEAR', facialDetail: 'SUFFICIENT', eyes: 'OPEN_OR_NOT_VISIBLE', blur: 'CLEAR',
     occlusion: 'NONE_OR_MINOR', expressionUsability: 'NATURAL_OR_NEUTRAL', framing: 'USABLE', observableReason: 'Usable portrait',
     sourceOverlay: { status: 'CLEAN', edge: 'NONE', removePermille: 0, overlayDepthPermille: 0 },
@@ -198,4 +199,15 @@ it.each(['sourceVideoMediaId', 'sourceVideoContentHash', 'analyzerFingerprintSha
   else (input.reviewChoices.video as any)[field] = '9'.repeat(64);
   await expect(selectPortfolioVideoFrames(input)).rejects.toThrow(/closed-pool/);
   expect(input.request).not.toHaveBeenCalled(); expect(mocks.extractFrames).not.toHaveBeenCalled();
+});
+
+it('forwards frozen reuse counts through manual selection and read-only preflight without repeat assessments', async () => {
+  const input = await manualSetup(); input.reviewChoices.frames = input.bindings;
+  const first = await selectPortfolioVideoFrames(input);
+  expect(first).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [input.bindings[0].frameId] } });
+  const reuseContext = { version: 1 as const, frames: [{ libraryId: input.item.library.id, frameId: input.bindings[0].frameId, useCount: 1 }] };
+  const second = await selectPortfolioVideoFrames({ ...input, reuseContext });
+  expect(second).toMatchObject({ status: 'COMPLETE', selection: { candidateBindings: [input.bindings[1]] } });
+  expect(await preflightPortfolioVideoFrames({ ...input, reuseContext, selectionPolicy: 'human-frame-candidate-suitability-v3' })).toEqual(second);
+  expect(input.request).toHaveBeenCalledTimes(2); expect(mocks.candidateImage.mock.calls[0][2]).toBe(1);
 });
