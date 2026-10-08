@@ -1,4 +1,4 @@
-.card { margin-top: 16px; }
+.card { margin-top: 16px; min-width: 0; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .heading strong { color: #17212b; font-size: 15px; }
 .heading span, .metadata { color: #687585; font-size: 12px; }
