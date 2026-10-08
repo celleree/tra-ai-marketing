@@ -118,7 +118,8 @@ class Run:
             return read(receipt)['returncode']
         (directory / 'prompt.txt').write_text(prompt)
         spec = {'args': args, 'cwd': str(cwd), 'directory': str(directory),
-                'timeout': timeout, 'lock_fd': self.lock.fileno()}
+                'timeout': timeout, 'lock_fd': self.lock.fileno(), 'root': str(self.root),
+                'deadline': self.state.get('deadline', time.time() + timeout)}
         atomic(directory / 'launch.json', spec)
         child = subprocess.Popen([sys.executable, __file__, str(directory / 'launch.json')],
                                  start_new_session=True, pass_fds=(self.lock.fileno(),), env=clean_env())
@@ -126,13 +127,17 @@ class Run:
             while child.poll() is None:
                 self.wait(0.2)
         except BaseException:
-            os.killpg(child.pid, signal.SIGTERM)
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 child.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 os.killpg(child.pid, signal.SIGKILL)
                 child.wait()
             raise
+        self.stop_check()
         if not receipt.exists():
             raise Blocked('Worker exited without a durable receipt; inspect preserved attempt')
         return read(receipt)['returncode']
@@ -148,12 +153,16 @@ def worker(path):
     with (directory / 'prompt.txt').open() as inp, (directory / 'codex.jsonl').open('w') as out, (directory / 'stderr.log').open('w') as err:
         p = subprocess.Popen(spec['args'], cwd=spec['cwd'], stdin=inp, stdout=out, stderr=err,
                              env=clean_env(), pass_fds=(spec['lock_fd'],))
-        try:
-            rc = p.wait(timeout=spec['timeout'])
-        except subprocess.TimeoutExpired:
-            # kill all children, including command grandchildren, not just the CLI leader
-            atomic(directory / 'exit.json', {'returncode': 124})
-            os.killpg(os.getpgrp(), signal.SIGKILL)
+        end = time.monotonic() + spec['timeout']
+        while p.poll() is None:
+            # Stop must still work when the supervisor was killed and this worker is orphaned.
+            if (Path(spec['root']) / 'STOP').exists():
+                os.killpg(os.getpgrp(), signal.SIGKILL)
+            if time.monotonic() >= end or time.time() >= spec['deadline']:
+                atomic(directory / 'exit.json', {'returncode': 124})
+                os.killpg(os.getpgrp(), signal.SIGKILL)
+            time.sleep(0.1)
+        rc = p.returncode
         atomic(directory / 'exit.json', {'returncode': rc})
 
 

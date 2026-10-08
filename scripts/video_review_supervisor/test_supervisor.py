@@ -136,6 +136,26 @@ class SupervisorTests(unittest.TestCase):
         checks.append({**checks[0], 'id': 10, 'status': 'in_progress', 'conclusion': None})
         self.assertFalse(check_snapshot(pr, 'abc', checks, statuses)[0])
 
+    def test_stop_reaches_orphan_worker_then_resume(self):
+        self.scenario(delay=20)
+        child = subprocess.Popen([sys.executable, SCRIPT, 'start', '--dry-run', '--run-dir', str(self.root)],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.wait_for(lambda: (self.root / 'fake-calls.json').exists())
+        child.kill()
+        child.wait()
+        self.assertEqual(self.cli('stop').returncode, 0)
+        def lock_released():
+            try:
+                run = Run(self.root)
+            except Blocked:
+                return False
+            run.close()
+            return True
+        self.wait_for(lock_released)
+        self.scenario()
+        result = self.cli('resume')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_atomic_checkpoint_and_lock(self):
         run = Run(self.root)
         try:
