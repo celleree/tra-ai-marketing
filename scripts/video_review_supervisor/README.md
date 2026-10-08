@@ -42,10 +42,13 @@ execution authority. Do not delete locks, worktrees, receipts, or checkpoints to
 - Every implementation/review/repair uses a new `codex exec --ephemeral` execution, a task-specific
   prompt and `--output-schema`, JSONL events and a separate result file. Each phase owns an isolated
   feature branch/worktree; repairs preserve that phase's worktree in a new conversation. Each review
-  has a separate detached worktree and `read-only` sandbox.
-- Workers use `workspace-write` or `read-only`, never unrestricted access. User configuration is
+  has a separate detached worktree and a filesystem-read-only permission profile.
+- Workers use supported Codex permission profiles with workspace writes or read-only source,
+  plus a private writable temporary directory; `.git` is read-only. Never unrestricted access. User configuration is
   ignored for execution (existing Codex authentication is still used). Application/provider env
-  secrets are not inherited. Shells get only a minimal explicit PATH. Worker network is disabled;
+  secrets are not inherited. Shells get a minimal explicit PATH and TMPDIR. The Codex command-network proxy permits only
+  loopback fixtures and registry.npmjs.org; external application/provider traffic is denied.
+  NO_PROXY lets browser/server fixtures communicate within their sandbox namespace;
   approval policy `never` means disallowed operations fail, not permission escalation.
 - The deterministic supervisor alone performs exact-branch commits, non-force pushes, PR
   creation, and metadata updates. It has no merge/deployment command. It preserves protected
@@ -110,6 +113,6 @@ and operator instructions. Splitting the process lock/checkpoint protocol from i
 Git/CI gates and failure tests would leave an unverified runnable coordinator. There is no app
 runtime change. The next independent unit is a future supervisor capability, not a partial runner.
 
-REVIEW ORDER: `contracts.py` (scope/safeguards/schema), `runtime.py` (durability/stop/locking),
+REVIEW ORDER: `contracts.py` (scope/safeguards/schema), `sandbox.py` (filesystem/network permissions), `runtime.py` (durability/stop/locking),
 `supervisor.py` (transitions/GitHub gates), `fake.py` and `test_supervisor.py` (failure evidence),
 then these launch instructions. No repository safeguard or CI file changes.

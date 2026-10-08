@@ -5,12 +5,14 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import sys
 import time
 import uuid
 
 from contracts import BASE, PHASES, REPO, SCHEMA, SOURCES, prompt, validate
 from runtime import Blocked, Run, Stopped, atomic, command, digest, read
+from sandbox import options as sandbox_options
 
 HERE = Path(__file__).resolve().parent
 REQUIRED = {'verify', 'pr-reviewability', 'Vercel'}
@@ -65,6 +67,8 @@ class Supervisor:
             raise Blocked('Supervisor code changed since start; use a newly verified run')
         if self.fake:
             return
+        if command(['codex', '--version']) != 'codex-cli 0.161.0':
+            raise Blocked('Codex version changed; revalidate sandbox profiles before unattended use')
         help_text = command(['codex', 'exec', '--help'])
         for flag in ('--sandbox', '--output-schema', '--output-last-message', '--json', '--ephemeral', '--ignore-user-config'):
             if flag not in help_text:
@@ -85,9 +89,16 @@ class Supervisor:
         if git(self.repo, 'rev-parse', 'origin/staging') != BASE:
             raise Blocked('Fetched staging differs from pinned base')
         # Exercise the installed sandbox without using an LLM or application provider.
-        command(['codex', 'sandbox', '-P', 'supervisor', '-c',
-                 'permissions.supervisor.filesystem={"/"="read"}', '-c',
-                 'permissions.supervisor.network.enabled=false', '--', '/usr/bin/true'])
+        scratch = self.run.root / 'preflight-scratch'
+        scratch.mkdir(exist_ok=True)
+        command(['codex', 'sandbox', '-P', 'supervisor',
+                 *sandbox_options(self.repo, scratch, True), '--', '/usr/bin/true'])
+        local_tools = {name: shutil.which(name) for name in ('node', 'npm', 'ffmpeg', 'ffprobe', 'agent-browser')}
+        browsers = sorted((Path.home() / '.cache/ms-playwright').glob(
+            'chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell'))
+        if not all(local_tools.values()) or not browsers:
+            raise Blocked('Node/npm/ffmpeg/ffprobe/agent-browser or cached Chromium prerequisite missing')
+        self.s['local_tools'] = {**local_tools, 'chromium': str(browsers[-1])}
 
     def snapshot(self, p):
         if self.fake:
@@ -201,11 +212,11 @@ class Supervisor:
                 git(self.repo, 'worktree', 'add', '--detach', str(worktree), p['head'])
             self.prepare_dependencies(worktree, directory)
             atomic(directory / 'schema.json', SCHEMA)
-            mode = 'read-only' if 'review' in role else 'workspace-write'
-            args = ['codex', 'exec', '--ignore-user-config', '--ephemeral', '--sandbox', mode,
-                    '-c', 'approval_policy="never"', '-c', 'sandbox_workspace_write.network_access=false',
-                    '-c', 'shell_environment_policy.inherit="none"',
-                    '-c', 'shell_environment_policy.set={PATH="/usr/local/bin:/usr/bin:/bin"}',
+            scratch = directory / 'scratch'
+            scratch.mkdir()
+            args = ['codex', 'exec', '--ignore-user-config', '--ephemeral',
+                    '-c', 'default_permissions="supervisor"',
+                    *sandbox_options(worktree, scratch, 'review' in role),
                     '--model', self.s['review_model'] if 'review' in role else self.s['model'],
                     '-c', 'model_reasoning_effort="high"',
                     '--json', '--output-schema', str(directory / 'schema.json'),
@@ -215,6 +226,7 @@ class Supervisor:
                         str(worktree), str(directory / 'result.json')]
             text = prompt(self.s['phase'], role, p['base'], p['head'], dependencies, p['findings'])
             text += '\nOriginal staging SHA for integration diff: ' + self.s['base']
+            text += '\nSandbox permits loopback fixtures and npm registry only; providers remain blocked. Use NO_PROXY for localhost. Temporary outputs must use TMPDIR. Do not connect to existing operator browser sessions. Verified local tooling: ' + json.dumps(self.s.get('local_tools', {}))
             if 'review' in role:
                 text += '\nWorker-reported local tests (not CI proof): ' + json.dumps(p['tests'])
                 text += '\nSupervisor-verified GitHub checks: ' + json.dumps(p['ci'])

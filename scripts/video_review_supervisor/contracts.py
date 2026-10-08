@@ -64,7 +64,7 @@ Preserve Proof, draft-only claims, source hash/revision integrity, provider-inel
 JPEGs/thumbnails, fresh PNG provenance, automatic behavior without selected frames, persistent
 creative identity, quotas, idempotency, paid-result reuse and current retry safety.
 No merges, pushes, PR operations, deployments, paid generation, provider smoke tests, credential
-changes, production data access, sandbox bypass, network enabling, or other worktrees. The
+changes, production data access, sandbox bypass, network-policy changes, or other worktrees. The
 supervisor owns Git writes and GitHub. Do not edit .git, AGENTS.md, docs/agent-workflow.md,
 docs/parallel-coding.md, .github/, .env files, or the supervisor. No parallel writers/subagents.
 This bounded implementation is authorized. For implementation/repair: inspect, implement only
