@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 from contracts import SCHEMA, validate
 from runtime import Blocked, Run, Stopped, atomic, read
-from supervisor import Supervisor, check_snapshot, git, github_items, initialize
+from supervisor import (ALLOWED_CODEX_MODELS, DEFAULT_CODEX_MODEL, Supervisor,
+                        check_snapshot, git, github_items, initialize, validate_models)
 
 SCRIPT = str(Path(__file__).with_name('supervisor.py'))
 
@@ -37,8 +38,8 @@ class SupervisorTests(unittest.TestCase):
 
     def initialized_run(self):
         run = Run(self.root)
-        initialize(run, SimpleNamespace(dry_run=True, repo=str(self.root), model='fake',
-                                        review_model='fake', worker_timeout=30, ci_timeout=0))
+        initialize(run, SimpleNamespace(dry_run=True, repo=str(self.root), model='gpt-6.1-sol',
+                                        review_model='gpt-6.1-sol', worker_timeout=30, ci_timeout=0))
         return run
 
     def wait_for(self, predicate):
@@ -54,6 +55,8 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         state = read(self.root / 'checkpoint.json')
         self.assertEqual(state['status'], 'complete')
+        self.assertEqual(state['model'], 'gpt-6.1-sol')
+        self.assertEqual(state['review_model'], 'gpt-6.1-sol')
         self.assertEqual(len(state['phases']), 4)
         calls = read(self.root / 'fake-calls.json')
         self.assertEqual(len(calls), 7)
@@ -65,6 +68,40 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(self.cli('resume').returncode, 0)
         self.assertEqual(read(self.root / 'fake-calls.json'), calls)
         self.assertTrue((self.root / 'dry-run-passed.json').exists())
+
+    def test_exact_model_allowlist_enforced_for_both_roles(self):
+        self.assertEqual(DEFAULT_CODEX_MODEL, 'gpt-6.1-sol')
+        self.assertEqual(ALLOWED_CODEX_MODELS, {'gpt-6-luna', 'gpt-6.1-sol'})
+        for allowed in ALLOWED_CODEX_MODELS:
+            validate_models(allowed, allowed)
+        for forbidden in ('gpt-6-sol', 'gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-sol', '', None):
+            with self.subTest(forbidden=forbidden):
+                with self.assertRaisesRegex(Blocked, 'not permitted'):
+                    validate_models(forbidden, 'gpt-6.1-sol')
+                with self.assertRaisesRegex(Blocked, 'not permitted'):
+                    validate_models('gpt-6-luna', forbidden)
+
+    def test_invalid_model_cli_rejected_without_running_or_checkpoint(self):
+        for flag in ('--model', '--review-model'):
+            with self.subTest(flag=flag):
+                result = subprocess.run([sys.executable, SCRIPT, 'start', '--dry-run',
+                                         '--run-dir', str(self.root), flag, 'gpt-6-astra'],
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('invalid choice', result.stderr)
+                self.assertFalse((self.root / 'checkpoint.json').exists())
+
+    def test_resume_rejects_unapproved_persisted_model(self):
+        run = self.initialized_run()
+        try:
+            run.state['review_model'] = 'gpt-6-astra'
+            run.save()
+        finally:
+            run.close()
+        result = self.cli('resume')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('not permitted', result.stderr)
+        self.assertFalse((self.root / 'fake-calls.json').exists())
 
     def test_review_repairs_use_new_execution_and_new_review(self):
         self.scenario(findings=1)
