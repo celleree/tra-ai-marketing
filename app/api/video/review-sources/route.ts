@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { requireOperatorAccess } from '@/lib/auth/require-operator';
 import { assertDurableVideoIntelligenceAvailable, videoIntelligenceHttpStatus } from '@/lib/video/preview-availability';
-import { ReviewSelectionError } from '@/lib/video/review-selection';
+import { record, ReviewSelectionError } from '@/lib/video/review-selection';
+import { discoverReviewStatements } from '@/lib/video/review-statement-discovery';
 import { VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
 import { CreativeSourceHydrationError } from '@/lib/media/source-hydration';
 import { discoverVideoReviewSource } from '@/lib/video/review-source-discovery';
@@ -9,6 +10,19 @@ import { discoverVideoReviewSource } from '@/lib/video/review-source-discovery';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 const headers = { 'Cache-Control': 'private, no-store' };
+/** Read-only discovery of existing Proof fields and the supplied operator Profile snapshot. */
+export async function POST(request: Request) {
+  const denied = await requireOperatorAccess(); if (denied) return denied;
+  try {
+    assertDurableVideoIntelligenceAvailable();
+    const body: unknown = await request.json();
+    if (!record(body) || Object.keys(body).length !== 1 || !('companyProfile' in body)) throw new ReviewSelectionError('Statement sources are invalid.', 400);
+    return NextResponse.json(await discoverReviewStatements(body.companyProfile), { headers });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof ReviewSelectionError ? error.message : 'Statement sources could not be loaded.' },
+      { headers, status: videoIntelligenceHttpStatus(error instanceof ReviewSelectionError ? error.status : error instanceof SyntaxError ? 400 : 503) });
+  }
+}
 export async function GET(request: Request) {
   const denied = await requireOperatorAccess(); if (denied) return denied;
   try {

@@ -8,4 +8,11 @@
 .frame input { accent-color: #17212b; }
 .nearby { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; }
 .advanced { display: inline-block; margin-top: 16px; color: #687585; font-size: 12px; }
+.statements { margin-top: 22px; }
+.statement { padding: 12px 0; border-bottom: 1px solid #e8edf3; font-size: 13px; }
+.statement label { display: flex; align-items: baseline; gap: 8px; white-space: pre-wrap; }
+.statement p { margin: 5px 0; white-space: pre-wrap; }
+.statement details, .transcript { color: #687585; font-size: 12px; }
+.statement summary, .transcript summary { cursor: pointer; }
+.transcript { margin-top: 18px; }
 @media (max-width: 600px) { .frame { flex-basis: 92px; } .frame img { width: 92px; height: 68px; } }
