@@ -77,6 +77,9 @@ execution authority. Do not delete locks, worktrees, receipts, or checkpoints to
   exceeded budgets and material final integration findings stop. They are not silently retried.
   Restart does not reset budgets. A persistent failed worker receipt requires operator diagnosis,
   not automatic repeated LLM calls.
+  After diagnosing and resolving a failed CLI invocation, `resume --retry-worker --run-dir …`
+  explicitly permits a fresh execution within the same two-recovery budget. A successful receipt
+  cannot be repeated with this option; it never resets the overall deadline or repair limit.
 - Phases must attempt splitting oversized changes; >400 lines or >10 files requires a concrete
   coherence justification and review order, assessed by the independent reviewer. Unresolved
   architecture/splitting decisions stop rather than inventing a shared interface.

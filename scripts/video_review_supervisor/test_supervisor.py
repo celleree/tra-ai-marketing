@@ -198,6 +198,15 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(self.cli('resume').returncode, 2)
         self.assertEqual(len(read(self.root / 'fake-calls.json')), 1)
 
+    def test_explicit_retry_after_worker_failure(self):
+        self.scenario(exit=9)
+        self.assertEqual(self.cli().returncode, 2)
+        self.scenario()
+        result = subprocess.run([sys.executable, SCRIPT, 'resume', '--retry-worker', '--run-dir', str(self.root)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(read(self.root / 'fake-calls.json')), 8)
+
     def test_schema_does_not_accept_self_report_with_blockers(self):
         with self.assertRaises(ValueError):
             validate({key: [] for key in SCHEMA['required']})

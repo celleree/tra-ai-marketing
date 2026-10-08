@@ -459,6 +459,7 @@ def main():
     parser.add_argument('--repo', default=str(HERE.parents[1]))
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--dry-run-proof')
+    parser.add_argument('--retry-worker', action='store_true', help='On resume only: retry a diagnosed failed worker in a fresh context (bounded)')
     parser.add_argument('--model', default='gpt-6-sol')
     parser.add_argument('--review-model', default='gpt-6-astra')
     parser.add_argument('--worker-timeout', type=int, default=5400)
@@ -480,6 +481,20 @@ def main():
             initialize(run, args)
         elif not run.state:
             raise Blocked('No checkpoint to resume')
+        if args.retry_worker:
+            if args.action != 'resume' or run.state['phase'] >= len(run.state['phases']):
+                raise Blocked('--retry-worker requires an existing interrupted phase')
+            p = run.state['phases'][run.state['phase']]
+            pending = p.get('pending')
+            receipt = Path(pending['directory']) / 'exit.json' if pending else None
+            if not receipt or not receipt.exists() or not read(receipt)['returncode']:
+                raise Blocked('--retry-worker requires a failed worker receipt; successful work is never repeated')
+            if p['interruptions'] >= 2:
+                raise Blocked('Worker recovery budget exhausted')
+            p['interruptions'] += 1
+            p.setdefault('failed_attempts', []).append(pending)
+            p['pending'] = None
+            run.save()
         if run.state['status'] == 'complete':
             print((root / 'handoff.txt').read_text())
             return 0
