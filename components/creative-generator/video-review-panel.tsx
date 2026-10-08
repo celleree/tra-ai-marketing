@@ -18,6 +18,19 @@ export const toggleReviewFrame = (frames: VideoCandidateFrameBinding[] | null, f
     : current.length < 3 ? [...current, frame] : current;
 };
 
+/** Saved selections belong to Create, independently of the video currently being browsed. */
+export function SavedVideoReviewSummary({ draft }: { draft: ReturnType<typeof useVideoReviewDraft> }) {
+  const saved = draft.state.saved, choices = saved?.draft.choices;
+  if (!saved || !choices?.video) return null;
+  return <section className={`panel ${styles.card}`} aria-label="Saved video review"
+    data-review-id={saved.draft.id} data-review-revision={saved.revision} data-video-id={choices.video.locator.sourceVideoMediaId}>
+    <strong>Saved selected material</strong>
+    <p>{choices.frames?.length ? `${choices.frames.length} manually selected frames` : 'Automatic frame selection'}</p>
+    {choices.frames?.map(frame => <p key={frame.frameId} data-frame-id={frame.frameId}>Selected frame at {reviewTime(frame.timestampMs)}</p>)}
+    {saved.draft.claimSnapshots.map((statement, index) => <p key={index}>{statement.wording}</p>)}
+  </section>;
+}
+
 export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: Array<{ id: string; name: string }>;
   draft: ReturnType<typeof useVideoReviewDraft>; disabled?: boolean }) {
   const [active, setActive] = useState(''), [source, setSource] = useState<ReviewSource | null>(null);
@@ -122,11 +135,6 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
         onClick={() => void prepare()}>{working || source.status?.busy ? 'Preparing video…' : !source.status ? 'Prepare video'
           : source.status.phase === 'RETRY_REQUIRED' ? 'Retry video preparation' : 'Resume video preparation'}</button> : null}
       {source?.status?.phase === 'RETRY_REQUIRED' ? <p>Retry may make another paid analysis call.</p> : null}
-      {draft.state.choices?.video?.locator.sourceVideoMediaId === mediaId ? <details><summary>Saved selected material</summary>
-        <p>{draft.state.choices.frames?.length ? `${draft.state.choices.frames.length} manually selected frames` : 'Automatic frame selection'}</p>
-        {draft.state.choices.frames?.map(frame => <p key={frame.frameId} data-frame-id={frame.frameId}>Selected frame at {reviewTime(frame.timestampMs)}</p>)}
-        {draft.state.saved?.draft.claimSnapshots.map((statement, index) => <p key={index}>{statement.wording}</p>)}
-      </details> : null}
     </> : !collapsed ? <>
       <p>Choose frames and statements for generation</p>
       <div className={styles.heading}><strong>Frames</strong><span>{frames.length} / 3 selected</span></div>

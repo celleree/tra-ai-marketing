@@ -14,6 +14,7 @@ await server.listen();
 const url = `http://127.0.0.1:${server.httpServer.address().port}/tests/browser/video-review.html`;
 const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {}) });
 const id = `review_${'a'.repeat(32)}`, mediaId = `media_${'b'.repeat(32)}`;
+const availableB = `media_${'9'.repeat(32)}`, availableC = `media_${'8'.repeat(32)}`;
 const video = { locator: { version: 1, sourceVideoMediaId: mediaId, sourceVideoContentHash: 'c'.repeat(64), analyzerFingerprintSha256: 'd'.repeat(64) },
   libraryId: `video-library:${'e'.repeat(64)}`, librarySha256: 'f'.repeat(64), preparationSha256: '1'.repeat(64) };
 const frame = { frameId: `video-frame:${'2'.repeat(64)}`, representativeFrameId: `video-frame:${'2'.repeat(64)}`, candidateIndex: 0, timestampMs: 1000, frameSha256: '3'.repeat(64) };
@@ -35,32 +36,35 @@ async function scenario(name, options, run) {
   const response = () => ({ draft: { id, version: 1, artifactType: 'VIDEO_REVIEW_DRAFT', providerEligible: false,
     choices, claimSnapshots: [{ reference: claim, wording: segment.text, context: { type: 'VIDEO_TRANSCRIPT', segments: [segment] } }], updatedAtMs: 1 },
     revision, issues: issue ? [{ source: 'VIDEO', message: issue }] : [], transcriptContext: null, profileSource: null });
-  await context.addInitScript(({ id, mediaId, profile, hasProfile }) => {
+  await context.addInitScript(({ id, inventory, profile, hasProfile }) => {
     if (sessionStorage.getItem('video-review-fixture-seeded')) return;
     sessionStorage.setItem('video-review-fixture-seeded', 'true');
     localStorage.setItem('tra-video-review-draft-v1', id);
-    localStorage.setItem('tra-create-video-ids-v1', JSON.stringify([mediaId]));
+    localStorage.setItem('tra-create-video-ids-v1', JSON.stringify(inventory));
     if (hasProfile) localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', brandGuidelines: {}, guardrails: {}, ...profile }));
-  }, { id, mediaId, profile, hasProfile: options.profile });
+  }, { id, inventory: options.inventory ?? [mediaId], profile, hasProfile: options.profile });
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, body = request.postDataJSON();
     calls.push([path, request.method()]);
+    const requestedId = new URL(request.url()).searchParams.get('mediaId') ?? mediaId;
+    const missing = options.missingMedia || (options.missingReviewed && requestedId === mediaId);
+    const currentVideo = { ...video, locator: { ...video.locator, sourceVideoMediaId: requestedId } };
+    const currentMedia = { ...media, id: requestedId, originalName: requestedId === mediaId ? 'fixture.mp4' : requestedId === availableB ? 'second.mp4' : 'third.mp4' };
     let value = {}, status = 200;
     if (path === '/api/video/review-selection') {
       if (options.missingDraft) { status = 404; value = { error: 'Review draft was not found.' }; }
       else { if (request.method() === 'POST') { choices = body.choices; revision = 'revision-2'; issue = undefined; } value = response(); }
     } else if (path === '/api/video/intelligence/jobs') {
       if (request.method() === 'POST') { videoActions.push(body.action); phase = 'COMPLETE'; value = { phase, locator: video.locator, busy: false }; }
-      else if (options.missingMedia) { status = 404; value = { error: 'Stored video is missing.' }; }
-      else { const requestedId = new URL(request.url()).searchParams.get('mediaId');
-        value = { source: { ...media, id: requestedId, originalName: requestedId === mediaId ? 'fixture.mp4' : 'second.mp4' }, locator: video.locator, status: { phase, locator: video.locator, busy: false } }; }
+      else if (missing) { status = 404; value = { error: 'Stored video is missing.' }; }
+      else value = { source: currentMedia, locator: currentVideo.locator, status: { phase, locator: currentVideo.locator, busy: false } };
     } else if (path === '/api/video/intelligence/library') value = {};
     else if (path === '/api/video/review-sources') {
       if (request.method() === 'POST') value = { statements: [], companyProfile: body.companyProfile };
-      else if (options.missingMedia) { status = 404; value = { error: 'Stored video is missing.' }; }
-      else value = { source: media, status: { phase, locator: video.locator, completedRepresentatives: 1, totalRepresentatives: 1, busy: false,
+      else if (missing) { status = 404; value = { error: 'Stored video is missing.' }; }
+      else value = { source: currentMedia, status: { phase, locator: currentVideo.locator, completedRepresentatives: 1, totalRepresentatives: 1, busy: false,
         failure: { message: 'Fixture preparation failed.' }, retry: { message: 'Uncertain prior attempt.' } },
-        review: phase !== 'COMPLETE' ? null : { video, frameBindings: [frame], onScreenStatements: [], library: { transcript: { segments: [segment] },
+        review: phase !== 'COMPLETE' ? null : { video: currentVideo, frameBindings: [frame], onScreenStatements: [], library: { transcript: { segments: [segment] },
           representativeFrames: [{ ...frame, id: frame.frameId, thumbnailDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5l8AAAAASUVORK5CYII=' }] } } };
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') submissions.push(body);
@@ -101,6 +105,41 @@ try {
     await page.getByLabel('Remove second.mp4').click(); await page.reload(); await ready(page);
     assert.equal(await page.getByLabel('Remove second.mp4').count(), 0);
   });
+  await scenario('Missing reviewed A remains visible while available B is displayed and selected', {
+    missingReviewed: true, issue: 'Reviewed video A is unavailable.', inventory: [mediaId, availableB, availableC],
+  }, async ({ page, calls, submissions, videoActions, response }) => {
+    await ready(page);
+    const frozen = structuredClone(response());
+    const summary = page.getByRole('region', { name: 'Saved video review' });
+    await summary.getByText(segment.text, { exact: true }).waitFor();
+    const assertFrozen = async () => {
+      assert.equal(await summary.getAttribute('data-review-id'), id);
+      assert.equal(await summary.getAttribute('data-review-revision'), frozen.revision);
+      assert.equal(await summary.getAttribute('data-video-id'), mediaId);
+      assert.equal(await summary.locator('[data-frame-id]').getAttribute('data-frame-id'), frame.frameId);
+      assert.equal(await summary.getByText('Selected frame at 00:01', { exact: true }).isVisible(), true);
+      assert.equal(await summary.getByText(segment.text, { exact: true }).isVisible(), true);
+      assert.equal(await generateButton(page).isDisabled(), true);
+      assert.deepEqual(response(), frozen);
+    };
+    await assertFrozen();
+    const picker = page.getByRole('combobox').filter({ has: page.locator(`option[value="${availableB}"]`) });
+    assert.equal(await picker.inputValue(), availableB);
+    await picker.selectOption(availableC); await page.getByText('Video material ready').waitFor();
+    await assertFrozen();
+    await picker.selectOption(availableB); await page.getByText('Video material ready').waitFor();
+    await assertFrozen();
+    await page.getByRole('button', { name: 'Reload saved review' }).click(); await assertFrozen();
+    assert.equal(await page.getByLabel('Remove second.mp4').count(), 1);
+    assert.equal(await page.getByRole('button', { name: 'Remove unavailable videos' }).count(), 1);
+    assert.equal(calls.some(([path, method]) => path === '/api/video/review-selection' && method !== 'GET'), false);
+    assert.deepEqual(submissions, []); assert.deepEqual(videoActions, []);
+    await page.getByRole('button', { name: 'Remove unavailable videos' }).click();
+    await summary.waitFor({ state: 'detached' });
+    assert.equal(response().draft.choices.video, null);
+    assert.equal(await page.getByLabel('Remove second.mp4').count(), 1);
+    assert.equal(await page.getByLabel('Remove third.mp4').count(), 1);
+  });
   for (const frames of [null, []]) await scenario(`Automatic frame mode ${JSON.stringify(frames)}`, { frames }, async ({ page, submissions, response }) => {
     await ready(page); assert.equal(await page.locator('input[type=checkbox]').first().isChecked(), false);
     await generateButton(page).click(); await page.getByText('Generation needs attention.').waitFor();
@@ -139,7 +178,7 @@ try {
         assert.equal(await generateButton(page).isDisabled(), true);
       }
       if (options.missingMedia) {
-        await page.getByText('Saved selected material').click(); await page.getByText(segment.text, { exact: true }).waitFor();
+        await page.getByRole('region', { name: 'Saved video review' }).getByText(segment.text, { exact: true }).waitFor();
         await page.getByRole('button', { name: 'Remove unavailable videos' }).click();
       }
     });

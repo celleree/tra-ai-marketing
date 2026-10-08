@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
-import { VideoReviewPanel } from '@/components/creative-generator/video-review-panel';
+import { SavedVideoReviewSummary, VideoReviewPanel } from '@/components/creative-generator/video-review-panel';
 import { CreativeComposer } from '@/components/creative-generator/creative-composer';
 import { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
 import { useSavedVideoSources } from '@/components/creative-generator/use-saved-video-sources';
@@ -307,6 +307,7 @@ export function CreativeGenerator() {
                   {videoReview.profileChanged() ? <div role="alert"><p>Company Profile changed. Saved selected wording is preserved. Use the current Profile and reselect its statements before generating.</p>
                     <button type="button" disabled={generating || videoReview.state.pending > 0} onClick={() => void videoReview.useCurrentProfile()}>Use current Company Profile</button>
                   </div> : null}
+                  <SavedVideoReviewSummary draft={videoReview} />
                   <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} />
                   <PortfolioProgressPanel portfolio={portfolio} />
                 </> : null}
