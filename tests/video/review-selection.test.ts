@@ -63,8 +63,29 @@ describe('persisted draft frame and claim choices', () => {
     expect(cleared.draft.claimSnapshots).toEqual([]); expect(usesAutomaticReviewFrames(cleared.draft.choices)).toBe(true);
     expect(untouched.draft.choices.frames).toBeNull();
   });
-  it.each([['duplicate', [frame(0), frame(0)]], ['more than three', [frame(0), frame(1), frame(2), frame(3)]]])
-    ('rejects %s frames', (_name, frames) => expect(() => parseReviewSelectionChoices({ ...choices(), frames })).toThrow('distinct frames'));
+  it.each([['duplicate', [frame(0), frame(0)]]])
+    ('rejects %s frames', (_name, frames) => expect(() => parseReviewSelectionChoices({ ...choices(), frames })).toThrow('distinct valid source frames'));
+  it('round trips twelve exact manual candidates with saved revisions and preserves per-creative attachment limits', async () => {
+    const frames = Array.from({ length: 12 }, (_, index) => frame(index)), indexes = frames.map(item => item.candidateIndex);
+    mocks.library.mockResolvedValue({ ...library, candidates: frames,
+      representativeFrames: [{ ...library.representativeFrames[0], candidateIndexes: indexes }] });
+    mocks.preparation.mockResolvedValue({ manifest: { candidates: frames, groups: [{ representativeIndex: 0, candidateIndexes: indexes }] } });
+    const saved = await save({ ...choices(), frames });
+    expect((await loadVideoReviewDraft(saved.draft.id)).draft.choices.frames).toEqual(frames);
+    const edited = await saveVideoReviewDraft({ id: saved.draft.id, expectedRevision: saved.revision, choices: { ...choices(), frames: frames.slice(1) } });
+    expect(edited.revision).not.toBe(saved.revision);
+    expect((await loadVideoReviewDraft(saved.draft.id)).draft.choices.frames).toEqual(frames.slice(1));
+    expect(parseGenerateVideoFrameSelection({ version: 2, libraryId: video.libraryId, sourceVideoContentHash: locator.sourceVideoContentHash,
+      frameIds: frames.slice(0, 4).map(item => item.frameId), sourceOverlays: frames.slice(0, 4).map(() => ({ version: 2, status: 'CLEAN' })) })).toBeNull();
+  });
+  it('rejects an oversized draft explicitly without changing the saved revision or choices', async () => {
+    const saved = await save();
+    mocks.library.mockResolvedValue({ ...library, transcript: { ...library.transcript,
+      segments: segments.map(segment => ({ ...segment, text: 'x'.repeat(1024 * 1024) })) } });
+    await expect(saveVideoReviewDraft({ id: saved.draft.id, expectedRevision: saved.revision, choices: choices() })).rejects.toThrow('size limit');
+    mocks.library.mockResolvedValue(library);
+    expect(await loadVideoReviewDraft(saved.draft.id)).toEqual(saved);
+  });
   it('rejects duplicate claims and accepts specific case-study facts', async () => {
     expect(() => parseReviewSelectionChoices({ ...choices(), claims: [claims()[0], claims()[0]] })).toThrow('distinct');
     const reference = { ...proofChoice(caseStudy as never, 'verifiedFacts'), field: 'verifiedFacts' as const, factIndex: 0,

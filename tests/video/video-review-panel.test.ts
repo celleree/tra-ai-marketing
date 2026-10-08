@@ -58,6 +58,21 @@ describe('native Create frame review', () => {
     expect(html()).toContain('restored-neighbor'); expect(nodes(render()).filter(node => node.type === 'input').at(-1)!.props.checked).toBe(true);
     expect(draft.update).not.toHaveBeenCalled(); expect(draft.state.choices!.claims).toBeNull();
   });
+  it('restores every selected neighbor in a larger pool with one preview request at a time', async () => {
+    await loaded();
+    const neighbors = Array.from({ length: 5 }, (_, index) => ({ ...bindings[4], frameId: `neighbor-${index}`, candidateIndex: index + 4 }));
+    const largeSource = { ...source, review: { ...source.review!, frameBindings: [...bindings.slice(0, 4), ...neighbors] } };
+    hooks.values[1] = largeSource; draft.state.choices!.frames = neighbors;
+    let active = 0, peak = 0;
+    request.mockImplementation(async url => {
+      active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 1)); active--;
+      const index = Number(new URL(String(url), 'http://localhost').searchParams.get('candidateIndex'));
+      return Response.json({ ...largeSource, review: { ...largeSource.review, preview: { binding: neighbors[index - 4], thumbnailDataUrl: 'neighbor' } } });
+    });
+    render(); run(1); await vi.waitFor(() => expect(Object.keys(hooks.values[5] as object)).toHaveLength(5));
+    expect(peak).toBe(1); expect(request).toHaveBeenCalledTimes(6);
+    expect(draft.state.choices!.frames).toEqual(neighbors); expect(draft.update).not.toHaveBeenCalled();
+  });
   it('ignores a late source response after switching videos, even when transport ignores abort', async () => {
     let resolve!: (response: Response) => void; request.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
     render(); run(0); hooks.cleanups[0](); hooks.values[0] = 'other'; hooks.cursor = 0; hooks.effects = [];
@@ -75,13 +90,27 @@ describe('native Create frame review', () => {
     (nodes(render()).find(node => node.type === 'input')!.props.onChange as () => void)();
     expect(draft.state.choices!.frames).toEqual([]); expect(request).toHaveBeenCalledTimes(1);
   });
-  it('preserves untouched null and clearly prevents a fourth selection while allowing deselection', async () => {
+  it('preserves untouched null and allows all analyzed frames while saving and deselecting', async () => {
     await loaded(); expect(draft.state.choices!.frames).toBeNull();
     draft.state.choices!.frames = bindings.slice(0, 3);
     const checks = nodes(render()).filter(node => node.type === 'input');
-    expect(checks.map(node => node.props.disabled)).toEqual([false, false, false, true]);
-    expect(toggleReviewFrame(bindings.slice(0, 3), bindings[3])).toEqual(bindings.slice(0, 3));
-    expect(html()).toContain('Deselect one');
+    expect(checks.map(node => node.props.disabled)).toEqual([false, false, false, false]);
+    expect(toggleReviewFrame(bindings.slice(0, 3), bindings[3])).toEqual(bindings.slice(0, 4));
+    expect(toggleReviewFrame(bindings, bindings[1])).toEqual(bindings.filter(item => item !== bindings[1]));
+    draft.state.pending = 2;
+    expect(nodes(render()).filter(node => node.type === 'input').every(node => !node.props.disabled)).toBe(true);
+    expect(html()).toContain('3 selected');
+  });
+  it.each(['error', 'conflict', 'issues', 'generation'])('explains the %s block without altering choices', async reason => {
+    await loaded(); const before = structuredClone(draft.state.choices);
+    if (reason === 'error') draft.state.error = 'HTTP 401: Sign in again, then reload saved review.';
+    if (reason === 'conflict') draft.state.conflict = true;
+    if (reason === 'issues') draft.state.saved = { draft: { claimSnapshots: [] }, issues: [{ source: 'VIDEO', message: 'Missing source' }] } as never;
+    hooks.cursor = 0;
+    const tree = VideoReviewPanel({ videos: [{ id: mediaId, name: 'Source' }], draft, disabled: reason === 'generation' });
+    expect(nodes(tree).filter(node => node.type === 'input').every(node => node.props.disabled)).toBe(true);
+    expect(renderToStaticMarkup(tree)).toContain(reason === 'generation' ? 'Stop or finish generation' : reason === 'issues' ? 'unavailable or changed' : reason === 'conflict' ? 'latest revision' : 'Sign in again');
+    expect(draft.state.choices).toEqual(before); expect(draft.update).not.toHaveBeenCalled();
   });
   it('reads/polls incomplete work until completion without starting/resuming analysis', async () => {
     vi.useFakeTimers(); const incomplete = { ...source, status: { phase: 'OBSERVING' }, review: null };

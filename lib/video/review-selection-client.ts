@@ -8,6 +8,16 @@ export const LAST_VIDEO_REVIEW = 'tra-video-review-draft-v1';
 export const EMPTY_REVIEW_CLIENT_STATE: ReviewDraftClientState = { saved: null, choices: null, pending: 0, error: '', conflict: false };
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>;
 
+export const reviewRequestFailure = (error: unknown, recovery = 'saved review') => {
+  const status = (error as { status?: number } | null)?.status;
+  const detail = error instanceof Error ? error.message : 'Review request failed.';
+  const action = status === 401 ? 'Sign in again in another tab, then reload'
+    : status === 403 ? 'Use an approved TRA operator account, then reload'
+    : status === 409 ? 'Read the newer saved revision or changed source by reloading'
+    : 'The request could not be confirmed. Check your connection and reload';
+  return `${status ? `HTTP ${status}: ` : ''}${detail} ${action} the ${recovery}. Saved selections are preserved; unsaved changes may need to be reselected.`;
+};
+
 /** Browser storage contains only a convenience ID, never authoritative choices or revisions. */
 export const reviewDraftIdForReopen = (url: URL, storage?: Storage) => {
   if (url.searchParams.has('review')) return url.searchParams.get('review');
@@ -34,15 +44,16 @@ export const createReviewDraftClient = (options: { request?: typeof fetch; onCha
   const request = async (url: string, body?: unknown): Promise<ReviewDraftResponse> => {
     const response = await (options.request ?? fetch)(url, { cache: 'no-store', ...(body === undefined ? {} :
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
-    const result = await response.json();
+    const result = await response.json().catch(error => { if (response.ok) throw error; return {}; });
     if (!response.ok) throw Object.assign(new Error(result.error || 'Review draft request failed.'), { status: response.status });
     return result as ReviewDraftResponse;
   };
   const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
     publish({ pending: state.pending + 1 });
     const result = tail.then(task).catch(error => {
+      if ((error as { reviewBlocked?: boolean }).reviewBlocked) throw error;
       blocked = true;
-      publish({ error: `${error instanceof Error ? error.message : 'Review draft request failed.'} Reload the saved review before saving again.`,
+      publish({ error: reviewRequestFailure(error),
         conflict: (error as { status?: number }).status === 409 || state.conflict });
       throw error;
     }).finally(() => publish({ pending: state.pending - 1 }));
@@ -68,7 +79,7 @@ export const createReviewDraftClient = (options: { request?: typeof fetch; onCha
     const snapshot = structuredClone(choices), version = ++edit;
     publish({ choices: snapshot });
     return enqueue(async () => {
-      if (blocked) throw new Error('Review state needs a server reload.');
+      if (blocked) throw Object.assign(new Error('Review state needs a server reload.'), { reviewBlocked: true });
       const saved = await request('/api/video/review-selection', { id: state.saved?.draft.id ?? draftId,
         expectedRevision: state.saved?.revision ?? null, choices: snapshot });
       publish({ saved, ...(edit === version ? { choices: saved.draft.choices } : {}), error: '', conflict: false });

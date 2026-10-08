@@ -203,6 +203,30 @@ describe('manual candidate closed pool', () => {
     expect(state.request).toHaveBeenCalledOnce(); expect(mocks.neighbor.mock.calls[0][2]).toBe(3);
   });
 
+  it('uses the fourth manual candidate after three unsuitable candidates without truncation or widening', async () => {
+    const state = setup(...Array.from({ length: 3 }, () => assessment({ humanPresence: 'NONE' })), assessment());
+    for (let index = 0; index < 3; index++) expect(await manualStep([0, 1, 2, 3], state)).toEqual({ status: 'CONTINUE' });
+    expect(await manualStep([0, 1, 2, 3], state)).toMatchObject({ status: 'COMPLETE', selection: { candidateBindings: [manualBinding(3)] } });
+    expect(await manualStep([0, 1, 2, 3], state)).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(3)] } });
+    expect(state.request).toHaveBeenCalledTimes(4);
+    expect(mocks.neighbor.mock.calls.map(call => call[2])).toEqual([1, 2, 3]);
+  });
+  it('orders four suitable pool members by saved use counts and retains operator order on ties', async () => {
+    const state = setup(...Array.from({ length: 4 }, () => assessment())); const used = reuse();
+    for (let index = 0; index < 4; index++) {
+      expect(await manualStep([0, 1, 2, 3], state, false, used)).toMatchObject({ status: 'COMPLETE', selection: { candidateBindings: [manualBinding(index)] } });
+      used.frames.push({ libraryId, frameId: representativeId(index), useCount: 1 });
+    }
+    expect(await manualStep([3, 2, 1, 0], state, false, used)).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(3)] } });
+    used.frames[3].useCount = 2;
+    expect(await manualStep([3, 2, 1, 0], state, false, used)).toMatchObject({ status: 'COMPLETE', selection: { frameIds: [representativeId(2)] } });
+    expect(state.request).toHaveBeenCalledTimes(4);
+  });
+  it('rejects an empty or duplicate manual pool before assessment', async () => {
+    const state = setup(assessment());
+    for (const indexes of [[], [0, 1, 2, 3, 0]]) await expect(manualStep(indexes, state)).rejects.toThrow('closed-pool');
+    expect(state.request).not.toHaveBeenCalled();
+  });
   it('never substitutes a suitable unselected representative or neighbor', async () => {
     const state = setup(assessment({ eyes: 'CLOSED_OR_BLINKING' }));
     expect(await manualStep([1], state)).toEqual({ status: 'CONTINUE' });
