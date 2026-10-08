@@ -48,7 +48,8 @@ export const saveVideoReviewDraft = async (input: { id: string | null; expectedR
   return { draft, revision: saved.etag, issues: [] as ReviewSelectionIssue[],
     transcriptContext: video?.library.transcript ?? null, profileSource: choices.companyProfile ? 'OPERATOR_SNAPSHOT' as const : null };
 };
-export const loadVideoReviewDraft = async (id: string, dependencies: ReviewSourceDependencies = {}, currentProfileSha256?: string) => {
+/** Shared validated read; frame observations remain analysis-only, never generation pixels. */
+export const loadVideoReviewDraftWithFrameContext = async (id: string, dependencies: ReviewSourceDependencies = {}, currentProfileSha256?: string) => {
   const saved = await readStored(id, dependencies);
   if (!saved) throw new ReviewSelectionError('Review draft was not found.', 404);
   const { choices } = saved.draft; const issues: ReviewSelectionIssue[] = [];
@@ -71,6 +72,18 @@ export const loadVideoReviewDraft = async (id: string, dependencies: ReviewSourc
   if (currentProfileSha256 !== undefined && choices.companyProfile && currentProfileSha256 !== reviewSourceSha256(choices.companyProfile)) {
     issues.push({ source: 'COMPANY_PROFILE', message: 'Current browser profile differs from the saved operator snapshot.' });
   }
-  return { ...saved, issues, transcriptContext: video?.library.transcript ?? null,
+  const selectedFrameContexts = choices.frames?.map(binding => {
+    const representative = video?.library.representativeFrames.find(frame => frame.id === binding.representativeFrameId);
+    return { binding: structuredClone(binding), observationSourceFrameId: binding.representativeFrameId,
+      observationIsExactFrame: representative?.candidateIndex === binding.candidateIndex,
+      observation: representative ? structuredClone(representative.observation) : null };
+  }) ?? null;
+  return { ...saved, issues, selectedFrameContexts, transcriptContext: video?.library.transcript ?? null,
     profileSource: choices.companyProfile ? 'OPERATOR_SNAPSHOT' as const : null };
+};
+
+/** Preserve the existing API/client response shape. */
+export const loadVideoReviewDraft = async (...args: Parameters<typeof loadVideoReviewDraftWithFrameContext>) => {
+  const { selectedFrameContexts: _frameContexts, ...saved } = await loadVideoReviewDraftWithFrameContext(...args);
+  return saved;
 };
