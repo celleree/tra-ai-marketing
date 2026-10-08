@@ -33,6 +33,10 @@ afterEach(() => { hooks.cleanups.forEach(cleanup => cleanup()); vi.unstubAllGlob
 const loaded = async () => { render(); run(0); await vi.waitFor(() => expect(hooks.values[1]).toEqual(source)); };
 
 describe('native Create frame review', () => {
+  it('renders cold Create with no video or restored source without touching a null source', () => {
+    expect(VideoReviewPanel({ videos: [], draft: { ...draft, state: { ...draft.state, choices: null } } })).toBeNull();
+    expect(request).not.toHaveBeenCalled();
+  });
   it('restores a saved neighboring choice with its exact local thumbnail without saving or copying observations', async () => {
     draft.state.choices!.frames = [bindings[4]]; await loaded();
     request.mockResolvedValueOnce(Response.json({ ...source, review: { ...source.review, preview: {

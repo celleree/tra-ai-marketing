@@ -43,7 +43,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
     void read(); window.addEventListener('focus', read);
     return () => { controller.abort(); clearTimeout(timer); window.removeEventListener('focus', read); };
   }, [mediaId]);
-  const review = source?.review?.video.locator.sourceVideoMediaId === mediaId && source.status?.phase === 'COMPLETE' ? source.review : null;
+  const review = source?.status?.phase === 'COMPLETE' && source.review?.video.locator.sourceVideoMediaId === mediaId ? source.review : null;
   const matching = review && JSON.stringify(draft.state.choices?.video) === JSON.stringify(review.video);
   const frames = matching ? draft.state.choices?.frames ?? [] : [];
   const blocked = disabled || Boolean(draft.state.error || draft.state.conflict || draft.state.saved?.issues.length);
