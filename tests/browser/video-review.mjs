@@ -41,6 +41,8 @@ async function scenario(name, options, run) {
   let choices = { video, frames: options.frames === undefined ? [frame] : options.frames, claims: [claim], companyProfile: options.profile ? profile : null };
   const bindings = Array.from({ length: options.frameCount ?? 1 }, (_, index) => index ? { ...frame,
     frameId: `video-frame:${String(index + 4).repeat(64)}`, candidateIndex: index, timestampMs: (index + 1) * 1000 } : frame);
+  if (options.savedNeighbors) choices.frames = bindings.slice(1);
+  const previewBatches = [], previewActivity = { active: 0, peak: 0 }; let previewFailure = Boolean(options.failPreviews), brokenPreview = Boolean(options.brokenPreview);
   const saves = []; let failure = 0, loadFailure = 0, sourceFailure = 0, revisionNumber = 1;
   let revision = 'revision-1', phase = options.phase ?? 'COMPLETE', issue = options.issue;
   const response = () => ({ draft: { id, version: 1, artifactType: 'VIDEO_REVIEW_DRAFT', providerEligible: false,
@@ -60,7 +62,7 @@ async function scenario(name, options, run) {
     const missing = options.missingMedia || (options.missingReviewed && requestedId === mediaId);
     const currentVideo = { ...video, locator: { ...video.locator, sourceVideoMediaId: requestedId } };
     const currentMedia = { ...media, id: requestedId, originalName: requestedId === mediaId ? 'fixture.mp4' : requestedId === availableB ? 'second.mp4' : 'third.mp4' };
-    let value = {}, status = 200;
+    let value = {}, status = 200, isPreview = false;
     if (path === '/api/video/review-selection') {
       if ((request.method() === 'POST' && failure) || (request.method() === 'GET' && loadFailure)) {
         status = request.method() === 'POST' ? failure : loadFailure; failure = 0; value = { error: 'Fixture denial or failure.' };
@@ -79,7 +81,17 @@ async function scenario(name, options, run) {
       else value = { source: currentMedia, status: { phase, locator: currentVideo.locator, completedRepresentatives: 1, totalRepresentatives: 1, busy: false,
         failure: { message: 'Fixture preparation failed.' }, retry: { message: 'Uncertain prior attempt.' } },
         review: phase !== 'COMPLETE' ? null : { video: currentVideo, frameBindings: bindings, onScreenStatements: [], library: { transcript: { segments: [segment] },
-          representativeFrames: bindings.map((binding, index) => ({ ...binding, id: binding.frameId, thumbnailDataUrl: thumbnails[index % 2] })) } } };
+          representativeFrames: bindings.slice(0, options.savedNeighbors ? 1 : bindings.length).map((binding, index) => ({ ...binding, id: binding.frameId, thumbnailDataUrl: thumbnails[index % 2] })) } } };
+      const indexes = new URL(request.url()).searchParams.get('candidateIndexes');
+      if (indexes && value.review) {
+        const batch = indexes.split(',').map(Number); previewBatches.push(batch); isPreview = true;
+        previewActivity.active++; previewActivity.peak = Math.max(previewActivity.peak, previewActivity.active);
+        assert.ok(batch.length <= 24);
+        if (options.previewDelay) await new Promise(resolve => setTimeout(resolve, options.previewDelay));
+        if (previewFailure) { status = 409; value = { error: 'Fixture preview extraction failed.' }; }
+        else value.review.previews = batch.map(index => ({ binding: bindings[index], providerEligible: false,
+          thumbnailDataUrl: brokenPreview ? 'data:image/jpeg;base64,broken' : thumbnails[index % 2] }));
+      }
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
@@ -87,6 +99,7 @@ async function scenario(name, options, run) {
       else value = { job: job(state), creatives: [] };
     }
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) });
+    if (isPreview) previewActivity.active--;
   });
   // Abort every external request; the harness never reaches an auth, storage or provider service.
   await page.route(/^https:\/\//, route => route.abort());
@@ -94,7 +107,7 @@ async function scenario(name, options, run) {
     await page.goto(url);
     await page.getByRole('button', { name: 'Generate creatives', exact: true }).waitFor();
     await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
-    await run({ page, calls, submissions, videoActions, response, bindings, saves, failNext: status => { failure = status; }, denyLoads: status => { loadFailure = status; }, failSource: status => { sourceFailure = status; } });
+    await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, recoverPreviews: () => { previewFailure = false; brokenPreview = false; }, failNext: status => { failure = status; }, denyLoads: status => { loadFailure = status; }, failSource: status => { sourceFailure = status; } });
     assert.deepEqual(errors, [], 'Browser runtime errors');
     results.push(name); console.log(`PASS ${name}`);
   } finally { await context.close(); }
@@ -168,7 +181,7 @@ try {
       const dimensions = await images.evaluateAll(images => images.map(image => ({ natural: image.naturalWidth / image.naturalHeight,
         rendered: image.getBoundingClientRect().width / image.getBoundingClientRect().height, fit: getComputedStyle(image).objectFit })));
       for (const image of dimensions) { assert.ok(Math.abs(image.natural - image.rendered) < 0.01); assert.notEqual(image.fit, 'cover'); }
-      const strip = images.first().locator('..').locator('..');
+      const strip = images.first().locator('..').locator('..').locator('..');
       const start = await strip.evaluate(element => ({ left: element.scrollLeft, width: element.clientWidth, total: element.scrollWidth }));
       assert.equal(start.left, 0); assert.ok(start.total > start.width);
       await images.first().tap(); await page.getByText('Saved ✓').waitFor();
@@ -182,6 +195,71 @@ try {
         assert.ok(box.height >= 44); assert.ok(image.x >= 0 && image.x + image.width <= width);
         await page.screenshot({ path: `/tmp/tra-307-mobile-${width}-${index}.png`, fullPage: true });
       }
+    });
+  for (const width of [375, 390, 430]) await scenario(`Failed neighboring previews retain touch selection and retry at ${width}px`,
+    { width, frameCount: 21, savedNeighbors: true, failPreviews: true }, async ({ page, response, bindings, previewBatches, recoverPreviews, saves }) => {
+      await ready(page); const panel = page.getByRole('region', { name: 'Video material review' });
+      await panel.getByText('Fixture preview extraction failed.', { exact: false }).waitFor();
+      assert.equal(await panel.locator('[data-frame-id] input[type=checkbox]').count(), 21);
+      const card = panel.locator(`[data-frame-id="${bindings[1].frameId}"]`);
+      assert.equal(await card.getByRole('checkbox').isChecked(), true);
+      await card.getByText(bindings[1].frameId, { exact: true }).waitFor();
+      await card.getByText(`${bindings[1].timestampMs} ms`, { exact: false }).waitFor();
+      await card.getByText('Preview unavailable').waitFor();
+      const before = structuredClone(response()); recoverPreviews();
+      const retry = card.getByRole('button', { name: 'Retry preview' });
+      assert.ok((await retry.boundingBox()).height >= 44); await retry.tap();
+      await page.waitForFunction(() => document.querySelectorAll('[data-frame-id] img').length >= 21);
+      assert.deepEqual(response(), before); assert.equal(saves.length, 0);
+      assert.deepEqual(previewBatches.map(batch => batch.length), [20, 20]);
+      await card.getByRole('checkbox').tap(); await page.getByText('Saved ✓').waitFor();
+      assert.deepEqual(response().draft.choices.frames, bindings.slice(2));
+      const saved = structuredClone(response()); await page.reload(); await ready(page);
+      assert.deepEqual(response(), saved);
+      assert.equal(await panel.locator('[data-frame-id] input[type=checkbox]').count(), 20);
+      assert.deepEqual(previewBatches.map(batch => batch.length), [20, 20, 19]);
+      const image = panel.locator('img').last(); await image.scrollIntoViewIfNeeded();
+      await page.waitForFunction(() => [...document.querySelectorAll('img')].every(image => image.complete && image.naturalWidth));
+      const geometry = await image.evaluate(image => ({ natural: image.naturalWidth / image.naturalHeight,
+        rendered: image.getBoundingClientRect().width / image.getBoundingClientRect().height }));
+      assert.ok(Math.abs(geometry.natural - geometry.rendered) < 0.01);
+      await page.screenshot({ path: `/tmp/tra-308-neighbor-${width}.png`, fullPage: true });
+    });
+  await scenario('Large neighboring pool queues preview work across rapid deselections',
+    { frameCount: 51, savedNeighbors: true, previewDelay: 700 }, async ({ page, response, bindings, previewBatches, previewActivity }) => {
+      await ready(page); const panel = page.getByRole('region', { name: 'Video material review' });
+      await page.waitForTimeout(50);
+      for (const binding of bindings.slice(1, 3)) await panel.locator(`[data-frame-id="${binding.frameId}"]`).getByRole('checkbox').click();
+      await page.getByText('Saved ✓').waitFor();
+      await page.waitForFunction(() => document.querySelectorAll('[data-frame-id] img').length >= 49);
+      assert.equal(previewActivity.peak, 1); assert.ok(previewBatches.every(batch => batch.length <= 24));
+      assert.deepEqual(response().draft.choices.frames, bindings.slice(3));
+    });
+  await scenario('Failed neighboring extraction deselects and refreshes without any successful preview',
+    { frameCount: 21, savedNeighbors: true, failPreviews: true }, async ({ page, response, bindings }) => {
+      await ready(page); const panel = page.getByRole('region', { name: 'Video material review' });
+      await panel.getByText('Fixture preview extraction failed.', { exact: false }).waitFor();
+      await panel.locator(`[data-frame-id="${bindings[1].frameId}"]`).getByRole('checkbox').click();
+      await page.getByText('Saved ✓').waitFor(); assert.deepEqual(response().draft.choices.frames, bindings.slice(2));
+      await page.reload(); await ready(page); assert.deepEqual(response().draft.choices.frames, bindings.slice(2));
+      assert.equal(await panel.locator('[data-frame-id] input[type=checkbox]').count(), 20);
+    });
+  await scenario('Image decode failure retains saved identity and can retry without saving',
+    { frameCount: 2, savedNeighbors: true, brokenPreview: true }, async ({ page, response, bindings, recoverPreviews, saves }) => {
+      await ready(page); const card = page.getByRole('region', { name: 'Video material review' }).locator(`[data-frame-id="${bindings[1].frameId}"]`);
+      await card.getByText('Preview unavailable').waitFor(); assert.equal(await card.getByRole('checkbox').isChecked(), true);
+      const before = structuredClone(response()); recoverPreviews(); await card.getByRole('button', { name: 'Retry preview' }).click();
+      await card.locator('img').waitFor(); assert.deepEqual(response(), before); assert.equal(saves.length, 0);
+    });
+  for (const portfolioState of ['PENDING', 'RETRY_REQUIRED']) await scenario(`Large neighboring pool preserves portfolio ${portfolioState} recovery`,
+    { frameCount: 51, savedNeighbors: true, portfolioState }, async ({ page, response, previewBatches, saves }) => {
+      await ready(page); await page.waitForFunction(() => document.querySelectorAll('[data-frame-id] img').length >= 51);
+      assert.deepEqual(previewBatches.map(batch => batch.length), [24, 24, 2]);
+      const before = structuredClone(response());
+      await page.evaluate(() => localStorage.setItem('tra-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
+      await page.getByRole('region', { name: 'Saved portfolio progress' }).waitFor();
+      await page.getByRole('button', { name: portfolioState === 'PENDING' ? 'Resume generation' : 'Retry creative 1', exact: true }).click();
+      await page.getByText('Generation complete.').waitFor(); assert.deepEqual(response(), before); assert.equal(saves.length, 0);
     });
   await scenario('Review → Create exact revision/manual frames; refresh and reopen are read-only', {}, async ({ page, calls, submissions }) => {
     await ready(page); assert.equal(await page.locator('input[type=checkbox]').first().isChecked(), true);

@@ -14,6 +14,7 @@ import { createCurrentVideoIntelligenceIdentity } from '@/lib/video/intelligence
 import { loadVideoFrameLibrary, videoSourceHash } from '@/lib/video/library-service';
 import { getApprovedPreparedSelectedTraVideoFrames } from '@/lib/video/prepared-selected-frames';
 import { getApprovedSelectedTraVideoFrames } from '@/lib/video/selected-frames';
+import { MAX_REVIEW_PREVIEW_BATCH } from '@/lib/video/review-preview-policy';
 import type { VideoSelectionRepresentativeImage } from '@/lib/video/human-frame-selection';
 
 export interface VideoSelectionContext {
@@ -98,34 +99,50 @@ export const extractVideoSelectionFrames = async (source: HydratedTraVideoSource
     : getApprovedSelectedTraVideoFrames(source, context.library, frameIds);
 };
 
-/** Bounded candidate JPEGs are regenerated and verified from the hydrated original, never sent to image generation. */
-export const loadVideoCandidateAnalysisImage = async (source: HydratedTraVideoSource,
-  context: VideoSelectionContext, candidateIndex: number) => {
+/** Read one verified JPEG at a time from one bounded preprocessing pass, then release its temporary files. */
+export const withVideoCandidateAnalysisImages = async <T>(source: HydratedTraVideoSource,
+  context: VideoSelectionContext, candidateIndexes: readonly number[],
+  consume: (image: VideoSelectionRepresentativeImage & { representativeFrameId: string }) => Promise<T>) => {
   const { library, manifest } = context;
-  const candidate = library.candidates.find((entry) => entry.candidateIndex === candidateIndex);
-  const representative = library.representativeFrames.find((frame) => frame.candidateIndexes.includes(candidateIndex));
-  const prepared = manifest?.candidates[candidateIndex];
-  if (!manifest || !candidate || !representative || !prepared
-    || library.sourceVideoMediaId !== source.media.id || library.sourceVideoContentHash !== videoSourceHash(source)
-    || manifest.sourceVideoMediaId !== source.media.id || manifest.sourceVideoContentHash !== library.sourceVideoContentHash
-    || !manifest.groups.some((group) => group.representativeIndex === representative.candidateIndex
-      && group.candidateIndexes.includes(candidateIndex))
-    || candidate.timestampMs !== prepared.timestampMs || candidate.frameSha256 !== prepared.frameSha256) {
-    throw new Error('Candidate analysis does not match its frozen TRA video preparation.');
-  }
-  return withTemporaryTraVideoFrameCandidates(source, async (set) => {
-    const regenerated = set.candidates[candidateIndex];
-    if (set.sourceVideoContentHash !== library.sourceVideoContentHash || set.durationMs !== manifest.durationMs
-      || !regenerated || regenerated.timestampMs !== candidate.timestampMs
-      || regenerated.frameSha256 !== candidate.frameSha256) throw new Error('Candidate analysis frame has drifted.');
-    const bytes = await readFile(regenerated.temporaryPath);
-    const dimensions = getJpegDimensions(bytes);
-    if (createHash('sha256').update(bytes).digest('hex') !== candidate.frameSha256
-      || dimensions?.width !== candidate.width || dimensions?.height !== candidate.height) {
-      throw new Error('Candidate analysis JPEG failed source integrity validation.');
+  if (!candidateIndexes.length || candidateIndexes.length > MAX_REVIEW_PREVIEW_BATCH
+    || new Set(candidateIndexes).size !== candidateIndexes.length) throw new Error('Candidate analysis batch is invalid.');
+  const sourceHash = videoSourceHash(source);
+  const candidates = candidateIndexes.map(candidateIndex => {
+    const candidate = library.candidates.find((entry) => entry.candidateIndex === candidateIndex);
+    const representative = library.representativeFrames.find((frame) => frame.candidateIndexes.includes(candidateIndex));
+    const prepared = manifest?.candidates[candidateIndex];
+    if (!Number.isSafeInteger(candidateIndex) || candidateIndex < 0 || !manifest || !candidate || !representative || !prepared
+      || library.sourceVideoMediaId !== source.media.id || library.sourceVideoContentHash !== sourceHash
+      || manifest.sourceVideoMediaId !== source.media.id || manifest.sourceVideoContentHash !== library.sourceVideoContentHash
+      || !manifest.groups.some((group) => group.representativeIndex === representative.candidateIndex
+        && group.candidateIndexes.includes(candidateIndex))
+      || candidate.timestampMs !== prepared.timestampMs || candidate.frameSha256 !== prepared.frameSha256) {
+      throw new Error('Candidate analysis does not match its frozen TRA video preparation.');
     }
-    return { frameId: videoCandidateFrameId(library.sourceVideoContentHash, candidate.timestampMs, candidate.frameSha256),
-      representativeFrameId: representative.id, candidateIndex, timestampMs: candidate.timestampMs,
-      frameSha256: candidate.frameSha256, width: candidate.width, height: candidate.height, bytes };
-  }, {}, manifest.analyzerFingerprint.candidatePolicy);
+    return { candidate, representative };
+  });
+  return withTemporaryTraVideoFrameCandidates(source, async (set) => {
+    const results: T[] = [];
+    for (const { candidate, representative } of candidates) {
+      const regenerated = set.candidates[candidate.candidateIndex];
+      if (set.sourceVideoContentHash !== library.sourceVideoContentHash || set.durationMs !== manifest!.durationMs
+        || !regenerated || regenerated.timestampMs !== candidate.timestampMs
+        || regenerated.frameSha256 !== candidate.frameSha256) throw new Error('Candidate analysis frame has drifted.');
+      const bytes = await readFile(regenerated.temporaryPath);
+      const dimensions = getJpegDimensions(bytes);
+      if (createHash('sha256').update(bytes).digest('hex') !== candidate.frameSha256
+        || dimensions?.width !== candidate.width || dimensions?.height !== candidate.height) {
+        throw new Error('Candidate analysis JPEG failed source integrity validation.');
+      }
+      results.push(await consume({ frameId: videoCandidateFrameId(library.sourceVideoContentHash, candidate.timestampMs, candidate.frameSha256),
+        representativeFrameId: representative.id, candidateIndex: candidate.candidateIndex, timestampMs: candidate.timestampMs,
+        frameSha256: candidate.frameSha256, width: candidate.width, height: candidate.height, bytes }));
+    }
+    return results;
+  }, {}, manifest!.analyzerFingerprint.candidatePolicy);
 };
+
+/** Single-candidate callers retain the same validated analysis-only boundary. */
+export const loadVideoCandidateAnalysisImage = async (source: HydratedTraVideoSource,
+  context: VideoSelectionContext, candidateIndex: number) =>
+  (await withVideoCandidateAnalysisImages(source, context, [candidateIndex], async image => image))[0];

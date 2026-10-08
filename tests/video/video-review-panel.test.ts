@@ -52,26 +52,54 @@ describe('native Create frame review', () => {
   });
   it('restores a saved neighboring choice with its exact local thumbnail without saving or copying observations', async () => {
     draft.state.choices!.frames = [bindings[4]]; await loaded();
-    request.mockResolvedValueOnce(Response.json({ ...source, review: { ...source.review, preview: {
-      binding: bindings[4], providerEligible: false, thumbnailDataUrl: 'data:image/jpeg;base64,restored-neighbor' } } }));
+    request.mockResolvedValueOnce(Response.json({ ...source, review: { ...source.review, previews: [{
+      binding: bindings[4], providerEligible: false, thumbnailDataUrl: 'data:image/jpeg;base64,restored-neighbor' }] } }));
     render(); run(1); await vi.waitFor(() => expect(hooks.values[5]).toHaveProperty('frame-4'));
     expect(html()).toContain('restored-neighbor'); expect(nodes(render()).filter(node => node.type === 'input').at(-1)!.props.checked).toBe(true);
     expect(draft.update).not.toHaveBeenCalled(); expect(draft.state.choices!.claims).toBeNull();
   });
-  it('restores every selected neighbor in a larger pool with one preview request at a time', async () => {
+  it('restores 50 selected neighbors in serial batches of at most 24 without changing choices', async () => {
     await loaded();
-    const neighbors = Array.from({ length: 5 }, (_, index) => ({ ...bindings[4], frameId: `neighbor-${index}`, candidateIndex: index + 4 }));
+    const neighbors = Array.from({ length: 50 }, (_, index) => ({ ...bindings[4], frameId: `neighbor-${index}`, candidateIndex: index + 4 }));
     const largeSource = { ...source, review: { ...source.review!, frameBindings: [...bindings.slice(0, 4), ...neighbors] } };
     hooks.values[1] = largeSource; draft.state.choices!.frames = neighbors;
-    let active = 0, peak = 0;
+    let active = 0, peak = 0; const sizes: number[] = [];
     request.mockImplementation(async url => {
       active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 1)); active--;
-      const index = Number(new URL(String(url), 'http://localhost').searchParams.get('candidateIndex'));
-      return Response.json({ ...largeSource, review: { ...largeSource.review, preview: { binding: neighbors[index - 4], thumbnailDataUrl: 'neighbor' } } });
+      const indexes = new URL(String(url), 'http://localhost').searchParams.get('candidateIndexes')!.split(',').map(Number);
+      sizes.push(indexes.length);
+      return Response.json({ ...largeSource, review: { ...largeSource.review, previews: indexes.map(index => ({
+        binding: neighbors[index - 4], providerEligible: false, thumbnailDataUrl: 'neighbor' })) } });
     });
-    render(); run(1); await vi.waitFor(() => expect(Object.keys(hooks.values[5] as object)).toHaveLength(5));
-    expect(peak).toBe(1); expect(request).toHaveBeenCalledTimes(6);
+    render(); run(1); await vi.waitFor(() => expect(Object.keys(hooks.values[5] as object)).toHaveLength(50));
+    expect(peak).toBe(1); expect(sizes).toEqual([24, 24, 2]); expect(request).toHaveBeenCalledTimes(4);
     expect(draft.state.choices!.frames).toEqual(neighbors); expect(draft.update).not.toHaveBeenCalled();
+  });
+  it('keeps failed restored previews visible with exact identity and time; retries and deselects independently', async () => {
+    draft.state.choices!.frames = [bindings[4]]; await loaded();
+    request.mockResolvedValueOnce(Response.json({ error: 'Extraction unavailable' }, { status: 409 }));
+    render(); run(1); await vi.waitFor(() => expect(hooks.values[2]).toContain('Extraction unavailable'));
+    expect(html()).toContain('Preview unavailable'); expect(html()).toContain('frame-4'); expect(html()).toContain('16000 ms');
+    const check = nodes(render()).filter(node => node.type === 'input').at(-1)!;
+    expect(check.props.checked).toBe(true); expect(check.props.disabled).toBe(false);
+    (nodes(render()).find(node => node.type === 'button' && node.props.children === 'Retry preview')!.props.onClick as () => void)();
+    expect(draft.update).not.toHaveBeenCalled(); expect(draft.state.choices!.frames).toEqual([bindings[4]]);
+    request.mockResolvedValueOnce(Response.json({ ...source, review: { ...source.review, previews: [{
+      binding: bindings[4], providerEligible: false, thumbnailDataUrl: 'recovered' }] } }));
+    render(); run(1); await vi.waitFor(() => expect(html()).toContain('recovered'));
+    (nodes(render()).find(node => node.type === 'img' && node.props.src === 'recovered')!.props.onError as () => void)();
+    expect(html()).toContain('Preview unavailable');
+    (check.props.onChange as () => void)(); expect(draft.state.choices!.frames).toEqual([]);
+  });
+  it.each(['source', 'binding', 'eligibility'])('rejects preview %s drift while keeping saved choices selectable', async drift => {
+    draft.state.choices!.frames = [bindings[4]]; await loaded();
+    const preview = { binding: drift === 'binding' ? { ...bindings[4], timestampMs: 9 } : bindings[4],
+      providerEligible: drift === 'eligibility', thumbnailDataUrl: 'invalid' };
+    request.mockResolvedValueOnce(Response.json({ ...source, review: { ...source.review,
+      video: drift === 'source' ? { ...video, libraryId: 'changed' } : video, previews: [preview] } }));
+    render(); run(1); await vi.waitFor(() => expect(hooks.values[2]).toContain('changed'));
+    expect(hooks.values[5]).toEqual({}); expect(draft.state.choices!.frames).toEqual([bindings[4]]);
+    expect(nodes(render()).filter(node => node.type === 'input').at(-1)!.props.disabled).toBe(false);
   });
   it('ignores a late source response after switching videos, even when transport ignores abort', async () => {
     let resolve!: (response: Response) => void; request.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
@@ -123,11 +151,11 @@ describe('native Create frame review', () => {
     const button = nodes(render()).find(node => node.type === 'button' && Array.isArray(node.props.children) && node.props.children.join('') === 'Preview 00:16')!;
     (button.props.onClick as () => void)();
     const preview = { binding: bindings[4], providerEligible: false, thumbnailDataUrl: 'data:image/jpeg;base64,neighbor' };
-    request.mockResolvedValueOnce(Response.json({ ...source, review: { ...source.review, preview } })); render(); run(1);
+    request.mockResolvedValueOnce(Response.json({ ...source, review: { ...source.review, previews: [preview] } })); render(); run(1);
     await vi.waitFor(() => expect(hooks.values[5]).toHaveProperty('frame-4'));
     const check = nodes(render()).filter(node => node.type === 'input').at(-1)!; (check.props.onChange as () => void)();
     expect(draft.state.choices!.frames).toEqual([bindings[4]]); expect(draft.state.choices!.claims).toBeNull();
-    expect(request.mock.calls[1][0]).toContain('candidateIndex=4');
+    expect(request.mock.calls[1][0]).toContain('candidateIndexes=4');
   });
   it('collapse/reopen preserves choices; saving/failure/conflict remain visible; no-video is unchanged', async () => {
     await loaded(); const choices = structuredClone(draft.state.choices);

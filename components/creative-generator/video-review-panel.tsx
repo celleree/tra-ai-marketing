@@ -7,6 +7,7 @@ import type { useVideoReviewDraft } from './use-video-review-draft';
 import styles from './video-review-panel.module.css';
 import { runVideoIntelligence } from '@/lib/video/intelligence-client';
 import { VideoReviewStatements } from './video-review-statements';
+import { MAX_REVIEW_PREVIEW_BATCH } from '@/lib/video/review-preview-policy';
 import { reviewRequestFailure } from '@/lib/video/review-selection-client';
 
 export type ReviewSource = Awaited<ReturnType<typeof discoverVideoReviewSource>>;
@@ -41,13 +42,16 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
   const [candidate, setCandidate] = useState<number | null>(null);
   const [working, setWorking] = useState(false), [refresh, setRefresh] = useState(0);
 
+  const [previewRetry, setPreviewRetry] = useState(0), [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+
+  const previewWork = useRef<Promise<void>>(Promise.resolve());
   const work = useRef<AbortController | null>(null);
   const savedId = draft.state.choices?.video?.locator.sourceVideoMediaId;
   const mediaId = videos.some(video => video.id === active) ? active
     : savedId && (!videos.length || videos.some(video => video.id === savedId)) ? savedId : videos[0]?.id;
   useEffect(() => {
     work.current?.abort(); work.current = null; setWorking(false);
-    setSource(null); setError(''); setPreviews({}); setNearby(false); setCollapsed(false); setCandidate(null);
+    setSource(null); setError(''); setPreviews({}); setFailedImages({}); setNearby(false); setCollapsed(false); setCandidate(null);
     if (!mediaId) return;
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>, reading = false;
     const read = async () => {
@@ -78,30 +82,46 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
     choices => ({ ...choices, frames: toggleReviewFrame(choices.frames, frame) }));
   const previewIndexes = review ? [...new Set([...frames.map(frame => frame.candidateIndex), ...(candidate === null ? [] : [candidate])])]
     .filter(index => !review.library.representativeFrames.some(frame => frame.candidateIndex === index)) : [];
+  const neighborBindings = [...frames.filter(frame => !review?.library.representativeFrames.some(item => item.candidateIndex === frame.candidateIndex)),
+    ...(candidate === null || frames.some(frame => frame.candidateIndex === candidate) ? [] : review?.frameBindings.filter(frame => frame.candidateIndex === candidate) ?? [])];
   useEffect(() => {
     setPreviewBusy(false);
     if (!review || !previewIndexes.length) return;
     const controller = new AbortController(); setPreviewBusy(true);
-    // Larger saved pools must not fan out local video extraction requests.
-    void (async () => { for (const index of previewIndexes) {
+    // Serial bounded batches share preprocessing; retained previews avoid work when choices change.
+    const missing = previewIndexes.filter(index => {
+      const binding = review.frameBindings.find(frame => frame.candidateIndex === index);
+      return !binding || !previews[binding.frameId];
+    });
+    // Let an issued read settle: aborting HTTP does not stop server FFmpeg work. Ignore stale results and queue the next batch.
+    const previous = previewWork.current;
+    previewWork.current = (async () => { await previous; for (let offset = 0; offset < missing.length; offset += MAX_REVIEW_PREVIEW_BATCH) {
       if (controller.signal.aborted) break;
-      const binding = review.frameBindings.find(frame => frame.candidateIndex === index)!;
-      if (previews[binding.frameId]) continue;
+      const indexes = missing.slice(offset, offset + MAX_REVIEW_PREVIEW_BATCH);
       try {
-        const response = await fetch(`/api/video/review-sources?mediaId=${encodeURIComponent(mediaId!)}&candidateIndex=${index}`,
-          { cache: 'no-store', signal: controller.signal });
+        const bindings = indexes.map(index => {
+          const binding = review.frameBindings.find(frame => frame.candidateIndex === index);
+          const saved = frames.find(frame => frame.candidateIndex === index);
+          if (!binding || (saved && JSON.stringify(saved) !== JSON.stringify(binding))) throw new Error('Nearby frame changed. Reload the saved review.');
+          return binding;
+        });
+        const response = await fetch(`/api/video/review-sources?mediaId=${encodeURIComponent(mediaId!)}&candidateIndexes=${indexes.join(',')}`,
+          { cache: 'no-store' });
         const next: ReviewSource & { error?: string } = await response.json().catch(error => { if (response.ok) throw error; return {}; });
-        if (!response.ok) throw Object.assign(new Error(next.error || 'Nearby frame unavailable.'), { status: response.status });
+        if (!response.ok) throw Object.assign(new Error(next.error || 'Nearby frames unavailable.'), { status: response.status });
         if (!controller.signal.aborted) {
           if (JSON.stringify(next.review?.video) !== JSON.stringify(review.video)) throw new Error('Video source changed. Reload the saved review.');
-          const preview = next.review?.preview;
-          if (!preview || JSON.stringify(preview.binding) !== JSON.stringify(binding)) throw new Error('Nearby frame changed. Reload the saved review.');
-          setPreviews(current => ({ ...current, [binding.frameId]: preview }));
+          const loaded = next.review?.previews;
+          if (!loaded || loaded.length !== bindings.length || bindings.some(binding => !loaded.some(preview =>
+            preview.providerEligible === false && JSON.stringify(preview.binding) === JSON.stringify(binding)))) {
+            throw new Error('Nearby frames changed. Reload the saved review.');
+          }
+          setPreviews(current => ({ ...current, ...Object.fromEntries(loaded.map(preview => [preview.binding.frameId, preview])) }));
         }
       } catch (failure) { if (!controller.signal.aborted) setError(reviewRequestFailure(failure, 'video material')); }
     } })().finally(() => { if (!controller.signal.aborted) setPreviewBusy(false); });
     return () => controller.abort();
-  }, [JSON.stringify(previewIndexes), mediaId, review]);
+  }, [JSON.stringify(previewIndexes), mediaId, review, previewRetry]);
   const selectedClaims = draft.state.choices?.claims?.filter(reference => matching || !reference.type.startsWith('VIDEO_')) ?? [];
   const prepare = async () => {
     if (disabled || work.current || !source || source.status?.busy || source.status?.phase === 'FAILED') return;
@@ -115,11 +135,24 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
     finally { if (work.current === controller) { work.current = null; setWorking(false); } }
   };
   if (!mediaId) return null;
-  const frameChoice = (binding: VideoCandidateFrameBinding, thumbnail: string) => <label key={binding.frameId} className={styles.frame}>
-    <img src={thumbnail} alt={`Video frame at ${reviewTime(binding.timestampMs)}`} />
-    <span><input type="checkbox" checked={selected(binding)} disabled={blocked}
-      onChange={() => choose(binding)} /> {reviewTime(binding.timestampMs)}</span>
-  </label>;
+  const retryPreview = (binding: VideoCandidateFrameBinding) => {
+    setError(''); setFailedImages(current => ({ ...current, [binding.frameId]: false }));
+    setPreviews(current => { const next = { ...current }; delete next[binding.frameId]; return next; });
+    setPreviewRetry(value => value + 1);
+  };
+  const frameChoice = (binding: VideoCandidateFrameBinding, thumbnail?: string) => <div key={binding.frameId}
+    className={styles.frame} data-frame-id={binding.frameId}>
+    <label>
+      {thumbnail && !failedImages[binding.frameId] ? <img src={thumbnail} alt={`Video frame at ${reviewTime(binding.timestampMs)}`}
+        onError={() => setFailedImages(current => ({ ...current, [binding.frameId]: true }))} />
+        : <div className={styles.placeholder}>Preview unavailable</div>}
+      <span><input type="checkbox" checked={selected(binding)} disabled={blocked}
+        onChange={() => choose(binding)} /> {reviewTime(binding.timestampMs)} · {binding.timestampMs} ms</span>
+    </label>
+    <code>{binding.frameId}</code>
+    {(!thumbnail || failedImages[binding.frameId]) ? <button type="button" disabled={previewBusy}
+      onClick={() => retryPreview(binding)}>Retry preview</button> : null}
+  </div>;
   return <section className={`panel ${styles.card}`} aria-label="Video material review">
     {videos.length > 1 ? <label>Video <select value={mediaId} disabled={disabled || draft.state.pending > 0} onChange={event => { setActive(event.target.value); setCandidate(null); }}>
       {videos.map(video => <option key={video.id} value={video.id}>{video.name}</option>)}
@@ -148,8 +181,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
       <div className={styles.heading}><strong>Frames</strong><span>{frames.length} selected</span></div>
       <div className={styles.frames}>{review.library.representativeFrames.map(frame => frameChoice(
         review.frameBindings.find(binding => binding.candidateIndex === frame.candidateIndex)!, frame.thumbnailDataUrl))}
-        {Object.values(previews).filter(preview => selected(preview.binding) || preview.binding.candidateIndex === candidate)
-          .map(preview => frameChoice(preview.binding, preview.thumbnailDataUrl))}</div>
+        {neighborBindings.map(binding => frameChoice(binding, previews[binding.frameId]?.thumbnailDataUrl))}</div>
       <p className={styles.metadata}>{frames.length ? 'Selected frames form the candidate pool for generation.' : 'No frames selected = let AI choose automatically'}</p>
       <button type="button" className="button button-secondary" onClick={() => setNearby(!nearby)}>View nearby frames</button>
       {nearby ? <div className={styles.nearby}>
