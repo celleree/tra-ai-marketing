@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 import { isDeepStrictEqual } from 'node:util';
+import { loadReviewVideoSource } from '@/lib/video/review-selection-sources';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
@@ -103,6 +104,12 @@ async function advancePortfolio(
     }
 
     await assertCurrentWork();
+    const reviewedVideo = job.request.reviewHandoff?.choices.video;
+    if (reviewedVideo) {
+      // Revalidate frozen source bindings, never reload mutable review choices or approve pixels.
+      try { await loadReviewVideoSource(structuredClone(reviewedVideo), { storage, hydrateSource: options.video?.hydrateSource }); }
+      catch (error) { throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'Reviewed video changed.', 409); }
+    }
     if (slotIndex === null) {
       if (job.planning.phase === 'INITIAL_PLAN') {
         if (job.videoPreparationVersion === 1) {
@@ -190,7 +197,7 @@ async function advancePortfolio(
         const { checkpoint, repairAttempted } = job.planning;
         checkpoint.snapshot.batchPlan.creatives.forEach(assertValidPlannedCreativeCopy);
         providerWorkStarted = true;
-        const audit = await auditCreativePortfolio(checkpoint.snapshot.batchPlan.creatives);
+        const audit = await auditCreativePortfolio(checkpoint.snapshot.batchPlan.creatives, checkpoint.plannerArgs.operatorSelectedSourceGuidance);
         const issue = getCreativeDiversityIssue(checkpoint.snapshot.batchPlan.creatives, audit);
         if (!issue) {
           const snapshot = structuredClone(checkpoint.snapshot);
@@ -230,6 +237,10 @@ async function advancePortfolio(
     const slot = job.slots[slotIndex - 1];
     const concept = context.batchPlan.creatives[slotIndex - 1];
     assertValidPlannedCreativeCopy(concept);
+    if (job.request.reviewHandoff?.operatorSelectedSourceGuidance.frameMode === 'MANUAL_CLOSED_POOL'
+      && concept.strategy.execution.subjectSource === 'approved-tra-human') {
+      throw new CreativeGenerationPreparationError('Reviewed frames require closed-pool visual assessment and fresh PNG handoff before rendering. Automatic substitution is unavailable.', 409);
+    }
     const automaticVideoSelection = job.videoPreparationVersion === 1
       && concept.strategy.execution.subjectSource === 'approved-tra-human'
       && !job.request.videoFrameSelection

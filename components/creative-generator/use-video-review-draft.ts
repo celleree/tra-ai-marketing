@@ -92,7 +92,12 @@ export function useVideoReviewDraft() {
       await client.current!.save(choices).catch(() => undefined);
     } finally { finishEdit(); }
   };
-  return { state, save: client.current.save, update, canGenerate, clearUnavailable, reload: () => {
+  // Read the queue's settled revision, even when a save completed before React rerendered.
+  const generationReference = () => {
+    const saved = client.current!.getState().saved;
+    return saved ? { draftId: saved.draft.id, revision: saved.revision } : undefined;
+  };
+  return { state, save: client.current.save, update, canGenerate, generationReference, clearUnavailable, reload: () => {
     const id = lastId.current;
     if (id) return restoring.current = (client.current!.getState().saved ? restore(id) : client.current!.recover().then(async () => {
       const current = client.current!.getState();

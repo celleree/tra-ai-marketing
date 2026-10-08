@@ -178,7 +178,9 @@ export function CreativeGenerator() {
     try {
       const brand = readStoredBrandGuidance();
       const companyProfile = readStoredRuntimeCompanyProfile();
+      const reviewReference = videoReview.generationReference();
       await portfolio.start({
+        ...(reviewReference ? { videoReview: reviewReference } : {}),
         sourceAssets: sourceAssets.map(source => ({ mediaId: source.media.id, role: source.role })),
         ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
         ...(brand.colors.length ? { brandColors: brand.colors } : {}),
@@ -295,7 +297,7 @@ export function CreativeGenerator() {
 
                 {creationMode === 'generate' ? <>
                   <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} />
-                  <PortfolioProgressPanel portfolio={portfolio} canAdvance={videoReview.canGenerate} />
+                  <PortfolioProgressPanel portfolio={portfolio} />
                 </> : null}
                 {videoReview.state.error || videoReview.state.saved?.issues.length ? (
                   <div role="alert" className="error-message">
