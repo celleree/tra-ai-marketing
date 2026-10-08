@@ -28,6 +28,23 @@ afterEach(() => { expect(request.mock.calls.every(([url]) => String(url).startsW
   vi.unstubAllGlobals(); });
 
 describe('Create-owned saved review lifecycle', () => {
+  it('allows explicit removal of unavailable video material so a stale restored draft cannot trap no-video Create', async () => {
+    const { hook } = mount(); await settled(); expect(hook.canGenerate()).toBe(false);
+    await hook.clearUnavailable();
+    expect(JSON.parse(request.mock.calls[1][1]!.body as string).choices).toMatchObject({ video: null, frames: [], claims: [] });
+    expect(hook.canGenerate()).toBe(true);
+  });
+  it('remembers a first-save ID before dispatch so a committed write with a lost response restores on reopen', async () => {
+    window.location.href = 'http://localhost/'; const first = mount(); await settled();
+    request.mockRejectedValueOnce(new Error('Response lost'));
+    await first.hook.update(response.draft.choices.video as never, choices => ({ ...choices, frames: [] }));
+    const createdId = JSON.parse(request.mock.calls[0][1]!.body as string).id;
+    expect(values.get(LAST_VIDEO_REVIEW)).toBe(createdId);
+    expect(replace.mock.calls[0][2].searchParams.get('review')).toBe(createdId);
+    first.unmount(); request.mockResolvedValueOnce(Response.json({ ...response, draft: { ...response.draft, id: createdId } }));
+    mount(); await settled(); expect(request.mock.calls[1][0]).toContain(createdId);
+    expect(mocks.update.mock.calls.at(-1)![0].saved.draft.id).toBe(createdId);
+  });
   it('derives edits from restored choices and blocks generation synchronously through pending/failed saves', async () => {
     let resolve!: (response: Response) => void;
     request.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));

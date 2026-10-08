@@ -301,6 +301,8 @@ export function CreativeGenerator() {
                   <div role="alert" className="error-message">
                     <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ')}</p>
                     <button type="button" disabled={videoReview.state.pending > 0} onClick={() => void videoReview.reload()}>Reload saved review</button>
+                    {videoReview.state.saved?.issues.length ? <button type="button" disabled={generating || videoReview.state.pending > 0 || Boolean(videoReview.state.error)}
+                      onClick={() => void videoReview.clearUnavailable()}>Remove unavailable material</button> : null}
                   </div>
                 ) : null}
                 {displayGenerationError ? (

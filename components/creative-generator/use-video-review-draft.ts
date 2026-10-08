@@ -14,16 +14,15 @@ export function useVideoReviewDraft() {
   const removedSources = useRef(new Set<string>());
   const initialized = useRef(false), editing = useRef(0);
   const client = useRef<ReturnType<typeof createReviewDraftClient> | null>(null);
+  const persistId = (id: string) => {
+    lastId.current = id;
+    if (!mounted.current) return;
+    try { rememberReviewDraft(id, window.localStorage); } catch { /* Storage can be disabled. */ }
+    const url = new URL(window.location.href); url.searchParams.set('review', id);
+    window.history.replaceState(null, '', url);
+  };
   if (!client.current) client.current = createReviewDraftClient({
-    onChange: next => { if (mounted.current) setState(next); },
-    onCreated: id => { lastId.current = id; },
-    onSaved: id => {
-      lastId.current = id;
-      if (!mounted.current) return;
-      try { rememberReviewDraft(id, window.localStorage); } catch { /* Storage can be disabled. */ }
-      const url = new URL(window.location.href); url.searchParams.set('review', id);
-      window.history.replaceState(null, '', url);
-    },
+    onChange: next => { if (mounted.current) setState(next); }, onCreated: persistId, onSaved: persistId,
   });
   const restore = async (id: string) => {
     await client.current!.load(id);
@@ -80,7 +79,20 @@ export function useVideoReviewDraft() {
       if (client.current!.getState().choices?.video?.locator.sourceVideoMediaId === mediaId) return await replaceVideo(null);
     } finally { finishEdit(); }
   };
-  return { state, save: client.current.save, update, canGenerate, reload: () => {
+  const clearUnavailable = async () => {
+    editing.current++;
+    try {
+      await restoring.current;
+      const current = client.current!.getState();
+      if (!current.choices || current.error || current.pending) return;
+      const issues = current.saved?.issues ?? [];
+      let choices = { ...current.choices, claims: current.choices.claims?.filter((_, index) =>
+        !issues.some(issue => issue.source === 'CLAIM' && issue.index === index)) ?? null };
+      if (issues.some(issue => issue.source === 'VIDEO')) choices = replaceReviewVideo(choices, null);
+      await client.current!.save(choices).catch(() => undefined);
+    } finally { finishEdit(); }
+  };
+  return { state, save: client.current.save, update, canGenerate, clearUnavailable, reload: () => {
     const id = lastId.current;
     if (id) return restoring.current = (client.current!.getState().saved ? restore(id) : client.current!.recover().then(async () => {
       const current = client.current!.getState();
