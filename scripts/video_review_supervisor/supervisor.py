@@ -286,11 +286,11 @@ class Supervisor:
 ## Reviewability
 - PR scope: {p['name']} plus verified upstream dependencies.
 - Stack: {json.dumps(p['dependencies'])}
-- LARGE PR JUSTIFICATION: Branches stack sequentially; cumulative PRs target staging because
+- Large PR justification: Branches stack sequentially; cumulative PRs target staging because
   current CI only runs for staging/main targets. No automatic merging or workflow changes.
   Phase-specific split analysis: {p['result']['large_pr_justification'] or 'Phase is within 400 lines/10 files.'}
   Review phase diff from {p['base']}.
-- REVIEW ORDER: Verified upstream PRs first, then this phase's contracts, runtime, and tests.
+- Review order: Verified upstream PRs first, then this phase's contracts, runtime, and tests.
   {json.dumps(p['result']['review_order'])}
 ## Verification
 - Focused/local (worker evidence; independently reviewed): {json.dumps(p['tests'])}
