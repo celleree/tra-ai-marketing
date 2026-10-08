@@ -40,13 +40,18 @@ beforeEach(() => {
 const storage = { saveImage: vi.fn().mockResolvedValue({ id: `media_${'1'.repeat(32)}`, fileName: 'creative.png', originalName: 'creative.png',
   mimeType: 'image/png', size: 5, url: '/creative.png' }) } as any;
 
-async function render(explicit = false, human = true, selected: typeof selection = selection) {
+async function render(explicit = false, human = true, selected: typeof selection = selection, reviewed = false) {
   const request = { ...portfolioRequest(), sourceAssets: [{ role: 'TRA_VIDEO', mediaId }],
     ...(explicit ? { videoFrameSelection: { libraryId: selected.libraryId, sourceVideoContentHash: sourceHash,
       frameIds: [selected.frames[0].libraryFrameId] } } : {}) } as any;
+  if (reviewed) request.reviewHandoff = { choices: { video: { libraryId: selected.libraryId,
+    librarySha256: '1'.repeat(64), locator: { sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash } },
+    frames: [{ frameId: videoCandidateFrameId(sourceHash, 1200, 'd'.repeat(64)), representativeFrameId: frameId,
+      candidateIndex: 7, timestampMs: 1200, frameSha256: 'd'.repeat(64) }] } };
   const snapshot = portfolioSnapshot(newCreativePortfolio(request));
   const item = snapshot.batchPlan.creatives[0];
   if (human) item.strategy.execution.subjectSource = 'approved-tra-human';
+  if (reviewed) item.strategy.humanSourceId = approvedHumanSourceId(humanId);
   return renderPlannedCreative(item, {
     request, batchPlan: snapshot.batchPlan, referenceCatalog: [], selectedReferences: [],
     requestedSources: [{ role: 'TRA_VIDEO', mediaId, sha256: sourceHash }], analysisSources: [],
@@ -180,4 +185,21 @@ describe('render planned video provenance', () => {
     expect(storage.saveImage).not.toHaveBeenCalled();
     expect(mocks.saveBatch).not.toHaveBeenCalled();
   });
+});
+
+it('saves manual review selection and exact candidate/provider provenance', async () => {
+  const selected = { ...selection, librarySha256: '1'.repeat(64), frames: [{ ...provenance[0],
+    libraryFrameId: videoCandidateFrameId(sourceHash, 1200, 'd'.repeat(64)), representativeFrameId: frameId, candidateIndex: 7 }] };
+  const creative = await render(false, true, selected, true);
+  expect(mocks.generate.mock.calls[0][0].frames).toEqual([frame]);
+  expect(creative.videoFrameSelection).toEqual(selected);
+  expect(creative.planning!.strategy.humanSourceId).toBeUndefined(); expect(mocks.resolveHuman).not.toHaveBeenCalled();
+  expect(mocks.saveBatch.mock.calls[0][0][0].generationProvenance.attachedSource).toMatchObject({ selectionMode: 'USER_SELECTED',
+    libraryId: selected.libraryId, librarySha256: selected.librarySha256, frames: [{ candidateIndex: 7,
+      representativeFrameId: frameId, candidateFrameSha256: 'd'.repeat(64), approvedPngSha256: 'e'.repeat(64), providerPngSha256: 'e'.repeat(64) }] });
+});
+
+it('rejects an automatic or unknown frame at the final manual render boundary before image work', async () => {
+  await expect(render(false, true, selection, true)).rejects.toThrow('closed-pool');
+  expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.promptOnly).not.toHaveBeenCalled(); expect(mocks.saveBatch).not.toHaveBeenCalled();
 });

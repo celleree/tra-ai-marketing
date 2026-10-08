@@ -12,14 +12,14 @@ import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 
-const mocks = vi.hoisted(() => ({ load: vi.fn(), storage: vi.fn(), hydrate: vi.fn(), render: vi.fn(), videoSource: vi.fn() }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), storage: vi.fn(), hydrate: vi.fn(), render: vi.fn(), videoSource: vi.fn(), humanOptions: vi.fn() }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: async () => ({ allowed: true, userId: 'operator' }) }));
 vi.mock('@/lib/video/review-selection-store', () => ({ loadVideoReviewDraftWithFrameContext: mocks.load }));
 vi.mock('@/lib/video/review-selection-sources', async original => ({ ...await original<typeof import('@/lib/video/review-selection-sources')>(), loadReviewVideoSource: mocks.videoSource }));
 vi.mock('@/lib/video/intelligence-storage', async original => ({ ...await original<typeof import('@/lib/video/intelligence-storage')>(), getVideoIntelligenceStorage: mocks.storage }));
 vi.mock('@/lib/creatives/generation-sources', async original => ({ ...await original<typeof import('@/lib/creatives/generation-sources')>(), hydrateGenerationSources: mocks.hydrate }));
 vi.mock('@/lib/references/storage', () => ({ listAllReferenceLibrary: async () => [], listReferenceLibrary: async () => [] }));
-vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: async () => [] }));
+vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: mocks.humanOptions }));
 vi.mock('@/lib/proof/storage', () => ({ listProofRecords: async () => [review, caseStudy] }));
 vi.mock('@/lib/creatives/storage', () => ({ listCreatives: async () => [] }));
 vi.mock('@/lib/creatives/render-planned', () => ({ renderPlannedCreative: mocks.render }));
@@ -46,7 +46,7 @@ beforeEach(() => {
   vi.spyOn(console, 'info').mockImplementation(() => {}); vi.spyOn(console, 'error').mockImplementation(() => {});
   outbound = []; failAudit = false; repeatAudit = false;
   mocks.storage.mockReturnValue(storage); mocks.load.mockResolvedValue(loadFixture());
-  mocks.videoSource.mockResolvedValue({ library, manifest });
+  mocks.videoSource.mockResolvedValue({ library, manifest }); mocks.humanOptions.mockResolvedValue([]);
   mocks.hydrate.mockResolvedValue({ storage: {}, requestedSources: [], providerImageSource: null, videoFrameSet: null,
     brandLogo: null, reserveLogoArea: false });
   mocks.render.mockRejectedValue(new Error('Offline render boundary'));
@@ -131,13 +131,14 @@ it('freezes actual initial/audit/repair/re-audit payloads through reopen, explic
   expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify(corrupt)), id)).toThrow('invalid');
 });
 
-it('delivers exact nonrepresentative selected frames to planning but fails closed before automatic human substitution', async () => {
+it('delivers exact nonrepresentative frames to planning and fails closed when manual render bindings are unavailable', async () => {
   mocks.load.mockResolvedValue(loadFixture(choices()));
   const parsed = validateGenerateCreativeRequest({ ...input(), sourceAssets: [{ role: 'TRA_VIDEO', mediaId: locator.sourceVideoMediaId }] }, 36);
   if (!parsed.success) throw new Error(parsed.error);
   const job = await createCreativePortfolio(parsed.data, storage);
   const result = await advancePortfolioPreparation(job.request, 'http://localhost', { quotaReserved: true, analysis, selectedReferences: [], referenceCatalog: [] }, () => {}, 1);
   if (!result.prepared) throw new Error('Missing plan');
+  expect(mocks.humanOptions).not.toHaveBeenCalled(); expect(result.prepared.plannerArgs!.approvedHumanOptions).toBeUndefined();
   expect(outbound[0].operatorSelectedSourceGuidance.frames[1]).toMatchObject({ observationIsExactFrame: false, binding: { candidateIndex: 1 } });
   result.prepared.batchPlan.creatives[0].strategy.execution.subjectSource = 'approved-tra-human';
   await step(job.id); // Normal planning quota reservation precedes the frozen plan checkpoint.
@@ -150,7 +151,7 @@ it('delivers exact nonrepresentative selected frames to planning but fails close
   delete corrupt.planning.checkpoint.plannerArgs.operatorSelectedSourceGuidance;
   expect(() => parseCreativePortfolioJob(Buffer.from(JSON.stringify(corrupt)), job.id)).toThrow('invalid');
   await step(job.id); const before = outbound.length; await step(job.id);
-  expect((await readCreativePortfolio(job.id, storage))!.slots[0]).toMatchObject({ status: 'RETRY_REQUIRED', error: expect.stringContaining('closed-pool') });
+  expect((await readCreativePortfolio(job.id, storage))!.slots[0]).toMatchObject({ status: 'RETRY_REQUIRED', error: expect.stringContaining('frozen B1 source analysis') });
   expect(mocks.render).not.toHaveBeenCalled(); expect(outbound).toHaveLength(before);
   await PATCH(http({ id: job.id, action: 'retry', slotIndex: 1 }));
   mocks.videoSource.mockRejectedValue(new Error('Frozen video source hash or library revision changed'));

@@ -103,3 +103,21 @@ export function validateStoredReviewHandoff(value: unknown, reference: VideoRevi
       && isDeepStrictEqual(guidance.statements, choices.claims === null ? null : value.claimSnapshots);
   } catch { return false; }
 }
+
+/** Final saved/attached frame identities must remain inside the operator's frozen pool. */
+export function assertReviewedFrameSelection(choices: VideoReviewHandoff['choices'] | undefined,
+  selection: import('@/lib/video/generation-selection-contract').GenerateVideoFrameSelection
+    | import('@/lib/video/generation-selection-contract').GeneratedVideoFrameSelection | undefined) {
+  if (!choices?.frames?.length) return;
+  const video = choices.video;
+  const bindings = selection && ('frames' in selection ? selection.frames.map(frame => ({
+    frameId: frame.libraryFrameId, representativeFrameId: frame.representativeFrameId,
+    candidateIndex: frame.candidateIndex, timestampMs: frame.timestampMs, frameSha256: frame.candidateFrameSha256,
+  })) : selection.version === 3 ? selection.candidateBindings : undefined);
+  if (!video || !selection || selection.libraryId !== video.libraryId || selection.librarySha256 !== video.librarySha256
+    || selection.sourceVideoMediaId !== video.locator.sourceVideoMediaId
+    || selection.sourceVideoContentHash !== video.locator.sourceVideoContentHash
+    || !bindings?.length || bindings.some(binding => !choices.frames!.some(allowed => isDeepStrictEqual(binding, allowed)))) {
+    throw new ReviewSelectionError('Manual closed-pool frame selection does not match the frozen review. Automatic substitution is unavailable.', 409);
+  }
+}
