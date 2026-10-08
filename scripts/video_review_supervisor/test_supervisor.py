@@ -160,6 +160,100 @@ class SupervisorTests(unittest.TestCase):
                     pass
             run.close()
 
+    def test_orphan_worker_holds_lock_after_leader_exit_until_descendant_stops(self):
+        pidfile = self.root / 'descendant.pid'
+        leader_pidfile = self.root / 'leader.pid'
+        release = self.root / 'release-leader'
+        attempt = self.root / 'attempt'
+        descendant = ("import signal,time,os; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                      f"open({str(pidfile)!r}, 'w').write(str(os.getpid())); time.sleep(30)")
+        leader = ("import os,subprocess,sys,time\nfrom pathlib import Path\n"
+                  f"Path({str(leader_pidfile)!r}).write_text(str(os.getpid()))\n"
+                  f"subprocess.Popen([sys.executable, '-c', {descendant!r}])\n"
+                  f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n")
+        runner = ("from pathlib import Path\nimport sys,time\nfrom runtime import Run\n"
+                  f"run = Run({str(self.root)!r})\nrun.state = {{'deadline': time.time() + 60}}\n"
+                  f"run.execute([sys.executable, '-c', {leader!r}], Path({str(self.root)!r}), "
+                  f"Path({str(attempt)!r}), '', 40)\n")
+        supervisor = subprocess.Popen([sys.executable, '-c', runner],
+                                      cwd=Path(SCRIPT).parent, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL)
+        try:
+            self.wait_for(lambda: pidfile.exists() and leader_pidfile.exists())
+            supervisor.kill()
+            supervisor.wait(timeout=5)
+            release.touch()
+            leader_pid = int(leader_pidfile.read_text())
+            def leader_exited():
+                stat = Path(f'/proc/{leader_pid}/stat')
+                return not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X')
+            self.wait_for(leader_exited)
+            with self.assertRaisesRegex(Blocked, 'lock'):
+                Run(self.root)
+            self.assertFalse((attempt / 'exit.json').exists())
+            (self.root / 'STOP').touch()
+            descendant_pid = int(pidfile.read_text())
+            def descendant_stopped():
+                stat = Path(f'/proc/{descendant_pid}/stat')
+                return not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X')
+            self.wait_for(descendant_stopped)
+            def lock_released():
+                try:
+                    run = Run(self.root)
+                except Blocked:
+                    return False
+                run.close()
+                return True
+            self.wait_for(lock_released)
+            self.assertFalse((attempt / 'exit.json').exists())
+        finally:
+            (self.root / 'STOP').touch()
+            if supervisor.poll() is None:
+                supervisor.kill()
+                supervisor.wait()
+            if pidfile.exists():
+                try:
+                    os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_orphan_worker_deadline_kills_command_descendant_before_receipt(self):
+        pidfile = self.root / 'descendant.pid'
+        attempt = self.root / 'attempt'
+        descendant = ("import signal,time,os; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                      f"open({str(pidfile)!r}, 'w').write(str(os.getpid())); time.sleep(30)")
+        leader = ("import subprocess,sys,time\n"
+                  f"subprocess.Popen([sys.executable, '-c', {descendant!r}])\n"
+                  "time.sleep(30)\n")
+        runner = ("from pathlib import Path\nimport sys,time\nfrom runtime import Run\n"
+                  f"run = Run({str(self.root)!r})\nrun.state = {{'deadline': time.time() + 3}}\n"
+                  f"run.execute([sys.executable, '-c', {leader!r}], Path({str(self.root)!r}), "
+                  f"Path({str(attempt)!r}), '', 40)\n")
+        supervisor = subprocess.Popen([sys.executable, '-c', runner],
+                                      cwd=Path(SCRIPT).parent, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL)
+        try:
+            self.wait_for(pidfile.exists)
+            self.assertIsNone(supervisor.poll())
+            supervisor.kill()
+            supervisor.wait(timeout=5)
+            self.wait_for(lambda: (attempt / 'exit.json').exists())
+            self.assertEqual(read(attempt / 'exit.json')['returncode'], 124)
+            pid = int(pidfile.read_text())
+            stat = Path(f'/proc/{pid}/stat')
+            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+            run = Run(self.root)
+            run.close()
+        finally:
+            if supervisor.poll() is None:
+                supervisor.kill()
+                supervisor.wait()
+            if pidfile.exists():
+                try:
+                    os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
     def test_setup_rejects_staging_worktree_collision_without_touching_draft(self):
         run = self.initialized_run()
         try:

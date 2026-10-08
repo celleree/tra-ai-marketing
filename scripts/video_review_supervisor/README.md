@@ -50,6 +50,10 @@ execution authority. Do not delete locks, worktrees, receipts, or checkpoints to
   loopback fixtures and registry.npmjs.org; external application/provider traffic is denied.
   NO_PROXY lets browser/server fixtures communicate within their sandbox namespace;
   approval policy `never` means disallowed operations fail, not permission escalation.
+- In the read-only review source profile, ordinary Vitest config loading writes
+  `node_modules/.vite-temp` and fails. For the existing review handoff fixture, use
+  `npm test -- --configLoader runner --no-cache tests/creatives/review-handoff.test.ts`;
+  all 18 tests passed with this invocation on this machine.
 - The deterministic supervisor alone performs exact-branch commits, non-force pushes, PR
   creation, and metadata updates. It has no merge/deployment command. It preserves protected
   branches, existing checkouts and uncommitted work. A phase directory must be a clean, registered

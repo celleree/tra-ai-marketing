@@ -75,12 +75,12 @@ def group_alive(pgid):
     return False
 
 
-def stop_group(child):
+def stop_group(child, grace=5):
     try:
         os.killpg(child.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
-    end = time.monotonic() + 5
+    end = time.monotonic() + grace
     while group_alive(child.pid) and time.monotonic() < end:
         time.sleep(0.05)
     if group_alive(child.pid):
@@ -174,21 +174,33 @@ class Run:
 def worker(path):
     spec = read(path)
     directory = Path(spec['directory'])
-    # Parent may be killed: keep the inherited lock and bound the entire Codex process group.
+    interrupted = False
+
+    def request_stop(_signum, _frame):
+        nonlocal interrupted
+        interrupted = True
+
+    signal.signal(signal.SIGTERM, request_stop)
+    # Parent may be killed: keep the inherited lock until the command group is empty.
     with (directory / 'prompt.txt').open() as inp, (directory / 'codex.jsonl').open('w') as out, (directory / 'stderr.log').open('w') as err:
         p = subprocess.Popen(spec['args'], cwd=spec['cwd'], stdin=inp, stdout=out, stderr=err,
-                             env=clean_env(), pass_fds=(spec['lock_fd'],))
+                             env=clean_env(), pass_fds=(spec['lock_fd'],), start_new_session=True)
         end = time.monotonic() + spec['timeout']
         while p.poll() is None:
-            # Stop must still work when the supervisor was killed and this worker is orphaned.
-            if (Path(spec['root']) / 'STOP').exists():
-                os.killpg(os.getpgrp(), signal.SIGKILL)
+            if interrupted or (Path(spec['root']) / 'STOP').exists():
+                stop_group(p, grace=1)
+                return
             if time.monotonic() >= end or time.time() >= spec['deadline']:
+                stop_group(p, grace=1)
                 atomic(directory / 'exit.json', {'returncode': 124})
-                os.killpg(os.getpgrp(), signal.SIGKILL)
+                return
             time.sleep(0.1)
         rc = p.returncode
-        atomic(directory / 'exit.json', {'returncode': rc})
+        if group_alive(p.pid):
+            stop_group(p, grace=2)
+        if interrupted or (Path(spec['root']) / 'STOP').exists():
+            return
+        atomic(directory / 'exit.json', {'returncode': 124 if time.monotonic() >= end or time.time() >= spec['deadline'] else rc})
 
 
 if __name__ == '__main__':

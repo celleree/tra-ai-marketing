@@ -79,7 +79,10 @@ and source-contract paths in the structured result.
 For review/integration-review: read-only independent exact-HEAD review. Inspect the diff and
 relevant contracts/tests, verify realistic execution paths and reported evidence, return ALL
 material findings together. Do not implement fixes. Run offline checks only; use /tmp for output
-if necessary. Do not interpret inability to test as PASS. Report the exact inspected HEAD.
+if necessary. In the read-only source profile, Vitest's ordinary config loader cannot write
+node_modules/.vite-temp; use `npm test -- --configLoader runner --no-cache tests/creatives/review-handoff.test.ts`
+for that fixture (18 tests verified here). Do not interpret inability to test as PASS.
+Report the exact inspected HEAD.
 For every role return only the schema fields. head is the initial/inspected Git HEAD, not a
 fabricated future commit. tests distinguishes executed checks from limitations.
 '''
