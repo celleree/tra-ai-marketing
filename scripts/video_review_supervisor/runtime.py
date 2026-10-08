@@ -62,6 +62,37 @@ def command(args, cwd=None, timeout=60):
     return p.stdout.strip()
 
 
+def group_alive(pgid):
+    # Linux/WSL: a reparented descendant can outlive the group leader. Zombies
+    # cannot execute or hold the run lock, and may linger until init reaps them.
+    for stat in Path('/proc').glob('[0-9]*/stat'):
+        try:
+            fields = stat.read_text().rsplit(')', 1)[1].split()
+            if int(fields[2]) == pgid and fields[0] not in ('Z', 'X'):
+                return True
+        except (FileNotFoundError, ProcessLookupError, ValueError, IndexError):
+            continue
+    return False
+
+
+def stop_group(child):
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    end = time.monotonic() + 5
+    while group_alive(child.pid) and time.monotonic() < end:
+        time.sleep(0.05)
+    if group_alive(child.pid):
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        while group_alive(child.pid):
+            time.sleep(0.05)
+    child.wait()
+
+
 class Run:
     def __init__(self, root):
         self.root = Path(root).resolve()
@@ -126,18 +157,12 @@ class Run:
         try:
             while child.poll() is None:
                 self.wait(0.2)
+            self.stop_check()
+            if group_alive(child.pid):
+                stop_group(child)
         except BaseException:
-            try:
-                os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.wait()
+            stop_group(child)
             raise
-        self.stop_check()
         if not receipt.exists():
             raise Blocked('Worker exited without a durable receipt; inspect preserved attempt')
         return read(receipt)['returncode']

@@ -150,6 +150,27 @@ class Supervisor:
                              'contracts': p['contracts'], 'tests': p['tests']})
         return evidence
 
+    def phase_checkout(self, p, clean=False):
+        """Only the registered, dedicated worktree may receive supervisor Git writes."""
+        expected = self.run.root / p['name']
+        branch = f'codex/vr-{self.s["id"]}-{p["name"]}'
+        if (p['name'] not in dict(PHASES) or Path(p['worktree']) != expected
+                or expected.resolve() != expected
+                or p['branch'] != branch or branch in ('main', 'staging')):
+            raise Blocked('Phase checkout identity differs from this run')
+        entries = git(self.repo, 'worktree', 'list', '--porcelain').split('\n\n')
+        registered = any(
+            f'worktree {expected.resolve()}' in entry.splitlines()
+            and f'branch refs/heads/{branch}' in entry.splitlines()
+            for entry in entries)
+        if not registered or git(expected, 'symbolic-ref', '--quiet', 'HEAD') != f'refs/heads/{branch}':
+            raise Blocked('Phase directory is not the registered dedicated worktree')
+        common = git(expected, 'rev-parse', '--git-common-dir')
+        owner = git(self.repo, 'rev-parse', '--git-common-dir')
+        if (Path(expected / common).resolve() != Path(self.repo / owner).resolve()
+                or (clean and git(expected, 'status', '--porcelain'))):
+            raise Blocked('Phase worktree owner or cleanliness mismatch')
+
     def setup(self, index):
         if len(self.s['phases']) == index:
             base = self.s['phases'][-1]['head'] if index else self.s['base']
@@ -167,6 +188,7 @@ class Supervisor:
                 branches = git(self.repo, 'branch', '--list', p['branch'])
                 args = [] if branches else ['-b', p['branch']]
                 git(self.repo, 'worktree', 'add', *args, p['worktree'], p['branch'] if branches else p['base'])
+            self.phase_checkout(p, clean=True)
             if git(p['worktree'], 'rev-parse', 'HEAD') != p['base']:
                 raise Blocked('New worktree base mismatch')
             p['contracts'] = self.contracts(p['worktree'], SOURCES)
@@ -206,6 +228,8 @@ class Supervisor:
                 p['pending'] = None
                 self.save('Recover interrupted work in a NEW execution')
         if not p['pending']:
+            if role == 'review':
+                self.ci(p)  # persisted CI is never authority for a new reviewer
             p['attempts'] += 1
             directory = self.run.root / 'attempts' / f'{p["name"]}-{role}-{p["attempts"]}'
             worktree = Path(p['worktree'])
@@ -250,6 +274,7 @@ class Supervisor:
         return result
 
     def commit(self, p):
+        self.phase_checkout(p)
         wt = p['worktree']
         actual = git(wt, 'rev-parse', 'HEAD')
         # Git commit may have completed just before the checkpoint write.
@@ -279,6 +304,7 @@ class Supervisor:
         self.save('Publish exact branch HEAD and reconcile PR')
 
     def publish(self, p):
+        self.phase_checkout(p, clean=True)
         if self.fake:
             path = self.run.root / 'fake-github.json'
             data = read(path) if path.exists() else {}
@@ -351,6 +377,7 @@ class Supervisor:
             index = self.s['phase']
             dependencies = self.dependencies(index)
             p = self.setup(index)
+            self.phase_checkout(p)
             p['dependencies'] = dependencies
             if git(p['worktree'], 'rev-parse', 'HEAD') != p['head'] and p['step'] != 'commit':
                 raise Blocked('Phase HEAD drifted outside supervisor')

@@ -6,12 +6,13 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from contracts import SCHEMA, validate
-from runtime import Blocked, Run, atomic, read
-from supervisor import Supervisor, check_snapshot, git, github_items
+from runtime import Blocked, Run, Stopped, atomic, read
+from supervisor import Supervisor, check_snapshot, git, github_items, initialize
 
 SCRIPT = str(Path(__file__).with_name('supervisor.py'))
 
@@ -33,6 +34,12 @@ class SupervisorTests(unittest.TestCase):
 
     def scenario(self, **kwargs):
         atomic(self.root / 'scenario.json', kwargs)
+
+    def initialized_run(self):
+        run = Run(self.root)
+        initialize(run, SimpleNamespace(dry_run=True, repo=str(self.root), model='fake',
+                                        review_model='fake', worker_timeout=30, ci_timeout=0))
+        return run
 
     def wait_for(self, predicate):
         end = time.monotonic() + 10
@@ -103,6 +110,118 @@ class SupervisorTests(unittest.TestCase):
             if child.poll() is None:
                 child.kill()
                 child.wait()
+
+    def test_stop_kills_descendant_after_launcher_exits(self):
+        run = Run(self.root)
+        run.state = {'deadline': time.time() + 60}
+        pidfile = self.root / 'descendant.pid'
+        descendant = ("import signal,time,os; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                      f"open({str(pidfile)!r}, 'w').write(str(os.getpid())); time.sleep(30)")
+        leader = f"import subprocess,sys,time; subprocess.Popen([sys.executable, '-c', {descendant!r}]); time.sleep(30)"
+        def interrupt(_seconds):
+            self.wait_for(pidfile.exists)
+            raise Stopped('fixture stop')
+        try:
+            with patch.object(run, 'wait', side_effect=interrupt):
+                with self.assertRaises(Stopped):
+                    run.execute([sys.executable, '-c', leader], self.root,
+                                self.root / 'attempt', '', 40)
+            pid = int(pidfile.read_text())
+            stat = Path(f'/proc/{pid}/stat')
+            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+        finally:
+            if pidfile.exists():
+                try:
+                    os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            run.close()
+        acquired = Run(self.root)
+        acquired.close()
+
+    def test_launcher_exit_does_not_release_live_descendant(self):
+        run = Run(self.root)
+        run.state = {'deadline': time.time() + 60}
+        pidfile = self.root / 'descendant.pid'
+        descendant = ("import signal,time,os; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                      f"open({str(pidfile)!r}, 'w').write(str(os.getpid())); time.sleep(30)")
+        leader = (f"import subprocess,sys,time; subprocess.Popen([sys.executable, '-c', {descendant!r}]); "
+                  "time.sleep(0.3)")
+        try:
+            self.assertEqual(run.execute([sys.executable, '-c', leader], self.root,
+                                         self.root / 'attempt', '', 40), 0)
+            stat = Path(f'/proc/{int(pidfile.read_text())}/stat')
+            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+        finally:
+            if pidfile.exists():
+                try:
+                    os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            run.close()
+
+    def test_setup_rejects_staging_worktree_collision_without_touching_draft(self):
+        run = self.initialized_run()
+        try:
+            repo = run.state['repo']
+            base = run.state['base']
+            git(repo, 'switch', '-c', 'operator-work')
+            git(repo, 'worktree', 'add', str(self.root / 'slice-2'), 'staging')
+            draft = self.root / 'slice-2' / 'operator-draft.txt'
+            draft.write_text('keep this draft\n')
+        finally:
+            run.close()
+        result = self.cli('resume')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('registered dedicated worktree', result.stderr)
+        self.assertEqual(git(self.root / 'slice-2', 'rev-parse', 'HEAD'), base)
+        self.assertEqual(git(self.root / 'slice-2', 'branch', '--show-current'), 'staging')
+        self.assertEqual(draft.read_text(), 'keep this draft\n')
+
+    def test_setup_rejects_unowned_directory_even_with_matching_head(self):
+        run = self.initialized_run()
+        try:
+            repo = run.state['repo']
+            base = run.state['base']
+            git(repo, 'clone', '--shared', repo, str(self.root / 'slice-2'))
+            self.assertEqual(git(self.root / 'slice-2', 'rev-parse', 'HEAD'), base)
+        finally:
+            run.close()
+        result = self.cli('resume')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('registered dedicated worktree', result.stderr)
+        self.assertEqual(git(self.root / 'slice-2', 'rev-parse', 'HEAD'), base)
+
+    def test_commit_and_publish_reject_phase_branch_switch(self):
+        run = self.initialized_run()
+        try:
+            supervisor = Supervisor(run)
+            p = supervisor.setup(0)
+            draft = Path(p['worktree']) / 'operator-draft.txt'
+            draft.write_text('keep\n')
+            git(p['worktree'], 'switch', '-c', 'operator-work')
+            p['commit_message'] = 'Fixture commit'
+            with self.assertRaisesRegex(Blocked, 'registered dedicated worktree'):
+                supervisor.commit(p)
+            with self.assertRaisesRegex(Blocked, 'registered dedicated worktree'):
+                supervisor.publish(p)
+            self.assertEqual(git(p['worktree'], 'rev-parse', 'HEAD'), p['base'])
+            self.assertEqual(draft.read_text(), 'keep\n')
+            self.assertFalse((self.root / 'fake-github.json').exists())
+        finally:
+            run.close()
+
+    def test_setup_recovers_registered_worktree_after_checkpoint_interruption(self):
+        run = self.initialized_run()
+        try:
+            supervisor = Supervisor(run)
+            p = supervisor.setup(0)
+            p['step'] = 'setup'  # worktree add completed before the step checkpoint
+            run.save()
+        finally:
+            run.close()
+        result = self.cli('resume')
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_sigkill_orphan_lock_and_receipt_recovery(self):
         self.scenario(delay=1)
@@ -180,6 +299,37 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(read(self.root / 'fake-calls.json')), 7)
 
+    def test_resume_at_review_refreshes_ci_before_reviewer_dispatch(self):
+        self.scenario(ci_failure=True)
+        self.assertEqual(self.cli().returncode, 2)
+        state = read(self.root / 'checkpoint.json')
+        p = state['phases'][0]
+        p['step'] = 'review'
+        p['ci'] = {'head': p['head'], 'passed': True}  # stale; live verify still fails
+        atomic(self.root / 'checkpoint.json', state)
+        calls = read(self.root / 'fake-calls.json')
+        result = self.cli('resume')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('checks failed', result.stderr)
+        self.assertEqual(read(self.root / 'fake-calls.json'), calls)
+
+    def test_interrupted_review_retry_refreshes_ci_before_new_execution(self):
+        self.scenario(ci_failure=True)
+        self.assertEqual(self.cli().returncode, 2)
+        state = read(self.root / 'checkpoint.json')
+        p = state['phases'][0]
+        p['step'] = 'review'
+        p['ci'] = {'head': p['head'], 'passed': True}
+        p['pending'] = {'directory': str(self.root / 'attempts' / 'interrupted-review'),
+                        'role': 'review', 'worktree': str(self.root / 'review'), 'head': p['head']}
+        atomic(self.root / 'checkpoint.json', state)
+        calls = read(self.root / 'fake-calls.json')
+        result = self.cli('resume')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('checks failed', result.stderr)
+        self.assertEqual(read(self.root / 'fake-calls.json'), calls)
+        self.assertEqual(read(self.root / 'checkpoint.json')['phases'][0]['interruptions'], 1)
+
     def test_resume_refuses_changed_worktree_head(self):
         self.scenario(ci_failure=True)
         self.assertEqual(self.cli().returncode, 2)
@@ -224,7 +374,7 @@ class SupervisorTests(unittest.TestCase):
              'name': 'slice-2', 'base': 'b' * 40, 'tests': ['offline checks'], 'dependencies': [],
              'result': {'large_pr_justification': 'Coherent unit', 'review_order': ['contracts', 'tests']}}
         try:
-            with patch('supervisor.git'), patch('supervisor.command'), patch('supervisor.github', side_effect=[[], [{'number': 1}]]):
+            with patch.object(Supervisor, 'phase_checkout'), patch('supervisor.git'), patch('supervisor.command'), patch('supervisor.github', side_effect=[[], [{'number': 1}]]):
                 Supervisor(run).publish(p)
             body = (self.root / 'slice-2-pr.md').read_text()
             self.assertIn('\n- Large PR justification: ', body)

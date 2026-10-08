@@ -52,7 +52,9 @@ execution authority. Do not delete locks, worktrees, receipts, or checkpoints to
   approval policy `never` means disallowed operations fail, not permission escalation.
 - The deterministic supervisor alone performs exact-branch commits, non-force pushes, PR
   creation, and metadata updates. It has no merge/deployment command. It preserves protected
-  branches, existing checkouts and uncommitted work. Worker changes to safeguards/env/supervisor
+  branches, existing checkouts and uncommitted work. A phase directory must be a clean, registered
+  worktree of this repository on its dedicated branch at setup; commit and publish recheck that
+  identity. Worker changes to safeguards/env/supervisor
   paths stop before commit/push. npm dependency preparation uses `npm ci --ignore-scripts`;
   package lifecycle scripts are not executed by the unsandboxed coordinator.
 - Branches stack on verified upstream HEADs. PRs target `staging` cumulatively because this
@@ -63,6 +65,7 @@ execution authority. Do not delete locks, worktrees, receipts, or checkpoints to
 - Required `verify`, `pr-reviewability`, and `Vercel` evidence comes from live GitHub check runs and
   statuses at the assigned SHA, with PR HEAD/base/state checks. Empty, pending, stale, failed,
   cancelled or skipped checks never pass. Worker claims of PASS are only local-test evidence.
+  Live exact-HEAD checks are refreshed before each new reviewer execution, including after resume.
   PR metadata updates are followed by another CI check; reviewer SHA must remain exact.
 - `checkpoint.json` is atomically replaced and fsynced; it includes source-contract Git blob IDs,
   phase/base/HEAD/branch, tests, PR/CI, review, blockers and next step. `events.jsonl`, per-attempt
