@@ -279,8 +279,15 @@ class SupervisorTests(unittest.TestCase):
             pid = int(pidfile.read_text())
             stat = Path(f'/proc/{pid}/stat')
             self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
-            run = Run(self.root)
-            run.close()
+            # The timeout receipt precedes worker teardown and inherited flock release.
+            def lock_released():
+                try:
+                    run = Run(self.root)
+                except Blocked:
+                    return False
+                run.close()
+                return True
+            self.wait_for(lock_released)
         finally:
             if supervisor.poll() is None:
                 supervisor.kill()
