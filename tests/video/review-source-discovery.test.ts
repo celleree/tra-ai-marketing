@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
-import { access, mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
+import { access, readFile } from 'node:fs/promises';
 import { FfmpegIntervalCandidateExtractor, FfmpegSceneCandidateMaterializer } from '@/lib/video/candidate-extractor';
 import { FfmpegSceneChangeDetector } from '@/lib/video/scene-change-detector';
 import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
@@ -10,7 +8,6 @@ import { createVideoIntelligenceAnalyzerFingerprint } from '@/lib/video/intellig
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
 import * as ffmpeg from '@/lib/video/ffmpeg';
 import * as cleanup from '@/lib/video/candidate-cleanup';
-import { REAL_SCENE_CHANGE_MP4 } from '@/tests/fixtures/video-candidate-scene';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
 
@@ -131,13 +128,9 @@ describe('completed video review source discovery', () => {
 
 // Mock only persisted artifacts; run discovery, validation, lifecycle, FFmpeg and thumbnail generation for real.
 it('restores 20 exact neighboring previews with one preprocessing pass and releases temporary ownership', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'tra-review-fixture-'));
-  let buffer: Buffer;
-  try {
-    const file = path.join(directory, 'fixture.mp4'); await writeFile(file, REAL_SCENE_CHANGE_MP4);
-    buffer = (await ffmpeg.runFfmpeg(['-hide_banner', '-nostdin', '-v', 'error', '-stream_loop', '1', '-i', file,
-      '-c', 'copy', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'])).stdout;
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  // Eight-second fixture: loop video-candidate-scene.ts's 4-second MP4 once with local FFmpeg -stream_loop 1 -c copy -movflags +faststart.
+  // Store the fixture because production's deliberately small FFmpeg build decodes MP4 but does not mux it.
+  const buffer = await readFile(new URL('../fixtures/video-review-preview-pool.mp4', import.meta.url));
   const input = { role: 'TRA_VIDEO', media: { id: locator.sourceVideoMediaId, fileName: 'fixture.mp4',
     mimeType: 'video/mp4', mediaType: 'VIDEO', size: buffer.length, url: '/fixture.mp4' },
     stored: { buffer, fileName: 'fixture.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO' } } as import('@/lib/video/candidate-extractor').HydratedTraVideoSource;
