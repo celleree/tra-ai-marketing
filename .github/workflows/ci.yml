@@ -12,7 +12,14 @@ permissions:
 
 jobs:
   verify:
-    name: verify
+    # Metadata skips must not publish a successful replacement for required verify.
+    name: ${{ github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base.ref.from == null && 'metadata-only (verification unchanged)' || 'verify' }}
+    # Retargeting changes the tested merge tree. Title/body edits do not.
+    if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base.ref.from != null
+    # Skipped metadata jobs do not enter concurrency or cancel real verification.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -30,5 +37,9 @@ jobs:
         run: npm run typecheck
       - name: Tests
         run: npm test
+      - name: Install pinned Chromium
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Offline Chromium regression
+        run: npm run test:browser
       - name: Production build
         run: npm run build
