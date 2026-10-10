@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { validateReviewFrame } from '@/lib/video/review-selection-sources';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import { parseGenerateVideoFrameSelection, videoCandidateFrameId, type GenerateVideoFrameSelection,
   type VideoCandidateFrameBinding } from '@/lib/video/generation-selection-contract';
@@ -126,4 +127,35 @@ export const advanceCandidateHumanSelection = async (plan: Extract<CandidateSele
     return { status: 'COMPLETE', selection: selectionFor(candidate, result.assessment) };
   }
   return { status: 'CONTINUE' }; // Caller replans from the now-complete candidate cache.
+};
+
+/** Manual choices are a closed pool, including exact nonrepresentative candidates; never widen it. */
+export const planManualCandidateHumanSelection = async (source: CandidateSelectionSource,
+  bindings: readonly VideoCandidateFrameBinding[], reuseContext: VideoFrameReuseContext, model: string,
+  dependencies: CandidateAssessmentDependencies): Promise<CandidateSelectionPlan> => {
+  const { library, manifest, librarySha256, preparationSha256 } = source.context;
+  if (!manifest || !librarySha256 || !preparationSha256 || !model.trim()
+    || bindings.length < 1 || bindings.length > 3 || new Set(bindings.map(item => item.frameId)).size !== bindings.length) {
+    throw new Error('Manual closed-pool selection requires exact frozen frame bindings and preparation.');
+  }
+  // Validate the entire pool before reading assessments or starting any provider work.
+  bindings.forEach(binding => validateReviewFrame(binding, { library, manifest }));
+  const reuse = canonicalizeVideoFrameReuseContext(reuseContext);
+  const useCounts = new Map(reuse.frames.filter(item => item.libraryId === library.id).map(item => [item.frameId, item.useCount]));
+  // Intrinsically suitable members are comparable; retain operator order when counts tie.
+  const ordered = [...bindings].sort((a, b) => (useCounts.get(a.frameId) ?? 0) - (useCounts.get(b.frameId) ?? 0));
+  for (const binding of ordered) {
+    const candidate: CandidateOption = { source, binding, useCount: useCounts.get(binding.frameId) ?? 0, identity: {
+      policy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, model,
+      sourceVideoMediaId: library.sourceVideoMediaId, sourceVideoContentHash: library.sourceVideoContentHash,
+      librarySha256, preparationSha256, representativeFrameId: binding.representativeFrameId,
+      candidateIndex: binding.candidateIndex, timestampMs: binding.timestampMs, frameSha256: binding.frameSha256,
+    } };
+    const state = await readCandidateSuitability(candidate.identity, dependencies);
+    if (state.status === 'BUSY') return state;
+    if (state.status === 'RETRY_REQUIRED') return dependencies.retry ? { status: 'READY', candidate } : state;
+    if (state.status === 'MISSING') return { status: 'READY', candidate };
+    if (isSuitableCandidate(state.assessment)) return { status: 'COMPLETE', selection: selectionFor(candidate, state.assessment) };
+  }
+  return { status: 'NO_SUITABLE_HUMAN' };
 };

@@ -19,6 +19,7 @@ import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, L
   canonicalizeVideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 import { isSelectedPlanningProof } from '@/lib/proof/planning-selection';
 import { isCreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
+import { validateStoredReviewHandoff } from '@/lib/creatives/review-handoff';
 
 export const isPortfolioId = (id: string) => /^portfolio_[a-f0-9]{32}$/.test(id);
 const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
@@ -174,6 +175,7 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
   if (!record(value) || !record(value.plannerArgs) || !record(value.snapshot)) return false;
   const checkpoint = value as unknown as PortfolioPlanningCheckpoint, args = checkpoint.plannerArgs;
   if (args.count !== job.slots.length || !text(args.context) || args.proofRetrievalQuery !== job.request.proofRetrievalQuery || !validAnalysis(args.analysis)
+    || !isDeepStrictEqual(args.operatorSelectedSourceGuidance, job.request.reviewHandoff?.operatorSelectedSourceGuidance)
     || typeof args.hasApprovedHumanSource !== 'boolean'
     || (args.hasBrandLogo !== undefined && typeof args.hasBrandLogo !== 'boolean')
     || (args.hasBrandLogo !== undefined && args.hasBrandLogo !== Boolean(job.request.brandLogoMediaId))
@@ -205,7 +207,9 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
     const job = { ...raw, planning } as CreativePortfolioJob;
     if (job.version !== 1 || job.id !== expectedId || !time(job.createdAtMs) || !time(job.updatedAtMs)
       || job.updatedAtMs < job.createdAtMs || !text(job.request.context)
-      || !validateGenerateCreativeRequest({ ...job.request, context: 'Saved portfolio' }, MAX_PORTFOLIO_CREATIVES).success
+      || !validateGenerateCreativeRequest({ ...job.request, reviewHandoff: undefined, context: 'Saved portfolio' }, MAX_PORTFOLIO_CREATIVES).success
+      || !validateStoredReviewHandoff(job.request.reviewHandoff, job.request.videoReview,
+        job.request.sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => source.mediaId))
       || !Array.isArray(job.slots) || job.slots.length !== job.request.variationCount
       || new Set(job.slots.map(slot => slot.creativeId)).size !== job.slots.length
       || job.slots.some((slot, index) => slot.index !== index + 1 || !/^creative_[a-f0-9]{32}$/.test(slot.creativeId)

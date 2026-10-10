@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
+import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
 import { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
 import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/openai';
 import { generateApprovedTraVideoFrameCreativeImage } from '@/lib/ai/video-frame-generation';
@@ -72,11 +73,21 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   preflightHumanVideo?: PlannedHumanVideoSource } = {}): Promise<GeneratedCreative> {
   const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
   if (!/^creative_[a-f0-9]{32}$/.test(creativeId)) throw new Error('Invalid reserved creative ID.');
+  if (request.reviewHandoff?.choices.frames?.length) {
+    // The explicit operator pool supersedes a catalog choice from an older frozen plan.
+    item = structuredClone(item);
+    delete item.strategy.approvedHumanId;
+    delete item.strategy.humanSourceId;
+  }
   const copyMode = classifyPlannedCopy(item);
   const { human, videoFrames: itemVideoFrames } = options.preflightHumanVideo
     ?? await resolvePlannedHumanVideoSource(item, { videoFrameSet, providerImageSource });
   const itemImageSource = human ? null : providerImageSource;
   const itemFrameSelection = itemVideoFrames ? human?.record.source ?? generatedVideoFrameSelection : undefined;
+  if (request.reviewHandoff?.choices.frames?.length && item.strategy.execution.subjectSource === 'approved-tra-human') {
+    assertReviewedFrameSelection(request.reviewHandoff.choices, itemFrameSelection);
+    if (human || itemImageSource || !itemVideoFrames) throw new Error('Manual reviewed frames require their exact fresh PNG attachment.');
+  }
   const itemRequestedSources = human ? [
     ...requestedSources.filter(source => source.mediaId !== human.record.source.sourceVideoMediaId),
     { role: 'TRA_VIDEO' as const, mediaId: human.record.source.sourceVideoMediaId, sha256: human.record.source.sourceVideoContentHash },
@@ -209,7 +220,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
             type: 'TRA_VIDEO_FRAMES',
             mediaId: providerFrames[0].sourceVideoMediaId,
             sourceSha256: providerFrames[0].sourceVideoContentHash,
-            selectionMode: human || request.videoFrameSelection
+            selectionMode: human || request.videoFrameSelection || request.reviewHandoff?.choices.frames?.length
               ? 'USER_SELECTED'
               : 'AUTOMATIC',
             ...(itemFrameSelection?.librarySha256 ? { libraryId: itemFrameSelection.libraryId,

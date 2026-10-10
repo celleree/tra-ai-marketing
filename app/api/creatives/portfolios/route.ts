@@ -10,6 +10,7 @@ import { portfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { readPortfolioCreatives } from '@/lib/creatives/portfolio-results';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
+import { ReviewSelectionError } from '@/lib/video/review-selection';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -21,6 +22,7 @@ const result = async (job: CreativePortfolioJob, status = 200, error?: string, r
 const failure = (error: unknown) => {
   if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body.' }, 400);
   if (error instanceof SubmissionConflictError) return json({ error: error.message }, 409);
+  if (error instanceof ReviewSelectionError) return json({ error: error.message }, error.status);
   if (error instanceof CreativeGenerationPreparationError) return json({ error: error.message }, error.status);
   console.error('Creative portfolio request failed', error);
   return json({ error: 'Creative portfolio request failed. Reload its saved progress before continuing.' }, 500);

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 import { isDeepStrictEqual } from 'node:util';
+import { loadReviewVideoSource } from '@/lib/video/review-selection-sources';
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { getCreativeDiversityIssue } from '@/lib/creatives/diversity';
@@ -103,6 +104,12 @@ async function advancePortfolio(
     }
 
     await assertCurrentWork();
+    const reviewedVideo = job.request.reviewHandoff?.choices.video;
+    if (reviewedVideo) {
+      // Revalidate frozen source bindings, never reload mutable review choices or approve pixels.
+      try { await loadReviewVideoSource(structuredClone(reviewedVideo), { storage, hydrateSource: options.video?.hydrateSource }); }
+      catch (error) { throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'Reviewed video changed.', 409); }
+    }
     if (slotIndex === null) {
       if (job.planning.phase === 'INITIAL_PLAN') {
         if (job.videoPreparationVersion === 1) {
@@ -190,7 +197,7 @@ async function advancePortfolio(
         const { checkpoint, repairAttempted } = job.planning;
         checkpoint.snapshot.batchPlan.creatives.forEach(assertValidPlannedCreativeCopy);
         providerWorkStarted = true;
-        const audit = await auditCreativePortfolio(checkpoint.snapshot.batchPlan.creatives);
+        const audit = await auditCreativePortfolio(checkpoint.snapshot.batchPlan.creatives, checkpoint.plannerArgs.operatorSelectedSourceGuidance);
         const issue = getCreativeDiversityIssue(checkpoint.snapshot.batchPlan.creatives, audit);
         if (!issue) {
           const snapshot = structuredClone(checkpoint.snapshot);
@@ -230,14 +237,15 @@ async function advancePortfolio(
     const slot = job.slots[slotIndex - 1];
     const concept = context.batchPlan.creatives[slotIndex - 1];
     assertValidPlannedCreativeCopy(concept);
-    const automaticVideoSelection = job.videoPreparationVersion === 1
+    const reviewChoices = job.request.reviewHandoff?.choices;
+    const manualVideoSelection = Boolean(reviewChoices?.frames?.length)
+      && concept.strategy.execution.subjectSource === 'approved-tra-human';
+    const durableVideoSelection = job.videoPreparationVersion === 1
       && concept.strategy.execution.subjectSource === 'approved-tra-human'
-      && !job.request.videoFrameSelection
-      && !concept.strategy.approvedHumanId
-      && !concept.strategy.humanSourceId
-      && !context.providerImageSource
-      && context.videoFrameSet !== null;
-    if (automaticVideoSelection) {
+      && (manualVideoSelection || (!job.request.videoFrameSelection
+        && !concept.strategy.approvedHumanId && !concept.strategy.humanSourceId
+        && !context.providerImageSource && context.videoFrameSet !== null));
+    if (durableVideoSelection) {
       if (slot.videoSelection && (slot.videoSelection.version !== 2
         || slot.videoSelection.selectionPolicy !== CANDIDATE_HUMAN_FRAME_SELECTION_POLICY
         || (slot.videoSelection.selection && slot.videoSelection.selection.version !== 3))) {
@@ -261,7 +269,10 @@ async function advancePortfolio(
         const cache = { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}) };
         const preflight = await preflightPortfolioVideoFrames({ sourceAnalysis: context.sourceAnalysis,
           sources: videoSources, finalConcept: concept, selectionPolicy: attempt.selectionPolicy,
-          reuseContext: attempt.reuseContext, cache });
+          reuseContext: attempt.reuseContext, cache, reviewChoices }).catch(error => {
+          if (!manualVideoSelection) throw error;
+          throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'Manual frame assessment is unavailable.', 409);
+        });
         if (preflight.status === 'COMPLETE') return { job: await updateCreativePortfolio(id, current => {
           const checkpointed = checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job;
           return finishPortfolioVideoFrameSelection(checkpointed, token, preflight.selection);
@@ -291,7 +302,7 @@ async function advancePortfolio(
           finalConcept: concept,
           selectionPolicy: attempt.selectionPolicy,
           reuseContext: attempt.reuseContext,
-          cache,
+          cache, reviewChoices,
         }));
         if (selected.status === 'BUSY') return {
           job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
@@ -317,7 +328,7 @@ async function advancePortfolio(
       const selectedFrames = await hydratePortfolioVideoFrameSelection({
         sourceAnalysis: context.sourceAnalysis,
         sources: videoSources,
-        selection: slot.videoSelection.selection,
+        selection: slot.videoSelection.selection, reviewChoices,
       }).catch(error => {
         const message = error instanceof Error ? error.message : 'Saved human-frame selection could not be hydrated.';
         throw new CreativeGenerationPreparationError(message, 409);
@@ -341,7 +352,9 @@ async function advancePortfolio(
         ...context,
         videoFrameSet: selectedFrames,
         generatedVideoFrameSelection,
-      }, { creativeId: slot.creativeId, assertCurrentWork });
+        ...(manualVideoSelection ? { providerImageSource: undefined } : {}),
+      }, { creativeId: slot.creativeId, assertCurrentWork,
+        ...(manualVideoSelection ? { preflightHumanVideo: { human: null, videoFrames: selectedFrames } } : {}) });
       return { job: await updateCreativePortfolio(id, current => finishPortfolioSlot(current, token, creative.id), storage) };
     }
 

@@ -246,8 +246,11 @@ export async function advancePortfolioPreparation(
   const hasUsableApprovedHumanSource = approvedHumanSource
     ? isUsableApprovedHumanSource(approvedHumanSource, sourceSuppliedToImageGeneration)
     : false;
-  const approvedHumanOptions = await loadApprovedHumanOptions();
-  const humanSourceDirection = approvedHumanOptions.length
+  const manualFrames = Boolean(data.reviewHandoff?.choices.frames?.length);
+  const approvedHumanOptions = manualFrames ? [] : await loadApprovedHumanOptions();
+  const humanSourceDirection = manualFrames
+    ? 'The operator selected a closed pool of exact TRA video frames in operatorSelectedSourceGuidance. For human concepts use only that pool, with null approvedHumanId; no catalog, image, representative or neighbor substitution. Visual suitability and overlay assessment plus fresh PNG extraction are still required before rendering. Choose a non-human concept if that pool cannot support the idea.'
+    : approvedHumanOptions.length
     ? 'Curated approvedHumanOptions are available as independent human sources. Choose a stable ID only when that person strengthens the proposition; selecting one replaces any supplied human source for that concept. Choose null for a graphic concept or an explicitly supplied approved source. No invented people or identity-based claims.'
     : videoFrameSet
       ? `Use only a person visibly grounded in the attached approved TRA video frames from source ${videoFrameSet.source.media.id}. Preserve that visible identity; do not invent, replace, blend, or add another person. Layout-reference and library-reference people remain forbidden human sources.`
@@ -272,12 +275,13 @@ export async function advancePortfolioPreparation(
     ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, data.placement)
     : undefined;
   const plannerArgs = {
+    ...(data.reviewHandoff ? { operatorSelectedSourceGuidance: data.reviewHandoff.operatorSelectedSourceGuidance } : {}),
     count: data.variationCount,
     context: generationContext,
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
-    hasApprovedHumanSource: hasUsableApprovedHumanSource,
+    hasApprovedHumanSource: manualFrames || hasUsableApprovedHumanSource,
     hasBrandLogo: reserveLogoArea,
     ...(logoPlacement ? { logoPlacement } : {}),
     referenceCatalog: state.referenceCatalog,
