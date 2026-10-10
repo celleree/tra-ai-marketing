@@ -99,7 +99,7 @@ describe('single-creative revision planning', () => {
   });
   it('uses one Astra Medium request and permits an ordinary edit without variation requirements', async () => {
     const result = await planCreativeRevision(args);
-    expect(result).toMatchObject({ concept: { ...plan(), index: 1 }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    expect(result).toMatchObject({ concept: { ...plan(), index: 1 }, plannerModel: 'gpt-6.1-sol', reasoningEffort: 'medium' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.reasoning).toEqual({ effort: 'medium' });

@@ -42,7 +42,7 @@ export async function buildReferencePlanningCatalog(args: {
 export async function advanceReferenceAngles(
   catalog: ReferencePlanningCandidate[], storage: MediaStorage, onProviderOperationStart: () => void,
 ): Promise<ReferencePlanningCandidate[] | null> {
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
   const pending = catalog.find(item => {
     const value = parseReusableReferenceAngle(item.reusableAngle);
     return !value || value.sourceSha256 !== item.sourceSha256 || value.analyzerModel !== model;

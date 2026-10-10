@@ -130,7 +130,7 @@ const analyzeCreative = async (
   instruction: string,
   schemaName: string
 ): Promise<CreativeReferenceAnalysis> => {
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
   const response = await fetchWithProviderUsage('source-reference-analysis', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
@@ -266,7 +266,7 @@ export async function generateCreativeCopy(
   context: string,
   analysis: CreativeReferenceAnalysis
 ): Promise<Map<number, CreativeCopy>> {
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol';
   const requested = plan.map((item) => ({
     index: item.index,
     category: CREATIVE_CATEGORY_LABELS[item.category],

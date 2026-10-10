@@ -112,7 +112,7 @@ export async function planCreativeRevision(args: {
   if (copyMode.kind === 'INVALID') throw new Error('Saved parent has an invalid separated ad/image copy contract.');
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY is not configured.');
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol';
   const copySchemaForPlan = copyMode.kind === 'E2' ? E2_SCHEMA : LEGACY_SCHEMA;
   const baseSchema = args.hasBrandLogo ? {
     ...copySchemaForPlan,

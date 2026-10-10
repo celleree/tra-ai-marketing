@@ -150,7 +150,7 @@ describe('creative batch planner', () => {
     for (const [url, init] of fetchMock.mock.calls) {
       expect(url).toBe('https://api.openai.com/v1/responses');
       const body = JSON.parse(String(init?.body)), input = JSON.parse(body.input[1].content[0].text);
-      expect(body.model).toBe('gpt-6-astra');
+      expect(body.model).toBe('gpt-6.1-sol');
       expect(input.sourceAnalysis).toEqual(sourceAnalysis);
       for (let i = 1; i <= 6; i++) expect(JSON.stringify(input.sourceAnalysis)).toContain(`SENTINEL_${requestedSources[i - 1].role}_${i}`);
       expect(input.sourceAnalysisGuidance).toContain('not full Video Intelligence');
@@ -248,7 +248,7 @@ describe('creative batch planner', () => {
     expect(reloaded).toEqual(job);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(auditCreativePortfolio).not.toHaveBeenCalled();
-    expect(batchPlan).toMatchObject({ plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    expect(batchPlan).toMatchObject({ plannerModel: 'gpt-6.1-sol', reasoningEffort: 'medium' });
     expect(batchPlan).not.toHaveProperty('portfolioAudit');
     batchPlan.creatives.forEach((planned, index) => {
       expect(planned).toMatchObject({ index: index + 1, format: creatives[index].format,
@@ -421,7 +421,7 @@ describe('creative batch planner', () => {
       }],
     });
     expect(repairInput.repairGuidance).toContain('fix every listed repairDefect');
-    expect(repairBody.model).toBe('gpt-6-astra');
+    expect(repairBody.model).toBe('gpt-6.1-sol');
     expect(repairBody.text.format.schema.properties.creatives).toMatchObject({ minItems: 1, maxItems: 1 });
     expect(repairBody.text.format.schema.properties.creatives.items.properties.index).toEqual({ type: 'integer', enum: [2] });
     expect(result.portfolioAudit?.groups).toHaveLength(2);
@@ -579,8 +579,8 @@ describe('creative batch planner', () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => okResponse({ creatives: [concept(1), concept(2)] }));
     vi.stubGlobal('fetch', fetchMock);
     const result = await planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
-    expect(result.plannerModel).toBe('gpt-6-astra');
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).model).toBe('gpt-6-astra');
+    expect(result.plannerModel).toBe('gpt-6.1-sol');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).model).toBe('gpt-6.1-sol');
   });
 
   it('makes one medium-reasoning strict request and returns the ordered parsed batch', async () => {

@@ -1,18 +1,22 @@
 import type { ProviderEndpoint, ProviderUsage } from '@/lib/ai/provider-usage';
 
-/** Standard direct API baseline, verified 2026-09-26; estimates exclude regional/FedRAMP uplift.
+/** Standard direct API baseline, verified 2026-10-10; estimates exclude regional/FedRAMP uplift.
  * https://developers.openai.com/api/docs/pricing
+ * https://developers.openai.com/api/docs/models/gpt-6-luna
+ * https://developers.openai.com/api/docs/models/gpt-6.1-sol
  * https://developers.openai.com/api/docs/models/gpt-6-astra
  * https://developers.openai.com/api/docs/models/gpt-5.6-terra
  * https://developers.openai.com/api/docs/models/whisper-1
  */
 export const PROVIDER_PRICING = {
-  version: 'openai-standard-2026-09-26-v1', currency: 'USD', perTokens: 1_000_000, longContextAbove: 272_000,
+  version: 'openai-standard-2026-10-10-v2', currency: 'USD', perTokens: 1_000_000, longContextAbove: 272_000,
   images: {
     'gpt-image-2.5-sunburst': { textInput: 5, imageInput: 8, output: 30 },
     'gpt-image-2.5-flare': { textInput: 5, imageInput: 8, output: 30 },
   },
   responses: {
+    'gpt-6-luna': { short: { input: .1, cached: .01, write: .125, output: .5 }, long: { input: .2, cached: .02, write: .25, output: .75 } },
+    'gpt-6.1-sol': { short: { input: 2, cached: .1, write: 2.5, output: 10 }, long: { input: 4, cached: .2, write: 5, output: 15 } },
     'gpt-6-astra': { short: { input: 10, cached: 1, write: 12.5, output: 50 }, long: { input: 20, cached: 2, write: 25, output: 75 } },
     'gpt-5.6-terra': { short: { input: 2, cached: .2, write: 2.5, output: 12 }, long: { input: 4, cached: .4, write: 5, output: 18 } },
   },

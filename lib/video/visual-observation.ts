@@ -109,6 +109,6 @@ export const observeTemporaryVideoFrame = async (
     throw new Error('Video vision requires an analysis-only TRA candidate.');
   }
   return observeVideoFrameBytes(candidate, await readFile(candidate.temporaryPath), {
-    model: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra', request: dependencies.request,
+    model: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna', request: dependencies.request,
   });
 };

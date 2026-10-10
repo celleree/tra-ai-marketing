@@ -30,6 +30,13 @@ describe('provider usage minimization and pricing', () => {
     expect(estimateProviderCostUsd('gpt-6-astra', 'responses', { inputTokens: 10, outputTokens: 10 })).toBeNull();
     expect(estimateProviderCostUsd('whisper-1', 'transcription', { audioSeconds: 30 })).toBeCloseTo(.003);
   });
+  it('prices migrated Luna and Sol requests including long context and Sol cache discounts', () => {
+    const usage = { inputTokens: 272000, outputTokens: 100, cachedInputTokens: 1000, cacheWriteTokens: 2000 };
+    expect(estimateProviderCostUsd('gpt-6-luna', 'responses', usage)).toBeCloseTo((269000 * .1 + 1000 * .01 + 2000 * .125 + 100 * .5) / 1e6);
+    expect(estimateProviderCostUsd('gpt-6.1-sol', 'responses', usage)).toBeCloseTo((269000 * 2 + 1000 * .1 + 2000 * 2.5 + 100 * 10) / 1e6);
+    expect(estimateProviderCostUsd('gpt-6.1-sol', 'responses', { ...usage, inputTokens: 272001 })).toBeCloseTo((269001 * 4 + 1000 * .2 + 2000 * 5 + 100 * 15) / 1e6);
+    expect(estimateProviderCostUsd('gpt-6-luna', 'responses', { ...usage, inputTokens: 272001 })).toBeCloseTo((269001 * .2 + 1000 * .02 + 2000 * .25 + 100 * .75) / 1e6);
+  });
   it('does not retain arbitrary metadata, secrets, prompts, PII or response text', () => {
     const event = providerUsageEvent({ attemptId: 'attempt-1', stage: 'image', endpoint: 'images', purpose: 'production',
       model: 'gpt-image-2.5-sunburst', quality: 'high', dimensions: '1024x1024', n: 1, renderFingerprint: 'a'.repeat(64),

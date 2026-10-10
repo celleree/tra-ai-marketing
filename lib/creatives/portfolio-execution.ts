@@ -260,7 +260,7 @@ async function advancePortfolio(
       const videoSources = inventory.filter(({ source }) => source.role === 'TRA_VIDEO')
         .map(({ source }) => source as HydratedTraVideoSource);
       if (!slot.videoSelection?.selection) {
-        const proposed = { selectionModel: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra').trim(),
+        const proposed = { selectionModel: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna').trim(),
           selectionPolicy: portfolioVideoSelectionPolicy(concept),
           reuseContext: portfolioVideoFrameReuseContext(job.slots.flatMap((candidate) => candidate.videoSelection?.selection
             ? [candidate.videoSelection.selection] : [])) };

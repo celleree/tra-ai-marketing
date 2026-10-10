@@ -280,7 +280,7 @@ export const selectVideoHumanFrameFromPool = async (
   const reuse = canonicalizeVideoFrameReuseContext(reuseContext);
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured for video concept selection.');
-  const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra')).trim();
+  const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna')).trim();
   if (!model) throw new Error('Video selection model must be non-empty.');
   const content: Array<Record<string, unknown>> = [{ type: 'input_text', text: JSON.stringify({
     policyVersion: HUMAN_FRAME_SELECTION_POLICY, concept: brief, reuseContext: reuse,

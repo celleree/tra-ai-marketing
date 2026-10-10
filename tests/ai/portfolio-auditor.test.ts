@@ -25,14 +25,14 @@ describe('Astra semantic portfolio audit', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
   it('submits the whole portfolio to a separate bounded audit and preserves duplicate groups', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'fixture'); vi.stubEnv('OPENAI_TEXT_MODEL', 'gpt-6-astra');
+    vi.stubEnv('OPENAI_API_KEY', 'fixture'); vi.stubEnv('OPENAI_TEXT_MODEL', 'gpt-6.1-sol');
     const groups = [{ conceptIndexes: [1, 2], proposition: 'Conversation to next steps', distinction: 'No strategic distinction; different wording' }];
     const fetchMock = vi.fn(async (_url: string, _options: RequestInit) => response({ groups, executionNotes: 'Avoid automatic desk imagery.' }));
     vi.stubGlobal('fetch', fetchMock);
     const audit = await auditCreativePortfolio(concepts);
     expect(audit.groups).toEqual(groups);
     const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
-    expect(body).toMatchObject({ model: 'gpt-6-astra', store: false, reasoning: { effort: 'medium' }, max_output_tokens: 4608 });
+    expect(body).toMatchObject({ model: 'gpt-6.1-sol', store: false, reasoning: { effort: 'medium' }, max_output_tokens: 4608 });
     expect(JSON.parse(body.input[1].content[0].text)).toHaveLength(2);
     expect(body.input[0].content[0].text).toContain('same category');
     expect(body.input[0].content[0].text).toContain('near-duplicate paraphrases');
