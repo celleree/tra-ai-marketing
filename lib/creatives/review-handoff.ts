@@ -2,7 +2,8 @@ import { MAX_CREATIVE_SOURCE_ASSETS } from '@/lib/media/source-limits';
 import type { RuntimeCompanyProfileSnapshot } from '@/lib/company/creative-context';
 import { loadVideoReviewDraftWithFrameContext } from '@/lib/video/review-selection-store';
 import type { ReviewSourceDependencies } from '@/lib/video/review-selection-sources';
-import { ReviewSelectionError, reviewSourceSha256, usesAutomaticReviewFrames } from '@/lib/video/review-selection';
+import { isDeepStrictEqual } from 'node:util';
+import { parseReviewSelectionChoices, record, ReviewSelectionError, reviewSourceSha256, usesAutomaticReviewFrames } from '@/lib/video/review-selection';
 
 export type VideoReviewReference = { draftId: string; revision: string };
 export type ReviewHandoffInput = VideoReviewReference & {
@@ -79,3 +80,44 @@ export async function resolveVideoReviewHandoff(input: ReviewHandoffInput, depen
   return immutable(handoff);
 }
 export type VideoReviewHandoff = Awaited<ReturnType<typeof resolveVideoReviewHandoff>>;
+
+/** Validate frozen saved input without consulting a subsequently edited review draft. */
+export function validateStoredReviewHandoff(value: unknown, reference: VideoReviewReference | undefined, videoIds: readonly string[]) {
+  if (value === undefined) return reference === undefined;
+  try {
+    if (!record(value) || !reference || value.version !== 1 || value.artifactType !== 'VIDEO_REVIEW_HANDOFF'
+      || value.draftId !== reference.draftId || value.revision !== reference.revision) return false;
+    const { handoffSha256, ...snapshot } = value;
+    if (handoffSha256 !== reviewSourceSha256(snapshot)) return false;
+    requireSize(value, MAX_REVIEW_HANDOFF_BYTES, 'Review handoff');
+    const choices = parseReviewSelectionChoices(value.choices), guidance = value.operatorSelectedSourceGuidance;
+    requireSize(guidance, MAX_OPERATOR_SOURCE_GUIDANCE_BYTES, 'Selected source guidance');
+    return (!choices.video || videoIds.includes(choices.video.locator.sourceVideoMediaId)) && record(guidance)
+      && guidance.usage === 'DRAFT_CREATIVE_GUIDANCE_ONLY' && guidance.grantsAdvertisingApproval === false && guidance.providerEligible === false
+      && isDeepStrictEqual(guidance.video, choices.video) && isDeepStrictEqual(guidance.companyProfile, choices.companyProfile)
+      && guidance.frameMode === (usesAutomaticReviewFrames(choices) ? 'AUTOMATIC' : 'MANUAL_CLOSED_POOL')
+      && isDeepStrictEqual(Array.isArray(guidance.frames) ? guidance.frames.map(item => item.binding) : guidance.frames, choices.frames)
+      && Array.isArray(value.claimSnapshots) && value.claimSnapshots.length === (choices.claims?.length ?? 0)
+      && value.claimSnapshots.every((claim, index) => record(claim) && typeof claim.wording === 'string' && record(claim.context)
+        && isDeepStrictEqual(claim.reference, choices.claims![index]))
+      && isDeepStrictEqual(guidance.statements, choices.claims === null ? null : value.claimSnapshots);
+  } catch { return false; }
+}
+
+/** Final saved/attached frame identities must remain inside the operator's frozen pool. */
+export function assertReviewedFrameSelection(choices: VideoReviewHandoff['choices'] | undefined,
+  selection: import('@/lib/video/generation-selection-contract').GenerateVideoFrameSelection
+    | import('@/lib/video/generation-selection-contract').GeneratedVideoFrameSelection | undefined) {
+  if (!choices?.frames?.length) return;
+  const video = choices.video;
+  const bindings = selection && ('frames' in selection ? selection.frames.map(frame => ({
+    frameId: frame.libraryFrameId, representativeFrameId: frame.representativeFrameId,
+    candidateIndex: frame.candidateIndex, timestampMs: frame.timestampMs, frameSha256: frame.candidateFrameSha256,
+  })) : selection.version === 3 ? selection.candidateBindings : undefined);
+  if (!video || !selection || selection.libraryId !== video.libraryId || selection.librarySha256 !== video.librarySha256
+    || selection.sourceVideoMediaId !== video.locator.sourceVideoMediaId
+    || selection.sourceVideoContentHash !== video.locator.sourceVideoContentHash
+    || !bindings?.length || bindings.some(binding => !choices.frames!.some(allowed => isDeepStrictEqual(binding, allowed)))) {
+    throw new ReviewSelectionError('Manual closed-pool frame selection does not match the frozen review. Automatic substitution is unavailable.', 409);
+  }
+}

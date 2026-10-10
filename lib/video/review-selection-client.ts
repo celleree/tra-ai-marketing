@@ -83,7 +83,7 @@ export const createReviewDraftClient = (options: { request?: typeof fetch; onCha
       options.onSaved?.(saved.draft.id);
     } catch (error) {
       // A first write may never have reached storage. Keep visible choices for an explicit retry.
-      if (state.saved || (error as { status?: number }).status !== 404) throw error;
+      if (state.saved || !state.choices || (error as { status?: number }).status !== 404) throw error;
       blocked = false; publish({ error: '', conflict: false });
     }
   });

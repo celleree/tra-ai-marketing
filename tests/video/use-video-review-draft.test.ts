@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { COMPANY_PROFILE_STORAGE_KEY } from '@/lib/company/creative-context';
 import { LAST_VIDEO_REVIEW } from '@/lib/video/review-selection-client';
 
 const mocks = vi.hoisted(() => ({ effects: [] as Array<() => () => void>, update: vi.fn() }));
@@ -18,7 +19,7 @@ const mount = () => { const hook = useVideoReviewDraft(); const unmount = mocks.
 const settled = () => vi.waitFor(() => expect(mocks.update.mock.calls.at(-1)?.[0].pending).toBe(0));
 beforeEach(() => {
   vi.resetAllMocks(); mocks.effects = []; values = new Map(); replace = vi.fn();
-  vi.stubGlobal('window', { location: { href: `http://localhost/?review=${id}` }, history: { replaceState: replace },
+  vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn(), location: { href: `http://localhost/?review=${id}` }, history: { replaceState: replace },
     localStorage: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } } });
   request = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => init?.method === 'POST'
     ? Response.json({ ...response, draft: { ...response.draft, choices: JSON.parse(init.body as string).choices }, revision: 'revision-2', issues: [] })
@@ -34,8 +35,21 @@ describe('Create-owned saved review lifecycle', () => {
     request.mockResolvedValueOnce(Response.json({ ...response, draft: { ...response.draft, choices: { ...response.draft.choices,
       claims: [response.draft.choices.claims[0], { type: 'PROOF', proofId: 'unavailable' }, proof, profileClaim], companyProfile } },
       issues: [{ source: 'VIDEO', message: 'Video unavailable' }, { source: 'CLAIM', index: 1, message: 'Proof changed' }] }));
+    values.set(COMPANY_PROFILE_STORAGE_KEY, JSON.stringify(companyProfile));
     const { hook } = mount(); await settled(); await hook.clearUnavailable();
     expect(JSON.parse(request.mock.calls[1][1]!.body as string).choices).toMatchObject({ video: null, frames: [], claims: [proof, profileClaim], companyProfile });
+    expect(hook.canGenerate()).toBe(true);
+  });
+  it('blocks a changed Profile and explicitly removes old Profile claims while preserving frame and Proof identities', async () => {
+    const companyProfile = { knowledgeBase: { servicesOffers: 'Frozen offer.' } };
+    const changed = { knowledgeBase: { servicesOffers: 'Current offer.' } };
+    request.mockResolvedValueOnce(Response.json({ ...response, issues: [], draft: { ...response.draft,
+      choices: { ...response.draft.choices, companyProfile, claims: [{ type: 'COMPANY_PROFILE' }, { type: 'PROOF', proofId: 'retained' }] } } }));
+    values.set(COMPANY_PROFILE_STORAGE_KEY, JSON.stringify(changed));
+    const { hook } = mount(); await settled(); expect(hook.canGenerate()).toBe(false);
+    await hook.useCurrentProfile();
+    expect(JSON.parse(request.mock.calls[1][1]!.body as string).choices).toMatchObject({ companyProfile: changed,
+      frames: response.draft.choices.frames, claims: [{ type: 'PROOF', proofId: 'retained' }] });
     expect(hook.canGenerate()).toBe(true);
   });
   it('allows explicit removal of unavailable video material so a stale restored draft cannot trap no-video Create', async () => {

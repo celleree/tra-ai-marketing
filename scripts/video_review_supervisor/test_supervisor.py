@@ -18,6 +18,14 @@ from supervisor import (ALLOWED_CODEX_MODELS, DEFAULT_CODEX_MODEL, Supervisor,
 SCRIPT = str(Path(__file__).with_name('supervisor.py'))
 
 
+def process_stopped(pid):
+    try:
+        fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    return fields[0] in ('Z', 'X')
+
+
 class SupervisorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -49,6 +57,19 @@ class SupervisorTests(unittest.TestCase):
                 return
             time.sleep(0.05)
         self.fail('Timed out waiting for process fixture')
+
+    def test_process_observation_handles_only_disappearance(self):
+        for error in (FileNotFoundError(2, 'gone'), ProcessLookupError(3, 'gone')):
+            with self.subTest(error=type(error).__name__), patch.object(Path, 'read_text', side_effect=error):
+                self.assertTrue(process_stopped(123))
+        for state, stopped in (('S', False), ('Z', True), ('X', True)):
+            with patch.object(Path, 'read_text', return_value=f'123 (fixture) {state} 1 123'):
+                self.assertEqual(process_stopped(123), stopped)
+        for error in (PermissionError(13, 'denied'), OSError(5, 'I/O error')):
+            with patch.object(Path, 'read_text', side_effect=error), self.assertRaises(type(error)):
+                process_stopped(123)
+        with patch.object(Path, 'read_text', return_value='corrupt'), self.assertRaises(IndexError):
+            process_stopped(123)
 
     def test_complete_dry_run_and_idempotent_resume(self):
         result = self.cli()
@@ -246,8 +267,7 @@ class SupervisorTests(unittest.TestCase):
                     run.execute([sys.executable, '-c', leader], self.root,
                                 self.root / 'attempt', '', 40)
             pid = int(pidfile.read_text())
-            stat = Path(f'/proc/{pid}/stat')
-            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+            self.assertTrue(process_stopped(pid))
         finally:
             if pidfile.exists():
                 try:
@@ -269,8 +289,8 @@ class SupervisorTests(unittest.TestCase):
         try:
             self.assertEqual(run.execute([sys.executable, '-c', leader], self.root,
                                          self.root / 'attempt', '', 40), 0)
-            stat = Path(f'/proc/{int(pidfile.read_text())}/stat')
-            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+            pid = int(pidfile.read_text())
+            self.assertTrue(process_stopped(pid))
         finally:
             if pidfile.exists():
                 try:
@@ -304,8 +324,7 @@ class SupervisorTests(unittest.TestCase):
             release.touch()
             leader_pid = int(leader_pidfile.read_text())
             def leader_exited():
-                stat = Path(f'/proc/{leader_pid}/stat')
-                return not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X')
+                return process_stopped(leader_pid)
             self.wait_for(leader_exited)
             with self.assertRaisesRegex(Blocked, 'lock'):
                 Run(self.root)
@@ -313,8 +332,7 @@ class SupervisorTests(unittest.TestCase):
             (self.root / 'STOP').touch()
             descendant_pid = int(pidfile.read_text())
             def descendant_stopped():
-                stat = Path(f'/proc/{descendant_pid}/stat')
-                return not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X')
+                return process_stopped(descendant_pid)
             self.wait_for(descendant_stopped)
             def lock_released():
                 try:
@@ -359,8 +377,7 @@ class SupervisorTests(unittest.TestCase):
             self.wait_for(lambda: (attempt / 'exit.json').exists())
             self.assertEqual(read(attempt / 'exit.json')['returncode'], 124)
             pid = int(pidfile.read_text())
-            stat = Path(f'/proc/{pid}/stat')
-            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+            self.assertTrue(process_stopped(pid))
             # The timeout receipt precedes worker teardown and inherited flock release.
             def lock_released():
                 try:
@@ -490,6 +507,60 @@ class SupervisorTests(unittest.TestCase):
         checks[0]['conclusion'] = 'success'
         checks.append({**checks[0], 'id': 10, 'status': 'in_progress', 'conclusion': None})
         self.assertFalse(check_snapshot(pr, 'abc', checks, statuses)[0])
+
+    def test_legacy_status_cannot_mask_required_check_failure_pending_or_skip(self):
+        pr = {'head': {'sha': 'abc'}, 'base': {'ref': 'staging'}, 'state': 'open'}
+        checks = [{'id': i, 'name': name, 'head_sha': 'abc', 'status': 'completed', 'conclusion': 'success'}
+                  for i, name in enumerate(('verify', 'pr-reviewability'))]
+        statuses = [{'context': 'verify', 'state': 'success'}, {'context': 'Vercel', 'state': 'success'}]
+        for conclusion in ('failure', 'skipped', 'cancelled'):
+            with self.subTest(conclusion=conclusion):
+                checks[0]['conclusion'] = conclusion
+                with self.assertRaises(Blocked):
+                    check_snapshot(pr, 'abc', checks, statuses)
+        checks[0].update(status='in_progress', conclusion=None)
+        self.assertFalse(check_snapshot(pr, 'abc', checks, statuses)[0])
+        checks[0].update(status='completed', conclusion='success')
+        statuses[0]['state'] = 'failure'
+        with self.assertRaises(Blocked):
+            check_snapshot(pr, 'abc', checks, statuses)
+        statuses[0]['state'] = 'pending'
+        self.assertFalse(check_snapshot(pr, 'abc', checks, statuses)[0])
+
+    def test_optional_metadata_skip_preserves_required_verification(self):
+        pr = {'head': {'sha': 'abc'}, 'base': {'ref': 'staging'}, 'state': 'open'}
+        checks = [{'id': i, 'name': name, 'head_sha': 'abc', 'status': 'completed', 'conclusion': 'success'}
+                  for i, name in enumerate(('verify', 'pr-reviewability'))]
+        checks.append({'id': 99, 'name': 'metadata-only (verification unchanged)', 'head_sha': 'abc',
+                       'status': 'completed', 'conclusion': 'skipped'})
+        statuses = [{'context': 'Vercel', 'state': 'success'}]
+        self.assertTrue(check_snapshot(pr, 'abc', checks, statuses)[0])
+        checks[0]['status'] = 'in_progress'
+        self.assertFalse(check_snapshot(pr, 'abc', checks, statuses)[0])
+        checks[0].update(status='completed', conclusion='skipped')
+        with self.assertRaises(Blocked):
+            check_snapshot(pr, 'abc', checks, statuses)
+
+    def test_nested_environment_files_stop_before_staging_commit_or_publish(self):
+        run = self.initialized_run()
+        try:
+            supervisor = Supervisor(run)
+            p = supervisor.setup(0)
+            p['commit_message'] = 'Never commit environment fixture'
+            wt = Path(p['worktree'])
+            for name in ('config/.env.local', 'nested/.env', 'config/.env.d/value'):
+                secret = wt / name
+                secret.parent.mkdir(parents=True, exist_ok=True)
+                secret.write_text('offline fixture only\n')
+                with self.subTest(path=name):
+                    with self.assertRaisesRegex(Blocked, 'protected path'):
+                        supervisor.commit(p)
+                    self.assertEqual(git(wt, 'rev-parse', 'HEAD'), p['base'])
+                    self.assertEqual(git(wt, 'diff', '--cached', '--name-only'), '')
+                    self.assertFalse((self.root / 'fake-github.json').exists())
+                secret.unlink()
+        finally:
+            run.close()
 
     def test_stop_reaches_orphan_worker_then_resume(self):
         self.scenario(delay=20)
@@ -624,7 +695,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertNotIn('--slurp', call.call_args.args[0])
             self.assertIn('--paginate', call.call_args.args[0])
 
-    def test_metadata_update_requires_new_ci_runs(self):
+    def test_metadata_update_requires_fresh_reviewability_and_reuses_same_head_verify(self):
         run = Run(self.root)
         run.state = {'repo': str(self.root), 'dry_run': True, 'ci_timeout': 0}
         p = {'head': 'abc', 'after_check_ids': {'verify': 1, 'pr-reviewability': 2}}
@@ -637,8 +708,10 @@ class SupervisorTests(unittest.TestCase):
             with patch.object(supervisor, 'snapshot', return_value=snapshot):
                 with self.assertRaises(Blocked):
                     supervisor.ci(p)
-                for check in snapshot['checks']:
-                    check['id'] += 10
+                # Legacy checkpoint verify ID stays unchanged; only body-sensitive reviewability reruns.
+                snapshot['checks'][1]['id'] += 10
+                snapshot['checks'].append({'id': 99, 'name': 'metadata-only (verification unchanged)',
+                                           'head_sha': 'abc', 'status': 'completed', 'conclusion': 'skipped'})
                 supervisor.ci(p)
                 self.assertNotIn('after_check_ids', p)
         finally:

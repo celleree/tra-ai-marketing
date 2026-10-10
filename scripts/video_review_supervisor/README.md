@@ -1,5 +1,11 @@
 # Local Video Review supervisor
 
+Maintenance-only foundation; merging this code does not authorize unattended execution. The
+pinned Slice 2–4 plan is historical: those application slices are already merged into staging.
+Keep the original base pin and its fail-closed checks. A new application task requires separate
+planning, current sandbox verification, exact-source rehearsal/review and execution authorization;
+do not update BASE merely to run the old plan against current staging.
+
 Python 3.12 standard library, Linux/WSL, sequential execution. This tool implements orchestration;
 its offline fixture does **not** implement or validate the Video Review application slices.
 
@@ -96,7 +102,10 @@ mismatch. Do not replace code or edit digests to force resume of an existing run
   statuses at the assigned SHA, with PR HEAD/base/state checks. Empty, pending, stale, failed,
   cancelled or skipped checks never pass. Worker claims of PASS are only local-test evidence.
   Live exact-HEAD checks are refreshed before each new reviewer execution, including after resume.
-  PR metadata updates are followed by another CI check; reviewer SHA must remain exact.
+  Check runs and legacy statuses cannot mask each other's failed/pending evidence. Optional skipped
+  metadata-only jobs are not verification evidence; required skipped checks never pass. Body-only
+  metadata updates require fresh reviewability, while successful verify at the unchanged SHA may
+  be reused. Reviewer SHA must remain exact.
 - `checkpoint.json` is atomically replaced and fsynced; it includes source-contract Git blob IDs,
   phase/base/HEAD/branch, tests, PR/CI, review, blockers and next step. `events.jsonl`, per-attempt
   prompt/schema/result/exit/JSONL/stderr files and `handoff.txt` preserve readable provenance.

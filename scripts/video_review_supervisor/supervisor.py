@@ -30,6 +30,10 @@ FORBIDDEN = ('AGENTS.md', 'docs/agent-workflow.md', 'docs/parallel-coding.md',
              '.github/', '.env', 'scripts/video_review_supervisor/')
 
 
+def protected_path(path):
+    return path.startswith(FORBIDDEN) or any(part.startswith('.env') for part in Path(path).parts)
+
+
 def git(repo, *args):
     return command(['git', '-C', repo, *args])
 
@@ -53,18 +57,25 @@ def check_snapshot(pr, head, checks, statuses):
         raise Blocked('PR HEAD/base/state drifted; refusing stale evidence')
     if pr.get('mergeable') is False:
         raise Blocked('PR has merge conflicts; dependency repair requires operator action')
-    current = {}
+    check_values, status_values = {}, {}
     for item in sorted(checks, key=lambda x: x.get('id', 0)):
         if item['head_sha'] != head:
             raise Blocked('GitHub returned a stale check SHA')
-        current[item['name']] = 'success' if item['status'] == 'completed' and item['conclusion'] == 'success' else (
-            'pending' if item['status'] != 'completed' else 'failure')
+        check_values[item['name']] = (item['conclusion'] if item['conclusion'] in ('success', 'skipped') else 'failure'
+                                      ) if item['status'] == 'completed' else 'pending'
     for item in reversed(statuses):  # GitHub returns newest statuses first
-        current[item['context']] = item['state']
-    failed = [name for name, value in current.items() if value not in ('success', 'pending')]
+        status_values[item['context']] = item['state']
+    current = {}
+    for name in check_values.keys() | status_values.keys():
+        evidence = [source[name] for source in (check_values, status_values) if name in source]
+        # A successful legacy status cannot mask failed/pending check-run evidence (or vice versa).
+        current[name] = ('failure' if any(value not in ('success', 'pending', 'skipped') for value in evidence)
+                         else 'pending' if 'pending' in evidence else 'skipped' if 'skipped' in evidence else 'success')
+    failed = [name for name, value in current.items() if value == 'failure' or (name in REQUIRED and value == 'skipped')]
     if failed:
         raise Blocked(f'Actual GitHub checks failed: {failed}')
-    return REQUIRED <= current.keys() and all(x == 'success' for x in current.values()), current
+    return (REQUIRED <= current.keys() and all(current[name] == 'success' for name in REQUIRED)
+            and all(value in ('success', 'skipped') for value in current.values())), current
 
 
 class Supervisor:
@@ -137,7 +148,9 @@ class Supervisor:
             ids = {name: max((x.get('id', 0) for x in snap['checks'] if x['name'] == name), default=0)
                    for name in ('verify', 'pr-reviewability')}
             if p.get('after_check_ids'):
-                passed = passed and all(ids[name] > old for name, old in p['after_check_ids'].items())
+                # Supervisor edits only the body: verify is reused at the same SHA by metadata-only CI.
+                # Older checkpoints may still include verify here; never require redundant verification.
+                passed = passed and ids['pr-reviewability'] > p['after_check_ids']['pr-reviewability']
             p['ci'] = {'head': p['head'], 'checks': values, 'verified_at': time.time(), 'passed': passed}
             p['ci']['check_ids'] = ids
             self.save('Wait for exact-HEAD GitHub CI and Vercel')
@@ -300,7 +313,7 @@ class Supervisor:
             files.update(git(wt, 'ls-files', '--others', '--exclude-standard').splitlines())
             if not files:
                 raise Blocked('Implementation reported complete but produced no change')
-            if any(f.startswith(FORBIDDEN) for f in files):
+            if any(protected_path(f) for f in files):
                 raise Blocked('Worker changed a protected path; retained for inspection')
             git(wt, 'diff', '--check')
             git(wt, 'add', '--', *sorted(files))
@@ -443,7 +456,7 @@ class Supervisor:
                     if updated != body:
                         path = self.run.root / f'{p["name"]}-review-body.md'
                         path.write_text(updated)
-                        p['after_check_ids'] = p['ci']['check_ids']
+                        p['after_check_ids'] = {'pr-reviewability': p['ci']['check_ids']['pr-reviewability']}
                         self.save('Record review metadata and wait for triggered CI reruns')
                         command(['gh', 'api', '--method', 'PATCH', f'repos/{REPO}/pulls/{p["pr"]}',
                                  '-F', f'body=@{path}'])

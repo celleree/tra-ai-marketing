@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createReviewDraftClient, EMPTY_REVIEW_CLIENT_STATE, rememberReviewDraft, replaceReviewVideo,
   reviewDraftIdForReopen } from '@/lib/video/review-selection-client';
+import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import type { ReviewSelectionChoices, ReviewVideoReference } from '@/lib/video/review-selection';
 
 /** Owned by Create, above the future panel: hiding/unmounting that panel cannot clear saved choices. */
@@ -33,6 +34,8 @@ export function useVideoReviewDraft() {
   };
   useEffect(() => {
     mounted.current = true;
+    const refreshProfile = () => { if (mounted.current) setState(client.current!.getState()); };
+    window.addEventListener('storage', refreshProfile); window.addEventListener('focus', refreshProfile);
     const url = new URL(window.location.href);
     let id: string | null;
     try { id = reviewDraftIdForReopen(url, window.localStorage); } catch { id = reviewDraftIdForReopen(url); }
@@ -41,7 +44,7 @@ export function useVideoReviewDraft() {
       initialized.current = true;
       if (mounted.current) setState(client.current!.getState());
     });
-    return () => { mounted.current = false; };
+    return () => { mounted.current = false; window.removeEventListener('storage', refreshProfile); window.removeEventListener('focus', refreshProfile); };
   }, []);
   const finishEdit = () => {
     editing.current--;
@@ -57,9 +60,25 @@ export function useVideoReviewDraft() {
       await client.current!.save(change(replaceReviewVideo(choices, video)));
     })().catch(() => undefined).finally(finishEdit);
   };
+  const profileChanged = () => {
+    const saved = client.current!.getState().choices?.companyProfile;
+    const canonical = (value: unknown): unknown => value && typeof value === 'object'
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
+    return Boolean(saved && JSON.stringify(canonical(saved)) !== JSON.stringify(canonical(readStoredRuntimeCompanyProfile() ?? null)));
+  };
+  const useCurrentProfile = async () => {
+    editing.current++;
+    try {
+      await restoring.current;
+      const current = client.current!.getState();
+      if (!current.choices || current.pending || current.error || current.conflict) return;
+      await client.current!.save({ ...current.choices, companyProfile: readStoredRuntimeCompanyProfile() ?? null,
+        claims: current.choices.claims?.filter(claim => claim.type !== 'COMPANY_PROFILE') ?? null }).catch(() => undefined);
+    } finally { finishEdit(); }
+  };
   const canGenerate = () => {
     const current = client.current!.getState();
-    return initialized.current && !editing.current && !current.pending && !current.error && !current.conflict
+    return initialized.current && !profileChanged() && !editing.current && !current.pending && !current.error && !current.conflict
       && !current.saved?.issues.length && (!current.choices || Boolean(current.saved));
   };
   const replaceVideo = async (video: ReviewVideoReference | null) => {
@@ -92,7 +111,12 @@ export function useVideoReviewDraft() {
       await client.current!.save(choices).catch(() => undefined);
     } finally { finishEdit(); }
   };
-  return { state, save: client.current.save, update, canGenerate, clearUnavailable, reload: () => {
+  // Read the queue's settled revision, even when a save completed before React rerendered.
+  const generationReference = () => {
+    const saved = client.current!.getState().saved;
+    return saved ? { draftId: saved.draft.id, revision: saved.revision } : undefined;
+  };
+  return { state, restored: initialized.current, profileChanged, useCurrentProfile, save: client.current.save, update, canGenerate, generationReference, clearUnavailable, reload: () => {
     const id = lastId.current;
     if (id) return restoring.current = (client.current!.getState().saved ? restore(id) : client.current!.recover().then(async () => {
       const current = client.current!.getState();
