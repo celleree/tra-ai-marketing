@@ -18,6 +18,14 @@ from supervisor import (ALLOWED_CODEX_MODELS, DEFAULT_CODEX_MODEL, Supervisor,
 SCRIPT = str(Path(__file__).with_name('supervisor.py'))
 
 
+def process_stopped(pid):
+    try:
+        fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    return fields[0] in ('Z', 'X')
+
+
 class SupervisorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -49,6 +57,19 @@ class SupervisorTests(unittest.TestCase):
                 return
             time.sleep(0.05)
         self.fail('Timed out waiting for process fixture')
+
+    def test_process_observation_handles_only_disappearance(self):
+        for error in (FileNotFoundError(2, 'gone'), ProcessLookupError(3, 'gone')):
+            with self.subTest(error=type(error).__name__), patch.object(Path, 'read_text', side_effect=error):
+                self.assertTrue(process_stopped(123))
+        for state, stopped in (('S', False), ('Z', True), ('X', True)):
+            with patch.object(Path, 'read_text', return_value=f'123 (fixture) {state} 1 123'):
+                self.assertEqual(process_stopped(123), stopped)
+        for error in (PermissionError(13, 'denied'), OSError(5, 'I/O error')):
+            with patch.object(Path, 'read_text', side_effect=error), self.assertRaises(type(error)):
+                process_stopped(123)
+        with patch.object(Path, 'read_text', return_value='corrupt'), self.assertRaises(IndexError):
+            process_stopped(123)
 
     def test_complete_dry_run_and_idempotent_resume(self):
         result = self.cli()
@@ -164,8 +185,7 @@ class SupervisorTests(unittest.TestCase):
                     run.execute([sys.executable, '-c', leader], self.root,
                                 self.root / 'attempt', '', 40)
             pid = int(pidfile.read_text())
-            stat = Path(f'/proc/{pid}/stat')
-            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+            self.assertTrue(process_stopped(pid))
         finally:
             if pidfile.exists():
                 try:
@@ -187,8 +207,8 @@ class SupervisorTests(unittest.TestCase):
         try:
             self.assertEqual(run.execute([sys.executable, '-c', leader], self.root,
                                          self.root / 'attempt', '', 40), 0)
-            stat = Path(f'/proc/{int(pidfile.read_text())}/stat')
-            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+            pid = int(pidfile.read_text())
+            self.assertTrue(process_stopped(pid))
         finally:
             if pidfile.exists():
                 try:
@@ -222,8 +242,7 @@ class SupervisorTests(unittest.TestCase):
             release.touch()
             leader_pid = int(leader_pidfile.read_text())
             def leader_exited():
-                stat = Path(f'/proc/{leader_pid}/stat')
-                return not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X')
+                return process_stopped(leader_pid)
             self.wait_for(leader_exited)
             with self.assertRaisesRegex(Blocked, 'lock'):
                 Run(self.root)
@@ -231,8 +250,7 @@ class SupervisorTests(unittest.TestCase):
             (self.root / 'STOP').touch()
             descendant_pid = int(pidfile.read_text())
             def descendant_stopped():
-                stat = Path(f'/proc/{descendant_pid}/stat')
-                return not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X')
+                return process_stopped(descendant_pid)
             self.wait_for(descendant_stopped)
             def lock_released():
                 try:
@@ -277,8 +295,7 @@ class SupervisorTests(unittest.TestCase):
             self.wait_for(lambda: (attempt / 'exit.json').exists())
             self.assertEqual(read(attempt / 'exit.json')['returncode'], 124)
             pid = int(pidfile.read_text())
-            stat = Path(f'/proc/{pid}/stat')
-            self.assertTrue(not stat.exists() or stat.read_text().rsplit(')', 1)[1].split()[0] in ('Z', 'X'))
+            self.assertTrue(process_stopped(pid))
             # The timeout receipt precedes worker teardown and inherited flock release.
             def lock_released():
                 try:
