@@ -43,7 +43,8 @@ describe('approved TRA video-frame provider boundary', () => {
     expect(selectProviderVideoFrames(makeFrames()).map((frame) => frame.frameIndex)).toEqual([0, 2, 5]);
   });
 
-  it.each([false, true])('sends approved PNG pixels and preserves invisible logo reservation when enabled: %s', async (reserveLogoArea) => {
+  it.each([[false, ''], [true, 'configured-image-model']] as const)('sends approved PNG pixels and preserves invisible logo reservation when enabled: %s', async (reserveLogoArea, override) => {
+    vi.stubEnv('OPENAI_IMAGE_MODEL', override);
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
@@ -57,6 +58,9 @@ describe('approved TRA video-frame provider boundary', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/images/edits');
     const formData = init.body as FormData;
+    expect(formData.get('model')).toBe(override || 'gpt-image-2.5-sunburst');
+    expect(result.model).toBe(override || 'gpt-image-2.5-sunburst');
+    expect(formData.get('output_format')).toBe('png');
     expect(formData.get('quality')).toBe('high');
     expect(formData.getAll('image[]')).toHaveLength(3);
     expect(formData.getAll('image[]').every((image) => image instanceof Blob && image.type === 'image/png')).toBe(true);

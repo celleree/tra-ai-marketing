@@ -67,7 +67,7 @@ export const selectVideoFramesForConcept = async (
     summary: cap(frame.observation.summary, 400), visibleText: cap(frame.observation.visibleText.join('\n'), 1_000),
     temporalTranscriptContext: cap(frame.transcriptSegments.map((segment) => segment.text).join('\n'), 700),
   }));
-  const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra')).trim();
+  const model = (dependencies.model ?? (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna')).trim();
   if (!model) throw new Error('Video selection model must be non-empty.');
   const response = await (dependencies.request || fetch)('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS),

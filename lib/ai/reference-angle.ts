@@ -67,7 +67,7 @@ export async function classifyReferenceCreativeAngle(
     throw new Error('OPENAI_API_KEY is not configured.');
   }
 
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
   const angleList = CREATIVE_CATEGORIES.map(
     (angle) => `- ${angle}: ${CREATIVE_CATEGORY_LABELS[angle]} — ${ANGLE_GUIDE[angle]}`
   ).join('\n');

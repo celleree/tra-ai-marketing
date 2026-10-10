@@ -31,8 +31,8 @@ describe('creative batch planner', () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => okResponse({ creatives: [concept(1), concept(2)] }));
     vi.stubGlobal('fetch', fetchMock);
     const result = await planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false });
-    expect(result.plannerModel).toBe('gpt-6-astra');
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).model).toBe('gpt-6-astra');
+    expect(result.plannerModel).toBe('gpt-6.1-sol');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).model).toBe('gpt-6.1-sol');
   });
 
   it('makes one medium-reasoning strict request and returns the ordered parsed batch', async () => {

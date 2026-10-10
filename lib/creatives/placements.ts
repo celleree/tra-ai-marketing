@@ -9,7 +9,7 @@ export interface CreativePlacementSpec {
   providerSize: `${number}x${number}`;
 }
 
-// Exact ratios within GPT Image 2's documented custom-size constraints:
+// Exact ratios within GPT Image 2.5's documented custom-size constraints:
 // https://developers.openai.com/api/docs/guides/image-generation
 // These dimensions do not establish platform safe zones; those require a separate policy.
 export const CREATIVE_PLACEMENT_SPECS: Readonly<Record<CreativePlacement, CreativePlacementSpec>> = {

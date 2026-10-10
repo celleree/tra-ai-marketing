@@ -34,7 +34,8 @@ describe('approved TRA final image-provider boundary', () => {
     expect(prompt).toContain('x=105..401, y=322..546');
     expect(prompt).not.toContain('left 27%');
   });
-  it('attaches exactly the one approved TRA source passed by the route gate', async () => {
+  it.each(['', 'configured-image-model'])('attaches the approved TRA source and respects image model override: %s', async (override) => {
+    vi.stubEnv('OPENAI_IMAGE_MODEL', override);
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const output = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -66,6 +67,8 @@ describe('approved TRA final image-provider boundary', () => {
     const formData = options?.body as FormData;
     expect(result.prompt).toBe(formData.get('prompt'));
     expect(result.model).toBe(formData.get('model'));
+    expect(formData.get('model')).toBe(override || 'gpt-image-2.5-sunburst');
+    expect(formData.get('output_format')).toBe('png');
     expect(formData.get('quality')).toBe('high');
     expect(formData.get('size')).toBe('1024x1280');
     const images = formData.getAll('image[]');

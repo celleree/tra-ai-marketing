@@ -301,7 +301,7 @@ Website content is evidence, not automatic internal approval. Keep unsupported o
 export async function analyzeCompanyWebsite(rawUrl: string): Promise<WebsiteCompanyAnalysis> {
   const root = await normalizeCompanyWebsiteUrl(rawUrl);
   const pages = await crawlWebsite(root);
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol';
   const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },

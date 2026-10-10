@@ -98,7 +98,7 @@ export async function planCreativeBatch(args: {
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > 30) {
     throw new Error('Creative batch count must be an integer from 2 to 30.');
   }
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol';
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },

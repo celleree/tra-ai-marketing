@@ -45,7 +45,7 @@ const setup = () => {
   return { storage, clock, hydrateSource, deps: { storage, now: () => clock.value, deadlineAtMs: 99_000, hydrateSource } };
 };
 const identity = () => ({ sourceVideoMediaId: mediaId, sourceVideoContentHash: hash(bytes),
-  analyzerFingerprint: createVideoIntelligenceAnalyzerFingerprint(DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY, process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra') });
+  analyzerFingerprint: createVideoIntelligenceAnalyzerFingerprint(DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY, process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna') });
 const locator = () => ({ version: 1 as const, sourceVideoMediaId: mediaId, sourceVideoContentHash: hash(bytes), analyzerFingerprintSha256: identity().analyzerFingerprint.sha256 });
 const preparation = () => ({ manifestKey: `preparations/manifests/sha256/${hash('manifest')}.json`, manifestSha256: hash('manifest'), durationMs: 1_000, representativeCandidateIndexes: [0] });
 const requireWork = (claim: Awaited<ReturnType<typeof claimVideoIntelligenceJob>>) => {
