@@ -11,9 +11,9 @@ import unittest
 from unittest.mock import patch
 
 from contracts import SCHEMA, validate
-from runtime import Blocked, Run, Stopped, atomic, read
+from runtime import Blocked, Run, Stopped, atomic, read, status_snapshot
 from supervisor import (ALLOWED_CODEX_MODELS, DEFAULT_CODEX_MODEL, Supervisor,
-                        check_snapshot, git, github_items, initialize, validate_models)
+                        check_snapshot, git, github_items, initialize, main, validate_models)
 
 SCRIPT = str(Path(__file__).with_name('supervisor.py'))
 
@@ -89,6 +89,87 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(self.cli('resume').returncode, 0)
         self.assertEqual(read(self.root / 'fake-calls.json'), calls)
         self.assertTrue((self.root / 'dry-run-passed.json').exists())
+        lifecycle = read(self.root / 'supervisor.json')
+        self.assertEqual(lifecycle['exit']['reason'], 'complete')
+        self.assertEqual(lifecycle['action'], 'resume')
+
+    def test_status_is_read_only_and_does_not_invent_exit_cause(self):
+        atomic(self.root / 'checkpoint.json', {'status': 'running', 'phases': []})
+        atomic(self.root / 'supervisor.json', {'pid': 123, 'last_heartbeat_at': 1, 'exit': None})
+        before = {p.name: p.read_bytes() for p in self.root.iterdir()}
+        snapshot = status_snapshot(self.root)['reconciliation']
+        self.assertEqual(snapshot['lock'], 'missing')
+        self.assertEqual(snapshot['diagnosis'], 'no_lock_evidence')
+        self.assertEqual({p.name: p.read_bytes() for p in self.root.iterdir()}, before)
+        (self.root / 'run.lock').touch()
+        before = {p.name: p.read_bytes() for p in self.root.iterdir()}
+        snapshot = status_snapshot(self.root)
+        self.assertEqual(snapshot['reconciliation']['diagnosis'], 'exit_unobserved_cause_unknown')
+        self.assertEqual(snapshot['status'], 'running')
+        self.assertEqual({p.name: p.read_bytes() for p in self.root.iterdir()}, before)
+
+    def test_status_does_not_read_attempt_outside_run(self):
+        atomic(self.root / 'checkpoint.json', {'phase': 0, 'phases': [
+            {'pending': {'directory': str(self.root.parent), 'role': 'review', 'head': 'abc'}}]})
+        self.assertEqual(status_snapshot(self.root)['reconciliation']['pending'],
+                         {'observation': 'outside_run_attempts'})
+
+    def test_unexpected_exception_records_type_and_releases_lock(self):
+        with patch.object(sys, 'argv', [SCRIPT, 'start', '--dry-run', '--run-dir', str(self.root)]), \
+                patch.object(Supervisor, 'drive', side_effect=RuntimeError('fixture')):
+            with self.assertRaises(RuntimeError):
+                main()
+        lifecycle = read(self.root / 'supervisor.json')
+        self.assertEqual(lifecycle['exit']['reason'], 'unexpected_exception')
+        self.assertEqual(lifecycle['exit']['exception_type'], 'RuntimeError')
+        self.assertEqual(status_snapshot(self.root)['reconciliation']['lock'], 'available_at_probe')
+
+    def test_signal_during_heartbeat_replace_does_not_reenter_atomic_write(self):
+        replace = os.replace
+        active = False
+        sent = False
+        def interrupted_replace(source, destination):
+            nonlocal sent
+            if active and not sent and Path(source).name == 'supervisor.json.tmp':
+                sent = True
+                os.kill(os.getpid(), signal.SIGTERM)
+            replace(source, destination)
+        def drive(supervisor):
+            nonlocal active
+            active = True
+            supervisor.run.save()
+            supervisor.run.stop_check()
+        with patch.object(sys, 'argv', [SCRIPT, 'start', '--dry-run', '--run-dir', str(self.root)]), \
+                patch.object(Supervisor, 'drive', drive), patch('runtime.os.replace', interrupted_replace):
+            self.assertEqual(main(), 2)
+        self.assertTrue(sent)
+        lifecycle = read(self.root / 'supervisor.json')
+        self.assertEqual(lifecycle['exit']['reason'], 'stopped')
+        self.assertEqual(lifecycle['stop_signal'], 'SIGTERM')
+
+    def test_signal_during_heartbeat_serialization_preserves_dictionary_keys(self):
+        encode = json.JSONEncoder.iterencode
+        active = False
+        sent = False
+        def interrupted_encode(encoder, value, *args, **kwargs):
+            nonlocal sent
+            for chunk in encode(encoder, value, *args, **kwargs):
+                yield chunk
+                if active and not sent and isinstance(value, dict) and 'session' in value and chunk == '"pid"':
+                    sent = True
+                    os.kill(os.getpid(), signal.SIGTERM)
+        def drive(supervisor):
+            nonlocal active
+            active = True
+            supervisor.run.save()
+            supervisor.run.stop_check()
+        with patch.object(sys, 'argv', [SCRIPT, 'start', '--dry-run', '--run-dir', str(self.root)]), \
+                patch.object(Supervisor, 'drive', drive), patch.object(json.JSONEncoder, 'iterencode', interrupted_encode):
+            self.assertEqual(main(), 2)
+        self.assertTrue(sent)
+        lifecycle = read(self.root / 'supervisor.json')
+        self.assertEqual(lifecycle['exit']['reason'], 'stopped')
+        self.assertEqual(lifecycle['stop_signal'], 'SIGTERM')
 
     def test_exact_model_allowlist_enforced_for_both_roles(self):
         self.assertEqual(DEFAULT_CODEX_MODEL, 'gpt-6.1-sol')
@@ -161,6 +242,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(self.cli('stop').returncode, 0)
             self.assertEqual(child.wait(timeout=10), 2)
             self.assertEqual(read(self.root / 'checkpoint.json')['status'], 'stopped')
+            self.assertEqual(read(self.root / 'supervisor.json')['exit']['reason'], 'stopped')
             self.scenario()
             resumed = self.cli('resume')
             self.assertEqual(resumed.returncode, 0, resumed.stderr)
@@ -379,20 +461,36 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_sigkill_orphan_lock_and_receipt_recovery(self):
-        self.scenario(delay=1)
+        self.scenario(delay=2)
         child = subprocess.Popen([sys.executable, SCRIPT, 'start', '--dry-run', '--run-dir', str(self.root)],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.wait_for(lambda: (self.root / 'fake-calls.json').exists())
+        first_heartbeat = read(self.root / 'supervisor.json')['last_heartbeat_at']
+        self.wait_for(lambda: read(self.root / 'supervisor.json')['last_heartbeat_at'] > first_heartbeat)
         child.kill()
         child.wait()
+        self.assertEqual(status_snapshot(self.root)['reconciliation']['lock'],
+                         'held_by_supervisor_or_worker')
+        self.assertIsNone(read(self.root / 'supervisor.json')['exit'])
         result = self.cli('resume')
         self.assertEqual(result.returncode, 2)
         self.assertIn('lock', result.stderr)
         self.wait_for(lambda: len(list((self.root / 'attempts').glob('*/exit.json'))) == 1)
+        self.wait_for(lambda: status_snapshot(self.root)['reconciliation']['lock'] == 'available_at_probe')
+        before = {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+        snapshot = status_snapshot(self.root)['reconciliation']
+        self.assertEqual(snapshot['diagnosis'], 'exit_unobserved_cause_unknown')
+        self.assertEqual(snapshot['pending']['returncode'], 0)
+        self.assertEqual(snapshot['pending']['observation'], 'receipt_available')
+        self.assertEqual({str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}, before)
         self.scenario()
         resumed = self.cli('resume')
         self.assertEqual(resumed.returncode, 0, resumed.stderr)
         self.assertEqual(len(read(self.root / 'fake-calls.json')), 7)
+        events = [json.loads(line) for line in (self.root / 'events.jsonl').read_text().splitlines()]
+        self.assertEqual(len([e for e in events if e['event'] == 'worker_receipt_reconciled']), 1)
+        prior = [e for e in events if e['event'] == 'previous_supervisor_observation']
+        self.assertEqual(prior[-1]['diagnosis'], 'exit_unobserved_cause_unknown')
 
     def test_live_ci_rejects_stale_failed_and_missing(self):
         pr = {'head': {'sha': 'abc'}, 'base': {'ref': 'staging'}, 'state': 'open', 'mergeable': True}
