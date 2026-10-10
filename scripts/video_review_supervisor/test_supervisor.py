@@ -126,6 +126,30 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(lifecycle['exit']['reason'], 'stopped')
         self.assertEqual(lifecycle['stop_signal'], 'SIGTERM')
 
+    def test_signal_during_heartbeat_serialization_preserves_dictionary_keys(self):
+        encode = json.JSONEncoder.iterencode
+        active = False
+        sent = False
+        def interrupted_encode(encoder, value, *args, **kwargs):
+            nonlocal sent
+            for chunk in encode(encoder, value, *args, **kwargs):
+                yield chunk
+                if active and not sent and isinstance(value, dict) and 'session' in value and chunk == '"pid"':
+                    sent = True
+                    os.kill(os.getpid(), signal.SIGTERM)
+        def drive(supervisor):
+            nonlocal active
+            active = True
+            supervisor.run.save()
+            supervisor.run.stop_check()
+        with patch.object(sys, 'argv', [SCRIPT, 'start', '--dry-run', '--run-dir', str(self.root)]), \
+                patch.object(Supervisor, 'drive', drive), patch.object(json.JSONEncoder, 'iterencode', interrupted_encode):
+            self.assertEqual(main(), 2)
+        self.assertTrue(sent)
+        lifecycle = read(self.root / 'supervisor.json')
+        self.assertEqual(lifecycle['exit']['reason'], 'stopped')
+        self.assertEqual(lifecycle['stop_signal'], 'SIGTERM')
+
     def test_exact_model_allowlist_enforced_for_both_roles(self):
         self.assertEqual(DEFAULT_CODEX_MODEL, 'gpt-6.1-sol')
         self.assertEqual(ALLOWED_CODEX_MODELS, {'gpt-6-luna', 'gpt-6.1-sol'})

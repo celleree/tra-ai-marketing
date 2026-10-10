@@ -158,7 +158,8 @@ class Run:
             self.event('previous_supervisor_observation', lifecycle=previous,
                        diagnosis='observed_exit' if previous.get('exit') else 'exit_unobserved_cause_unknown')
         self.lifecycle = {'session': uuid.uuid4().hex, 'pid': os.getpid(),
-                          'action': action, 'started_at': time.time(), 'exit': None}
+                          'action': action, 'started_at': time.time(), 'exit': None,
+                          'stop_signal': None}  # signal handler must never add keys during JSON iteration
         self.heartbeat(force=True)
 
     def heartbeat(self, force=False):
