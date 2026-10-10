@@ -8,7 +8,7 @@ import { createServer } from 'vite';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE_PATH ? pathToFileURL(process.env.PLAYWRIGHT_MODULE_PATH).href : 'playwright');
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const server = await createServer({ root, configFile: false, cacheDir: '/tmp/tra-slice4-vite-cache',
+const server = await createServer({ root, configFile: false, cacheDir: root + 'node_modules/.vite-browser',
   plugins: [{ name: 'app-styles', transformIndexHtml: () => [
     { tag: 'meta', attrs: { name: 'viewport', content: 'width=device-width, initial-scale=1' }, injectTo: 'head' },
     ...['/app/globals.css', '/app/ui-sweep.css'].map(href => ({ tag: 'link', attrs: { rel: 'stylesheet', href }, injectTo: 'head' }))] }],
