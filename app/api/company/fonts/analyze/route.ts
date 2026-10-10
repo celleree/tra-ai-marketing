@@ -63,7 +63,7 @@ export async function POST(request: Request) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra',
+        model: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna',
         store: false,
         input: [
           {

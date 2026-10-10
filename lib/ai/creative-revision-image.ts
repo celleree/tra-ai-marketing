@@ -49,7 +49,7 @@ Use the supplied copy and strategy for messaging. Saved canvas copy, user direct
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is Tax Relief Advocates or TRA.
 Keep text readable on a phone, with clear hierarchy and no clutter.
 ${logoOverlay ? formatCreativeLogoReservation(args.placement) : ''}`;
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst';
   const form = new FormData();
   for (const [key, value] of Object.entries({ model, prompt, size: spec.providerSize, quality: 'high', output_format: 'png' })) {
     form.set(key, value);

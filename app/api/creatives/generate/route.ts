@@ -153,7 +153,7 @@ export const generatePromptOnlyCreativeImage = async (args: {
     throw new Error('OPENAI_API_KEY is not configured.');
   }
 
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst';
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement];
   const logoDirection = args.reserveLogoArea ? formatCreativeLogoReservation(args.placement) : '';
   const prompt = `

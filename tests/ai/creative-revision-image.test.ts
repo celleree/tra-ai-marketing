@@ -24,12 +24,13 @@ describe('revision image provider', () => {
     const result = await generateCreativeRevisionImage(args());
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/images/edits');
     expect(body().get('size')).toBe('1024x1280');
+    expect(body().get('model')).toBe('gpt-image-2.5-sunburst');
     expect(body().get('quality')).toBe('high');
     expect(body().get('output_format')).toBe('png');
     expect(files()).toHaveLength(1);
     expect(files()[0].name).toBe('editing-canvas-canvas.png');
     expect(Buffer.from(await files()[0].arrayBuffer()).toString()).toBe('canvas');
-    expect(result).toEqual({ buffer: Buffer.from('provider-output'), prompt: body().get('prompt'), model: 'gpt-image-2' });
+    expect(result).toEqual({ buffer: Buffer.from('provider-output'), prompt: body().get('prompt'), model: 'gpt-image-2.5-sunburst' });
     expect(result.prompt).toContain('never an approved human-identity source');
     expect(result.prompt).toContain('There are no approved human source attachments');
     expect(result.prompt).toContain('results vary');

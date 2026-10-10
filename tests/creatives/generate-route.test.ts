@@ -309,9 +309,9 @@ let readMediaById: ReturnType<typeof vi.fn>;
 let readImageById: ReturnType<typeof vi.fn>;
 let saveImage: ReturnType<typeof vi.fn>;
 
-it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model and placement rules for prompt-only %s', async (placement) => {
+it.each([['SQUARE_1_1', ''], ['VERTICAL_9_16', 'test-image-model']] as const)('returns actual prompt/model and placement rules for prompt-only %s', async (placement, override) => {
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
-  vi.stubEnv('OPENAI_IMAGE_MODEL', 'test-image-model');
+  vi.stubEnv('OPENAI_IMAGE_MODEL', override);
   const fetchMock = vi.fn().mockResolvedValue(
     new Response(
       JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
@@ -332,6 +332,9 @@ it.each(['SQUARE_1_1', 'VERTICAL_9_16'] as const)('returns actual prompt/model a
   expect(result.buffer).toEqual(PNG);
   expect(result.prompt).toBe(body.prompt);
   expect(result.model).toBe(body.model);
+  expect(body.model).toBe(override || 'gpt-image-2.5-sunburst');
+  expect(body.quality).toBe('high');
+  expect(body.output_format).toBe('png');
   if (placement === 'VERTICAL_9_16') {
     expect(body.prompt).toContain('x=70..1081, y=287..1330');
     expect(body.prompt).toContain('x=105..401, y=322..546');
@@ -440,7 +443,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
         (data.creative as { generationProvenance?: unknown }).generationProvenance
       );
       expect(provenance).toMatchObject({
-        imageGeneration: { model: 'gpt-image-2' },
+        imageGeneration: { model: 'gpt-image-2.5-sunburst' },
         requestedSources: [
           { role: 'LAYOUT_REFERENCE', mediaId: layoutId, sha256: contentHash(PNG) },
         ],
@@ -1003,7 +1006,7 @@ describe('progressive creative delivery', () => {
 
     expect(provenance).toMatchObject({
       version: 1,
-      imageGeneration: { model: 'gpt-image-2' },
+      imageGeneration: { model: 'gpt-image-2.5-sunburst' },
       requestedSources: [],
       attachedSource: null,
       analysisSources: [],

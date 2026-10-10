@@ -64,7 +64,7 @@ export async function planCreativeRevision(args: {
 }): Promise<CreativeRevisionPlan> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY is not configured.');
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol';
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, input: [

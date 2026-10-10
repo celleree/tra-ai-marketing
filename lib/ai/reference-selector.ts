@@ -153,7 +153,7 @@ export async function selectBestReferenceCreatives(args: {
     throw new Error('There are not enough reference images to create this batch.');
   }
 
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
   const userContent: Array<Record<string, unknown>> = [
     {
       type: 'input_text',

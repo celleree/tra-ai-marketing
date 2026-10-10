@@ -34,7 +34,7 @@ const getApiKey = () => {
 };
 
 export const getLayoutAnalysisModel = () =>
-  process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
 
 const getErrorMessage = async (response: Response) => {
   try {
