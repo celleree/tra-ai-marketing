@@ -12,11 +12,8 @@ permissions:
 
 jobs:
   verify:
-    # Metadata skips must not publish a successful replacement for required verify.
-    name: ${{ github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base.ref.from == null && 'metadata-only (verification unchanged)' || 'verify' }}
-    # Retargeting changes the tested merge tree. Title/body edits do not.
-    if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base.ref.from != null
-    # Skipped metadata jobs do not enter concurrency or cancel real verification.
+    name: verify
+    # Superseded PR runs yield to verification of the current revision.
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
@@ -31,6 +28,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Supervisor model policy and failure tests
+        run: python3 -m unittest discover -s scripts/video_review_supervisor -p 'test_*.py' -v
       - name: Typecheck
         run: npm run typecheck
       - name: Tests

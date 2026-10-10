@@ -9,12 +9,13 @@ ChatGPT/the coordinator resolves and displays this outside the copyable Codex pr
 ```text
 WHERE: Terminal / CLI | Desktop | VS Code
 SESSION: NEW | CONTINUE — <name>
-MODEL: Luna | Terra | Sol | Astra
+MODEL: GPT-6 Luna (gpt-6-luna) | GPT-6.1 Sol (gpt-6.1-sol)
 REASONING: Low | Medium | High | Extra-high
 PARALLEL: YES | NO — <reason>
 ```
 
 Every value must be concrete. Codex should execute the selected route but not echo this launch block unless asked.
+Only the two exact coding-model IDs above are allowed; see AGENTS.md. Never silently fall back or upgrade to other coding-agent models. If the requested allowed model is unavailable, stop.
 
 ## Coordinator-first execution boundary
 
@@ -107,7 +108,7 @@ The root agent should maintain a concise durable checkpoint between phases/PRs c
 
 ### Roadmap orchestration
 
-When Astra is coordinating the Stage 1 image roadmap:
+When an authorized coordinator is managing the Stage 1 image roadmap:
 
 1. Inspect current `staging` and the relevant code/tests.
 2. Classify each roadmap item as COMPLETE, PARTIAL, NOT STARTED, or BLOCKED.
