@@ -149,7 +149,9 @@ try {
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     const panel = page.getByRole('region', { name: 'Video material review' });
     await panel.getByText('Sign in again', { exact: false }).waitFor();
-    await panel.getByRole('button', { name: 'Reload video material' }).click(); await page.getByText('Video material ready').waitFor();
+    await panel.getByRole('button', { name: 'Reload video material' }).click();
+    await panel.getByText('Sign in again', { exact: false }).waitFor({ state: 'hidden' });
+    await page.getByText('Video material ready').waitFor();
     assert.equal(await panel.getByText('Sign in again', { exact: false }).count(), 0); assert.deepEqual(response(), before);
   });
   await scenario('Active generation explains disabled frame selection and releases it when settled', { generationDelay: 1000 }, async ({ page, response }) => {
