@@ -548,8 +548,9 @@ def main():
             return 0
         (root / 'STOP').unlink(missing_ok=True)
         def stop_signal(_sig, _frame):
+            # Persist at the next cooperative poll/finally; avoid re-entering atomic
+            # heartbeat writes if the signal interrupted their temporary-file replace.
             run.lifecycle['stop_signal'] = signal.Signals(_sig).name
-            run.heartbeat(force=True)
             (root / 'STOP').touch()
         signal.signal(signal.SIGTERM, stop_signal)
         signal.signal(signal.SIGINT, stop_signal)

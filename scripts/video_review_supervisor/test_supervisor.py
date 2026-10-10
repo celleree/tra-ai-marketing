@@ -103,6 +103,29 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(lifecycle['exit']['exception_type'], 'RuntimeError')
         self.assertEqual(status_snapshot(self.root)['reconciliation']['lock'], 'available_at_probe')
 
+    def test_signal_during_heartbeat_replace_does_not_reenter_atomic_write(self):
+        replace = os.replace
+        active = False
+        sent = False
+        def interrupted_replace(source, destination):
+            nonlocal sent
+            if active and not sent and Path(source).name == 'supervisor.json.tmp':
+                sent = True
+                os.kill(os.getpid(), signal.SIGTERM)
+            replace(source, destination)
+        def drive(supervisor):
+            nonlocal active
+            active = True
+            supervisor.run.save()
+            supervisor.run.stop_check()
+        with patch.object(sys, 'argv', [SCRIPT, 'start', '--dry-run', '--run-dir', str(self.root)]), \
+                patch.object(Supervisor, 'drive', drive), patch('runtime.os.replace', interrupted_replace):
+            self.assertEqual(main(), 2)
+        self.assertTrue(sent)
+        lifecycle = read(self.root / 'supervisor.json')
+        self.assertEqual(lifecycle['exit']['reason'], 'stopped')
+        self.assertEqual(lifecycle['stop_signal'], 'SIGTERM')
+
     def test_exact_model_allowlist_enforced_for_both_roles(self):
         self.assertEqual(DEFAULT_CODEX_MODEL, 'gpt-6.1-sol')
         self.assertEqual(ALLOWED_CODEX_MODELS, {'gpt-6-luna', 'gpt-6.1-sol'})
