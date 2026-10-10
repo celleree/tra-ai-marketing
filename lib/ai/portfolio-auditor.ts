@@ -12,7 +12,7 @@ Separately report execution concentration (mechanisms, subjects, archetypes, des
 
 export async function auditCreativePortfolio(concepts: PlannedCreativeConcept[], operatorSelectedSourceGuidance?: VideoReviewHandoff['operatorSelectedSourceGuidance']): Promise<PortfolioAudit> {
   if (concepts.length < 2 || concepts.length > MAX_PORTFOLIO_CREATIVES) throw new Error(`Portfolio audit requires 2–${MAX_PORTFOLIO_CREATIVES} concepts.`);
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol';
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY is not configured.');
   const summaries = concepts.map(({ strategy, copy }, index) => ({

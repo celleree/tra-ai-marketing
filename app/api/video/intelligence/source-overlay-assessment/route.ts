@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     }
     const bindings = [{ library: context.library, librarySha256: context.librarySha256, representativeImages: context.representativeImages }];
     const reuse = { version: 1 as const, frames: [] };
-    const cache = { model: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra', deadlineAtMs: Date.now() + 295_000,
+    const cache = { model: process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna', deadlineAtMs: Date.now() + 295_000,
       retry: input.retry === true };
     const preflight = await preflightVideoHumanFrameFromPoolWithCache(bindings, concept, reuse, cache);
     if (preflight.status === 'READY') {

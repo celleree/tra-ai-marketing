@@ -53,7 +53,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url, init) => {
     expect(url).toBe('https://api.openai.com/v1/responses');
     const body = JSON.parse(init.body), payload = JSON.parse(body.input[1].content[0].text);
-    outbound.push(payload); expect(body.model).toBe('gpt-6-astra'); expect(body.reasoning.effort).toBe('medium');
+    outbound.push(payload); expect(body.model).toBe('gpt-6.1-sol'); expect(body.reasoning.effort).toBe('medium');
     const audit = body.text.format.name === 'tra_portfolio_audit';
     if (audit && failAudit) { failAudit = false; throw new Error('Lost audit response'); }
     let result: unknown;

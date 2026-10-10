@@ -132,7 +132,7 @@ export const analyzeTraVideoIntelligence = async (
   const hash = videoSourceHash(source);
   const root = options.root || defaultRoot();
   const file = libraryPath(source.media.id, hash, root);
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
   const key = JSON.stringify([path.resolve(/* turbopackIgnore: true */ root), source.media.id, hash, model]);
   const active = activeAnalyses.get(key);
   if (active) {

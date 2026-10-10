@@ -35,7 +35,7 @@ it.each(['layout', 'tra'] as const)('edits, clears and reloads %s records throug
   expect(await withCuratedReferenceMetadata([candidate])).toEqual([candidate]);
   await getLayoutBlueprintCache().write(candidate.sourceSha256, candidate.analyzerModel, candidate.blueprint);
   const reusableAngle = { version: 1 as const, sourceSha256: candidate.sourceSha256,
-    analyzerModel: 'gpt-5.6-terra', angleSummary: 'MACHINE_SUMMARY' };
+    analyzerModel: 'gpt-6-luna', angleSummary: 'MACHINE_SUMMARY' };
   await getLayoutBlueprintCache().writeAngle(reusableAngle);
   const prepared = { ...candidate, reusableAngle };
   for (const patch of [{ notes: ' Editorial note\nsecond line ', tags: [' calm ', 'simple', 'calm'] },
@@ -56,7 +56,7 @@ it.each(['layout', 'tra'] as const)('edits, clears and reloads %s records throug
       strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct ${c.index}` },
         execution: { ...c.strategy.execution, taxDocumentReference: 'none' } }, referenceChoices: { angleSource: null, layoutSource: null } }));
     vi.mocked(fetch).mockImplementationOnce(async (_url, init) => {
-      const body = JSON.parse(String(init?.body)); expect(body.model).toBe('gpt-6-astra');
+      const body = JSON.parse(String(init?.body)); expect(body.model).toBe('gpt-6.1-sol');
       const outbound = JSON.parse(body.input[1].content[0].text);
       expect(outbound.referenceCatalog[0].curated).toEqual(catalog[0].curated);
       expect(outbound.referenceCatalog[0].reusableAngleSummary).toBe('MACHINE_SUMMARY');

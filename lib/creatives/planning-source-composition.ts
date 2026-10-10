@@ -31,7 +31,7 @@ export async function advancePlanningSourceAnalysis(
   // Revalidate every supplied source even when its analysis is already complete.
   const inventory = await hydratePlanningSourceInventory(request.sourceAssets, storage);
   const contextSha256 = createHash('sha256').update(request.context).digest('hex');
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
   const entries = [...inventory].sort((a, b) => a.identity.mediaId.localeCompare(b.identity.mediaId)).flatMap(({ identity: source }) => {
     const savedVideo = source.role === 'TRA_VIDEO' ? current?.entries.find(entry => entry.source.mediaId === source.mediaId
       && entry.result?.kind === 'VIDEO_INTELLIGENCE' && entry.analyzer.kind === 'VIDEO_INTELLIGENCE') : undefined;

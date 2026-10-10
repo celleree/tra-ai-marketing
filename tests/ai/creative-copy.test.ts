@@ -56,7 +56,7 @@ afterEach(() => {
 
 describe('creative copy Responses request', () => {
   it.each([
-    ['uses Astra medium reasoning by default', '', 'gpt-6-astra'],
+    ['uses Sol medium reasoning by default', '', 'gpt-6.1-sol'],
     ['preserves the text-model override', 'gpt-5.6-terra', 'gpt-5.6-terra'],
   ])('%s', async (_label, override, expectedModel) => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');

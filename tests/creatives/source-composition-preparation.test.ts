@@ -65,7 +65,7 @@ beforeEach(() => {
       sourceVideoContentHash: hash(source.stored.buffer), approvedHumanSource: true, cacheKey: null }] }));
   mocks.video.mockImplementation(async ({ frames }) => { operations.push(frames[0].sourceVideoFileName); return analysis(frames[0].sourceVideoFileName); });
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-    const body = JSON.parse(init.body); expect(body.model).toBe('gpt-6-astra');
+    const body = JSON.parse(init.body); expect(body.model).toBe('gpt-6.1-sol');
     const plannerInput = JSON.parse(body.input[1].content[0].text);
     outbound.push(plannerInput); operations.push('Astra');
     const proof = plannerInput.proofCatalog?.[0];
