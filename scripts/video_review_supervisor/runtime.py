@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 
 
 class Blocked(RuntimeError):
@@ -36,6 +37,50 @@ def atomic(path, value):
 
 def read(path):
     return json.loads(Path(path).read_text())
+
+
+def status_snapshot(root):
+    """Read-only observations, not permission to execute or proof of CI/review validity."""
+    root = Path(root)
+    state = read(root / 'checkpoint.json')
+    # Never create/replace the lock or acquire Run (which creates directories).
+    try:
+        with (root / 'run.lock').open('r') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                authority = 'available_at_probe'
+            except BlockingIOError:
+                authority = 'held_by_supervisor_or_worker'
+    except FileNotFoundError:
+        authority = 'missing'
+    lifecycle = read(root / 'supervisor.json') if (root / 'supervisor.json').exists() else None
+    pending = None
+    index = state.get('phase', 0)
+    phases = state.get('phases', [])
+    if index < len(phases) and phases[index].get('pending'):
+        attempt = phases[index]['pending']
+        directory = Path(attempt['directory'])
+        # Do not follow paths outside the run, including symlinks.
+        if not directory.resolve().is_relative_to(root.resolve() / 'attempts'):
+            pending = {'observation': 'outside_run_attempts'}
+        else:
+            receipt = directory / 'exit.json'
+            pending = {'role': attempt['role'], 'assigned_head': attempt['head'],
+                       'observation': 'receipt_available' if receipt.exists() else 'no_receipt'}
+            if receipt.exists() and not receipt.resolve().is_relative_to(root.resolve() / 'attempts'):
+                pending['observation'] = 'receipt_outside_run_attempts'
+            elif receipt.exists():
+                pending['returncode'] = read(receipt)['returncode']
+    diagnosis = 'no_lifecycle_evidence'
+    if lifecycle:
+        diagnosis = 'observed_exit' if lifecycle.get('exit') else (
+            'exit_unobserved_cause_unknown' if authority == 'available_at_probe'
+            else 'lock_held_parent_liveness_unknown' if authority == 'held_by_supervisor_or_worker'
+            else 'no_lock_evidence')
+    state['reconciliation'] = {'lock': authority, 'supervisor': lifecycle,
+                               'diagnosis': diagnosis, 'pending': pending,
+                               'note': 'Snapshot only; resume reacquires lock and revalidates HEAD, source and CI.'}
+    return state
 
 
 def digest():
@@ -104,10 +149,36 @@ class Run:
             self.lock.close()
             raise Blocked('Supervisor or orphan worker still holds the run lock') from exc
         self.state = read(self.root / 'checkpoint.json') if (self.root / 'checkpoint.json').exists() else {}
+        self.lifecycle = None
+        self.last_heartbeat = 0
+
+    def begin(self, action):
+        previous = read(self.root / 'supervisor.json') if (self.root / 'supervisor.json').exists() else None
+        if previous:
+            self.event('previous_supervisor_observation', lifecycle=previous,
+                       diagnosis='observed_exit' if previous.get('exit') else 'exit_unobserved_cause_unknown')
+        self.lifecycle = {'session': uuid.uuid4().hex, 'pid': os.getpid(),
+                          'action': action, 'started_at': time.time(), 'exit': None}
+        self.heartbeat(force=True)
+
+    def heartbeat(self, force=False):
+        if self.lifecycle and (force or time.monotonic() - self.last_heartbeat >= 1):
+            self.lifecycle['last_heartbeat_at'] = time.time()
+            self.lifecycle['next_step'] = self.state.get('next_step')
+            atomic(self.root / 'supervisor.json', self.lifecycle)
+            self.last_heartbeat = time.monotonic()
+
+    def finish(self, reason, exception_type=None):
+        if self.lifecycle:
+            self.lifecycle['exit'] = {'observed_at': time.time(), 'reason': reason,
+                                      'exception_type': exception_type}
+            self.heartbeat(force=True)
+            self.event('supervisor_exit', **self.lifecycle['exit'])
 
     def save(self):
         self.state['updated_at'] = time.time()
         atomic(self.root / 'checkpoint.json', self.state)
+        self.heartbeat(force=True)
         lines = [f'STATUS: {self.state.get("status")}',
                  f'PHASE: {self.state.get("phase", 0) + 1}',
                  f'NEXT: {self.state.get("next_step")}',
@@ -130,6 +201,7 @@ class Run:
             os.fsync(out.fileno())
 
     def stop_check(self):
+        self.heartbeat()
         if (self.root / 'STOP').exists():
             raise Stopped('Stop requested; resume continues from the durable checkpoint')
         if time.time() > self.state.get('deadline', float('inf')):

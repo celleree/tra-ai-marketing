@@ -33,6 +33,27 @@ execution authority. Do not delete locks, worktrees, receipts, or checkpoints to
 
 ## Execution and evidence
 
+### Read-only reconciliation and exit evidence
+
+`status` adds a `reconciliation` object to the historical checkpoint. It probes the existing
+lock without creating it, reports a pending attempt's receipt and includes `supervisor.json`.
+It never starts workers, writes run files, clears STOP or validates GitHub CI.
+
+`supervisor.json` records session/PID, start time, last heartbeat and observed exit reason
+(`complete`, `stopped`, `blocked`, or `unexpected_exception`). Heartbeats update at checkpoints
+and about once per second during cooperative waits; synchronous prerequisite/GitHub commands
+can pause them. Heartbeat age and PID alone do not prove liveness. A held lock may belong to an
+orphan worker. An available lock plus an unfinished lifecycle reports
+`exit_unobserved_cause_unknown`: SIGKILL/power loss cannot write their own exit reason. Do not
+infer the cause of a disconnect from this observation. Resume preserves the prior lifecycle in
+`events.jsonl` before starting a new session.
+
+Status is a momentary observation; resume must acquire the exclusive lock and revalidate source
+digest, assigned HEAD and live CI. Receipt availability is not a reviewed/publishable PASS.
+Successful receipt consumption logs `worker_receipt_reconciled` without repeating completed work.
+Older files remain readable, but runs pinned to older code still fail closed on source-digest
+mismatch. Do not replace code or edit digests to force resume of an existing run.
+
 - Pinned source base: merged PR #302, staging `1bf68fd03860bbd0cbdbaee0bd1fb17df928ade9`.
   Live staging drift stops the run for explicit reconciliation; no automatic base sync.
 - Phases: Slice 2 admission/planning/persistence; Slice 3 manual frame generation;

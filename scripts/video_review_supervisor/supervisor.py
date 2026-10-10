@@ -11,7 +11,7 @@ import time
 import uuid
 
 from contracts import BASE, PHASES, REPO, SCHEMA, SOURCES, prompt, validate
-from runtime import Blocked, Run, Stopped, atomic, command, digest, read
+from runtime import Blocked, Run, Stopped, atomic, command, digest, read, status_snapshot
 from sandbox import options as sandbox_options
 
 HERE = Path(__file__).resolve().parent
@@ -274,6 +274,8 @@ class Supervisor:
             rc = self.run.execute(args, worktree, directory, text, self.s['worker_timeout'])
         else:
             rc = read(directory / 'exit.json')['returncode']
+            self.run.event('worker_receipt_reconciled', phase=p['name'], role=role,
+                           head=p['head'], directory=str(directory), returncode=rc)
         if rc:
             raise Blocked(f'Codex exit {rc}; inspect {directory}; no automatic infrastructure retries')
         result = validate(read(directory / 'result.json'))
@@ -512,7 +514,7 @@ def main():
     args = parser.parse_args()
     root = Path(args.run_dir).resolve()
     if args.action == 'status':
-        print(json.dumps(read(root / 'checkpoint.json'), indent=2))
+        print(json.dumps(status_snapshot(root), indent=2))
         return 0
     if args.action == 'stop':
         if not (root / 'checkpoint.json').exists():
@@ -522,6 +524,7 @@ def main():
         return 0
     run = Run(root)
     try:
+        run.begin(args.action)
         if args.action == 'start':
             initialize(run, args)
         elif not run.state:
@@ -545,6 +548,8 @@ def main():
             return 0
         (root / 'STOP').unlink(missing_ok=True)
         def stop_signal(_sig, _frame):
+            run.lifecycle['stop_signal'] = signal.Signals(_sig).name
+            run.heartbeat(force=True)
             (root / 'STOP').touch()
         signal.signal(signal.SIGTERM, stop_signal)
         signal.signal(signal.SIGINT, stop_signal)
@@ -560,7 +565,12 @@ def main():
         print(str(exc), file=sys.stderr)
         return 2
     finally:
-        run.close()
+        try:
+            exc = sys.exc_info()[1]
+            run.finish('unexpected_exception' if exc else run.state.get('status', 'uninitialized'),
+                       type(exc).__name__ if exc else None)
+        finally:
+            run.close()
 
 
 if __name__ == '__main__':
