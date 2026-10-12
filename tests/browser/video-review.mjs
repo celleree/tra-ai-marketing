@@ -53,7 +53,7 @@ async function scenario(name, options, run) {
     sessionStorage.setItem('video-review-fixture-seeded', 'true');
     localStorage.setItem('tra-video-review-draft-v1', id);
     localStorage.setItem('tra-create-video-ids-v1', JSON.stringify(inventory));
-    localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', guardrails: {}, ...(hasProfile ? profile : {}),
+    localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', knowledgeBase: {}, guardrails: {}, ...(hasProfile ? profile : {}),
       brandGuidelines: noLogo ? {} : { logo: '/api/media/files/media_77777777777777777777777777777777.png' } }));
   }, { id, inventory: options.inventory ?? [mediaId], profile, hasProfile: options.profile, noLogo: options.noLogo });
   await page.route('**/api/**', async route => {
