@@ -91,7 +91,7 @@ const ready = async page => { await page.locator('textarea').fill('Create four d
 try {
   await scenario('Missing original logo blocks a new generation before paid admission', { noLogo: true }, async ({ page, submissions }) => {
     await ready(page); await generateButton(page).click();
-    await page.getByText('The approved TRA logo is missing for this site.', { exact: false }).waitFor();
+    await page.getByRole('alert').getByText('The approved TRA logo is missing for this site.', { exact: false }).waitFor();
     assert.equal(submissions.length, 0);
   });
   await scenario('Review → Create exact revision/manual frames; refresh and reopen are read-only', {}, async ({ page, calls, submissions }) => {
