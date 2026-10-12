@@ -62,7 +62,8 @@ beforeEach(() => {
       repeatAudit = false;
     } else {
       const creatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(concept => ({ ...concept,
-        strategy: { ...concept.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct ${concept.index}` } },
+        strategy: { ...concept.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct ${concept.index}` },
+          execution: { ...concept.strategy.execution, subjectSource: payload.selectedVideoFrameRequirement ? 'approved-tra-human' : 'non-human' } },
         proofSelection: null, referenceChoices: { angleSource: null, layoutSource: null } }));
       result = { creatives: payload.replacementIndexes ? creatives.filter(c => payload.replacementIndexes.includes(c.index)) : creatives };
     }
@@ -140,7 +141,8 @@ it('delivers exact nonrepresentative frames to planning and fails closed when ma
   if (!result.prepared) throw new Error('Missing plan');
   expect(mocks.humanOptions).not.toHaveBeenCalled(); expect(result.prepared.plannerArgs!.approvedHumanOptions).toBeUndefined();
   expect(outbound[0].operatorSelectedSourceGuidance.frames[1]).toMatchObject({ observationIsExactFrame: false, binding: { candidateIndex: 1 } });
-  result.prepared.batchPlan.creatives[0].strategy.execution.subjectSource = 'approved-tra-human';
+  expect(result.prepared.plannerArgs!.requireSelectedVideoFrames).toBe(true);
+  expect(result.prepared.batchPlan.creatives.every(concept => concept.strategy.execution.subjectSource === 'approved-tra-human')).toBe(true);
   await step(job.id); // Normal planning quota reservation precedes the frozen plan checkpoint.
   await updateCreativePortfolio(job.id, current => claimCreativePortfolio(current, Date.now(), 'plan').job, storage);
   await updateCreativePortfolio(job.id, current => finishPortfolioInitialPlan(current, 'plan', {
