@@ -6,7 +6,7 @@ import { selectBestReferenceCreatives, type ReferenceSelectionCandidate, type Se
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
-import { hydrateGenerationSources } from '@/lib/creatives/generation-sources';
+import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import type { PreparedCreativeGeneration } from '@/lib/creatives/prepare-generation';
 import { formatLayoutBlueprintForPlanning, LAYOUT_BLUEPRINT_SCHEMA_VERSION, type LayoutBlueprint } from '@/lib/layouts/blueprint';
 import { getOrAnalyzeLayoutBlueprint, type ResolvedLayoutBlueprint } from '@/lib/layouts/service';
@@ -18,7 +18,7 @@ import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { advancePlanningSourceAnalysis, composedSourceCatalog, composedLayoutProvenance } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
-import { primaryVideoGuidance, primaryVideoDirection, selectedVideoInputContract } from '@/lib/creatives/primary-video-source';
+import { primaryVideoGuidance, primaryVideoDirection, representativeVideoGuidance, selectedVideoInputContract } from '@/lib/creatives/primary-video-source';
 
 export type PortfolioPreparationState = {
   videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
@@ -248,7 +248,11 @@ export async function advancePortfolioPreparation(
     ? isUsableApprovedHumanSource(approvedHumanSource, sourceSuppliedToImageGeneration)
     : false;
   const manualFrames = Boolean(data.reviewHandoff?.choices.frames?.length);
-  const videoGuidance = primaryVideoGuidance(state.sourceAnalysis, videoFrameSet?.source.media.id);
+  const videoGuidance = primaryVideoGuidance(state.sourceAnalysis, videoFrameSet?.source.media.id)
+    ?? (videoFrameSet ? representativeVideoGuidance(requestedSources.find(source => source.mediaId === videoFrameSet.source.media.id && source.role === 'TRA_VIDEO')!, state.analysis) : null);
+  if (videoGuidance?.hasHuman === null && !selectedVideoInputContract(data).requireSelectedVideoFrames) {
+    throw new CreativeGenerationPreparationError('The saved video analysis lacks a visible-human assessment. Prepare a new generation before planning.', 409);
+  }
   const approvedHumanOptions = manualFrames || videoGuidance ? [] : await loadApprovedHumanOptions();
   const humanSourceDirection = manualFrames
     ? 'The operator explicitly selected a closed pool of TRA video human frames in operatorSelectedSourceGuidance. Every concept must use that pool, with null humanSourceId/approvedHumanId; no catalog, image, representative or neighbor substitution. Visual suitability and overlay assessment plus fresh PNG extraction are still required before rendering. Stop visibly if the pool is unusable; do not replace it with a non-human concept.'
@@ -284,7 +288,7 @@ export async function advancePortfolioPreparation(
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
-    ...(videoGuidance ? { primaryVideoMediaId: videoGuidance.source.mediaId } : {}),
+    ...(videoGuidance ? { primaryVideoMediaId: videoGuidance.source.mediaId, primaryVideoHasHuman: videoGuidance.hasHuman } : {}),
     hasApprovedHumanSource: manualFrames || hasUsableApprovedHumanSource || Boolean(videoGuidance?.hasHuman),
     hasBrandLogo: reserveLogoArea,
     ...(logoPlacement ? { logoPlacement } : {}),

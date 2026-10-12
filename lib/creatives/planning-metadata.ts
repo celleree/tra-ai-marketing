@@ -5,11 +5,14 @@ import {
 import { parseReferenceCatalog, selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import { parsePortfolioAudit, type PortfolioAudit } from '@/lib/creatives/portfolio-audit';
 import { isCreativeLogoAnchor, type CreativeLogoAnchor } from '@/lib/creatives/logo-placement';
+import { parseDraftVideoSourceAssertion, type DraftVideoSourceAssertion } from '@/lib/creatives/draft-video-assertion';
 
 export type CreativePlanningMetadata = {
   portfolioAudit?: PortfolioAudit;
   referenceCatalog?: ReferencePlanningCandidate[];
   logoAnchor?: CreativeLogoAnchor;
+  draftSourceAssertion?: DraftVideoSourceAssertion;
+  requiredLayoutReferenceIds?: string[];
   strategy: CreativeStrategy;
   selectionReason: string;
   model: string;
@@ -31,7 +34,7 @@ const parseText = (value: unknown, maximumLength: number) => {
 export const parseCreativePlanning = (
   value: unknown
 ): CreativePlanningMetadata | null => {
-  if (!isRecord(value) || !hasOnly(value, ['strategy', 'selectionReason', 'model', 'reasoningEffort', ...('logoAnchor' in value ? ['logoAnchor'] : []), ...('referenceCatalog' in value ? ['referenceCatalog'] : []), ...('portfolioAudit' in value ? ['portfolioAudit'] : [])])) {
+  if (!isRecord(value) || !hasOnly(value, ['strategy', 'selectionReason', 'model', 'reasoningEffort', ...('requiredLayoutReferenceIds' in value ? ['requiredLayoutReferenceIds'] : []), ...('draftSourceAssertion' in value ? ['draftSourceAssertion'] : []), ...('logoAnchor' in value ? ['logoAnchor'] : []), ...('referenceCatalog' in value ? ['referenceCatalog'] : []), ...('portfolioAudit' in value ? ['portfolioAudit'] : [])])) {
     return null;
   }
 
@@ -53,5 +56,10 @@ export const parseCreativePlanning = (
   }
   const portfolioAudit = 'portfolioAudit' in value ? parsePortfolioAudit(value.portfolioAudit) : undefined;
   if (portfolioAudit === null) return null;
-  return { strategy, selectionReason, model, reasoningEffort: 'medium', ...(logoAnchor ? { logoAnchor } : {}), ...(referenceCatalog ? { referenceCatalog } : {}), ...(portfolioAudit ? { portfolioAudit } : {}) };
+  const draftSourceAssertion = 'draftSourceAssertion' in value ? parseDraftVideoSourceAssertion(value.draftSourceAssertion) : undefined;
+  if (draftSourceAssertion === null) return null;
+  const requiredLayoutReferenceIds = value.requiredLayoutReferenceIds;
+  if (requiredLayoutReferenceIds !== undefined && (!Array.isArray(requiredLayoutReferenceIds) || !requiredLayoutReferenceIds.length || requiredLayoutReferenceIds.length > 10
+    || requiredLayoutReferenceIds.some(id => typeof id !== 'string' || !/^media_[a-f0-9]{32}$/.test(id)) || new Set(requiredLayoutReferenceIds).size !== requiredLayoutReferenceIds.length)) return null;
+  return { strategy, selectionReason, model, reasoningEffort: 'medium', ...(requiredLayoutReferenceIds ? { requiredLayoutReferenceIds: requiredLayoutReferenceIds as string[] } : {}), ...(draftSourceAssertion ? { draftSourceAssertion } : {}), ...(logoAnchor ? { logoAnchor } : {}), ...(referenceCatalog ? { referenceCatalog } : {}), ...(portfolioAudit ? { portfolioAudit } : {}) };
 };

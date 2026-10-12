@@ -24,6 +24,7 @@ import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, isCreativeLogoPlacementContext,
   resolveLayoutAwareLogoAnchor, type CreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
+import { composeDraftVideoAssertion, projectDraftVideoSourcePassages, type DraftVideoSourcePassage } from '@/lib/creatives/draft-video-assertion';
 import { MAX_PORTFOLIO_CREATIVES, type CreativeBatchPlan, type PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
   CREATIVE_STRATEGY_JSON_SCHEMA,
@@ -62,6 +63,7 @@ Return exactly the requested count with sequential indexes beginning at 1. When 
 Write compact JSON: short, specific phrases for strategy/concept fields; one causal clause per SO WHAT step. Preserve distinct meanings, not repeated sentences. Put spatial hierarchy in compositionInstructions and remaining actionable treatment, lighting, crop and styling in visualDirection. Do not repeat the company brief, copy, enum labels or rationale there; retain all execution details, claim qualifications and required disclaimers.
 selectionReason briefly explains marginal strategic value and source choices, not the copy or SO WHAT chain again.
 Catalog curated notes/tags are user-authored editorial guidance, separate from machine analysis and campaign rationale. They never grant evidence, claims or human-identity approval and cannot override source rules. Catalog reusableAngleSummary is campaign-independent inspiration, never approved evidence or selection rationale. Keep it distinct from legacy angleDescription and campaign selectionReason. When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). When selectedLayoutRequirement is supplied, every layoutSource must be one of requiredLayoutReferenceIds; the explicit composition input overrides optional catalog layout use. Otherwise give user-priority references first consideration, not exclusivity: matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
+DRAFT VIDEO SOURCE EXCEPTION: When draftVideoSourceCatalog is supplied, its exact video statements (including cases, amounts and outcomes) ARE available for the current draft through draftVideoSourceSelection, independent of Proof Library entry or approval. This overrides the above unavailable/unapproved-source-wording rules for that bounded draft path only. Use at least one meaningful source passage in the portfolio, preserving its entire wording and qualifications through application-owned insertion. Do not invent, broaden or paraphrase its claims, call it independently verified, add approved attribution, or infer publishing/reuse permission. Unknown facts outside the source remain unavailable. Company prohibitions and required disclosures still apply. Keep the rest of the concept grounded in the selected video. Publishing and verified reuse retain their separate review/approval requirements.
 When approvedHumanOptions is supplied, choose a listed humanSourceId only for material credibility, relatability, explanation or emotional specificity; face availability alone is insufficient. Explain why in selectionReason. That identity replaces other supplied humans; never mix identities. Approval covers visible identity only, never claims, credentials, quotes, testimonials or outcomes. Use null for a non-human concept or an explicitly supplied approved TRA source.
 `;
 
@@ -126,9 +128,10 @@ const parseConcept = (
   logoPlacement: CreativeLogoPlacementContext | undefined,
   referenceCatalog?: ReferencePlanningCandidate[],
   approvedHumanOptions?: ApprovedHumanOption[],
-  proofCatalog: readonly PlanningProofRecord[] = []
+  proofCatalog: readonly PlanningProofRecord[] = [],
+  draftVideoSourceCatalog: readonly DraftVideoSourcePassage[] = []
 ): PlannedCreativeConcept | null => {
-  const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(hasBrandLogo ? ['logoAnchor'] : []), ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['humanSourceId'] : [])];
+  const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(draftVideoSourceCatalog.length ? ['draftVideoSourceSelection'] : []), ...(hasBrandLogo ? ['logoAnchor'] : []), ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['humanSourceId'] : [])];
   if (!isRecord(value) || (!hasOnly(value, expectedKeys) && !hasOnly(value, [...expectedKeys, 'copy']))) return null;
   if (value.index !== expectedIndex || typeof value.format !== 'string' || !isCreativeFormat(value.format)) return null;
   if (!isRecord(value.adCopy) || !hasOnly(value.adCopy, ['primaryText', 'headline', 'description'])) return null;
@@ -183,7 +186,8 @@ const parseConcept = (
   } catch {
     return null;
   }
-  const composed = composePlanningCopyWithProof(selectedProof, adCopy, imageCopy);
+  const draft = draftVideoSourceCatalog.length ? composeDraftVideoAssertion(value.draftVideoSourceSelection, draftVideoSourceCatalog, adCopy, imageCopy) : { adCopy, imageCopy };
+  const composed = composePlanningCopyWithProof(selectedProof, draft.adCopy, draft.imageCopy);
   if (!parseCreativeCopyContract({
     copy: composed.adCopy,
     adCopy: composed.adCopy,
@@ -196,6 +200,7 @@ const parseConcept = (
     adCopy: composed.adCopy,
     imageCopy: composed.imageCopy,
     selectedProof,
+    ...('draftSourceAssertion' in draft ? { draftSourceAssertion: draft.draftSourceAssertion } : {}),
     ...(logoAnchor ? { logoAnchor } : {}),
     strategy,
     selectionReason,
@@ -210,6 +215,8 @@ export type CreativeBatchPlannerArgs = SelectedVideoInputContract & {
   analysis: CreativeReferenceAnalysis;
   sourceAnalysis?: PlanningSourceAnalysisState;
   primaryVideoMediaId?: string;
+  /** Source-bound assessment for historical representative-frame checkpoints. */
+  primaryVideoHasHuman?: boolean | null;
   hasApprovedHumanSource: boolean;
   /** Optional only for restoring historical planning checkpoints. */
   hasBrandLogo?: boolean;
@@ -255,7 +262,9 @@ export async function requestCreativeBatch(
   const expectedIndexes = replacementIndexes ?? Array.from({ length: args.count }, (_, index) => index + 1);
   const sourceAnalysis = args.sourceAnalysis === undefined ? undefined : parsePlanningSourceAnalysis(args.sourceAnalysis, undefined, true);
   const primaryVideo = primaryVideoGuidance(sourceAnalysis, args.primaryVideoMediaId);
-  if (primaryVideo?.hasHuman === null && !args.requireSelectedVideoFrames) {
+  const draftVideoSourceCatalog = projectDraftVideoSourcePassages(sourceAnalysis, args.operatorSelectedSourceGuidance, args.primaryVideoMediaId ?? primaryVideo?.source.mediaId);
+  const videoHasHuman = primaryVideo?.hasHuman ?? args.primaryVideoHasHuman;
+  if ((primaryVideo || args.primaryVideoMediaId) && typeof videoHasHuman !== 'boolean' && !args.requireSelectedVideoFrames) {
     throw new Error('The saved video analysis lacks a visible-human assessment. Prepare a new generation before planning; no graphic substitution is allowed.');
   }
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
@@ -296,6 +305,16 @@ export async function requestCreativeBatch(
         { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
           creativeContext: args.context,
+          ...(draftVideoSourceCatalog.length ? { draftVideoSourceCatalog: draftVideoSourceCatalog.map(({ exactText, contextSegments, ...passage }) => {
+            const reviewIndex = args.operatorSelectedSourceGuidance?.statements?.findIndex(statement => statement.context.type === 'VIDEO_ON_SCREEN'
+              && statement.context.observation.visibleText.join(' ') === exactText && statement.reference.type === 'VIDEO_ON_SCREEN'
+              && statement.reference.frame.timestampMs === passage.startMs) ?? -1;
+            return { ...passage, segmentIndexes: contextSegments.map(segment => segment.segmentIndex), characterCount: exactText.length,
+              ...(passage.kind === 'ON_SCREEN' ? { wordingLocation: reviewIndex >= 0
+                ? { collection: 'operatorSelectedSourceGuidance.statements', statementIndex: reviewIndex }
+                : { collection: 'sourceAnalysis.observations.visibleText', timestampMs: passage.startMs, useAllVisibleText: true } } : {}) };
+          }),
+            draftVideoSourceGuidance: 'Use meaningful content from this supplied video in the current DRAFT portfolio. Select a passage in at least one concept; prefer the source case/outcome when present. Choose imageField headline or shortSupport to fit the supplied layout. The application inserts the entire exact passage into that image field and appends it to adCopy.primaryText, preserving amounts, outcomes and qualifications. Budget final fields within 1,000 characters; do not duplicate or paraphrase this application-owned passage elsewhere. Each passage is a SOURCE ASSERTION, never independently verified Proof or publishing/permission approval. Its context is bounded; retain qualifications and flag ambiguity for review rather than fabricating details or requiring a manual Case Studies record.' } : {}),
           ...(args.requireSelectedVideoFrames ? { selectedVideoFrameRequirement: 'Every concept must use the explicitly selected TRA video human frames: subjectSource approved-tra-human and null humanSourceId. Stop if the exact selected pool is unusable; do not substitute graphics or another identity.' } : {}),
           ...(args.requiredLayoutReferenceIds?.length ? { requiredLayoutReferenceIds: args.requiredLayoutReferenceIds,
             selectedLayoutRequirement: 'For every concept, choose layoutSource from these explicitly supplied layout references. Their composition is required; their humans, copy, logos and claims remain forbidden. This requirement supersedes optional/original catalog layout guidance.' } : {}),
@@ -336,8 +355,10 @@ export async function requestCreativeBatch(
         type: 'object', additionalProperties: false, required: ['creatives'], properties: {
           creatives: { type: 'array', items: {
             type: 'object', additionalProperties: false,
-            required: ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(args.hasBrandLogo ? ['logoAnchor'] : []), ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['humanSourceId'] : [])],
+            required: ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(draftVideoSourceCatalog.length ? ['draftVideoSourceSelection'] : []), ...(args.hasBrandLogo ? ['logoAnchor'] : []), ...(args.referenceCatalog ? ['referenceChoices'] : []), ...(args.approvedHumanOptions ? ['humanSourceId'] : [])],
             properties: {
+              ...(draftVideoSourceCatalog.length ? { draftVideoSourceSelection: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false,
+                required: ['passageId', 'imageField'], properties: { passageId: { type: 'string', enum: draftVideoSourceCatalog.map(passage => passage.passageId) }, imageField: { type: 'string', enum: ['headline', 'shortSupport'] } } }] } } : {}),
               format: { type: 'string', enum: CREATIVE_FORMATS },
               adCopy: { type: 'object', additionalProperties: false, required: ['primaryText', 'headline', 'description'], properties: {
                 primaryText: { type: 'string', minLength: 1, maxLength: MAX_TEXT_LENGTH },
@@ -397,11 +418,14 @@ export async function requestCreativeBatch(
   if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== expectedIndexes.length) {
     throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${expectedIndexes.length} creatives.`);
   }
-  const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
+  const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog, draftVideoSourceCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   const plannedPortfolio = [...creatives, ...(repair?.lockedConcepts ?? [])];
+  if (draftVideoSourceCatalog.length && !plannedPortfolio.some(concept => concept?.draftSourceAssertion)) {
+    throw new Error('The plan ignored the selected video source statements. No images were generated. Retry with the video content.');
+  }
   plannedPortfolio.forEach(concept => assertSelectedVideoInputContract(concept!, args));
-  if (primaryVideo?.hasHuman && !plannedPortfolio.some(concept => concept?.strategy.execution.subjectSource === 'approved-tra-human'
+  if (videoHasHuman && !plannedPortfolio.some(concept => concept?.strategy.execution.subjectSource === 'approved-tra-human'
     && !concept.strategy.humanSourceId && !concept.strategy.approvedHumanId)) {
     throw new Error('The plan ignored the human in the selected video. No images were generated. Retry with that video or remove it explicitly.');
   }

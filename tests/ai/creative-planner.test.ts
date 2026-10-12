@@ -17,6 +17,7 @@ import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-par
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { withPaidPreparationScope } from '@/lib/creatives/preparation-checkpoint';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
+import { draftVideoGuidance, draftVideoPassage } from '../fixtures/draft-video-source';
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: vi.fn(async (concepts: unknown[]) => portfolioAudit(concepts.length)) }));
 const proofMocks = vi.hoisted(() => ({ load: vi.fn() }));
 vi.mock('@/lib/proof/planning', async original => ({
@@ -96,6 +97,25 @@ const sourceProjection = (): PlanningSourceAnalysisState => ({ version: 1, entri
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); proofMocks.load.mockReset(); });
 
 describe('creative batch planner', () => {
+  it('uses source case wording directly in draft image/ad copy with no Proof Library prerequisite', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const passage = draftVideoPassage();
+    let selected = true;
+    const fetchMock = vi.fn(async () => okResponse({ creatives: [concept(1), concept(2)].map(item => ({ ...item,
+      draftVideoSourceSelection: selected && item.index === 1 ? { passageId: passage.passageId, imageField: 'shortSupport' } : null })) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: 'Use the case described in this video.', analysis, hasApprovedHumanSource: false, operatorSelectedSourceGuidance: draftVideoGuidance };
+    const plan = await requestCreativeBatch(args);
+    expect(plan.creatives[0].imageCopy?.shortSupport).toBe(passage.exactText);
+    expect(plan.creatives[0].adCopy?.primaryText).toContain(passage.exactText);
+    expect(plan.creatives[0].selectedProof).toBeNull();
+    expect(plan.creatives[0].draftSourceAssertion?.permission).toBe('REQUIRES_REVIEW');
+    const brief = buildCreativeRenderBrief({ concept: plan.creatives[0] });
+    expect(brief.exactCopy).toMatchObject({ shortSupport: passage.exactText });
+    expect(brief.draftSourceAssertion).toMatchObject({ sourceMediaId: passage.sourceMediaId, startMs: passage.startMs, endMs: passage.endMs, verification: 'UNVERIFIED_SOURCE_ASSERTION' });
+    selected = false;
+    await expect(requestCreativeBatch(args)).rejects.toThrow('ignored the selected video source statements');
+  });
   it('validates planner logo anchors and lets selected layout geometry override the fallback before persistence', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const referenceCatalog = [referenceCandidate('f')];

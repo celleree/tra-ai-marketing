@@ -256,6 +256,19 @@ describe('real preparation to Astra with composed sources', () => {
     expect(outbound).toHaveLength(0);
   });
 
+  it.each([undefined, 1] as const)('blocks legacy automatic-video jobs with unknown human assessment before planning: %s', async marker => {
+    const { videoPreparationVersion: _videoMarker, ...created } = newCreativePortfolio(request());
+    const { visibleHuman: _assessment, ...oldAnalysis } = analysis('SAVED_LEGACY');
+    const job = { ...created, sourceCompositionVersion: marker };
+    job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis: oldAnalysis,
+      referenceCatalog: [], selectedReferences: [] } };
+    const storage = new MemoryPortfolioStorage();
+    await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
+    const result = await step(job, storage);
+    expect(result.error).toContain('visible-human assessment');
+    expect(outbound).toHaveLength(0); expect(operations).toEqual([]);
+  });
+
   it.each([undefined, 1] as const)('resumes legacy partial/rendered jobs with marker %s without composing', async marker => {
     const { videoPreparationVersion: _videoMarker, ...created } = newCreativePortfolio(request());
     const job = { ...created, sourceCompositionVersion: marker };

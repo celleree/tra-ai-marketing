@@ -15,6 +15,7 @@ import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
 import { fetchCreativeImage } from '@/lib/creatives/image-models';
 import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
+import { draftVideoAssertion } from '../fixtures/draft-video-source';
 
 let executionStorage = new MemoryPortfolioStorage();
 vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => executionStorage }));
@@ -442,6 +443,41 @@ describe('saved creative revision API', () => {
       expect(creative.generationProvenance.requestedSources.some((source: any) => source.role === 'LAYOUT_REFERENCE')).toBe(false);
     }
   });
+  it('blocks dropping a qualified source assertion during an ordinary draft edit before image work', async () => {
+    const record = e2Parent(), assertion = draftVideoAssertion();
+    record.copy.primaryText += `\n\n${assertion.exactText}`;
+    record.adCopy = { ...record.copy };
+    record.imageCopy!.shortSupport = assertion.exactText;
+    record.planning!.draftSourceAssertion = assertion;
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrate(record));
+    const response = await call({ operation: 'EDIT', instruction: 'Make the headline blue.' });
+    expect(response.status).toBe(409); expect((await response.json()).error).toContain('exact video source passage');
+    expect(mocks.plan.mock.calls[0][0].parent.draftSourceAssertion).toEqual(assertion);
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+
+  it('retains supplied layout across video-only removal and the next ordinary edit', async () => {
+    const record = savedVideoParent('USER_SELECTED'), catalog = [referenceCandidate('7')];
+    const retainedStrategy = { ...strategy, referenceSelection: { angleSource: null, layoutSource: catalog[0].referenceId, referenceRelationship: 'mixed' as const } };
+    record.planning!.referenceCatalog = catalog;
+    record.planning!.strategy.referenceSelection = retainedStrategy.referenceSelection;
+    record.generationProvenance!.requestedSources.push({ role: 'LAYOUT_REFERENCE', mediaId: catalog[0].referenceId, sha256: catalog[0].sourceSha256 });
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValueOnce({ concept: { index: 1, format: record.format, copy: record.copy, strategy: retainedStrategy, selectionReason: 'Keep the supplied layout.' }, plannerModel: 'saved-planner', reasoningEffort: 'medium' });
+    const first = await call({ operation: 'EDIT', instruction: 'Remove only the person.', removeVideoSource: true });
+    expect(first.status).toBe(201);
+    const child = (await first.json()).creative;
+    expect(child.generationProvenance.requestedSources.map((source: any) => source.role)).toEqual(['LAYOUT_REFERENCE']);
+    mocks.list.mockResolvedValue([child]); mocks.hydrate.mockResolvedValue(hydrate(child));
+    mocks.generate.mockClear(); mocks.save.mockClear();
+    const next = await call({ operation: 'EDIT', instruction: 'Make the headline blue.' }, child.id);
+    expect(next.status).toBe(409); expect((await next.json()).error).toContain('supplied video layout reference');
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
+    const removed = await call({ operation: 'EDIT', instruction: 'Use an original layout.', removeLayoutReference: true }, child.id);
+    expect(removed.status).toBe(201);
+    expect((await removed.json()).creative.generationProvenance.requestedSources).toEqual([]);
+  });
+
   it('keeps a non-human TRA reference image source attached under its existing semantics', async () => {
     const record = parent();
     record.generationProvenance = { ...record.generationProvenance!, requestedSources: [{ role: 'TRA_REFERENCE', mediaId, sha256: 'a'.repeat(64) }],
