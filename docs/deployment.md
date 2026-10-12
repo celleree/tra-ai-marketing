@@ -64,6 +64,14 @@ Server logs emit `tra_provider_usage` events with allowlisted metadata and a ver
 
 Browser recovery requires session storage and retains only a request digest and UUID in the current tab. Retry or refresh keeps an unresolved paid intent; completing it or choosing an explicit new paid action permits fresh work. Do not clear session storage during recovery. Review the offline corpus in `tests/fixtures/cost-regression-corpus.md`; actual creative quality and cost per accepted output require a separately authorized staging run and human review.
 
+## Claude creative copilot
+
+Store `ANTHROPIC_API_KEY` as a server-only Secret in the intended Vercel environment. For an acceptance test, scope it to the exact Preview branch through the secure Vercel dashboard; do not paste credentials into chat or commit them. Local credentials belong in an ignored local environment file. The application model is defined in `lib/copilot/claude.ts`.
+
+Adding the key alone leaves the copilot disabled. Both `TRA_CLAUDE_COPILOT_ENABLED=true` and `TRA_CLAUDE_COPILOT_ALLOW_PAID=true` are required, followed by a new deployment. Enable them only after access and a paid budget are approved for that environment. Production configuration requires separate explicit authorization.
+
+The operator route requires approval of the effective company snapshot and each paid request. It uses authoritative saved creative evidence, a 4,096-token output limit, and a durable quota of 12 requests per operator per hour. Quotas and token limits do not enforce a total dollar cap. Provider failure or interruption can leave billing unknown; there are no automatic paid retries. Recommendations require human review and do not change creatives, publish ads, or claim measured performance or revenue. Adding credentials does not establish live quality or end-to-end acceptance.
+
 ## Meta
 
 - Store `META_ACCESS_TOKEN` server-side.
