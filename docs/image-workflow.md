@@ -40,6 +40,10 @@ The Create flow supports multiple explicitly typed source assets in one request 
 
 May supply people/human identity, messaging/captions, visual context, and approved human-reference frames.
 
+Selected TRA video is the primary creative input; company knowledge supports brand and verified facts. Do not replace it with unrelated knowledge-only concepts or another uploaded image. Completed Video Intelligence must contribute its timestamped content to planning and the render brief. If the primary video contains a person, the portfolio must include a concept grounded in that video human, subject to existing suitability/overlay checks and fresh-PNG extraction. Missing/unusable source evidence fails visibly; it does not authorize a graphic fallback. No-reference generation remains available when no video is supplied or the operator explicitly removes it.
+
+Uploaded logo artwork is composited deterministically and retained by ID/hash for revisions. A configured but unresolvable logo or unreadable saved brand settings must block generation instead of silently omitting the asset. This does not certify that an image provider will never draw extra unwanted marks elsewhere; actual outputs require visual review.
+
 ### TRA Reference
 
 TRA-owned image/creative. May supply people/human identity, TRA-owned imagery, messaging, and visual context.

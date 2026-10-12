@@ -18,6 +18,7 @@ import type { ReferenceLibraryItem } from '@/lib/references/types';
 import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { checkpointPaidPreparation } from '@/lib/creatives/preparation-checkpoint';
+import { primaryVideoGuidance, primaryVideoDirection } from '@/lib/creatives/primary-video-source';
 
 const buildPromptOnlyAnalysis = (
   context: string
@@ -99,12 +100,13 @@ export async function prepareCreativeGeneration(
       () => advancePlanningSourceAnalysis(data, state, () => {}));
   }
   const sourceAnalysis = parsePlanningSourceAnalysis(next.state, requestedSources, true);
-  const primaryId = generationSourceAsset?.media.id ?? videoFrameSet?.source.media.id;
+  const primaryId = videoFrameSet?.source.media.id ?? generationSourceAsset?.media.id;
+  const videoGuidance = primaryVideoGuidance(sourceAnalysis, videoFrameSet?.source.media.id);
   const primary = sourceAnalysis.entries.filter(entry => entry.source.mediaId === primaryId).map(entry => entry.result!);
   const layoutBlueprint = primary.find(result => result.kind === 'LAYOUT_BLUEPRINT')?.layout ?? null;
   const observation = primary.find(result => result.kind === 'TRA_REFERENCE' || result.kind === 'REPRESENTATIVE_VIDEO_FRAMES');
   const angle = primary.find(result => result.kind === 'LAYOUT_ANGLE');
-  const analysis = observation?.analysis ?? (layoutBlueprint ? { ...buildLayoutReferenceAnalysis(layoutBlueprint.blueprint),
+  const analysis = videoGuidance?.analysis ?? observation?.analysis ?? (layoutBlueprint ? { ...buildLayoutReferenceAnalysis(layoutBlueprint.blueprint),
     hookOrAngle: angle?.angleDescription ?? '' } : buildPromptOnlyAnalysis(data.context));
   let selectedReferences: SelectedReferenceCreative[] = [];
 
@@ -154,7 +156,7 @@ export async function prepareCreativeGeneration(
         sourceSuppliedToImageGeneration
       )
     : false;
-  const approvedHumanOptions = await loadApprovedHumanOptions();
+  const approvedHumanOptions = videoGuidance ? [] : await loadApprovedHumanOptions();
   const humanSourceDirection = approvedHumanOptions.length
     ? 'Curated approvedHumanOptions are available as independent human sources. Choose a stable ID only when that person strengthens the proposition; selecting one replaces any supplied human source for that concept. Choose null for a graphic concept or an explicitly supplied approved source. No invented people or identity-based claims.'
     : videoFrameSet
@@ -186,10 +188,11 @@ export async function prepareCreativeGeneration(
     : undefined;
   const plannerArgs: CreativeBatchPlannerArgs = {
     count: data.variationCount,
-    context: generationContext,
+    context: videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext,
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis, sourceAnalysis,
-    hasApprovedHumanSource: hasUsableApprovedHumanSource,
+    ...(videoGuidance ? { primaryVideoMediaId: videoGuidance.source.mediaId } : {}),
+    hasApprovedHumanSource: hasUsableApprovedHumanSource || Boolean(videoGuidance?.hasHuman),
     hasBrandLogo: reserveLogoArea,
     ...(logoPlacement ? { logoPlacement } : {}),
     referenceCatalog,
