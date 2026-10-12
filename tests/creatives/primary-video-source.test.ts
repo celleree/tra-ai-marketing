@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { primaryVideoGuidance, primaryVideoDirection, primaryVideoRenderDirection } from '@/lib/creatives/primary-video-source';
+import { primaryVideoGuidance, primaryVideoDirection, primaryVideoRenderDirection, inheritedVideoInputContract } from '@/lib/creatives/primary-video-source';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 
 const source = { role: 'TRA_VIDEO', mediaId: `media_${'a'.repeat(32)}`, sha256: 'b'.repeat(64) };
@@ -14,6 +14,13 @@ const completed = (person = true): PlanningSourceAnalysisState => ({ version: 1,
 }] } as unknown as PlanningSourceAnalysisState);
 
 describe('primary video source evidence', () => {
+  it('keeps ordinary no-video layouts optional and preserves an explicitly retained video layout', () => {
+    const layoutId = `media_${'c'.repeat(32)}`;
+    const provenance = { requestedSources: [{ role: 'LAYOUT_REFERENCE', mediaId: layoutId, sha256: 'c'.repeat(64) }], attachedSource: null } as any;
+    expect(inheritedVideoInputContract(provenance)).toEqual({});
+    expect(inheritedVideoInputContract(provenance, [layoutId])).toEqual({ requiredLayoutReferenceIds: [layoutId] });
+    expect(inheritedVideoInputContract(provenance, [])).toEqual({});
+  });
   it('projects completed Video Intelligence into actual primary analysis rather than no-source guidance', () => {
     const guidance = primaryVideoGuidance(completed())!;
     expect(guidance.analysis.summary).toContain('spokesperson');

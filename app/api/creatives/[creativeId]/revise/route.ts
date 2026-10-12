@@ -26,6 +26,7 @@ import { CheckpointUnavailableError, runDurableCheckpoint, submissionRunId } fro
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { imageAttemptBudget, withImageAttemptScope } from '@/lib/creatives/image-attempt-execution';
 import { assertSelectedVideoInputContract, inheritedVideoInputContract, SelectedVideoInputError } from '@/lib/creatives/primary-video-source';
+import { assertDraftVideoAssertionCopy } from '@/lib/creatives/draft-video-assertion';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -83,7 +84,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     const revision = parsed.data;
     const removeVideoSource = 'removeVideoSource' in revision && revision.removeVideoSource === true;
     const removeLayoutReference = 'removeLayoutReference' in revision && revision.removeLayoutReference === true;
-    const inheritedInputs = inheritedVideoInputContract(provenance);
+    const inheritedInputs = inheritedVideoInputContract(provenance, planning.requiredLayoutReferenceIds);
     const selectedInputs = { ...inheritedInputs,
       ...(removeVideoSource ? { requireSelectedVideoFrames: false } : {}),
       ...(removeLayoutReference ? { requiredLayoutReferenceIds: [] } : {}) };
@@ -103,6 +104,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       index: 1, format: parent.format!, copy: parentCopyMode.copy,
       ...(parentCopyMode.kind === 'E2' ? { adCopy: parentCopyMode.adCopy, imageCopy: parentCopyMode.imageCopy } : {}),
       ...(parentLogoAnchor ? { logoAnchor: parentLogoAnchor } : {}), strategy: planning.strategy, selectionReason: planning.selectionReason,
+      ...(planning.draftSourceAssertion ? { draftSourceAssertion: planning.draftSourceAssertion } : {}),
     };
     let plannerModel = planning.model;
     if (revision.operation === 'EDIT' || revision.operation === 'VARIATION') {
@@ -111,6 +113,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         parent: { format: concept.format, copy: concept.copy,
           ...(concept.adCopy ? { adCopy: concept.adCopy } : {}),
           ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}),
+          ...(planning.draftSourceAssertion ? { draftSourceAssertion: planning.draftSourceAssertion } : {}),
           ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}), strategy: concept.strategy },
         operation: revision.operation, instruction: revision.instruction, companyContext,
         hasApprovedHumanSource: sources.originalApprovedSource !== null && !removeVideoSource,
@@ -125,6 +128,8 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       plannerModel = plan.plannerModel;
     }
     assertSelectedVideoInputContract(concept, selectedInputs, planning.strategy);
+    if (planning.draftSourceAssertion) concept.draftSourceAssertion = structuredClone(planning.draftSourceAssertion);
+    assertDraftVideoAssertionCopy(concept.draftSourceAssertion, concept);
     if (removeVideoSource && concept.strategy.execution.subjectSource === 'approved-tra-human') {
       throw new Error('The selected video source was removed. Choose a non-human concept for this revision.');
     }
@@ -180,6 +185,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       operation: revision.operation,
       concept: { format: concept.format, copy: conceptCopyMode.copy,
         ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
+        ...(concept.draftSourceAssertion ? { draftSourceAssertion: concept.draftSourceAssertion } : {}),
         strategy: concept.strategy },
       placement, companyProfile: revision.companyProfile,
       referenceCatalog: planning.referenceCatalog,
@@ -199,6 +205,8 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       ...(proofProvenance ? { proofProvenance } : {}),
       identity,
       planning: { strategy: concept.strategy, selectionReason: concept.selectionReason, model: plannerModel, reasoningEffort: 'medium',
+        ...(selectedInputs.requiredLayoutReferenceIds?.length ? { requiredLayoutReferenceIds: selectedInputs.requiredLayoutReferenceIds } : {}),
+        ...(concept.draftSourceAssertion ? { draftSourceAssertion: concept.draftSourceAssertion } : {}),
         ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}),
         ...((revision.operation === 'PLACEMENT' || revision.operation === 'REGENERATE') && planning.portfolioAudit ? { portfolioAudit: planning.portfolioAudit } : {}),
         ...(referenceCatalog ? { referenceCatalog } : {}) },

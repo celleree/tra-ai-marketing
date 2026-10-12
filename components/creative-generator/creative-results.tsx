@@ -5,6 +5,7 @@ import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import { CreativeImageFallbackNotice, RevisionControls } from '@/components/creative-library/revision-controls';
+import { DraftVideoSourceNotice } from '@/components/creative-library/draft-video-source-notice';
 import type {
   MetaPublishBatchResult,
   MetaPublishCreativeResult,
@@ -485,6 +486,7 @@ export function CreativeResults({
                 ) : null}
                 <p className={styles.creativeId}>ID: {creative.id}</p>
                 <CreativeImageFallbackNotice creative={creative} />
+                <DraftVideoSourceNotice planning={creative.planning} />
                 {creative.source !== 'uploaded' ? (
                   <RevisionControls creative={creative} onSaved={() => {}} showOtherOperations={false} />
                 ) : null}

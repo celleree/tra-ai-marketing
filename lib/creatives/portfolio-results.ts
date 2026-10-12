@@ -15,6 +15,7 @@ export function portfolioSavedCreatives(job: CreativePortfolioJob, records: Crea
     const concept = job.snapshot!.batchPlan.creatives[slot.index - 1];
     const identity = buildCreativeIdentity({ creativeId: slot.creativeId, operation: 'GENERATE', strategy: concept.strategy });
     if (!isDeepStrictEqual(record.identity, identity) || !isDeepStrictEqual(record.copy, concept.copy)
+      || !isDeepStrictEqual(record.planning?.draftSourceAssertion, concept.draftSourceAssertion)
       || record.format !== concept.format || record.placement !== job.request.placement) {
       throw new Error('Saved creative does not match its reserved portfolio concept.');
     }

@@ -30,6 +30,7 @@ import { resolvePlannedHumanVideoSource, type PlannedHumanVideoSource } from '@/
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ProviderVideoFrame } from '@/lib/video/source-overlay';
 import { assertSelectedVideoInputContract, selectedVideoInputContract, primaryVideoGuidance, primaryVideoRenderDirection } from '@/lib/creatives/primary-video-source';
+import { assertDraftVideoAssertionCopy, projectDraftVideoSourcePassages } from '@/lib/creatives/draft-video-assertion';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
 import {
   revalidateSelectedProofForPaidWork,
@@ -83,6 +84,14 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   }
   assertSelectedVideoInputContract(item, selectedVideoInputContract(request));
   const copyMode = classifyPlannedCopy(item);
+  assertDraftVideoAssertionCopy(item.draftSourceAssertion, item);
+  if (item.draftSourceAssertion) {
+    const { imageField: _field, ...passage } = item.draftSourceAssertion;
+    const catalog = projectDraftVideoSourcePassages(sourceAnalysis, request.reviewHandoff?.operatorSelectedSourceGuidance, passage.sourceMediaId);
+    if (!catalog.some(current => JSON.stringify(current) === JSON.stringify(passage))) {
+      throw new Error('The draft video source passage does not match its saved source analysis. Prepare a new portfolio before rendering.');
+    }
+  }
   const { human, videoFrames: itemVideoFrames } = options.preflightHumanVideo
     ?? await resolvePlannedHumanVideoSource(item, { videoFrameSet, providerImageSource });
   const itemImageSource = human ? null : providerImageSource;
@@ -282,6 +291,8 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     identity,
     planning: {
       strategy: item.strategy,
+      ...(selectedVideoInputContract(request).requiredLayoutReferenceIds?.length ? { requiredLayoutReferenceIds: selectedVideoInputContract(request).requiredLayoutReferenceIds } : {}),
+      ...(item.draftSourceAssertion ? { draftSourceAssertion: item.draftSourceAssertion } : {}),
       ...(logoAnchor ? { logoAnchor } : {}),
       selectionReason: item.selectionReason,
       model: batchPlan.plannerModel,

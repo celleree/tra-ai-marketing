@@ -49,7 +49,7 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
   const [saved, setSaved] = useState<CreativeRecord | null>(null);
   const [removeVideoSource, setRemoveVideoSource] = useState(false);
   const [removeLayoutReference, setRemoveLayoutReference] = useState(false);
-  const selectedInputs = inheritedVideoInputContract(creative.generationProvenance);
+  const selectedInputs = inheritedVideoInputContract(creative.generationProvenance, creative.planning?.requiredLayoutReferenceIds);
   const removalChoices = () => ({
     ...(removeVideoSource && selectedInputs.requireSelectedVideoFrames ? { removeVideoSource: true } : {}),
     ...(removeLayoutReference && selectedInputs.requiredLayoutReferenceIds?.length ? { removeLayoutReference: true } : {}),

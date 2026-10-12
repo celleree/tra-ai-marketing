@@ -34,6 +34,8 @@ TRA Creatives supports plain-language edits, regeneration, meaningful variations
 
 ## Source roles
 
+Current supplied-video draft contract: use the video's information and eligible source frames, with supplied layout geometry as composition reference and the canonical uploaded TRA logo as a deterministic overlay. Company knowledge supports this source rather than replacing it. Exact transcript/on-screen passages may supply case assertions directly to draft image and ad copy without a manual Case Studies/Proof Library prerequisite. Persist source identity/hash, passage timestamps, complete selected wording and qualifications; label independent verification and permission as requiring review. Bounded context must remain explicit. These draft assertions grant no publishing permission or verified reuse and do not auto-create or approve Proof records. Existing approved Proof and human review controls remain separate.
+
 The Create flow supports multiple explicitly typed source assets in one request while preserving each asset's role.
 
 ### TRA Video

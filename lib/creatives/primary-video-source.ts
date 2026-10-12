@@ -17,14 +17,23 @@ export function selectedVideoInputContract(request: Pick<ValidGenerateCreativeRe
   };
 }
 
-export function inheritedVideoInputContract(provenance?: CreativeGenerationProvenance): SelectedVideoInputContract {
-  if (!provenance?.requestedSources?.some(source => source.role === 'TRA_VIDEO')) return {};
-  const layoutIds = provenance.requestedSources.filter(source => source.role === 'LAYOUT_REFERENCE').map(source => source.mediaId);
+export function inheritedVideoInputContract(provenance?: CreativeGenerationProvenance, retainedLayoutReferenceIds?: readonly string[]): SelectedVideoInputContract {
+  const hasVideo = provenance?.requestedSources?.some(source => source.role === 'TRA_VIDEO');
+  const layoutIds = provenance?.requestedSources?.filter(source => source.role === 'LAYOUT_REFERENCE').map(source => source.mediaId) ?? [];
+  // An explicit saved binding distinguishes video-only removal from ordinary optional layouts.
+  const requiredIds = hasVideo ? layoutIds : layoutIds.filter(id => retainedLayoutReferenceIds?.includes(id));
+  if (!hasVideo && !requiredIds.length) return {};
   return {
-    ...(provenance.attachedSource?.type === 'TRA_VIDEO_FRAMES' && provenance.attachedSource.selectionMode === 'USER_SELECTED'
+    ...(hasVideo && provenance?.attachedSource?.type === 'TRA_VIDEO_FRAMES' && provenance.attachedSource.selectionMode === 'USER_SELECTED'
       ? { requireSelectedVideoFrames: true } : {}),
-    ...(layoutIds.length ? { requiredLayoutReferenceIds: layoutIds } : {}),
+    ...(requiredIds.length ? { requiredLayoutReferenceIds: requiredIds } : {}),
   };
+}
+
+export function representativeVideoGuidance(source: CreativeGenerationProvenance['requestedSources'][number], analysis: CreativeReferenceAnalysis) {
+  return { source, hasHuman: analysis.visibleHuman ?? null, analysis: {
+    ...analysis, summary: `Primary TRA video ${source.mediaId}: ${analysis.summary}`,
+  } };
 }
 
 export function assertSelectedVideoInputContract(concept: Pick<PlannedCreativeConcept, 'strategy'>, contract: SelectedVideoInputContract,
@@ -51,9 +60,7 @@ export function primaryVideoGuidance(state?: PlanningSourceAnalysisState, mediaI
     throw new Error('The selected video analysis is unavailable. Prepare the video again before generating.');
   }
   if (result.kind === 'REPRESENTATIVE_VIDEO_FRAMES') {
-    return { source: entry.source, hasHuman: result.analysis.visibleHuman ?? null, analysis: {
-      ...result.analysis, summary: `Primary TRA video ${entry.source.mediaId}: ${result.analysis.summary}`,
-    } };
+    return representativeVideoGuidance(entry.source, result.analysis);
   }
   if (result.kind !== 'VIDEO_INTELLIGENCE') throw new Error('Invalid primary video analysis.');
   const video = result.intelligence;
@@ -69,7 +76,7 @@ export function primaryVideoGuidance(state?: PlanningSourceAnalysisState, mediaI
     visibleText: video.observations.flatMap(frame => frame.observation.visibleText).slice(0, 10).map(text => text.slice(0, 256)),
     visualStructure: bound(video.observations.map(frame => `${frame.timestampMs}ms: ${frame.observation.composition}`)),
     hookOrAngle: bound(transcript.length ? transcript : observations),
-    offerOrCta: 'Use source messaging only when supported by approved TRA facts and evidence.',
+    offerOrCta: 'Use exact video statements as traceable source assertions in drafts; verified facts and publishing permission require their separate approval path.',
     styleNotes: 'The selected video supplies the subject and creative direction; company knowledge supports brand and verified facts.',
     preserve: ['Selected video content and source identity', ...(hasHuman ? ['The visible TRA human, using verified source frames'] : [])],
     avoid: ['Unrelated knowledge-base-only concepts', 'Invented people or unsupported source claims'],
@@ -82,7 +89,7 @@ export function primaryVideoGuidance(state?: PlanningSourceAnalysisState, mediaI
 export const primaryVideoDirection = (guidance: NonNullable<ReturnType<typeof primaryVideoGuidance>>) =>
   `PRIMARY SELECTED VIDEO ${guidance.source.mediaId} (source SHA-256 ${guidance.source.sha256}).
 Use this video as the primary creative evidence. Company knowledge supports brand and verified facts; it must not replace the selected video with unrelated concepts. These bounded observations/transcript excerpts are partial source content, not approved claims or complete narratives. Preserve the supplied human through assessed fresh frames when using a person; no catalog-person substitution. ${guidance.hasHuman ? 'Include at least one concept using that visible TRA human (subjectSource approved-tra-human, no catalog humanSourceId). If usable human frames cannot be verified, stop visibly rather than substitute unrelated graphics.' : ''}
-Read the primary video content in referenceAnalysis and sourceAnalysis; their claims remain unverified until the approved evidence path validates them.`;
+Read the primary video content in referenceAnalysis and sourceAnalysis. Exact statements may inform current drafts through draftVideoSourceSelection without a manual Proof Library prerequisite. Their claims remain source assertions, not independent verification or publishing permission.`;
 
 /** The image renderer gets visual grounding, not unplanned transcript/claims/caption copy. */
 export const primaryVideoRenderDirection = (guidance: NonNullable<ReturnType<typeof primaryVideoGuidance>>) =>

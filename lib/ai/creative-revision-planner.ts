@@ -9,6 +9,7 @@ import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { CREATIVE_STRATEGY_JSON_SCHEMA, parseCreativeStrategy } from '@/lib/creatives/strategy';
 import type { CreativeProofProvenance } from '@/lib/proof/provenance';
 import { assertSelectedVideoInputContract, type SelectedVideoInputContract } from '@/lib/creatives/primary-video-source';
+import { assertDraftVideoAssertionCopy } from '@/lib/creatives/draft-video-assertion';
 import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, resolveLayoutAwareLogoAnchor,
   type CreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 
@@ -126,7 +127,7 @@ export async function planCreativeRevision(args: SelectedVideoInputContract & {
     ...baseSchema, required: [...baseSchema.required, 'referenceChoices'], properties: { ...baseSchema.properties,
       referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) },
   } : baseSchema;
-  const sourceRules = `${args.requireSelectedVideoFrames ? '\nThe operator selected the original TRA video human frames. Retain that subjectSource and the exact original identity for EDIT and VARIATION; do not replace it with a graphic.' : ''}${args.requiredLayoutReferenceIds?.length ? '\nThe supplied layout composition remains required. Every layoutSource must be from requiredLayoutReferenceIds for EDIT and VARIATION; this overrides optional/original catalog layout choices.' : ''}`;
+  const sourceRules = `${args.requireSelectedVideoFrames ? '\nThe operator selected the original TRA video human frames. Retain that subjectSource and the exact original identity for EDIT and VARIATION; do not replace it with a graphic.' : ''}${args.requiredLayoutReferenceIds?.length ? '\nThe supplied layout composition remains required. Every layoutSource must be from requiredLayoutReferenceIds for EDIT and VARIATION; this overrides optional/original catalog layout choices.' : ''}${args.parent.draftSourceAssertion ? '\nDRAFT SOURCE EXCEPTION: The parent draftSourceAssertion is an exact video statement allowed in this draft without Proof Library entry. Preserve its entire exactText, amounts, outcomes and qualifications as one blank-line-delimited block in adCopy.primaryText and verbatim in its designated imageField. This overrides the general unknown/unapproved-facts prohibition for that exact inherited statement only. It remains unverified source content with permission review required, not Proof, independent verification or publishing approval. Do not broaden, paraphrase, silently omit or claim to verify it.' : ''}`;
   const response = await fetchWithProviderUsage('revision-plan', model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, max_output_tokens: REVISION_OUTPUT_TOKENS, input: [
@@ -190,6 +191,8 @@ export async function planCreativeRevision(args: SelectedVideoInputContract & {
       copy: { primaryText: value.copy.primaryText.trim(), headline: value.copy.headline.trim(), description: value.copy.description.trim() } };
   }
   assertSelectedVideoInputContract(concept, args, args.parent.strategy);
+  if (args.parent.draftSourceAssertion) concept.draftSourceAssertion = structuredClone(args.parent.draftSourceAssertion);
+  assertDraftVideoAssertionCopy(concept.draftSourceAssertion, concept);
   if (args.operation === 'VARIATION') {
     const issue = getCreativeDiversityIssue([args.parent, concept]);
     if (issue) throw new Error(`The variation is too similar to its parent. ${issue}`);
