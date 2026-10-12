@@ -30,11 +30,19 @@ export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources:
     if (savedId) ids.push(savedId);
     const linkedUrl = new URL(window.location.href), linkedId = linkedUrl.searchParams.get('videoMediaId');
     if (linkedId && /^media_[a-f0-9]{32}$/.test(linkedId)) {
-      ids.push(linkedId); linkedUrl.searchParams.delete('videoMediaId');
+      ids.push(linkedId);
+      try {
+        window.localStorage.setItem(INVENTORY, JSON.stringify([...new Set(ids)]));
+        linkedUrl.searchParams.delete('videoMediaId');
+      } catch { /* Keep the URL identity when convenience storage is disabled. */ }
     }
     const layoutId = linkedUrl.searchParams.get('layoutMediaId');
     if (layoutId && /^media_[a-f0-9]{32}$/.test(layoutId)) {
-      linkedLayouts.current.add(layoutId); linkedUrl.searchParams.delete('layoutMediaId');
+      linkedLayouts.current.add(layoutId);
+      try {
+        window.localStorage.setItem(LINKED_LAYOUTS, JSON.stringify([...linkedLayouts.current]));
+        linkedUrl.searchParams.delete('layoutMediaId');
+      } catch { /* Keep the URL identity until it can survive refresh. */ }
     }
     if (linkedUrl.href !== window.location.href) window.history.replaceState(null, '', linkedUrl);
     const layouts = [...linkedLayouts.current].filter(id => !removed.current.has(id)

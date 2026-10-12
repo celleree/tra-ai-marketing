@@ -27,6 +27,7 @@ import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@
 import { imageAttemptBudget, withImageAttemptScope } from '@/lib/creatives/image-attempt-execution';
 import { assertSelectedVideoInputContract, inheritedVideoInputContract, SelectedVideoInputError } from '@/lib/creatives/primary-video-source';
 import { assertDraftVideoAssertionCopy } from '@/lib/creatives/draft-video-assertion';
+import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -34,6 +35,9 @@ export const maxDuration = 300;
 export async function POST(request: Request, context: { params: Promise<{ creativeId: string }> }) {
   const access = await getOperatorAccess();
   if (!access.allowed) return operatorAccessDeniedResponse(access);
+  if (isPreviewAcceptance()) return NextResponse.json({
+    error: 'Preview acceptance permits only the two initial images. Revisions and regeneration are blocked.',
+  }, { status: 409 });
 
   const { creativeId: parentId } = await context.params;
   if (!isSafeCreativeId(parentId)) return NextResponse.json({ error: 'Invalid creative ID.' }, { status: 400 });

@@ -38,6 +38,8 @@ async function scenario(name, options, run) {
   const context = await browser.newContext(options.width ? { viewport: { width: options.width, height: 900 }, isMobile: true, hasTouch: true } : {});
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   const errors = [], calls = [], submissions = [], videoActions = [];
+  let releaseSourceReads = () => {};
+  const sourceReadGate = options.holdSourceReads ? new Promise(resolve => { releaseSourceReads = resolve; }) : null;
   page.on('pageerror', error => errors.push(error.message));
   let choices = { video, frames: options.frames === undefined ? [frame] : options.frames, claims: [claim], companyProfile: options.profile ? profile : null };
   const bindings = Array.from({ length: options.frameCount ?? 1 }, (_, index) => index ? { ...frame,
@@ -60,6 +62,11 @@ async function scenario(name, options, run) {
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, body = request.postDataJSON();
     calls.push([path, request.method()]);
+    if (sourceReadGate && request.method() === 'GET'
+      && ['/api/video/intelligence/jobs', '/api/references'].includes(path)) {
+      await sourceReadGate;
+      if (request.failure()) return;
+    }
     const requestedId = new URL(request.url()).searchParams.get('mediaId') ?? mediaId;
     const missing = options.missingMedia || (options.missingReviewed && requestedId === mediaId);
     const currentVideo = { ...video, locator: { ...video.locator, sourceVideoMediaId: requestedId } };
@@ -114,15 +121,31 @@ async function scenario(name, options, run) {
     if (options.linkedLayout) target.searchParams.set('layoutMediaId', options.linkedLayout);
     await page.goto(target.href);
     await page.getByRole('button', { name: 'Generate creatives', exact: true }).waitFor();
-    await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
-    await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, recoverPreviews: () => { previewFailure = false; brokenPreview = false; }, failNext: status => { failure = status; }, denyLoads: status => { loadFailure = status; }, failSource: status => { sourceFailure = status; } });
+    if (!options.runWhilePending) await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
+    await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, releaseSourceReads, recoverPreviews: () => { previewFailure = false; brokenPreview = false; }, failNext: status => { failure = status; }, denyLoads: status => { loadFailure = status; }, failSource: status => { sourceFailure = status; } });
     assert.deepEqual(errors, [], 'Browser runtime errors');
     results.push(name); console.log(`PASS ${name}`);
-  } finally { await context.close(); }
+  } finally { releaseSourceReads(); await context.close(); }
 }
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  await scenario('Saved source UI handoff survives refresh while its first reads are pending',
+    { noSavedReview: true, inventory: [], linkedVideo: availableB, linkedLayout: layoutMediaId,
+      holdSourceReads: true, runWhilePending: true }, async ({ page, calls, videoActions, releaseSourceReads }) => {
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem('tra-create-video-ids-v1') ?? '[]').length === 1
+        && JSON.parse(localStorage.getItem('tra-create-linked-layout-ids-v1') ?? '[]').length === 1);
+      assert.equal(await page.getByLabel('Remove second.mp4').count(), 0);
+      assert.equal(await page.getByLabel('Remove fixture-layout.png').count(), 0);
+      assert.equal(new URL(page.url()).searchParams.has('videoMediaId'), false);
+      assert.equal(new URL(page.url()).searchParams.has('layoutMediaId'), false);
+      await page.reload();
+      releaseSourceReads();
+      await page.getByLabel('Remove second.mp4').waitFor(); await page.getByLabel('Remove fixture-layout.png').waitFor();
+      assert.equal(await page.getByRole('combobox', { name: 'Source role for fixture-layout.png' }).inputValue(), 'LAYOUT_REFERENCE');
+      assert.equal(videoActions.length, 0);
+      assert.equal(calls.some(([path]) => path.startsWith('/api/media/upload') || path === '/api/media/confirm' || path === '/api/creatives/portfolios'), false);
+    });
   await scenario('Saved layout UI handoff preserves its role and removal without upload or paid work',
     { noSavedReview: true, inventory: [], linkedVideo: availableB, linkedLayout: layoutMediaId }, async ({ page, calls, videoActions }) => {
       await page.getByLabel('Remove fixture-layout.png').waitFor();

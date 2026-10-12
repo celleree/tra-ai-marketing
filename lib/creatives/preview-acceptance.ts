@@ -33,10 +33,10 @@ export function assertPreviewAcceptanceJob(job: CreativePortfolioJob) {
 
 /** Check before dispatch; cached reuse never enters this boundary. */
 export function assertPreviewAcceptanceProvider(meta: ProviderAttemptMetadata) {
-  if (!isPreviewAcceptance() || !meta.portfolioId) return;
-  if (meta.endpoint === 'responses' && meta.model === 'gpt-6.1-sol'
+  if (!isPreviewAcceptance()) return;
+  if (meta.portfolioId && meta.endpoint === 'responses' && meta.model === 'gpt-6.1-sol'
     && ['creative-plan', 'portfolio-audit'].includes(meta.stage)) return;
-  if (meta.endpoint === 'images' && meta.stage === 'image'
+  if (meta.portfolioId && meta.endpoint === 'images' && meta.stage === 'image'
     && meta.model === 'gpt-image-2.5-sunburst' && meta.n === 1 && meta.purpose === 'staging-smoke'
     && meta.dimensions === '1024x1280' && meta.quality === 'high') return;
   throw new PreviewAcceptanceError(`Preview acceptance blocked ${meta.stage} before dispatch. Preparation must be cached; only the initial planner, initial audit and two Sunburst images are permitted.`);

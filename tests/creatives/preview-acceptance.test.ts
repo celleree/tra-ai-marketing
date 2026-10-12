@@ -62,7 +62,7 @@ describe('Preview acceptance spend boundary', () => {
     await expect(render('one', 'gpt-image-2.5-flare')).rejects.toThrow();
     expect(image).toHaveBeenCalledTimes(2);
   });
-  it('leaves production, diagnostic Preview and unscoped operator tools unchanged', async () => {
+  it('leaves production and diagnostic Preview unchanged', async () => {
     const dispatch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ status: 'completed', output: [] }));
     vi.spyOn(console, 'info').mockImplementation(() => {});
     for (const environment of ['production', 'development']) {
@@ -73,8 +73,20 @@ describe('Preview acceptance spend boundary', () => {
     enable(); vi.stubEnv('TRA_IMAGE_PURPOSE', 'diagnostic');
     await withProviderUsageContext({ portfolioId: 'owned' }, () =>
       fetchWithProviderUsage('video-human-selection', 'model', 'https://api.openai.com/v1/responses', {}, dispatch));
-    enable(); await fetchWithProviderUsage('video-human-selection', 'model', 'https://api.openai.com/v1/responses', {}, dispatch);
-    expect(dispatch).toHaveBeenCalledTimes(4);
+    expect(dispatch).toHaveBeenCalledTimes(3);
+  });
+  it.each(['revision-plan', 'creative-plan', 'video-human-selection'])
+  ('blocks unscoped %s calls including ordinary revisions before dispatch', async stage => {
+    enable(); const dispatch = vi.fn<typeof fetch>(); const events = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await expect(withProviderUsageContext({ creativeId: 'saved', operationType: 'REGENERATE' }, () =>
+      fetchWithProviderUsage(stage, 'gpt-6.1-sol', 'https://api.openai.com/v1/responses', {}, dispatch))).rejects.toThrow('before dispatch');
+    expect(dispatch).not.toHaveBeenCalled(); expect(events).not.toHaveBeenCalled();
+  });
+  it('blocks an unscoped image request before dispatch', async () => {
+    enable(); const dispatch = vi.spyOn(globalThis, 'fetch'); const events = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await expect(fetchCreativeImage('https://api.openai.com/v1/images/generations', { method: 'POST',
+      body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', size: '1024x1280', prompt: 'Extra image' }) })).rejects.toThrow('before dispatch');
+    expect(dispatch).not.toHaveBeenCalled(); expect(events).not.toHaveBeenCalled();
   });
   it('blocks planner model drift before dispatch', async () => {
     enable(); const dispatch = vi.fn<typeof fetch>(); vi.spyOn(console, 'info').mockImplementation(() => {});

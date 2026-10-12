@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/creatives/[creativeId]/revise/route';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { CreativeRevisionHydrationError } from '@/lib/creatives/revision-source-hydration';
@@ -139,6 +139,7 @@ const savedVideoParent = (mode: 'AUTOMATIC' | 'USER_SELECTED'): CreativeRecord =
   }
   return record;
 };
+afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
   executionStorage = new MemoryPortfolioStorage();
   Object.values(mocks).forEach(mock => mock.mockReset());
@@ -157,6 +158,20 @@ beforeEach(() => {
   mocks.saveImage.mockResolvedValue({ ...record.image, id: `media_${'d'.repeat(32)}`, fileName: `media_${'d'.repeat(32)}.png` });
   mocks.save.mockImplementation(async records => records);
   mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: { ...record.copy, headline: 'Edited headline' }, strategy, selectionReason: 'Requested edit' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+});
+
+it.each(['EDIT', 'VARIATION', 'PLACEMENT', 'REGENERATE'])('blocks normal %s in acceptance Preview before quota, state or provider work', async operation => {
+  vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+  const response = await call({ operation, instruction: 'Change the headline', placement: 'PORTRAIT_4_5' });
+  expect(response.status).toBe(409); expect(await response.json()).toHaveProperty('error', expect.stringContaining('blocked'));
+  for (const mock of [mocks.list, mocks.hydrate, mocks.requireOperatorQuota, mocks.plan, mocks.generate, mocks.save]) {
+    expect(mock).not.toHaveBeenCalled();
+  }
+});
+it.each([['production', 'staging-smoke'], ['preview', 'diagnostic']])('retains ordinary revisions for %s / %s', async (environment, purpose) => {
+  vi.stubEnv('VERCEL_ENV', environment); vi.stubEnv('TRA_IMAGE_PURPOSE', purpose);
+  expect((await call({ operation: 'REGENERATE' })).status).toBe(201);
+  expect(mocks.generate).toHaveBeenCalledTimes(1);
 });
 
 it.each([
