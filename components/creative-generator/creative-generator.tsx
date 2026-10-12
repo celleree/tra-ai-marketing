@@ -180,6 +180,7 @@ export function CreativeGenerator() {
     setGenerationError('');
     try {
       const brand = readStoredBrandGuidance();
+      if (!brand.logo) throw new Error('The approved TRA logo is missing for this site. Restore the original logo in Company > Brand Guidelines before generating.');
       const companyProfile = readStoredRuntimeCompanyProfile();
       const reviewReference = videoReview.generationReference();
       await portfolio.start({

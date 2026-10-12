@@ -254,6 +254,10 @@ export async function requestCreativeBatch(
   }
   const expectedIndexes = replacementIndexes ?? Array.from({ length: args.count }, (_, index) => index + 1);
   const sourceAnalysis = args.sourceAnalysis === undefined ? undefined : parsePlanningSourceAnalysis(args.sourceAnalysis, undefined, true);
+  const primaryVideo = primaryVideoGuidance(sourceAnalysis, args.primaryVideoMediaId);
+  if (primaryVideo?.hasHuman === null && !args.requireSelectedVideoFrames) {
+    throw new Error('The saved video analysis lacks a visible-human assessment. Prepare a new generation before planning; no graphic substitution is allowed.');
+  }
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
     throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
   }
@@ -395,7 +399,6 @@ export async function requestCreativeBatch(
   }
   const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
-  const primaryVideo = primaryVideoGuidance(sourceAnalysis, args.primaryVideoMediaId);
   const plannedPortfolio = [...creatives, ...(repair?.lockedConcepts ?? [])];
   plannedPortfolio.forEach(concept => assertSelectedVideoInputContract(concept!, args));
   if (primaryVideo?.hasHuman && !plannedPortfolio.some(concept => concept?.strategy.execution.subjectSource === 'approved-tra-human'

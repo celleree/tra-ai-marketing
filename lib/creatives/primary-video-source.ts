@@ -2,8 +2,10 @@ import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
+import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 
 export type SelectedVideoInputContract = { requireSelectedVideoFrames?: boolean; requiredLayoutReferenceIds?: string[] };
+export class SelectedVideoInputError extends Error {}
 
 /** Explicit inputs outrank optional catalog inspiration; automatic video mode remains available. */
 export function selectedVideoInputContract(request: Pick<ValidGenerateCreativeRequest, 'sourceAssets' | 'videoFrameSelection' | 'reviewHandoff'>): SelectedVideoInputContract {
@@ -15,13 +17,24 @@ export function selectedVideoInputContract(request: Pick<ValidGenerateCreativeRe
   };
 }
 
-export function assertSelectedVideoInputContract(concept: Pick<PlannedCreativeConcept, 'strategy'>, contract: SelectedVideoInputContract) {
+export function inheritedVideoInputContract(provenance?: CreativeGenerationProvenance): SelectedVideoInputContract {
+  if (!provenance?.requestedSources?.some(source => source.role === 'TRA_VIDEO')) return {};
+  const layoutIds = provenance.requestedSources.filter(source => source.role === 'LAYOUT_REFERENCE').map(source => source.mediaId);
+  return {
+    ...(provenance.attachedSource?.type === 'TRA_VIDEO_FRAMES' && provenance.attachedSource.selectionMode === 'USER_SELECTED'
+      ? { requireSelectedVideoFrames: true } : {}),
+    ...(layoutIds.length ? { requiredLayoutReferenceIds: layoutIds } : {}),
+  };
+}
+
+export function assertSelectedVideoInputContract(concept: Pick<PlannedCreativeConcept, 'strategy'>, contract: SelectedVideoInputContract,
+  preservedHuman?: Pick<PlannedCreativeConcept['strategy'], 'humanSourceId' | 'approvedHumanId'>) {
   if (contract.requireSelectedVideoFrames && (concept.strategy.execution.subjectSource !== 'approved-tra-human'
-    || concept.strategy.humanSourceId || concept.strategy.approvedHumanId)) {
-    throw new Error('The plan ignored the explicitly selected TRA video frames. No images were generated. Use those frames or remove the selection explicitly.');
+    || concept.strategy.humanSourceId !== preservedHuman?.humanSourceId || concept.strategy.approvedHumanId !== preservedHuman?.approvedHumanId)) {
+    throw new SelectedVideoInputError('The plan ignored the explicitly selected TRA video frames. No images were generated. Use those frames or remove the selection explicitly.');
   }
   if (contract.requiredLayoutReferenceIds?.length && !contract.requiredLayoutReferenceIds.includes(concept.strategy.referenceSelection?.layoutSource ?? '')) {
-    throw new Error('The plan ignored the supplied video layout reference. No images were generated. Use its composition or remove the reference explicitly.');
+    throw new SelectedVideoInputError('The plan ignored the supplied video layout reference. No images were generated. Use its composition or remove the reference explicitly.');
   }
 }
 
@@ -38,7 +51,7 @@ export function primaryVideoGuidance(state?: PlanningSourceAnalysisState, mediaI
     throw new Error('The selected video analysis is unavailable. Prepare the video again before generating.');
   }
   if (result.kind === 'REPRESENTATIVE_VIDEO_FRAMES') {
-    return { source: entry.source, hasHuman: false, analysis: {
+    return { source: entry.source, hasHuman: result.analysis.visibleHuman ?? null, analysis: {
       ...result.analysis, summary: `Primary TRA video ${entry.source.mediaId}: ${result.analysis.summary}`,
     } };
   }

@@ -40,7 +40,7 @@ vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.proof }));
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: mocks.audit }));
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
-const analysis = (sentinel: string) => ({ summary: sentinel, visibleText: [], visualStructure: '', hookOrAngle: sentinel,
+const analysis = (sentinel: string) => ({ visibleHuman: false, summary: sentinel, visibleText: [], visualStructure: '', hookOrAngle: sentinel,
   offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'educational' as const });
 const request = () => ({ ...portfolioRequest(), sourceAssets:
   (['TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE', 'TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE'] as const)
@@ -91,6 +91,12 @@ const createHistoricalPortfolio = async (data: ReturnType<typeof request>, stora
 };
 
 describe('real preparation to Astra with composed sources', () => {
+  it('rejects an all-graphic direct plan when representative frames visibly contain a TRA person', async () => {
+    mocks.video.mockImplementation(async ({ frames }) => ({ ...analysis(frames[0].sourceVideoFileName), visibleHuman: true }));
+    await expect(prepareCreativeGeneration(request(), 'http://localhost')).rejects.toThrow('plan ignored the human');
+    expect(outbound[0].referenceAnalysis.visibleHuman).toBe(true);
+    expect(outbound[0].creativeContext).toContain('at least one concept');
+  });
   it('replays all completed source analysis, planning and audit without another paid call', async () => {
     const scope = { runId: 'same-submission', storage: new MemoryPortfolioStorage() };
     const run = () => withPaidPreparationScope(scope, () => prepareCreativeGeneration(request(), 'http://localhost'));

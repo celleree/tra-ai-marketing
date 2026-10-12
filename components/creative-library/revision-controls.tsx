@@ -5,6 +5,7 @@ import { createSubmissionIdentity, SUBMISSION_HEADER } from '@/lib/creatives/sub
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import type { CreativeRecord, GeneratedCreative } from '@/lib/creatives/generated';
 import type { CreativeRevisionRequest } from '@/lib/creatives/revision-request';
+import { inheritedVideoInputContract } from '@/lib/creatives/primary-video-source';
 import { CREATIVE_PLACEMENTS, CREATIVE_PLACEMENT_SPECS, type CreativePlacement } from '@/lib/creatives/placements';
 import styles from '@/components/creative-generator/creative-results.module.css';
 
@@ -46,6 +47,19 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState<CreativeRecord | null>(null);
+  const [removeVideoSource, setRemoveVideoSource] = useState(false);
+  const [removeLayoutReference, setRemoveLayoutReference] = useState(false);
+  const selectedInputs = inheritedVideoInputContract(creative.generationProvenance);
+  const removalChoices = () => ({
+    ...(removeVideoSource && selectedInputs.requireSelectedVideoFrames ? { removeVideoSource: true } : {}),
+    ...(removeLayoutReference && selectedInputs.requiredLayoutReferenceIds?.length ? { removeLayoutReference: true } : {}),
+  });
+  const sourceChoices = <>
+    {selectedInputs.requireSelectedVideoFrames ? <label><input type="checkbox" checked={removeVideoSource} disabled={busy}
+      onChange={event => setRemoveVideoSource(event.target.checked)} /> Remove selected video source</label> : null}
+    {selectedInputs.requiredLayoutReferenceIds?.length ? <label><input type="checkbox" checked={removeLayoutReference} disabled={busy}
+      onChange={event => setRemoveLayoutReference(event.target.checked)} /> Remove supplied layout reference</label> : null}
+  </>;
   const submission = useRef(createSubmissionIdentity('revision'));
   const submitting = useRef(false);
 
@@ -82,14 +96,14 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
 
   const submitEdit = (event: FormEvent) => {
     event.preventDefault();
-    void submitRevision({ operation: 'EDIT', instruction: editInstruction.trim() });
+    void submitRevision({ operation: 'EDIT', instruction: editInstruction.trim(), ...removalChoices() });
   };
 
   const otherRequest = (): CreativeRevisionRequest => operation === 'PLACEMENT'
       ? { operation, placement }
       : operation === 'REGENERATE'
         ? { operation }
-        : { operation, instruction: instruction.trim() };
+        : { operation, instruction: instruction.trim(), ...removalChoices() };
   const submitOther = (event: FormEvent) => {
     event.preventDefault();
     void submitRevision(otherRequest());
@@ -113,11 +127,12 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
               onChange={event => setEditInstruction(event.target.value)}
               placeholder="For example: enlarge the headline and move the CTA lower." />
           </label>
+          {sourceChoices}
           <button className={styles.primaryButton} type="submit" disabled={busy || !editInstruction.trim()}>
             {busy ? 'Creating edit…' : 'Create edited creative'}
           </button>
           {error && !busy ? <button type="button" className={styles.secondaryButton} disabled={!editInstruction.trim()}
-            onClick={() => void submitRevision({ operation: 'EDIT', instruction: editInstruction.trim() }, 'fresh')}>
+            onClick={() => void submitRevision({ operation: 'EDIT', instruction: editInstruction.trim(), ...removalChoices() }, 'fresh')}>
             Start a new paid edit
           </button> : null}
         </form>
@@ -140,6 +155,7 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
                 onChange={event => setInstruction(event.target.value)}
                 placeholder="For example: use a split layout and minimal graphics." />
             </label> : null}
+            {operation === 'VARIATION' ? sourceChoices : null}
             {operation === 'PLACEMENT' ? <label>Target image shape
               <select value={placement} disabled={busy} onChange={event => setPlacement(event.target.value as CreativePlacement)}>
                 {CREATIVE_PLACEMENTS.map(value => <option key={value} value={value}>{CREATIVE_PLACEMENT_SPECS[value].aspectRatio}</option>)}

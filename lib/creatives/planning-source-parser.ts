@@ -59,7 +59,8 @@ export function parsePlanningSourceAnalysis(value: unknown,
     } else {
       if (!keys(r, ['kind', 'analysis', ...(r.kind === 'REPRESENTATIVE_VIDEO_FRAMES' ? ['analyzedFrames'] : [])])
         || !validAnalysis(r.analysis) || !record(r.analysis)
-        || !keys(r.analysis, [...analysisStrings, ...analysisArrays, 'dominantCategory'])) return invalid();
+        || !keys(r.analysis, [...analysisStrings, ...analysisArrays, 'dominantCategory', 'visibleHuman'])
+        || (r.analysis.visibleHuman !== undefined && typeof r.analysis.visibleHuman !== 'boolean')) return invalid();
       if (r.kind === 'REPRESENTATIVE_VIDEO_FRAMES' && (!Array.isArray(r.analyzedFrames)
         || r.analyzedFrames.length < 1 || r.analyzedFrames.length > 3
         || r.analyzedFrames.some(frame => !record(frame) || !keys(frame, ['timestampMs', 'frameSha256'])

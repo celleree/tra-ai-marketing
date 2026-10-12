@@ -391,7 +391,7 @@ describe('saved creative revision API', () => {
       ...(operation === 'VARIATION' ? { awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } } : {}) };
     mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
     mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: nonHumanStrategy, selectionReason: 'Remove the person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
-    const response = await call({ operation, instruction: 'Remove the person and make this non-human.' });
+    const response = await call({ operation, instruction: 'Remove the person and make this non-human.', removeVideoSource: true });
     const { creative } = await response.json();
     expect(response.status).toBe(201);
     expect(creative.planning.strategy).not.toHaveProperty('humanSourceId');
@@ -406,7 +406,7 @@ describe('saved creative revision API', () => {
   ] as const)('%s detaches saved %s video-human frames when the final concept is non-human', async (operation, mode) => {
     const record = savedVideoParent(mode);
     mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
-    const response = await call({ operation, instruction: 'Make this a graphic ad with no person.' });
+    const response = await call({ operation, instruction: 'Make this a graphic ad with no person.', ...(mode === 'USER_SELECTED' ? { removeVideoSource: true } : {}) });
     expect(response.status).toBe(201);
     const { creative } = await response.json();
     expect(mocks.generate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
@@ -415,6 +415,32 @@ describe('saved creative revision API', () => {
     }));
     expect(creative.generationProvenance.attachedSource).toBeNull();
     expect(creative).not.toHaveProperty('videoFrameSelection');
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('blocks unrequested manual-frame removal during %s before image generation', async operation => {
+    const record = savedVideoParent('USER_SELECTED');
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    const response = await call({ operation, instruction: 'Make the headline blue.' });
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('explicitly selected TRA video frames');
+    expect(mocks.plan.mock.calls[0][0].requireSelectedVideoFrames).toBe(true);
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('requires inherited supplied layout unless explicitly removed: %s', async removeLayoutReference => {
+    const record = savedVideoParent('AUTOMATIC'), catalog = [referenceCandidate('7')];
+    record.planning!.referenceCatalog = catalog;
+    record.planning!.strategy.referenceSelection = { angleSource: null, layoutSource: catalog[0].referenceId, referenceRelationship: 'mixed' };
+    record.generationProvenance!.requestedSources.push({ role: 'LAYOUT_REFERENCE', mediaId: catalog[0].referenceId, sha256: catalog[0].sourceSha256 });
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    const response = await call({ operation: 'EDIT', instruction: 'Make the headline blue.', ...(removeLayoutReference ? { removeLayoutReference: true } : {}) });
+    expect(response.status).toBe(removeLayoutReference ? 201 : 409);
+    if (!removeLayoutReference) {
+      expect((await response.json()).error).toContain('supplied video layout reference');
+      expect(mocks.generate).not.toHaveBeenCalled();
+    } else {
+      const { creative } = await response.json();
+      expect(mocks.plan.mock.calls[0][0].referenceCatalog).toEqual([]);
+      expect(creative.generationProvenance.requestedSources.some((source: any) => source.role === 'LAYOUT_REFERENCE')).toBe(false);
+    }
   });
   it('keeps a non-human TRA reference image source attached under its existing semantics', async () => {
     const record = parent();

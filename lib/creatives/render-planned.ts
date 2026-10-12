@@ -92,6 +92,9 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   if (suppliedVideo && (human || itemImageSource || (!itemVideoFrames && !videoGuidance))) {
     throw new Error('The selected video cannot be replaced by another source or unrelated generation. Prepare its source evidence again.');
   }
+  if (suppliedVideo && !itemVideoFrames && videoGuidance?.hasHuman === null) {
+    throw new Error('The saved video analysis lacks a visible-human assessment. Prepare a new generation before rendering.');
+  }
   if (suppliedVideo && item.strategy.execution.subjectSource === 'approved-tra-human' && !itemVideoFrames) {
     throw new Error('The selected video human has no verified frames. Select usable frames before generating.');
   }
