@@ -26,6 +26,15 @@ beforeEach(() => {
 });
 
 describe('resumable portfolio API', () => {
+  it('reports the frozen no-logo test choice on reload without advancing paid work', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    job.request.previewOmitBrandLogo = true; delete job.request.brandLogoMediaId;
+    if (job.planning.phase !== 'INITIAL_PLAN') throw new Error('Fixture');
+    job.planning.preparation.previewPreflightReady = true;
+    const value = await (await GET(request(undefined, job.id))).json();
+    expect(value).toMatchObject({ previewOmitBrandLogo: true, preflightReady: true });
+    expect(mocks.advance).not.toHaveBeenCalled();
+  });
   it('exposes the durable cached checkpoint and rejects Preview retries and unbounded creation', async () => {
     vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
     if (job.planning.phase !== 'INITIAL_PLAN') throw new Error('Fixture phase');

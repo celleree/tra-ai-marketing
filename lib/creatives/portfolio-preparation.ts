@@ -19,7 +19,7 @@ import { advancePlanningSourceAnalysis, composedSourceCatalog, composedLayoutPro
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
 import { primaryVideoGuidance, primaryVideoDirection, representativeVideoGuidance, selectedVideoInputContract } from '@/lib/creatives/primary-video-source';
-import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
+import { isPreviewAcceptance, PREVIEW_NO_LOGO_DIRECTION } from '@/lib/creatives/preview-acceptance';
 
 export type PortfolioPreparationState = {
   previewPreflightReady?: true;
@@ -287,7 +287,7 @@ export async function advancePortfolioPreparation(
     ...selectedVideoInputContract(data),
     ...(data.reviewHandoff ? { operatorSelectedSourceGuidance: data.reviewHandoff.operatorSelectedSourceGuidance } : {}),
     count: data.variationCount,
-    context: videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext,
+    context: `${data.previewOmitBrandLogo ? PREVIEW_NO_LOGO_DIRECTION + '\n\n' : ''}${videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext}`,
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),

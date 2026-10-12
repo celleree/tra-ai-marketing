@@ -35,6 +35,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
 
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
     {portfolio.response?.preflightReady ? <p role="status">Cached-input preflight passed. No paid planning or images have started. Resume only after approval for one initial planner, one audit and two Sunburst images. Uncached preparation, repair, retries and fallback are blocked in this Preview.</p> : null}
+    {portfolio.response?.previewOmitBrandLogo ? <p role="status">Logo omitted for this Preview test. Logo fidelity is not being evaluated.</p> : null}
     <div className={styles.summary} aria-live="polite">
       <p className={styles.status}><strong>{status}</strong></p>
       <p className={styles.count}><strong>{savedCount} / {job.requestedCount}</strong> creatives saved</p>

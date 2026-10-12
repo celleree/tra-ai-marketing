@@ -23,7 +23,7 @@ afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('resumable portfolio browser controller', () => {
   it('stops at the cached preflight checkpoint and does not advance a reopened checkpoint automatically', async () => {
-    const value = initial(), ready = { ...value, preflightReady: true as const };
+    const value = initial(), ready = { ...value, preflightReady: true as const, previewOmitBrandLogo: true as const };
     const fetcher = vi.fn().mockResolvedValue(Response.json(ready)); vi.stubGlobal('fetch', fetcher);
     const update = vi.fn(); expect(await runPortfolio(value, update, () => false)).toEqual(ready);
     expect(fetcher).toHaveBeenCalledOnce(); expect(update).toHaveBeenCalledOnce();

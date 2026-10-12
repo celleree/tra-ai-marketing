@@ -42,6 +42,8 @@ Preview acceptance with server purpose `staging-smoke` is restricted to two 4:5 
 
 The Preview Video Intelligence page can hand an existing completed video to Create without uploading it again. Create also accepts explicit `videoMediaId` / `layoutMediaId` UI links, rehydrates authenticated saved assets, verifies the layout-library role, and persists only convenience IDs. These links do not start analysis or generation and confer no pixel or claim approval.
 
+The operator may explicitly choose “Run this Preview test without a logo” for the bounded acceptance purpose. This choice is frozen with the portfolio, shown in saved progress, excludes logo fidelity, and cannot accompany a logo ID or be used outside the Preview portfolio path. Planning/rendering request no generated logo and no logo overlay is applied. Other source, cache and spend gates remain required; this test choice does not establish a canonical-logo repair.
+
 ### TRA Video
 
 May supply people/human identity, messaging/captions, visual context, and approved human-reference frames.

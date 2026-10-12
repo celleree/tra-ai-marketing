@@ -14,6 +14,7 @@ import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { withPaidPreparationScope } from '@/lib/creatives/preparation-checkpoint';
 import { advancePortfolioPreparation } from '@/lib/creatives/portfolio-preparation';
+import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 
 // The non-durable preparation helper stays disconnected from durable portfolio Video Intelligence.
 const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
@@ -92,6 +93,18 @@ const createHistoricalPortfolio = async (data: ReturnType<typeof request>, stora
 };
 
 describe('real preparation to Astra with composed sources', () => {
+  it('keeps source context unchanged while adding no-logo direction only to initial planning after cached preflight', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    const data = { ...portfolioRequest(), previewOmitBrandLogo: true as const, sourceAssets: [request().sourceAssets[2]] };
+    const sourceLayout = { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true };
+    const cached = await advancePortfolioPreparation(data, 'http://localhost', {
+      quotaReserved: true, analysis: analysis('Cached layout'), sourceLayout,
+    }, vi.fn(), 1, true);
+    expect(cached.state?.previewPreflightReady).toBe(true); expect(outbound).toHaveLength(0);
+    await withProviderUsageContext({ portfolioId: 'bounded-test' }, () => advancePortfolioPreparation(data, 'http://localhost', cached.state!, vi.fn(), 1));
+    expect(outbound).toHaveLength(1); expect(outbound[0].creativeContext).toContain('Do not render, invent or redraw any logo');
+    expect(data.context).not.toContain('unbranded Preview'); expect(mocks.angle).not.toHaveBeenCalled();
+  });
   it('checkpoints cached preparation before the planner and skips optional reference-provider stages in Preview', async () => {
     vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
     const data = { ...portfolioRequest(), sourceAssets: [request().sourceAssets[2]] };

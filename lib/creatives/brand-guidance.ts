@@ -24,7 +24,7 @@ const emptyGuidance = (): StoredBrandGuidance => ({
   fontGuidance: [],
 });
 
-export function readStoredBrandGuidance(): StoredBrandGuidance {
+export function readStoredBrandGuidance({ omitLogo = false }: { omitLogo?: boolean } = {}): StoredBrandGuidance {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyGuidance();
@@ -37,10 +37,10 @@ export function readStoredBrandGuidance(): StoredBrandGuidance {
       };
     };
     const logoUrl =
-      typeof parsed.brandGuidelines?.logo === 'string'
+      !omitLogo && typeof parsed.brandGuidelines?.logo === 'string'
         ? parsed.brandGuidelines.logo.trim()
         : '';
-    if (parsed.brandGuidelines?.logo != null && typeof parsed.brandGuidelines.logo !== 'string') {
+    if (!omitLogo && parsed.brandGuidelines?.logo != null && typeof parsed.brandGuidelines.logo !== 'string') {
       throw new Error('The saved TRA logo is not a usable uploaded asset. Save the logo in Company > Brand Guidelines before generating.');
     }
     const logoMatch = logoUrl ? STORED_MEDIA_URL.exec(logoUrl) : null;

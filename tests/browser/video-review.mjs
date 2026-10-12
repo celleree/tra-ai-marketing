@@ -27,8 +27,8 @@ const media = { id: mediaId, fileName: 'fixture.mp4', originalName: 'fixture.mp4
 const profile = { knowledgeBase: { servicesOffers: 'Saved consultation offer.' } };
 const claim = { type: 'VIDEO_TRANSCRIPT', startSegmentIndex: 0, endSegmentIndex: 0 };
 const segment = { segmentIndex: 0, startMs: 0, endMs: 2000, text: 'Exact saved video wording.' };
-const job = (status = 'BLOCKED') => ({ id: `portfolio_${'4'.repeat(32)}`, requestedCount: 4, planReady: true, planningPhase: 'READY_TO_RENDER',
-  planningCheckpoint: 0, planningError: null, lease: null, slots: Array.from({ length: 4 }, (_, i) => ({ index: i + 1,
+const job = (status = 'BLOCKED', count = 4) => ({ id: `portfolio_${'4'.repeat(32)}`, requestedCount: count, planReady: true, planningPhase: 'READY_TO_RENDER',
+  planningCheckpoint: 0, planningError: null, lease: null, slots: Array.from({ length: count }, (_, i) => ({ index: i + 1,
     creativeId: `creative_${String(i + 5).repeat(32)}`, status, ...(status === 'BLOCKED' ? { error: 'Offline fixture stop.' } : {}) })) });
 const thumbnails = await Promise.all([[180, 320], [320, 180]].map(async ([width, height]) =>
   'data:image/png;base64,' + (await sharp(Buffer.from(`<svg width="${width}" height="${height}"><rect width="100%" height="100%" fill="#cddbe8"/><text x="8" y="18">TOP CAPTION</text><text x="8" y="${height - 8}">BOTTOM CAPTION</text></svg>`)).png().toBuffer()).toString('base64')));
@@ -108,7 +108,10 @@ async function scenario(name, options, run) {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
       if (options.invalidRevision && request.method() === 'POST') { status = 409; value = { error: 'Review draft changed. Reload the saved review before generating.' }; }
-      else value = { job: job(state), creatives: [] };
+      else value = options.cachedPreflight ? {
+        job: { ...job('PENDING', 2), planReady: false, planningPhase: 'INITIAL_PLAN' }, creatives: [],
+        preflightReady: true, previewOmitBrandLogo: true,
+      } : { job: job(state), creatives: [] };
     }
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) });
     if (isPreview) previewActivity.active--;
@@ -119,6 +122,7 @@ async function scenario(name, options, run) {
     const target = new URL(url);
     if (options.linkedVideo) target.searchParams.set('videoMediaId', options.linkedVideo);
     if (options.linkedLayout) target.searchParams.set('layoutMediaId', options.linkedLayout);
+    if (options.acceptancePreview) target.searchParams.set('acceptancePreview', '1');
     await page.goto(target.href);
     await page.getByRole('button', { name: 'Generate creatives', exact: true }).waitFor();
     if (!options.runWhilePending) await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
@@ -130,6 +134,27 @@ async function scenario(name, options, run) {
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  await scenario('Explicit no-logo Preview test stops at cached checkpoint and persists its scope on reload',
+    { noLogo: true, acceptancePreview: true, cachedPreflight: true, linkedLayout: layoutMediaId }, async ({ page, calls, submissions }) => {
+      await ready(page);
+      await page.getByRole('slider', { name: 'Number of creatives to generate' }).fill('2');
+      await page.getByRole('combobox', { name: 'Creative format' }).selectOption('PORTRAIT_4_5');
+      await generateButton(page).click();
+      await page.getByRole('alert').getByText('The approved TRA logo is missing for this site.', { exact: false }).waitFor();
+      assert.equal(submissions.length, 0);
+      await page.getByLabel('Run this Preview test without a logo').check();
+      await generateButton(page).click();
+      await page.getByText('Cached-input preflight passed.', { exact: false }).waitFor();
+      await page.getByText('Logo omitted for this Preview test. Logo fidelity is not being evaluated.', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Resume generation', exact: true }).waitFor();
+      assert.equal(submissions.length, 1);
+      assert.equal(submissions[0].previewOmitBrandLogo, true); assert.equal(submissions[0].brandLogoMediaId, undefined);
+      assert.equal(submissions[0].variationCount, 2); assert.equal(submissions[0].placement, 'PORTRAIT_4_5');
+      assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method === 'PATCH'), false);
+      await page.reload();
+      await page.getByText('Logo omitted for this Preview test. Logo fidelity is not being evaluated.', { exact: true }).waitFor();
+      assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method === 'PATCH'), false);
+    });
   for (const source of ['video', 'layout']) await scenario(`Saved source UI handoff keeps ${source} removal across refresh while a sibling read is pending`,
     { noSavedReview: true, inventory: [], linkedVideo: availableB, linkedLayout: layoutMediaId, runWhilePending: true,
       holdSourceReadPaths: [source === 'video' ? '/api/references' : '/api/video/intelligence/jobs'] }, async ({ page, calls, videoActions, releaseSourceReads }) => {

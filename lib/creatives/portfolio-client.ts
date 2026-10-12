@@ -4,7 +4,8 @@ import { parseCreative } from '@/lib/creatives/parse-generation-response';
 import { parsePortfolioProgress, type PortfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { createSubmissionIdentity, SUBMISSION_HEADER, type SubmissionStorage } from '@/lib/creatives/submission-id';
 
-export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number; preflightReady?: true };
+export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number;
+  preflightReady?: true; previewOmitBrandLogo?: true };
 type Command = { action: 'create'; request: GenerateCreativeRequest; submissionId: string } | { action: 'load' | 'advance'; id: string }
   | { action: 'retry'; id: string; slotIndex: number | null };
 const endpoint = '/api/creatives/portfolios';
@@ -49,6 +50,7 @@ export async function requestPortfolio(command: Command): Promise<PortfolioRespo
   const error = typeof value.error === 'string' ? value.error : !response.ok ? 'Portfolio request failed. Reload saved progress.' : undefined;
   const retryAfterMs = response.status === 202 ? parseBusyRetryAfterMs(response.headers.get('Retry-After')) : undefined;
   return { job, creatives: creatives as GeneratedCreative[], ...(value.preflightReady === true ? { preflightReady: true } : {}),
+    ...(value.previewOmitBrandLogo === true ? { previewOmitBrandLogo: true } : {}),
     ...(error ? { error } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
 }
 export const portfolioCanAdvance = (job: PortfolioProgress) =>

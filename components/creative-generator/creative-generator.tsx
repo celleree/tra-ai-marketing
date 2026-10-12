@@ -85,13 +85,14 @@ function WorkspaceSectionHeader({ section }: { section: WorkspaceSection }) {
   );
 }
 
-export function CreativeGenerator() {
+export function CreativeGenerator({ acceptancePreview = false }: { acceptancePreview?: boolean } = {}) {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
   const [creationMode, setCreationMode] = useState<CreationMode>('generate');
   const [sourceAssets, setSourceAssets] = useState<CreativeSourceAsset[]>([]);
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
   const [placement, setPlacement] = useState<CreativePlacement>('SQUARE_1_1');
+  const [omitTestLogo, setOmitTestLogo] = useState(false);
   const [uploadedCreatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generationError, setGenerationError] = useState('');
   const [handoffGenerate, setHandoffGenerate] = useState(false);
@@ -179,12 +180,14 @@ export function CreativeGenerator() {
     if (!ready || generating || !videoReview.canGenerate()) return;
     setGenerationError('');
     try {
-      const brand = readStoredBrandGuidance();
-      if (!brand.logo) throw new Error('The approved TRA logo is missing for this site. Restore the original logo in Company > Brand Guidelines before generating.');
+      const previewOmitBrandLogo = acceptancePreview && omitTestLogo;
+      const brand = readStoredBrandGuidance({ omitLogo: previewOmitBrandLogo });
+      if (!brand.logo && !previewOmitBrandLogo) throw new Error('The approved TRA logo is missing for this site. Restore the original logo in Company > Brand Guidelines before generating.');
       const companyProfile = readStoredRuntimeCompanyProfile();
       const reviewReference = videoReview.generationReference();
       await portfolio.start({
         ...(reviewReference ? { videoReview: reviewReference } : {}),
+        ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
         sourceAssets: sourceAssets.map(source => ({ mediaId: source.media.id, role: source.role })),
         ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
         ...(brand.colors.length ? { brandColors: brand.colors } : {}),
@@ -275,6 +278,12 @@ export function CreativeGenerator() {
                   </button>
                 </div>
 
+                {creationMode === 'generate' && acceptancePreview ? <div className="panel">
+                  <p>Preview acceptance: Generate checks cached inputs and pauses before paid planning.</p>
+                  <label><input type="checkbox" checked={omitTestLogo} disabled={generating}
+                    onChange={event => setOmitTestLogo(event.target.checked)} /> Run this Preview test without a logo</label>
+                  {omitTestLogo ? <p>The images will be requested without logos. Logo fidelity is not being evaluated.</p> : null}
+                </div> : null}
                 {creationMode === 'generate' ? (
                   <CreativeComposer
                     value={context}

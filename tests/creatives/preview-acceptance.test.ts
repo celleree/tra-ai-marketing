@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertPreviewAcceptanceJob, assertPreviewAcceptanceRequest } from '@/lib/creatives/preview-acceptance';
+import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { fetchWithProviderUsage, withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 import { fetchCreativeImage } from '@/lib/creatives/image-models';
 import { withImageAttemptScope, imageAttemptBudget } from '@/lib/creatives/image-attempt-execution';
@@ -19,6 +20,23 @@ const request = (): ValidGenerateCreativeRequest => ({ context: 'Use saved video
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe('Preview acceptance spend boundary', () => {
+  it('requires explicit no-logo consent, freezes it, and rejects omission in other modes or with a logo', () => {
+    enable(); const { brandLogoMediaId: _logo, ...withoutLogo } = request();
+    const { reviewHandoff: _handoff, ...input } = withoutLogo;
+    const noLogo = { ...input, previewOmitBrandLogo: true };
+    const parsed = validateGenerateCreativeRequest(noLogo, 36);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error('Fixture');
+    expect(parsed.data).toHaveProperty('previewOmitBrandLogo', true); expect(parsed.data).not.toHaveProperty('brandLogoMediaId');
+    const frozen = { ...parsed.data, reviewHandoff: request().reviewHandoff };
+    expect(() => assertPreviewAcceptanceJob(newCreativePortfolio(frozen))).not.toThrow();
+    expect(() => assertPreviewAcceptanceRequest(withoutLogo, true)).toThrow('Preview acceptance requires');
+    expect(validateGenerateCreativeRequest({ ...noLogo, brandLogoMediaId: request().brandLogoMediaId }, 36).success).toBe(false);
+    expect(validateGenerateCreativeRequest({ ...noLogo, previewOmitBrandLogo: 'true' }, 36).success).toBe(false);
+    expect(validateGenerateCreativeRequest(noLogo).success).toBe(false);
+    vi.stubEnv('VERCEL_ENV', 'production'); expect(validateGenerateCreativeRequest(noLogo, 36).success).toBe(false);
+    enable(); vi.stubEnv('TRA_IMAGE_PURPOSE', 'diagnostic'); expect(validateGenerateCreativeRequest(noLogo, 36).success).toBe(false);
+  });
   it('requires the bounded source scope and excludes repair and re-audit jobs', () => {
     enable(); const valid = request(); expect(() => assertPreviewAcceptanceRequest(valid, true)).not.toThrow();
     for (const changed of [{ ...valid, variationCount: 3 }, { ...valid, brandLogoMediaId: undefined },

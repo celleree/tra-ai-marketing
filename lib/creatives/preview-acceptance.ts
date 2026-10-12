@@ -9,15 +9,17 @@ export const isPreviewAcceptance = () => process.env.VERCEL_ENV === 'preview'
 export class PreviewAcceptanceError extends Error {
   readonly status = 409;
 }
+export const PREVIEW_NO_LOGO_DIRECTION = 'This explicitly unbranded Preview test excludes logo verification. Do not render, invent or redraw any logo, wordmark, brand mark or logo-shaped placeholder. Do not substitute header artwork. No logo overlay will be added.';
 
 export function assertPreviewAcceptanceRequest(request: ValidGenerateCreativeRequest, frozen = false) {
   if (!isPreviewAcceptance()) return;
-  if (request.variationCount !== 2 || request.placement !== 'PORTRAIT_4_5' || !request.brandLogoMediaId
+  const validLogoChoice = request.previewOmitBrandLogo === true ? !request.brandLogoMediaId : Boolean(request.brandLogoMediaId);
+  if (request.variationCount !== 2 || request.placement !== 'PORTRAIT_4_5' || !validLogoChoice
     || request.sourceAssets.filter(source => source.role === 'TRA_VIDEO').length !== 1
     || request.sourceAssets.filter(source => source.role === 'LAYOUT_REFERENCE').length !== 1
     || request.sourceAssets.some(source => !['TRA_VIDEO', 'LAYOUT_REFERENCE'].includes(source.role))
     || (frozen ? !request.reviewHandoff?.choices.frames?.length : !request.videoReview)) {
-    throw new PreviewAcceptanceError('Preview acceptance requires exactly two 4:5 creatives, the original logo, one completed video, one supplied layout reference and a saved manually selected frame pool.');
+    throw new PreviewAcceptanceError('Preview acceptance requires exactly two 4:5 creatives, the original logo or explicit no-logo test choice, one completed video, one supplied layout reference and a saved manually selected frame pool.');
   }
 }
 

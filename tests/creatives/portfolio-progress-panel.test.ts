@@ -18,6 +18,7 @@ const renderPanel = ({
   planReady = false,
   videoPreparation,
   preflightReady = false,
+  previewOmitBrandLogo = false,
 }: {
   count?: number;
   statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>;
@@ -27,6 +28,7 @@ const renderPanel = ({
   planReady?: boolean;
   videoPreparation?: PortfolioProgress['videoPreparation'];
   preflightReady?: boolean;
+  previewOmitBrandLogo?: boolean;
 } = {}) => {
   const base = portfolioProgress(newCreativePortfolio(portfolioRequest(count)));
   const job = {
@@ -48,7 +50,8 @@ const renderPanel = ({
   const resume = vi.fn();
   const retry = vi.fn();
   const portfolio = {
-    response: { job, creatives: [], ...(preflightReady ? { preflightReady: true } : {}) },
+    response: { job, creatives: [], ...(preflightReady ? { preflightReady: true } : {}),
+      ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}) },
     running,
     stopped,
     error: '',
@@ -63,6 +66,12 @@ const renderPanel = ({
 };
 
 describe('portfolio progress panel', () => {
+  it('marks the frozen no-logo scope separately from cached preflight or image completion', () => {
+    const { html } = renderPanel({ count: 2, preflightReady: true, previewOmitBrandLogo: true });
+    expect(html).toContain('Logo omitted for this Preview test. Logo fidelity is not being evaluated.');
+    expect(html).toContain('No paid planning or images have started');
+    expect(html).toContain('Resume generation');
+  });
   it('shows the nonpaid cached checkpoint and bounded Resume scope', () => {
     const { html } = renderPanel({ count: 2, preflightReady: true });
     expect(html).toContain('Cached-input preflight passed');

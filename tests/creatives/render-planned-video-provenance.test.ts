@@ -44,12 +44,13 @@ const storage = { saveImage: vi.fn().mockResolvedValue({ id: `media_${'1'.repeat
   mimeType: 'image/png', size: 5, url: '/creative.png' }) } as any;
 
 async function render(explicit = false, human = true, selected: typeof selection = selection, reviewed = false,
-  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState, layout?: 'SELECTED' | 'IGNORED', draft = false) {
+  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState, layout?: 'SELECTED' | 'IGNORED', draft = false, omitLogo = false) {
   const referenceCatalog = layout ? [referenceCandidate('4')] : [];
   const request = { ...portfolioRequest(), sourceAssets: [{ role: 'TRA_VIDEO', mediaId },
     ...(layout ? [{ role: 'LAYOUT_REFERENCE', mediaId: referenceCatalog[0].referenceId }] : [])],
     ...(explicit ? { videoFrameSelection: { libraryId: selected.libraryId, sourceVideoContentHash: sourceHash,
       frameIds: [selected.frames[0].libraryFrameId] } } : {}) } as any;
+  if (omitLogo) { request.previewOmitBrandLogo = true; delete request.brandLogoMediaId; }
   if (reviewed) request.reviewHandoff = { choices: { video: { libraryId: selected.libraryId,
     librarySha256: '1'.repeat(64), locator: { sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash } },
     frames: [{ frameId: videoCandidateFrameId(sourceHash, 1200, 'd'.repeat(64)), representativeFrameId: frameId,
@@ -93,6 +94,15 @@ async function renderCatalogHuman(legacy = false) {
 }
 
 describe('render planned video provenance', () => {
+  it('requests the explicit no-logo test without logo geometry or saved overlay provenance', async () => {
+    const creative = await render(false, true, selection, false, undefined, undefined, false, true);
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+    const args = mocks.generate.mock.calls[0][0];
+    expect(args.logoGeometry).toBeUndefined(); expect(args.context).toContain('Do not render, invent or redraw any logo');
+    expect(creative.generationProvenance).not.toHaveProperty('logoOverlaySource');
+    expect(creative.planning).not.toHaveProperty('logoAnchor');
+    expect(args.frames).toEqual([frame]);
+  });
   it('attaches selected source pixels with exact source case wording and saves the draft binding', async () => {
     const creative = await render(false, true, selection, false, undefined, undefined, true);
     const passage = draftVideoPassage();

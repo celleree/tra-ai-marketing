@@ -12,6 +12,7 @@ import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { buildCreativeRenderBrief, formatCreativeRenderBrief } from '@/lib/creatives/render-brief';
 import { compositeCreativeBrandLogo, resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
+import { PREVIEW_NO_LOGO_DIRECTION } from '@/lib/creatives/preview-acceptance';
 import { resolveCreativeLogoGeometry, resolveLayoutAwareLogoAnchor } from '@/lib/creatives/logo-placement';
 import { selectedLayout } from '@/lib/references/planning';
 import { saveCreativeBatch } from '@/lib/creatives/storage';
@@ -125,6 +126,9 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   const layoutBlueprint = item.strategy.referenceSelection
     ? selectedLayout(item.strategy.referenceSelection, referenceCatalog)
     : undefined;
+  if (request.previewOmitBrandLogo && (brandLogo || logoOverlaySource)) {
+    throw new Error('The no-logo Preview test cannot attach or composite a logo source.');
+  }
   const logoPlacement = brandLogo
     ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, request.placement)
     : undefined;
@@ -153,7 +157,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     referenceCatalog,
     ...(proofProvenance ? { proofProvenance } : {}),
   }));
-  const itemContext = videoGuidance ? `${primaryVideoRenderDirection(videoGuidance)}\n\n${renderBrief}` : renderBrief;
+  const itemContext = `${request.previewOmitBrandLogo ? PREVIEW_NO_LOGO_DIRECTION + '\n\n' : ''}${videoGuidance ? `${primaryVideoRenderDirection(videoGuidance)}\n\n${renderBrief}` : renderBrief}`;
 
   if (itemImageSource) {
     imageResult = copyMode.kind === 'LEGACY'

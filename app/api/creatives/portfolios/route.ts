@@ -18,7 +18,8 @@ export const maxDuration = 300;
 const json = (body: object, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store', ...headers } });
 const result = async (job: CreativePortfolioJob, status = 200, error?: string, retryAfterSeconds?: number) =>
-  json({ job: portfolioProgress(job), creatives: await readPortfolioCreatives(job),
+    json({ job: portfolioProgress(job), creatives: await readPortfolioCreatives(job),
+      ...(job.request.previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
     ...(isPreviewAcceptance() && job.planning.phase === 'INITIAL_PLAN' && !job.planningError
       && job.planning.preparation.previewPreflightReady ? { preflightReady: true } : {}), ...(error ? { error } : {}) },
     status, retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {});
