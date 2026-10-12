@@ -72,6 +72,30 @@ Adding the key alone leaves the copilot disabled. Both `TRA_CLAUDE_COPILOT_ENABL
 
 The operator route requires approval of the effective company snapshot and each paid request. It uses authoritative saved creative evidence, a 4,096-token output limit, and a durable quota of 12 requests per operator per hour. Quotas and token limits do not enforce a total dollar cap. Provider failure or interruption can leave billing unknown; there are no automatic paid retries. Recommendations require human review and do not change creatives, publish ads, or claim measured performance or revenue. Adding credentials does not establish live quality or end-to-end acceptance.
 
+## Higgsfield video generation
+
+The selected initial video provider is Higgsfield, using Kling 2.6 Motion Control Standard
+(`kling-video/motion-control/std`). The server transport in `lib/video-generation/higgsfield.ts`
+accepts a source image and motion-reference video. It does not yet provide application routes,
+job persistence, output storage or a user interface.
+
+Developer API access and billing are separate from the Higgsfield website subscription.
+Keep `HF_API_KEY_ID` and `HF_API_KEY_SECRET` server-side; never use browser-visible variables.
+Credentials alone do not authorize generation. Before enabling a caller, verify source media
+authority and permissions, duration-based pricing and an approved budget; a caller-supplied
+quote is not a provider-enforced cost cap. Sound retention must be chosen explicitly.
+
+Persist the submission's idempotency key and exact inputs before calling the provider, then
+store the returned request ID and status URL. The transport submits once without automatic
+retries or model fallback. Recover by polling the existing job; after an ambiguous submission,
+replay only the same inputs and key under the approved recovery policy. Copy completed output
+to private application storage before provider retention expires. Do not expose generated output
+as approved advertising without the normal human/compliance review.
+
+References: [model contract](https://open.higgsfield.ai/models/kling-video/motion-control/std/api-reference),
+[request lifecycle](https://docs.higgsfield.ai/docs/concepts/requests),
+[idempotency](https://docs.higgsfield.ai/docs/concepts/idempotency).
+
 ## Meta
 
 - Store `META_ACCESS_TOKEN` server-side.
