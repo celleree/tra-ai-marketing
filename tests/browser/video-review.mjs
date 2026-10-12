@@ -39,7 +39,7 @@ async function scenario(name, options, run) {
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   const errors = [], calls = [], submissions = [], videoActions = [];
   let releaseSourceReads = () => {};
-  const sourceReadGate = options.holdSourceReads ? new Promise(resolve => { releaseSourceReads = resolve; }) : null;
+  const sourceReadGate = options.holdSourceReads || options.holdSourceReadPaths ? new Promise(resolve => { releaseSourceReads = resolve; }) : null;
   page.on('pageerror', error => errors.push(error.message));
   let choices = { video, frames: options.frames === undefined ? [frame] : options.frames, claims: [claim], companyProfile: options.profile ? profile : null };
   const bindings = Array.from({ length: options.frameCount ?? 1 }, (_, index) => index ? { ...frame,
@@ -63,7 +63,7 @@ async function scenario(name, options, run) {
     const request = route.request(), path = new URL(request.url()).pathname, body = request.postDataJSON();
     calls.push([path, request.method()]);
     if (sourceReadGate && request.method() === 'GET'
-      && ['/api/video/intelligence/jobs', '/api/references'].includes(path)) {
+      && (options.holdSourceReadPaths ?? ['/api/video/intelligence/jobs', '/api/references']).includes(path)) {
       await sourceReadGate;
       if (request.failure()) return;
     }
@@ -130,6 +130,20 @@ async function scenario(name, options, run) {
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  for (const source of ['video', 'layout']) await scenario(`Saved source UI handoff keeps ${source} removal across refresh while a sibling read is pending`,
+    { noSavedReview: true, inventory: [], linkedVideo: availableB, linkedLayout: layoutMediaId, runWhilePending: true,
+      holdSourceReadPaths: [source === 'video' ? '/api/references' : '/api/video/intelligence/jobs'] }, async ({ page, calls, videoActions, releaseSourceReads }) => {
+      const removedName = source === 'video' ? 'second.mp4' : 'fixture-layout.png';
+      const retainedName = source === 'video' ? 'fixture-layout.png' : 'second.mp4';
+      const key = source === 'video' ? 'tra-create-video-ids-v1' : 'tra-create-linked-layout-ids-v1';
+      await page.getByLabel(`Remove ${removedName}`).click();
+      assert.deepEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), key), []);
+      await page.reload(); releaseSourceReads(); await page.getByLabel(`Remove ${retainedName}`).waitFor();
+      await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
+      assert.equal(await page.getByLabel(`Remove ${removedName}`).count(), 0);
+      assert.equal(videoActions.length, 0);
+      assert.equal(calls.some(([path]) => path.startsWith('/api/media/upload') || path === '/api/media/confirm' || path === '/api/creatives/portfolios'), false);
+    });
   await scenario('Saved source UI handoff survives refresh while its first reads are pending',
     { noSavedReview: true, inventory: [], linkedVideo: availableB, linkedLayout: layoutMediaId,
       holdSourceReads: true, runWhilePending: true }, async ({ page, calls, videoActions, releaseSourceReads }) => {

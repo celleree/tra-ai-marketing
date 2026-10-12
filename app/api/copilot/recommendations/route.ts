@@ -3,11 +3,12 @@ import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { buildSavedCopilotContext, CopilotContextError } from '@/lib/copilot/context';
 import { CLAUDE_COPILOT_MODEL, ClaudeCopilotError, requestClaudeCopilot } from '@/lib/copilot/claude';
 import { requireOperatorQuota } from '@/lib/quotas/require-quota';
+import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
 
 export const runtime = 'nodejs';
 const MAX_BODY_BYTES = 256 * 1024;
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
-const available = () => process.env.TRA_CLAUDE_COPILOT_ENABLED === 'true'
+const available = () => !isPreviewAcceptance() && process.env.TRA_CLAUDE_COPILOT_ENABLED === 'true'
   && process.env.TRA_CLAUDE_COPILOT_ALLOW_PAID === 'true' && Boolean(process.env.ANTHROPIC_API_KEY?.trim());
 
 async function readBody(request: Request): Promise<unknown> {
@@ -37,6 +38,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const access = await getOperatorAccess();
   if (!access.allowed) return operatorAccessDeniedResponse(access);
+  if (isPreviewAcceptance()) return reply({ error: 'Preview acceptance does not authorize paid Copilot recommendations.' }, 409);
   if (!available()) return reply({ error: 'Claude Copilot is unavailable.' }, 503);
   let body: unknown;
   try { body = await readBody(request); } catch { return reply({ error: 'Provide valid JSON within the 256 KB request limit.' }, 400); }

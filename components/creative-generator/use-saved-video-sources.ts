@@ -95,7 +95,18 @@ export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources:
       ])]));
     } catch { /* Inventory convenience storage may be disabled. */ }
   }, [sources, failures, pending]);
-  const forget = (id: string) => { removed.current.add(id); };
+  const forget = (id: string) => {
+    removed.current.add(id);
+    for (const key of [INVENTORY, LINKED_LAYOUTS]) {
+      try {
+        const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? 'null');
+        if (Array.isArray(value)) window.localStorage.setItem(key, JSON.stringify(value.filter(saved => saved !== id)));
+      } catch { /* Other source reads may still be pending; remove each stored identity independently. */ }
+    }
+    const url = new URL(window.location.href);
+    for (const key of ['videoMediaId', 'layoutMediaId']) if (url.searchParams.get(key) === id) url.searchParams.delete(key);
+    if (url.href !== window.location.href) window.history.replaceState(null, '', url);
+  };
   const clearUnavailable = async () => {
     for (const id of Object.keys(failures)) { forget(id); await review.removeVideo(id); }
     setFailures({});

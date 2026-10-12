@@ -28,6 +28,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('operator-only Claude recommendation route (offline)', () => {
+  it('disables and rejects paid Copilot in acceptance Preview before reading context or charging quota', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    expect(await response(await GET(), 200)).toEqual({ available: false, model: CLAUDE_COPILOT_MODEL });
+    expect(await response(await POST(request()), 409)).toHaveProperty('error', expect.stringContaining('does not authorize'));
+    expect(mocks.listCreatives).not.toHaveBeenCalled(); expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+    expect(mocks.requestClaudeCopilot).not.toHaveBeenCalled();
+  });
+  it.each([['production', 'staging-smoke'], ['preview', 'diagnostic']])('retains configured Copilot for %s / %s', async (environment, purpose) => {
+    vi.stubEnv('VERCEL_ENV', environment); vi.stubEnv('TRA_IMAGE_PURPOSE', purpose);
+    expect(await response(await GET(), 200)).toHaveProperty('available', true);
+    await response(await POST(request()), 200); expect(mocks.requestClaudeCopilot).toHaveBeenCalledTimes(1);
+  });
   it.each([401, 403, 503])('gates GET and POST before reading the body or invoking storage/quota/provider: %i', async status => {
     mocks.getOperatorAccess.mockResolvedValue({ allowed: false, status, error: 'Access unavailable' });
     const readBody = vi.fn(() => { throw new Error('body must not be read'); });
