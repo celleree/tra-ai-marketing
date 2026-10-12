@@ -160,14 +160,16 @@ describe('real preparation to Astra with composed sources', () => {
     const ready = (await step(current, storage)).job;
     const restored = await restoreCreativePortfolio(ready.snapshot!);
     expect(restored.sourceAnalysis).toEqual(input.sourceAnalysis);
-    expect(restored.providerImageSource?.media.id).toBe(data.sourceAssets.find(s => s.role === 'TRA_REFERENCE')!.mediaId);
-    expect(restored.videoFrameSet).toBeNull(); expect(restored.generatedVideoFrameSelection).toBeUndefined();
+    expect(restored.providerImageSource).toBeUndefined();
+    expect(restored.videoFrameSet?.source.media.id).toBe(data.sourceAssets.find(s => s.role === 'TRA_VIDEO')!.mediaId);
+    expect(restored.generatedVideoFrameSelection).toBeUndefined();
     expect(ready.slots).toEqual(job.slots);
     const direct = await prepareCreativeGeneration(data, 'http://localhost');
     expect(outbound[1].sourceAnalysis).toEqual(input.sourceAnalysis);
     expect(direct.sourceAnalysis).toEqual(restored.sourceAnalysis);
     expect(direct.providerImageSource?.media.id).toBe(restored.providerImageSource?.media.id);
-    expect(direct.videoFrameSet).toBeNull(); expect(outbound).toHaveLength(2);
+    expect(direct.videoFrameSet?.source.media.id).toBe(restored.videoFrameSet?.source.media.id);
+    expect(outbound).toHaveLength(2);
   });
 
   it('reuses completed source and reference preparation after explicit retry of a failed second audit', async () => {

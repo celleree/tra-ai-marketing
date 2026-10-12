@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { afterEach, expect, it, vi } from 'vitest';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
+import { requestCreativeBatch } from '@/lib/ai/creative-planner';
+import { primaryVideoGuidance } from '@/lib/creatives/primary-video-source';
 import { retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY, getEffectiveIntervalFps } from '@/lib/video/candidate-policy';
@@ -137,6 +139,9 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   const outbound = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).input[1].content[0].text);
   const videoEntries = outbound.sourceAnalysis.entries.filter((entry: any) => entry.result?.kind === 'VIDEO_INTELLIGENCE');
   expect(videoEntries).toHaveLength(2);
+  expect(outbound.referenceAnalysis.summary).toContain('LATE_OBSERVATION_b');
+  expect(outbound.referenceAnalysis.summary).not.toContain('No source image');
+  expect(outbound.creativeContext).toContain('PRIMARY SELECTED VIDEO');
   expect(videoEntries.every((entry: any) => entry.result.intelligence.projectionVersion === 3)).toBe(true);
   expect(videoEntries.every((entry: any) => entry.result.intelligence.selector.contextSha256 === sha('Campaign b'))).toBe(true);
   expect(videoEntries.every((entry: any) => entry.result.intelligence.transcript.includedSegmentCount <= 24
@@ -175,6 +180,13 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   expect(retryReads.mock.calls.some(([key]) => key.startsWith('libraries/'))).toBe(false);
   expect(video.preparation).toHaveBeenCalledTimes(2); expect(video.transcription).toHaveBeenCalledTimes(2);
   expect(video.observation).toHaveBeenCalledTimes(2); expect(fetchMock).toHaveBeenCalledTimes(3);
+  const humanArgs = structuredClone(firstCompleted.planning.checkpoint.plannerArgs);
+  const primary = humanArgs.sourceAnalysis!.entries.find(entry => entry.result?.kind === 'VIDEO_INTELLIGENCE')!;
+  if (primary.result?.kind !== 'VIDEO_INTELLIGENCE') throw new Error('Expected complete video source');
+  primary.result.intelligence.observations[0].observation.sceneType = 'PERSON';
+  humanArgs.analysis = primaryVideoGuidance(humanArgs.sourceAnalysis)!.analysis;
+  humanArgs.hasApprovedHumanSource = true;
+  await expect(requestCreativeBatch(humanArgs)).rejects.toThrow('plan ignored the human');
 });
 
 it('refreshes the child retry state immediately when its ETag changes after parent authorization consumption', async () => {

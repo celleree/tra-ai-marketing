@@ -40,7 +40,8 @@ beforeEach(() => {
 const storage = { saveImage: vi.fn().mockResolvedValue({ id: `media_${'1'.repeat(32)}`, fileName: 'creative.png', originalName: 'creative.png',
   mimeType: 'image/png', size: 5, url: '/creative.png' }) } as any;
 
-async function render(explicit = false, human = true, selected: typeof selection = selection, reviewed = false) {
+async function render(explicit = false, human = true, selected: typeof selection = selection, reviewed = false,
+  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState) {
   const request = { ...portfolioRequest(), sourceAssets: [{ role: 'TRA_VIDEO', mediaId }],
     ...(explicit ? { videoFrameSelection: { libraryId: selected.libraryId, sourceVideoContentHash: sourceHash,
       frameIds: [selected.frames[0].libraryFrameId] } } : {}) } as any;
@@ -56,7 +57,7 @@ async function render(explicit = false, human = true, selected: typeof selection
     request, batchPlan: snapshot.batchPlan, referenceCatalog: [], selectedReferences: [],
     requestedSources: [{ role: 'TRA_VIDEO', mediaId, sha256: sourceHash }], analysisSources: [],
     reserveLogoArea: false, brandLogo: null, providerImageSource: undefined,
-    videoFrameSet: frameSet, generatedVideoFrameSelection: selected, storage,
+    videoFrameSet: frameSet, generatedVideoFrameSelection: selected, storage, sourceAnalysis,
   }, { creativeId: `creative_${'2'.repeat(32)}` });
 }
 
@@ -80,13 +81,27 @@ async function renderCatalogHuman(legacy = false) {
 }
 
 describe('render planned video provenance', () => {
-  it.each([false, true])('omits discarded request-wide video frames and selection from a non-human creative (explicit=%s)', async explicit => {
-    const creative = await render(explicit, false);
-    expect(mocks.generate).not.toHaveBeenCalled();
-    expect(mocks.promptOnly).toHaveBeenCalledOnce();
-    expect(creative.generationProvenance!.attachedSource).toBeNull();
-    expect(creative.videoFrameSelection).toBeUndefined();
+  it('carries selected-video evidence alongside exact human frames into provider context and saved prompt', async () => {
+    const sourceAnalysis = { version: 1, entries: [{ source: { role: 'TRA_VIDEO', mediaId, sha256: sourceHash },
+      analyzer: { kind: 'REPRESENTATIVE_VIDEO_FRAMES', model: 'fixture', schemaVersion: 1, contextSha256: 'a'.repeat(64) },
+      evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'REPRESENTATIVE_VIDEO_FRAMES',
+        analyzedFrames: [{ timestampMs: frame.timestampMs, frameSha256: frame.frameSha256 }],
+        analysis: { summary: 'REFERENCE VIDEO CONSULTATION SCENE', visibleText: [], visualStructure: 'Person beside a desk',
+          hookOrAngle: 'Explain the consultation', offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [],
+          dominantCategory: 'customer-problems' } } }] } as const;
+    mocks.generate.mockImplementationOnce(async args => ({ buffer: Buffer.from('image'), prompt: args.context,
+      model: 'gpt-image-2.5-sunburst', routing, providerFrames: [{ ...frame, ...attachedFrames[0] }] }));
+    const creative = await render(false, true, selection, false, sourceAnalysis as any);
+    expect(mocks.generate.mock.calls[0][0].frames[0].sourceVideoMediaId).toBe(mediaId);
+    expect(creative.generationProvenance!.imageGeneration.prompt).toContain('REFERENCE VIDEO CONSULTATION SCENE');
+    expect(creative.generationProvenance!.imageGeneration.prompt).toContain(mediaId);
     expect(creative.generationProvenance!.requestedSources).toEqual([{ role: 'TRA_VIDEO', mediaId, sha256: sourceHash }]);
+    expect(creative.videoFrameSelection!.sourceVideoMediaId).toBe(mediaId);
+  });
+  it.each([false, true])('blocks non-human video rendering without primary evidence (explicit=%s)', async explicit => {
+    await expect(render(explicit, false)).rejects.toThrow('selected video cannot be replaced');
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.promptOnly).not.toHaveBeenCalled();
   });
 
   it('saves automatic B3 provenance with exact selected-frame evidence', async () => {

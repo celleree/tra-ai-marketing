@@ -40,7 +40,11 @@ export function readStoredBrandGuidance(): StoredBrandGuidance {
       typeof parsed.brandGuidelines?.logo === 'string'
         ? parsed.brandGuidelines.logo.trim()
         : '';
+    if (parsed.brandGuidelines?.logo != null && typeof parsed.brandGuidelines.logo !== 'string') {
+      throw new Error('The saved TRA logo is not a usable uploaded asset. Save the logo in Company > Brand Guidelines before generating.');
+    }
     const logoMatch = logoUrl ? STORED_MEDIA_URL.exec(logoUrl) : null;
+    if (logoUrl && !logoMatch) throw new Error('The saved TRA logo is not a usable uploaded asset. Save the logo in Company > Brand Guidelines before generating.');
     const colors = parseBrandColors(
       typeof parsed.brandGuidelines?.brandColors === 'string'
         ? parsed.brandGuidelines.brandColors
@@ -63,7 +67,8 @@ export function readStoredBrandGuidance(): StoredBrandGuidance {
           : `${name}: approved uploaded brand font`;
       }),
     };
-  } catch {
-    return emptyGuidance();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('The saved TRA logo')) throw error;
+    throw new Error('Saved Company brand settings could not be read. Open Company and save them before generating.');
   }
 }

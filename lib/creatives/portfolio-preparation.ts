@@ -18,6 +18,7 @@ import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
+import { primaryVideoGuidance, primaryVideoDirection } from '@/lib/creatives/primary-video-source';
 
 export type PortfolioPreparationState = {
   videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
@@ -138,13 +139,13 @@ export async function advancePortfolioPreparation(
 
   if (sourceCompositionVersion === 2 && !state.analysis) {
     const entries = state.sourceAnalysis!.entries;
-    const primaryId = generationSourceAsset?.media.id ?? videoFrameSet?.source.media.id;
+    const primaryId = videoFrameSet?.source.media.id ?? generationSourceAsset?.media.id;
     const primary = entries.filter(entry => entry.source.mediaId === primaryId).map(entry => entry.result!);
     const layout = primary.find(result => result.kind === 'LAYOUT_BLUEPRINT');
     state.sourceLayout = layout?.layout;
     const observation = primary.find(result => result.kind === 'TRA_REFERENCE' || result.kind === 'REPRESENTATIVE_VIDEO_FRAMES');
     const angle = primary.find(result => result.kind === 'LAYOUT_ANGLE');
-    state.analysis = observation?.analysis ?? (layout ? { ...buildLayoutReferenceAnalysis(layout.layout.blueprint),
+    state.analysis = primaryVideoGuidance(state.sourceAnalysis, videoFrameSet?.source.media.id)?.analysis ?? observation?.analysis ?? (layout ? { ...buildLayoutReferenceAnalysis(layout.layout.blueprint),
       hookOrAngle: angle?.angleDescription ?? '' } : buildPromptOnlyAnalysis(data.context));
     state.referenceCatalog ??= composedSourceCatalog(state.sourceAnalysis!);
   }
@@ -247,7 +248,8 @@ export async function advancePortfolioPreparation(
     ? isUsableApprovedHumanSource(approvedHumanSource, sourceSuppliedToImageGeneration)
     : false;
   const manualFrames = Boolean(data.reviewHandoff?.choices.frames?.length);
-  const approvedHumanOptions = manualFrames ? [] : await loadApprovedHumanOptions();
+  const videoGuidance = primaryVideoGuidance(state.sourceAnalysis, videoFrameSet?.source.media.id);
+  const approvedHumanOptions = manualFrames || videoGuidance ? [] : await loadApprovedHumanOptions();
   const humanSourceDirection = manualFrames
     ? 'The operator selected a closed pool of exact TRA video frames in operatorSelectedSourceGuidance. For human concepts use only that pool, with null approvedHumanId; no catalog, image, representative or neighbor substitution. Visual suitability and overlay assessment plus fresh PNG extraction are still required before rendering. Choose a non-human concept if that pool cannot support the idea.'
     : approvedHumanOptions.length
@@ -277,11 +279,12 @@ export async function advancePortfolioPreparation(
   const plannerArgs = {
     ...(data.reviewHandoff ? { operatorSelectedSourceGuidance: data.reviewHandoff.operatorSelectedSourceGuidance } : {}),
     count: data.variationCount,
-    context: generationContext,
+    context: videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext,
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),
-    hasApprovedHumanSource: manualFrames || hasUsableApprovedHumanSource,
+    ...(videoGuidance ? { primaryVideoMediaId: videoGuidance.source.mediaId } : {}),
+    hasApprovedHumanSource: manualFrames || hasUsableApprovedHumanSource || Boolean(videoGuidance?.hasHuman),
     hasBrandLogo: reserveLogoArea,
     ...(logoPlacement ? { logoPlacement } : {}),
     referenceCatalog: state.referenceCatalog,

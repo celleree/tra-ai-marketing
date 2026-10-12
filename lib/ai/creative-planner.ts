@@ -3,6 +3,7 @@ import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
+import { primaryVideoGuidance } from '@/lib/creatives/primary-video-source';
 import type { VideoReviewHandoff } from '@/lib/creatives/review-handoff';
 import { parseCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
@@ -207,6 +208,7 @@ export type CreativeBatchPlannerArgs = {
   proofRetrievalQuery?: string;
   analysis: CreativeReferenceAnalysis;
   sourceAnalysis?: PlanningSourceAnalysisState;
+  primaryVideoMediaId?: string;
   hasApprovedHumanSource: boolean;
   /** Optional only for restoring historical planning checkpoints. */
   hasBrandLogo?: boolean;
@@ -386,6 +388,12 @@ export async function requestCreativeBatch(
   }
   const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog));
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
+  const primaryVideo = primaryVideoGuidance(sourceAnalysis, args.primaryVideoMediaId);
+  const plannedPortfolio = [...creatives, ...(repair?.lockedConcepts ?? [])];
+  if (primaryVideo?.hasHuman && !plannedPortfolio.some(concept => concept?.strategy.execution.subjectSource === 'approved-tra-human'
+    && !concept.strategy.humanSourceId && !concept.strategy.approvedHumanId)) {
+    throw new Error('The plan ignored the human in the selected video. No images were generated. Retry with that video or remove it explicitly.');
+  }
   return { creatives: creatives as PlannedCreativeConcept[], plannerModel: model, reasoningEffort: 'medium' };
 }
 
