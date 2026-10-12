@@ -72,12 +72,15 @@ Adding the key alone leaves the copilot disabled. Both `TRA_CLAUDE_COPILOT_ENABL
 
 The operator route requires approval of the effective company snapshot and each paid request. It uses authoritative saved creative evidence, a 4,096-token output limit, and a durable quota of 12 requests per operator per hour. Quotas and token limits do not enforce a total dollar cap. Provider failure or interruption can leave billing unknown; there are no automatic paid retries. Recommendations require human review and do not change creatives, publish ads, or claim measured performance or revenue. Adding credentials does not establish live quality or end-to-end acceptance.
 
-## Higgsfield video generation
+## Video generation setup
 
-The selected initial video provider is Higgsfield, using Kling 2.6 Motion Control Standard
-(`kling-video/motion-control/std`). The server transport in `lib/video-generation/higgsfield.ts`
-accepts a source image and motion-reference video. It does not yet provide application routes,
-job persistence, output storage or a user interface.
+WAN 2.2 is the selected next model family. A hosted API or an approved GPU deployment, exact variant, input/output contract and cost/compute budget must be selected before live integration. Do not treat the existing Higgsfield environment variables or credentials as WAN access.
+
+Keep the application UI and control routes on Vercel; run WAN inference on a separate GPU worker or hosted API. Vercel Hobby functions provide 2 GB of CPU memory, while the official WAN TI2V-5B setup documents a GPU with at least 24 GB VRAM. Vercel free function hosting therefore does not supply suitable WAN inference compute. See [Vercel function limits](https://vercel.com/docs/functions/limitations) and [WAN 2.2 setup](https://github.com/Wan-Video/Wan2.2); verify requirements for the selected variant before provisioning.
+
+### Preserved Higgsfield/Kling integration
+
+Kling 2.6 Motion Control Standard (`kling-video/motion-control/std`) is retained as an optional future integration. Its server transport in `lib/video-generation/higgsfield.ts` accepts a source image and motion-reference video. The offline store in `lib/video-generation/job-store.ts` preserves source-bound intents and conditional one-shot claims, with Higgsfield-specific receipts. Application execution routes, output ingestion, UI and live acceptance are still unfinished. Further Higgsfield setup is deferred while WAN 2.2 is the selected direction.
 
 Developer API access and billing are separate from the Higgsfield website subscription.
 Keep `HF_API_KEY_ID` and `HF_API_KEY_SECRET` server-side; never use browser-visible variables.
@@ -87,8 +90,8 @@ quote is not a provider-enforced cost cap. Sound retention must be chosen explic
 
 Persist the submission's idempotency key and exact inputs before calling the provider, then
 store the returned request ID and status URL. The transport submits once without automatic
-retries or model fallback. Recover by polling the existing job; after an ambiguous submission,
-replay only the same inputs and key under the approved recovery policy. Copy completed output
+retries or model fallback. Recover an accepted job by polling its existing provider identity.
+An ambiguous submission remains unresolved; do not automatically resubmit it. Copy completed output
 to private application storage before provider retention expires. Do not expose generated output
 as approved advertising without the normal human/compliance review.
 
