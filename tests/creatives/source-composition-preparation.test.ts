@@ -40,7 +40,7 @@ vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.proof }));
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: mocks.audit }));
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
-const analysis = (sentinel: string) => ({ summary: sentinel, visibleText: [], visualStructure: '', hookOrAngle: sentinel,
+const analysis = (sentinel: string) => ({ visibleHuman: false, summary: sentinel, visibleText: [], visualStructure: '', hookOrAngle: sentinel,
   offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'educational' as const });
 const request = () => ({ ...portfolioRequest(), sourceAssets:
   (['TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE', 'TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE'] as const)
@@ -74,7 +74,8 @@ beforeEach(() => {
         selectedText: proof.type === 'review' ? proof.originalReviewText : proof.approvedClaimWording,
         ...(proof.type === 'review' ? { includeAttribution: false } : {}) } : null,
       strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${c.index}` },
-        execution: { ...c.strategy.execution, taxDocumentReference: 'none' } }, referenceChoices: { angleSource: null, layoutSource: null } }));
+        execution: { ...c.strategy.execution, taxDocumentReference: 'none' } },
+      referenceChoices: { angleSource: null, layoutSource: plannerInput.requiredLayoutReferenceIds?.[0] ?? null } }));
     const creatives = plannerInput.replacementIndexes
       ? allCreatives.filter(c => plannerInput.replacementIndexes.includes(c.index))
       : allCreatives;
@@ -90,6 +91,12 @@ const createHistoricalPortfolio = async (data: ReturnType<typeof request>, stora
 };
 
 describe('real preparation to Astra with composed sources', () => {
+  it('rejects an all-graphic direct plan when representative frames visibly contain a TRA person', async () => {
+    mocks.video.mockImplementation(async ({ frames }) => ({ ...analysis(frames[0].sourceVideoFileName), visibleHuman: true }));
+    await expect(prepareCreativeGeneration(request(), 'http://localhost')).rejects.toThrow('plan ignored the human');
+    expect(outbound[0].referenceAnalysis.visibleHuman).toBe(true);
+    expect(outbound[0].creativeContext).toContain('at least one concept');
+  });
   it('replays all completed source analysis, planning and audit without another paid call', async () => {
     const scope = { runId: 'same-submission', storage: new MemoryPortfolioStorage() };
     const run = () => withPaidPreparationScope(scope, () => prepareCreativeGeneration(request(), 'http://localhost'));
@@ -160,14 +167,16 @@ describe('real preparation to Astra with composed sources', () => {
     const ready = (await step(current, storage)).job;
     const restored = await restoreCreativePortfolio(ready.snapshot!);
     expect(restored.sourceAnalysis).toEqual(input.sourceAnalysis);
-    expect(restored.providerImageSource?.media.id).toBe(data.sourceAssets.find(s => s.role === 'TRA_REFERENCE')!.mediaId);
-    expect(restored.videoFrameSet).toBeNull(); expect(restored.generatedVideoFrameSelection).toBeUndefined();
+    expect(restored.providerImageSource).toBeUndefined();
+    expect(restored.videoFrameSet?.source.media.id).toBe(data.sourceAssets.find(s => s.role === 'TRA_VIDEO')!.mediaId);
+    expect(restored.generatedVideoFrameSelection).toBeUndefined();
     expect(ready.slots).toEqual(job.slots);
     const direct = await prepareCreativeGeneration(data, 'http://localhost');
     expect(outbound[1].sourceAnalysis).toEqual(input.sourceAnalysis);
     expect(direct.sourceAnalysis).toEqual(restored.sourceAnalysis);
     expect(direct.providerImageSource?.media.id).toBe(restored.providerImageSource?.media.id);
-    expect(direct.videoFrameSet).toBeNull(); expect(outbound).toHaveLength(2);
+    expect(direct.videoFrameSet?.source.media.id).toBe(restored.videoFrameSet?.source.media.id);
+    expect(outbound).toHaveLength(2);
   });
 
   it('reuses completed source and reference preparation after explicit retry of a failed second audit', async () => {
@@ -247,15 +256,29 @@ describe('real preparation to Astra with composed sources', () => {
     expect(outbound).toHaveLength(0);
   });
 
+  it.each([undefined, 1] as const)('blocks legacy automatic-video jobs with unknown human assessment before planning: %s', async marker => {
+    const { videoPreparationVersion: _videoMarker, ...created } = newCreativePortfolio(request());
+    const { visibleHuman: _assessment, ...oldAnalysis } = analysis('SAVED_LEGACY');
+    const job = { ...created, sourceCompositionVersion: marker };
+    job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis: oldAnalysis,
+      referenceCatalog: [], selectedReferences: [] } };
+    const storage = new MemoryPortfolioStorage();
+    await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
+    const result = await step(job, storage);
+    expect(result.error).toContain('visible-human assessment');
+    expect(outbound).toHaveLength(0); expect(operations).toEqual([]);
+  });
+
   it.each([undefined, 1] as const)('resumes legacy partial/rendered jobs with marker %s without composing', async marker => {
     const { videoPreparationVersion: _videoMarker, ...created } = newCreativePortfolio(request());
     const job = { ...created, sourceCompositionVersion: marker };
     job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis: analysis('SAVED_LEGACY'),
       sourceLayout: { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true },
-      referenceCatalog: [], selectedReferences: [] } };
+      referenceCatalog: [{ ...referenceCandidate('3'), sourceSha256: hash(png) }], selectedReferences: [] } };
     const storage = new MemoryPortfolioStorage();
     await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
-    const result = await step(job, storage);
+    let result = await step(job, storage);
+    for (let index = 0; index < 3 && !outbound.length && !result.error; index++) result = await step(job, storage);
     expect(result.error).toBeUndefined(); expect(outbound[0].referenceAnalysis.summary).toBe('SAVED_LEGACY');
     expect(outbound[0]).not.toHaveProperty('sourceAnalysis'); expect(operations).toEqual(['Astra']);
     const ready = (await step(job, storage)).job;

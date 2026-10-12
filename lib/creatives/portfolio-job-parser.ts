@@ -18,6 +18,7 @@ import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selecti
 import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, LEGACY_HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY,
   canonicalizeVideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 import { isSelectedPlanningProof } from '@/lib/proof/planning-selection';
+import { assertDraftVideoAssertionCopy } from '@/lib/creatives/draft-video-assertion';
 import { isCreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 import { validateStoredReviewHandoff } from '@/lib/creatives/review-handoff';
 
@@ -151,6 +152,7 @@ const validSnapshot = (
       if (!validVideoSelectorBindings(snapshot.sourceAnalysis, job.request.context)) return false;
     }
     const plan = snapshot.batchPlan;
+    if (Array.isArray(plan?.creatives)) plan.creatives.forEach(concept => assertDraftVideoAssertionCopy(concept.draftSourceAssertion, concept));
     const audit = plan.portfolioAudit === undefined ? undefined : parsePortfolioAudit(plan.portfolioAudit);
     if (snapshot.version !== 1 || !isDeepStrictEqual(snapshot.request, job.request)
       || !Array.isArray(snapshot.referenceCatalog) || !validSelectedReferences(snapshot.selectedReferences)
@@ -163,6 +165,7 @@ const validSnapshot = (
         || (concept.selectedProof !== undefined && concept.selectedProof !== null && !isSelectedPlanningProof(concept.selectedProof))
         || ![concept.copy.headline, concept.copy.primaryText].every(text) || typeof concept.copy.description !== 'string'
         || !parseCreativePlanning({ strategy: concept.strategy, selectionReason: concept.selectionReason,
+          ...(concept.draftSourceAssertion ? { draftSourceAssertion: concept.draftSourceAssertion } : {}),
           ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}),
           model: plan.plannerModel, reasoningEffort: plan.reasoningEffort,
           referenceCatalog: snapshot.referenceCatalog, ...(audit ? { portfolioAudit: audit } : {}) }))) return false;

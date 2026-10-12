@@ -16,6 +16,22 @@ const payload = (value: unknown) => ({ output: [{ type: 'message', content: [{ t
 const fetchMock = vi.fn();
 const args = { parent, operation: 'EDIT' as const, instruction: 'Make the headline blue.', companyContext: 'APPROVED TRA COMPANY CONTEXT\nNo numeric claims approved.', hasApprovedHumanSource: false };
 
+it('rejects source-discarding revision plans and accepts retained frames and supplied composition', async () => {
+  const catalog = [referenceCandidate()];
+  const humanStrategy = { ...strategy, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' as const } };
+  const selectedArgs = { ...args, parent: { ...parent, strategy: humanStrategy }, hasApprovedHumanSource: true,
+    requireSelectedVideoFrames: true, requiredLayoutReferenceIds: [catalog[0].referenceId], referenceCatalog: catalog };
+  const changed = { ...plan(), referenceChoices: { angleSource: null, layoutSource: null as string | null } };
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload(changed))));
+  await expect(planCreativeRevision(selectedArgs)).rejects.toThrow('explicitly selected TRA video frames');
+  const preserved = { ...changed, strategy: { ...humanStrategy, conceptDetails } };
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload(preserved))));
+  await expect(planCreativeRevision(selectedArgs)).rejects.toThrow('supplied video layout reference');
+  preserved.referenceChoices.layoutSource = catalog[0].referenceId;
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload(preserved))));
+  expect((await planCreativeRevision(selectedArgs)).concept.strategy.referenceSelection?.layoutSource).toBe(catalog[0].referenceId);
+});
+
 beforeEach(() => {
   vi.stubEnv('OPENAI_API_KEY', 'fixture-key');
   vi.stubEnv('OPENAI_TEXT_MODEL', '');

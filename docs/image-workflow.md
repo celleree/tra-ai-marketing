@@ -34,11 +34,21 @@ TRA Creatives supports plain-language edits, regeneration, meaningful variations
 
 ## Source roles
 
+Current supplied-video draft contract: use the video's information and eligible source frames, with supplied layout geometry as composition reference and the canonical uploaded TRA logo as a deterministic overlay. Company knowledge supports this source rather than replacing it. Exact transcript/on-screen passages may supply case assertions directly to draft image and ad copy without a manual Case Studies/Proof Library prerequisite. Persist source identity/hash, passage timestamps, complete selected wording and qualifications; label independent verification and permission as requiring review. Bounded context must remain explicit. These draft assertions grant no publishing permission or verified reuse and do not auto-create or approve Proof records. Existing approved Proof and human review controls remain separate.
+
 The Create flow supports multiple explicitly typed source assets in one request while preserving each asset's role.
 
 ### TRA Video
 
 May supply people/human identity, messaging/captions, visual context, and approved human-reference frames.
+
+Selected TRA video is the primary creative input; company knowledge supports brand and verified facts. Do not replace it with unrelated knowledge-only concepts or another uploaded image. Completed Video Intelligence must contribute its timestamped content to planning and the render brief. If the primary video contains a person, the portfolio must include a concept grounded in that video human, subject to existing suitability/overlay checks and fresh-PNG extraction. Missing/unusable source evidence fails visibly; it does not authorize a graphic fallback. No-reference generation remains available when no video is supplied or the operator explicitly removes it.
+
+Explicitly selected TRA human frames must reach every requested concept through the exact approved-frame attachment path; an unusable pool stops generation rather than becoming a graphic. In video workflows, supplied `LAYOUT_REFERENCE` assets must supply each concept's composition through a selected blueprint, while their humans, copy, claims and logos remain excluded. Automatic frame mode still permits video-grounded non-human concepts.
+
+Saved video/layout obligations persist through edits and variations using existing source provenance. Removing them requires the operator's explicit source-removal control; a model's graphic or original-layout choice alone cannot detach them. Representative-frame analysis records whether a person is visible; legacy analysis lacking that observation requires a new preparation before automatic planning, without guessing human eligibility from prose.
+
+Uploaded logo artwork is composited deterministically and retained by ID/hash for revisions. Create requires the original approved logo to be configured on the current site origin; absent logos, configured but unresolvable logos and unreadable saved brand settings block generation instead of silently omitting the asset. The existing browser-local profile binding is retained; no header mark or invented asset becomes the canonical logo. This does not certify that an image provider will never draw extra unwanted marks elsewhere; actual outputs require visual review.
 
 ### TRA Reference
 

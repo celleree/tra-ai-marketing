@@ -21,6 +21,7 @@ import { referenceCandidate } from '../fixtures/reference-catalog';
 import { MemoryPortfolioStorage, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { conceptDetails } from '../fixtures/creative-concept-details';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
+import { projectDraftVideoSourcePassages } from '@/lib/creatives/draft-video-assertion';
 
 const proofStorage = vi.hoisted(() => ({ snapshot: vi.fn(async (): Promise<{
   items: ProofRecord[];
@@ -105,7 +106,8 @@ const plannedConcept = (index: number) => {
       execution: { taxDocumentReference: 'none', subjectSource: 'non-human', composition: 'single-focus', imageTreatment: 'minimal-graphic', textDensity: 'low',
         ctaTreatment: 'button', typographyHierarchy: 'headline-dominant' }, visualDirection: 'Simple graphic' } };
 };
-const ok = () => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ creatives: [plannedConcept(1), plannedConcept(2)] }) }] }] }), { status: 200 });
+const ok = (passageId?: string) => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ creatives: [plannedConcept(1), plannedConcept(2)].map(creative => ({ ...creative,
+  ...(passageId ? { draftVideoSourceSelection: creative.index === 1 ? { passageId, imageField: 'shortSupport' } : null } : {}) })) }) }] }] }), { status: 200 });
 const legacyContext = (source: ReturnType<typeof videoSource>, value = library(source, 30)): VideoPlanningContextV1 => {
   const saved = dependency(source), indexes = (total: number, limit: number) => Array.from({ length: Math.min(total, limit) }, (_, index) =>
     total <= limit ? index : Math.round(index * (total - 1) / (limit - 1)));
@@ -167,7 +169,8 @@ it('projects multiple completed libraries with explicit bounded timeline coverag
     link: { proofId: linkedProof.id, proofType: linkedProof.type, proofUpdatedAt: linkedProof.updatedAt },
     linkHealth: 'CURRENT', createdAt: '2026-09-19T10:00:00.000Z', updatedAt: '2026-09-19T10:00:00.000Z' }] });
   vi.stubEnv('OPENAI_API_KEY', 'test-key');
-  const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => ok()); vi.stubGlobal('fetch', fetchMock);
+  const passage = projectDraftVideoSourcePassages(projected, undefined, sources[0].mediaId)[0];
+  const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => ok(passage.passageId)); vi.stubGlobal('fetch', fetchMock);
   await requestCreativeBatch({ count: 2, context: 'TRA', analysis, sourceAnalysis: projected, hasApprovedHumanSource: false });
   expect(fetchMock).toHaveBeenCalledOnce();
   const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));

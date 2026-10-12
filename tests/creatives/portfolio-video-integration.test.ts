@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { afterEach, expect, it, vi } from 'vitest';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
+import { requestCreativeBatch } from '@/lib/ai/creative-planner';
+import { primaryVideoGuidance } from '@/lib/creatives/primary-video-source';
 import { retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY, getEffectiveIntervalFps } from '@/lib/video/candidate-policy';
@@ -104,8 +106,13 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   boundary.layoutAngle.mockImplementation(async (_source, _context, start) => { start(); return 'Layout angle'; });
   boundary.layoutBlueprint.mockResolvedValue({ blueprint: referenceCandidate('d').blueprint, analyzerModel: 'vision-model',
     contentHash: layoutHash, cacheHit: true });
-  const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text',
-    text: JSON.stringify({ creatives: [planned(1), planned(2)] }) }] }] }), { status: 200 }));
+  const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const input = JSON.parse(JSON.parse(String(init?.body)).input[1].content[0].text);
+    return new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text',
+      text: JSON.stringify({ creatives: [planned(1), planned(2)].map(item => ({ ...item,
+        ...(input.draftVideoSourceCatalog?.length ? { draftVideoSourceSelection: item.index === 1 ? { passageId: input.draftVideoSourceCatalog[0].passageId, imageField: 'shortSupport' } : null } : {}),
+        referenceChoices: { angleSource: null, layoutSource: layoutId } })) }) }] }] }), { status: 200 });
+  });
   vi.stubGlobal('fetch', fetchMock);
   const baseRequest = { ...portfolioRequest(), sourceAssets: sources.map(({ sha256: _hash, ...source }) => source) };
   const fixtureFor = (id: typeof videos[number]['identity']) => videos.find(fixture => fixture.mediaId === id.sourceVideoMediaId)!;
@@ -137,6 +144,9 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   const outbound = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).input[1].content[0].text);
   const videoEntries = outbound.sourceAnalysis.entries.filter((entry: any) => entry.result?.kind === 'VIDEO_INTELLIGENCE');
   expect(videoEntries).toHaveLength(2);
+  expect(outbound.referenceAnalysis.summary).toContain('LATE_OBSERVATION_b');
+  expect(outbound.referenceAnalysis.summary).not.toContain('No source image');
+  expect(outbound.creativeContext).toContain('PRIMARY SELECTED VIDEO');
   expect(videoEntries.every((entry: any) => entry.result.intelligence.projectionVersion === 3)).toBe(true);
   expect(videoEntries.every((entry: any) => entry.result.intelligence.selector.contextSha256 === sha('Campaign b'))).toBe(true);
   expect(videoEntries.every((entry: any) => entry.result.intelligence.transcript.includedSegmentCount <= 24
@@ -171,10 +181,18 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   expect(retried.planning.phase).toBe('DIVERSITY_AUDIT');
   if (retried.planning.phase !== 'DIVERSITY_AUDIT') throw new Error();
   expect(retried.planning.checkpoint.plannerArgs.sourceAnalysis).toEqual(savedAnalysis);
+  expect(retried.planning.checkpoint.plannerArgs.requiredLayoutReferenceIds).toEqual([layoutId]);
   expect(retried.planning.checkpoint.snapshot.sourceAnalysis).toEqual(savedAnalysis);
   expect(retryReads.mock.calls.some(([key]) => key.startsWith('libraries/'))).toBe(false);
   expect(video.preparation).toHaveBeenCalledTimes(2); expect(video.transcription).toHaveBeenCalledTimes(2);
   expect(video.observation).toHaveBeenCalledTimes(2); expect(fetchMock).toHaveBeenCalledTimes(3);
+  const humanArgs = structuredClone(firstCompleted.planning.checkpoint.plannerArgs);
+  const primary = humanArgs.sourceAnalysis!.entries.find(entry => entry.result?.kind === 'VIDEO_INTELLIGENCE')!;
+  if (primary.result?.kind !== 'VIDEO_INTELLIGENCE') throw new Error('Expected complete video source');
+  primary.result.intelligence.observations[0].observation.sceneType = 'PERSON';
+  humanArgs.analysis = primaryVideoGuidance(humanArgs.sourceAnalysis)!.analysis;
+  humanArgs.hasApprovedHumanSource = true;
+  await expect(requestCreativeBatch(humanArgs)).rejects.toThrow('plan ignored the human');
 });
 
 it('refreshes the child retry state immediately when its ETag changes after parent authorization consumption', async () => {

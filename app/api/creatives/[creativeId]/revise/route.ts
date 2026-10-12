@@ -25,6 +25,8 @@ import { ProofRevalidationError, revalidateCreativeProofProvenanceForPaidWork, v
 import { CheckpointUnavailableError, runDurableCheckpoint, submissionRunId } from '@/lib/creatives/durable-checkpoint';
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { imageAttemptBudget, withImageAttemptScope } from '@/lib/creatives/image-attempt-execution';
+import { assertSelectedVideoInputContract, inheritedVideoInputContract, SelectedVideoInputError } from '@/lib/creatives/primary-video-source';
+import { assertDraftVideoAssertionCopy } from '@/lib/creatives/draft-video-assertion';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -80,6 +82,14 @@ export async function POST(request: Request, context: { params: Promise<{ creati
     }, { safeToResume: true });
     const { planning, provenance } = sources.parent;
     const revision = parsed.data;
+    const removeVideoSource = 'removeVideoSource' in revision && revision.removeVideoSource === true;
+    const removeLayoutReference = 'removeLayoutReference' in revision && revision.removeLayoutReference === true;
+    const inheritedInputs = inheritedVideoInputContract(provenance, planning.requiredLayoutReferenceIds);
+    const selectedInputs = { ...inheritedInputs,
+      ...(removeVideoSource ? { requireSelectedVideoFrames: false } : {}),
+      ...(removeLayoutReference ? { requiredLayoutReferenceIds: [] } : {}) };
+    const referenceCatalog = planning.referenceCatalog?.filter(reference => !removeLayoutReference
+      || !inheritedInputs.requiredLayoutReferenceIds?.includes(reference.referenceId));
     const placement = revision.operation === 'PLACEMENT' ? revision.placement : parent.placement!;
     const parentLogoPlacement = sources.logoOverlay
       ? await resolveCreativeBrandLogoPlacementContext(sources.logoOverlay.buffer, parent.placement!)
@@ -94,25 +104,34 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       index: 1, format: parent.format!, copy: parentCopyMode.copy,
       ...(parentCopyMode.kind === 'E2' ? { adCopy: parentCopyMode.adCopy, imageCopy: parentCopyMode.imageCopy } : {}),
       ...(parentLogoAnchor ? { logoAnchor: parentLogoAnchor } : {}), strategy: planning.strategy, selectionReason: planning.selectionReason,
+      ...(planning.draftSourceAssertion ? { draftSourceAssertion: planning.draftSourceAssertion } : {}),
     };
     let plannerModel = planning.model;
     if (revision.operation === 'EDIT' || revision.operation === 'VARIATION') {
       const planInput = {
+        ...selectedInputs,
         parent: { format: concept.format, copy: concept.copy,
           ...(concept.adCopy ? { adCopy: concept.adCopy } : {}),
           ...(concept.imageCopy ? { imageCopy: concept.imageCopy } : {}),
+          ...(planning.draftSourceAssertion ? { draftSourceAssertion: planning.draftSourceAssertion } : {}),
           ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}), strategy: concept.strategy },
         operation: revision.operation, instruction: revision.instruction, companyContext,
-        hasApprovedHumanSource: sources.originalApprovedSource !== null,
+        hasApprovedHumanSource: sources.originalApprovedSource !== null && !removeVideoSource,
         hasBrandLogo: sources.logoOverlay !== null,
         ...(parentLogoPlacement ? { logoPlacement: parentLogoPlacement } : {}),
         ...(proofProvenance ? { proofProvenance } : {}),
-        ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}),
+        ...(referenceCatalog ? { referenceCatalog } : {}),
       };
       await assertCurrentWork();
       const plan = await runDurableCheckpoint(runId, 'revision-plan', planInput, () => planCreativeRevision(planInput));
       concept = plan.concept;
       plannerModel = plan.plannerModel;
+    }
+    assertSelectedVideoInputContract(concept, selectedInputs, planning.strategy);
+    if (planning.draftSourceAssertion) concept.draftSourceAssertion = structuredClone(planning.draftSourceAssertion);
+    assertDraftVideoAssertionCopy(concept.draftSourceAssertion, concept);
+    if (removeVideoSource && concept.strategy.execution.subjectSource === 'approved-tra-human') {
+      throw new Error('The selected video source was removed. Choose a non-human concept for this revision.');
     }
     if (sources.logoOverlay && !concept.logoAnchor) concept = { ...concept, logoAnchor: parentLogoAnchor! };
     const conceptCopyMode = classifyCreativeCopyContract(concept as unknown as Record<string, unknown>);
@@ -166,6 +185,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       operation: revision.operation,
       concept: { format: concept.format, copy: conceptCopyMode.copy,
         ...(conceptCopyMode.kind === 'E2' ? { adCopy: conceptCopyMode.adCopy, imageCopy: conceptCopyMode.imageCopy } : {}),
+        ...(concept.draftSourceAssertion ? { draftSourceAssertion: concept.draftSourceAssertion } : {}),
         strategy: concept.strategy },
       placement, companyProfile: revision.companyProfile,
       referenceCatalog: planning.referenceCatalog,
@@ -185,11 +205,15 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       ...(proofProvenance ? { proofProvenance } : {}),
       identity,
       planning: { strategy: concept.strategy, selectionReason: concept.selectionReason, model: plannerModel, reasoningEffort: 'medium',
+        ...(selectedInputs.requiredLayoutReferenceIds?.length ? { requiredLayoutReferenceIds: selectedInputs.requiredLayoutReferenceIds } : {}),
+        ...(concept.draftSourceAssertion ? { draftSourceAssertion: concept.draftSourceAssertion } : {}),
         ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}),
         ...((revision.operation === 'PLACEMENT' || revision.operation === 'REGENERATE') && planning.portfolioAudit ? { portfolioAudit: planning.portfolioAudit } : {}),
-        ...(planning.referenceCatalog ? { referenceCatalog: planning.referenceCatalog } : {}) },
+        ...(referenceCatalog ? { referenceCatalog } : {}) },
       generationProvenance: {
         ...provenance, imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
+        requestedSources: provenance.requestedSources.filter(source => !(removeVideoSource && source.role === 'TRA_VIDEO')
+          && !(removeLayoutReference && source.role === 'LAYOUT_REFERENCE')),
         ...(removedHumanSource ? { attachedSource: null } : {}),
         revision: { parentCreativeId: parentId, canvasMediaId: sources.canvas.mediaId, canvasSha256: sources.canvas.sha256, ...(instruction ? { instruction } : {}) },
       },
@@ -209,7 +233,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
       return NextResponse.json({ error: error.message }, { status, headers: { 'Cache-Control': 'private, no-store',
         ...(status === 202 ? { 'Retry-After': '2' } : {}) } });
     }
-    if (error instanceof ProofRevalidationError) {
+    if (error instanceof ProofRevalidationError || error instanceof SelectedVideoInputError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof CreativeRevisionHydrationError) {

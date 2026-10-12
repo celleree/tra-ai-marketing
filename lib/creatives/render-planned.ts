@@ -29,6 +29,8 @@ import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { resolvePlannedHumanVideoSource, type PlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ProviderVideoFrame } from '@/lib/video/source-overlay';
+import { assertSelectedVideoInputContract, selectedVideoInputContract, primaryVideoGuidance, primaryVideoRenderDirection } from '@/lib/creatives/primary-video-source';
+import { assertDraftVideoAssertionCopy, projectDraftVideoSourcePassages } from '@/lib/creatives/draft-video-assertion';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
 import {
   revalidateSelectedProofForPaidWork,
@@ -36,6 +38,7 @@ import {
 } from '@/lib/proof/provenance';
 
 export type CreativeRenderContext = {
+  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState;
   request: ValidGenerateCreativeRequest;
   batchPlan: Pick<CreativeBatchPlan, 'plannerModel' | 'reasoningEffort' | 'portfolioAudit'>;
   referenceCatalog: ReferencePlanningCandidate[];
@@ -68,7 +71,7 @@ const classifyPlannedCopy = (item: PlannedCreativeConcept): PlannedCopyMode => {
 /** The shared one-ad provider, validation, branding and persistence path. */
 export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   request, batchPlan, referenceCatalog, selectedReferences, requestedSources, analysisSources, logoOverlaySource,
-  brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage,
+  brandLogo, providerImageSource, videoFrameSet, generatedVideoFrameSelection, storage, sourceAnalysis,
 }: CreativeRenderContext, options: { creativeId?: string; assertCurrentWork?: () => Promise<void>;
   preflightHumanVideo?: PlannedHumanVideoSource } = {}): Promise<GeneratedCreative> {
   const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
@@ -79,12 +82,32 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     delete item.strategy.approvedHumanId;
     delete item.strategy.humanSourceId;
   }
+  assertSelectedVideoInputContract(item, selectedVideoInputContract(request));
   const copyMode = classifyPlannedCopy(item);
+  assertDraftVideoAssertionCopy(item.draftSourceAssertion, item);
+  if (item.draftSourceAssertion) {
+    const { imageField: _field, ...passage } = item.draftSourceAssertion;
+    const catalog = projectDraftVideoSourcePassages(sourceAnalysis, request.reviewHandoff?.operatorSelectedSourceGuidance, passage.sourceMediaId);
+    if (!catalog.some(current => JSON.stringify(current) === JSON.stringify(passage))) {
+      throw new Error('The draft video source passage does not match its saved source analysis. Prepare a new portfolio before rendering.');
+    }
+  }
   const { human, videoFrames: itemVideoFrames } = options.preflightHumanVideo
     ?? await resolvePlannedHumanVideoSource(item, { videoFrameSet, providerImageSource });
   const itemImageSource = human ? null : providerImageSource;
   const itemFrameSelection = itemVideoFrames ? human?.record.source ?? generatedVideoFrameSelection : undefined;
-  if (request.reviewHandoff?.choices.frames?.length && item.strategy.execution.subjectSource === 'approved-tra-human') {
+  const suppliedVideo = requestedSources.some(source => source.role === 'TRA_VIDEO');
+  const videoGuidance = primaryVideoGuidance(sourceAnalysis, videoFrameSet?.source?.media?.id);
+  if (suppliedVideo && (human || itemImageSource || (!itemVideoFrames && !videoGuidance))) {
+    throw new Error('The selected video cannot be replaced by another source or unrelated generation. Prepare its source evidence again.');
+  }
+  if (suppliedVideo && !itemVideoFrames && videoGuidance?.hasHuman === null) {
+    throw new Error('The saved video analysis lacks a visible-human assessment. Prepare a new generation before rendering.');
+  }
+  if (suppliedVideo && item.strategy.execution.subjectSource === 'approved-tra-human' && !itemVideoFrames) {
+    throw new Error('The selected video human has no verified frames. Select usable frames before generating.');
+  }
+  if (request.reviewHandoff?.choices.frames?.length) {
     assertReviewedFrameSelection(request.reviewHandoff.choices, itemFrameSelection);
     if (human || itemImageSource || !itemVideoFrames) throw new Error('Manual reviewed frames require their exact fresh PNG attachment.');
   }
@@ -124,12 +147,13 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
         : {}),
     });
   }
-  const itemContext = formatCreativeRenderBrief(buildCreativeRenderBrief({
+  const renderBrief = formatCreativeRenderBrief(buildCreativeRenderBrief({
     concept: item, companyProfile: request.companyProfile,
     brandColors: request.brandColors, brandFontNames: request.brandFontNames,
     referenceCatalog,
     ...(proofProvenance ? { proofProvenance } : {}),
   }));
+  const itemContext = videoGuidance ? `${primaryVideoRenderDirection(videoGuidance)}\n\n${renderBrief}` : renderBrief;
 
   if (itemImageSource) {
     imageResult = copyMode.kind === 'LEGACY'
@@ -267,6 +291,8 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     identity,
     planning: {
       strategy: item.strategy,
+      ...(selectedVideoInputContract(request).requiredLayoutReferenceIds?.length ? { requiredLayoutReferenceIds: selectedVideoInputContract(request).requiredLayoutReferenceIds } : {}),
+      ...(item.draftSourceAssertion ? { draftSourceAssertion: item.draftSourceAssertion } : {}),
       ...(logoAnchor ? { logoAnchor } : {}),
       selectionReason: item.selectionReason,
       model: batchPlan.plannerModel,

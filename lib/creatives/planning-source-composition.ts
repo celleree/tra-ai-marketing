@@ -11,6 +11,7 @@ import { getOrAnalyzeContextualLayoutAngle, getOrAnalyzeLayoutBlueprint } from '
 import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
+import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
 import { parseVideoPlanningContext } from '@/lib/creatives/video-intelligence-planning';
 
@@ -95,4 +96,12 @@ export function composedSourceCatalog(state: PlanningSourceAnalysisState): Refer
       analyzerModel: layout.analyzerModel, blueprint: layout.blueprint, angleDescription:
         (cue?.kind === 'LAYOUT_ANGLE' ? cue.angleDescription : cue?.kind === 'TRA_REFERENCE' ? cue.analysis.hookOrAngle : '').slice(0, 2000).trim() || 'No angle observed. Layout guidance only.' }];
   });
+}
+
+/** Secondary layout analysis remains recorded when the primary source is a video. */
+export function composedLayoutProvenance(state: PlanningSourceAnalysisState): CreativeGenerationProvenance['analysisSources'] {
+  return state.entries.flatMap(entry => entry.source.role === 'LAYOUT_REFERENCE' && entry.result?.kind === 'LAYOUT_BLUEPRINT'
+    ? [{ type: 'LAYOUT_REFERENCE' as const, mediaId: entry.source.mediaId, sha256: entry.result.layout.contentHash,
+      layoutCache: { sourceSha256: entry.result.layout.contentHash, analyzerModel: entry.result.layout.analyzerModel,
+        schemaVersion: LAYOUT_BLUEPRINT_SCHEMA_VERSION } }] : []);
 }

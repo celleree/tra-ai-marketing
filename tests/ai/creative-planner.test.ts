@@ -17,6 +17,7 @@ import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-par
 import { auditCreativePortfolio } from '@/lib/ai/portfolio-auditor';
 import { withPaidPreparationScope } from '@/lib/creatives/preparation-checkpoint';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
+import { draftVideoGuidance, draftVideoPassage } from '../fixtures/draft-video-source';
 vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: vi.fn(async (concepts: unknown[]) => portfolioAudit(concepts.length)) }));
 const proofMocks = vi.hoisted(() => ({ load: vi.fn() }));
 vi.mock('@/lib/proof/planning', async original => ({
@@ -25,6 +26,7 @@ vi.mock('@/lib/proof/planning', async original => ({
 }));
 
 const analysis = {
+  visibleHuman: false,
   summary: 'Clear visual hierarchy', visibleText: [], visualStructure: 'Headline over image',
   hookOrAngle: 'Clarity', offerOrCta: 'Talk with TRA', styleNotes: 'Calm', preserve: ['hierarchy'],
   avoid: ['third-party identity'], unknowns: ['performance'], dominantCategory: 'customer-problems' as const,
@@ -59,6 +61,25 @@ const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human
 const payload = (value: unknown) => ({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
 const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value)), { status: 200 });
 
+it('enforces explicitly selected human frames and layout through the provider response', async () => {
+  vi.stubEnv('OPENAI_API_KEY', 'test-key');
+  const catalog = [referenceCandidate()];
+  let creatives = [concept(1), concept(2)].map(item => ({ ...item, referenceChoices: { angleSource: null as string | null, layoutSource: null as string | null } }));
+  const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives })); vi.stubGlobal('fetch', fetchMock);
+  const args = { count: 2, context: 'Use the selected human frames and layout', analysis, hasApprovedHumanSource: true,
+    referenceCatalog: catalog, requireSelectedVideoFrames: true, requiredLayoutReferenceIds: [catalog[0].referenceId] };
+  await expect(requestCreativeBatch(args)).rejects.toThrow('explicitly selected TRA video frames');
+  creatives = creatives.map(item => ({ ...item, strategy: strategy('approved-tra-human') }));
+  await expect(requestCreativeBatch(args)).rejects.toThrow('supplied video layout reference');
+  creatives = creatives.map(item => ({ ...item, referenceChoices: { angleSource: null, layoutSource: catalog[0].referenceId } }));
+  const plan = await requestCreativeBatch(args);
+  expect(plan.creatives.every(item => item.strategy.execution.subjectSource === 'approved-tra-human'
+    && item.strategy.referenceSelection?.layoutSource === catalog[0].referenceId)).toBe(true);
+  const sent = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).input[1].content[0].text);
+  expect(sent.selectedVideoFrameRequirement).toContain('Every concept');
+  expect(sent.requiredLayoutReferenceIds).toEqual(args.requiredLayoutReferenceIds);
+});
+
 const sourceProjection = (): PlanningSourceAnalysisState => ({ version: 1, entries:
   (['TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE', 'TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE'] as const).flatMap((role, i) => {
     const hex = String(i + 1), source = { role, mediaId: `media_${hex.repeat(32)}`, sha256: hex.repeat(64) };
@@ -76,6 +97,25 @@ const sourceProjection = (): PlanningSourceAnalysisState => ({ version: 1, entri
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(auditCreativePortfolio).mockClear(); proofMocks.load.mockReset(); });
 
 describe('creative batch planner', () => {
+  it('uses source case wording directly in draft image/ad copy with no Proof Library prerequisite', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const passage = draftVideoPassage();
+    let selected = true;
+    const fetchMock = vi.fn(async () => okResponse({ creatives: [concept(1), concept(2)].map(item => ({ ...item,
+      draftVideoSourceSelection: selected && item.index === 1 ? { passageId: passage.passageId, imageField: 'shortSupport' } : null })) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: 'Use the case described in this video.', analysis, hasApprovedHumanSource: false, operatorSelectedSourceGuidance: draftVideoGuidance };
+    const plan = await requestCreativeBatch(args);
+    expect(plan.creatives[0].imageCopy?.shortSupport).toBe(passage.exactText);
+    expect(plan.creatives[0].adCopy?.primaryText).toContain(passage.exactText);
+    expect(plan.creatives[0].selectedProof).toBeNull();
+    expect(plan.creatives[0].draftSourceAssertion?.permission).toBe('REQUIRES_REVIEW');
+    const brief = buildCreativeRenderBrief({ concept: plan.creatives[0] });
+    expect(brief.exactCopy).toMatchObject({ shortSupport: passage.exactText });
+    expect(brief.draftSourceAssertion).toMatchObject({ sourceMediaId: passage.sourceMediaId, startMs: passage.startMs, endMs: passage.endMs, verification: 'UNVERIFIED_SOURCE_ASSERTION' });
+    selected = false;
+    await expect(requestCreativeBatch(args)).rejects.toThrow('ignored the selected video source statements');
+  });
   it('validates planner logo anchors and lets selected layout geometry override the fallback before persistence', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const referenceCatalog = [referenceCandidate('f')];
@@ -721,4 +761,15 @@ describe('creative batch planner', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text', text: '{' }] }] }), { status: 200 })));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/malformed/i);
   });
+});
+
+it('blocks legacy representative video analysis without a human assessment before a paid planning call', async () => {
+  const sourceAnalysis = sourceProjection(); sourceAnalysis.entries = sourceAnalysis.entries.filter(entry => entry.source.role === 'TRA_VIDEO').slice(0, 1);
+  const result = sourceAnalysis.entries[0].result;
+  if (result?.kind !== 'REPRESENTATIVE_VIDEO_FRAMES') throw new Error('Expected representative analysis');
+  delete result.analysis.visibleHuman;
+  const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+  await expect(requestCreativeBatch({ count: 2, context: 'Use the supplied video', analysis, sourceAnalysis, hasApprovedHumanSource: false }))
+    .rejects.toThrow('lacks a visible-human assessment');
+  expect(fetchMock).not.toHaveBeenCalled();
 });

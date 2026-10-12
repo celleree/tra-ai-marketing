@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ storage: vi.fn(), hydrate: vi.fn(), context: vi.fn(), extract: vi.fn() }));
+const mocks = vi.hoisted(() => ({ storage: vi.fn(), hydrate: vi.fn(), context: vi.fn(), extract: vi.fn(), imageSource: vi.fn() }));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: mocks.storage }));
 vi.mock('@/lib/media/source-hydration', () => ({ hydrateCreativeSourceSelections: mocks.hydrate,
-  findEligibleProviderImageSource: () => undefined }));
+  findEligibleProviderImageSource: mocks.imageSource }));
 vi.mock('@/lib/video/selection-context', () => ({ loadVideoSelectionContext: mocks.context,
   extractVideoSelectionFrames: mocks.extract }));
 vi.mock('@/lib/video/preview-availability', () => ({ isDurableVideoIntelligenceAvailable: () => true }));
@@ -55,6 +55,14 @@ describe('candidate-addressable generation hydration', () => {
     expect(hydrated.generatedVideoFrameSelection).toMatchObject({ libraryId, librarySha256,
       frames: [{ libraryFrameId: frameId, representativeFrameId, candidateIndex,
         candidateFrameSha256: candidateSha, approvedPngSha256: hash(png) }] });
+    const original = (await mocks.hydrate.mock.results[0].value)[0];
+    const image = { role: 'TRA_REFERENCE', media: { id: `media_${'f'.repeat(32)}`, mediaType: 'IMAGE' },
+      stored: { buffer: png, mediaType: 'IMAGE' } };
+    mocks.hydrate.mockResolvedValueOnce([image, original]); mocks.imageSource.mockReturnValue(image);
+    const mixed = await hydrateGenerationSources({ sourceAssets: [{ role: 'TRA_REFERENCE', mediaId: image.media.id },
+      { role: 'TRA_VIDEO', mediaId }], videoFrameSelection: selection() } as any);
+    expect(mixed.providerImageSource).toBeUndefined(); expect(mixed.generationSourceAsset).toBeUndefined();
+    expect(mixed.videoFrameSet!.source.media.id).toBe(mediaId);
     const [provider] = await prepareProviderVideoFrames(hydrated.videoFrameSet!.frames);
     expect(provider.sourceOverlay).toEqual(overlay);
     expect(provider.crop).toEqual({ left: 0, top: 0, width: 100, height: 90 });
