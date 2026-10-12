@@ -1,9 +1,25 @@
+import { isCreativeCategory, type CreativeCategoryId } from '@/lib/creative-categories';
+import { isCreativeFormat, type CreativeFormatId } from '@/lib/creative-formats';
+import { isCreativePlacement, type CreativePlacement } from '@/lib/creatives/placements';
+import { parseCreativeAdCopy, parseCreativeImageCopy } from '@/lib/creatives/copy-contract';
+import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import { parseCreativeIdentity, type CreativeIdentity } from '@/lib/creatives/identity';
+
+export type CopilotSavedCreativeEvidence = {
+  adCopy: CreativeAdCopy;
+  imageCopy: CreativeImageCopy | null;
+  category: CreativeCategoryId;
+  format: CreativeFormatId | null;
+  placement: CreativePlacement | null;
+  strategy: { hook: string; proposition: string | null; visualDirection: string;
+    soWhat: { surfaceMessage: string; functionalConsequence: string; meaningfulOutcome: string } } | null;
+  humanReviewStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
+};
 
 /** Explicit caller-supplied approved context, not a server-persisted company profile. */
 export type CopilotContextSnapshot = {
   company: { reference: string; approvedText: string };
-  creatives: { creativeId: string; identity: CreativeIdentity; sourceReferences: string[] }[];
+  creatives: { creativeId: string; identity: CreativeIdentity; sourceReferences: string[]; evidence?: CopilotSavedCreativeEvidence | null }[];
   performance: 'unknown';
 };
 export type CopilotModelIdentity = { provider: string; model: string };
@@ -38,6 +54,39 @@ const instant = (value: unknown): value is string => {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value.replace(/Z$/, value.includes('.') ? 'Z' : '.000Z');
 };
 
+/** Saved text/planning is an observed artifact, never approval of factual claims or actual pixels. */
+export function parseCopilotSavedCreativeEvidence(value: unknown): CopilotSavedCreativeEvidence | null {
+  if (!shape(value, ['adCopy', 'imageCopy', 'category', 'format', 'placement', 'strategy', 'humanReviewStatus'])
+    || !shape(value.adCopy, ['primaryText', 'headline', 'description'])
+    || !text(value.adCopy.primaryText, 1000) || !text(value.adCopy.headline, 1000)
+    || typeof value.adCopy.description !== 'string' || value.adCopy.description.length > 1000
+    || typeof value.category !== 'string' || !isCreativeCategory(value.category)
+    || (value.format !== null && (typeof value.format !== 'string' || !isCreativeFormat(value.format)))
+    || (value.placement !== null && !isCreativePlacement(value.placement))
+    || ![null, 'PENDING', 'APPROVED', 'REJECTED'].includes(value.humanReviewStatus as string | null)) return null;
+  const adCopy = parseCreativeAdCopy(value.adCopy)!;
+  let imageCopy: CreativeImageCopy | null = null;
+  if (value.imageCopy !== null) {
+    if (!record(value.imageCopy) || Object.keys(value.imageCopy).some(key => !['headline', 'shortSupport', 'proofAttribution', 'cta', 'disclosure'].includes(key))
+      || !Object.values(value.imageCopy).every(item => text(item, 1000))) return null;
+    imageCopy = parseCreativeImageCopy(value.imageCopy);
+    if (!imageCopy) return null;
+  }
+  let strategy: CopilotSavedCreativeEvidence['strategy'] = null;
+  if (value.strategy !== null) {
+    const input = value.strategy;
+    if (!shape(input, ['hook', 'proposition', 'visualDirection', 'soWhat']) || !text(input.hook, 1000)
+      || (input.proposition !== null && !text(input.proposition, 1000)) || !text(input.visualDirection, 1000)
+      || !shape(input.soWhat, ['surfaceMessage', 'functionalConsequence', 'meaningfulOutcome'])
+      || !Object.values(input.soWhat).every(item => text(item, 1000))) return null;
+    strategy = { hook: input.hook, proposition: input.proposition as string | null, visualDirection: input.visualDirection,
+      soWhat: { ...input.soWhat } as NonNullable<CopilotSavedCreativeEvidence['strategy']>['soWhat'] };
+  }
+  return { adCopy, imageCopy, category: value.category, format: value.format as CreativeFormatId | null,
+    placement: value.placement as CreativePlacement | null, strategy,
+    humanReviewStatus: value.humanReviewStatus as CopilotSavedCreativeEvidence['humanReviewStatus'] };
+}
+
 /** Checks identity shape only; callers remain responsible for approval and saved-record authority. */
 export function parseCopilotContextSnapshot(value: unknown): CopilotContextSnapshot | null {
   if (!shape(value, ['company', 'creatives', 'performance']) || value.performance !== 'unknown'
@@ -45,11 +94,14 @@ export function parseCopilotContextSnapshot(value: unknown): CopilotContextSnaps
     || !text(value.company.approvedText, 50000) || !Array.isArray(value.creatives) || value.creatives.length > 50) return null;
   const creatives: CopilotContextSnapshot['creatives'] = [];
   for (const creative of value.creatives) {
-    if (!shape(creative, ['creativeId', 'identity', 'sourceReferences']) || typeof creative.creativeId !== 'string'
+    if (!record(creative) || !shape(creative, ['creativeId', 'identity', 'sourceReferences', ...('evidence' in creative ? ['evidence'] : [])]) || typeof creative.creativeId !== 'string'
       || !strings(creative.sourceReferences) || new Set(creative.sourceReferences).size !== creative.sourceReferences.length) return null;
     const identity = parseCreativeIdentity(creative.identity, creative.creativeId);
     if (!identity) return null;
-    creatives.push({ creativeId: creative.creativeId, identity, sourceReferences: [...creative.sourceReferences] });
+    const evidence = creative.evidence === null || !('evidence' in creative) ? null : parseCopilotSavedCreativeEvidence(creative.evidence);
+    if ('evidence' in creative && creative.evidence !== null && !evidence) return null;
+    creatives.push({ creativeId: creative.creativeId, identity, sourceReferences: [...creative.sourceReferences],
+      ...('evidence' in creative ? { evidence } : {}) });
   }
   if (new Set(creatives.map(item => item.creativeId)).size !== creatives.length) return null;
   return { company: { reference: value.company.reference, approvedText: value.company.approvedText }, creatives, performance: 'unknown' };
