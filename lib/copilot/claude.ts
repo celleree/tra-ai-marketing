@@ -21,7 +21,7 @@ const system = `You are a creative-only copilot for an internal marketing team. 
 {"version":1,"generatedAt":"UTC ISO timestamp","action":"DO_NOTHING or PROPOSE_CREATIVE_TEST","observations":[{"text":"fact","evidenceReferences":["supplied reference"]}],"inferences":[{"text":"inference","evidenceReferences":["supplied reference"]}],"recommendation":null,"unknowns":["Performance and revenue are unknown"],"performance":"unknown"}.
 For PROPOSE_CREATIVE_TEST, include at least one inference and replace recommendation with {"text":"proposal","soWhat":{"surfaceMessage":"message","functionalConsequence":"practical consequence","meaningfulOutcome":"customer outcome"}}. These three steps must be distinct. For DO_NOTHING recommendation must be null. Do not return model or context fields.`;
 
-/** Server caller supplies approval, credentials and an explicit output/spend cap. One attempt only. */
+/** Server caller supplies approval, credentials and an explicit output-token cap. One attempt only. */
 export async function requestClaudeCopilot(suppliedContext: unknown, options: ClaudeCopilotOptions): Promise<CopilotRecommendationRecord> {
   if (typeof window !== 'undefined' || options.allowPaidRequest !== true || !options.apiKey?.trim()) {
     throw new ClaudeCopilotError('unavailable');
