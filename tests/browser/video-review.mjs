@@ -19,6 +19,7 @@ const url = `http://127.0.0.1:${server.httpServer.address().port}/tests/browser/
 const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {}) });
 const id = `review_${'a'.repeat(32)}`, mediaId = `media_${'b'.repeat(32)}`;
 const availableB = `media_${'9'.repeat(32)}`, availableC = `media_${'8'.repeat(32)}`;
+const layoutMediaId = `media_${'1'.repeat(32)}`;
 const video = { locator: { version: 1, sourceVideoMediaId: mediaId, sourceVideoContentHash: 'c'.repeat(64), analyzerFingerprintSha256: 'd'.repeat(64) },
   libraryId: `video-library:${'e'.repeat(64)}`, librarySha256: 'f'.repeat(64), preparationSha256: '1'.repeat(64) };
 const frame = { frameId: `video-frame:${'2'.repeat(64)}`, representativeFrameId: `video-frame:${'2'.repeat(64)}`, candidateIndex: 0, timestampMs: 1000, frameSha256: '3'.repeat(64) };
@@ -51,11 +52,11 @@ async function scenario(name, options, run) {
   await context.addInitScript(({ id, inventory, profile, hasProfile, noLogo }) => {
     if (sessionStorage.getItem('video-review-fixture-seeded')) return;
     sessionStorage.setItem('video-review-fixture-seeded', 'true');
-    localStorage.setItem('tra-video-review-draft-v1', id);
+    if (id) localStorage.setItem('tra-video-review-draft-v1', id);
     localStorage.setItem('tra-create-video-ids-v1', JSON.stringify(inventory));
     localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', knowledgeBase: {}, guardrails: {}, ...(hasProfile ? profile : {}),
       brandGuidelines: noLogo ? {} : { logo: '/api/media/files/media_77777777777777777777777777777777.png' } }));
-  }, { id, inventory: options.inventory ?? [mediaId], profile, hasProfile: options.profile, noLogo: options.noLogo });
+  }, { id: options.noSavedReview ? null : id, inventory: options.inventory ?? [mediaId], profile, hasProfile: options.profile, noLogo: options.noLogo });
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, body = request.postDataJSON();
     calls.push([path, request.method()]);
@@ -93,6 +94,9 @@ async function scenario(name, options, run) {
         else value.review.previews = batch.map(index => ({ binding: bindings[index], providerEligible: false,
           thumbnailDataUrl: brokenPreview ? 'data:image/jpeg;base64,broken' : thumbnails[index % 2] }));
       }
+    } else if (path === '/api/references') {
+      value = { items: options.linkedLayout ? [{ id: layoutMediaId, fileName: `${layoutMediaId}.png`, originalName: 'fixture-layout.png',
+        mimeType: 'image/png', size: 42, url: thumbnails[0], referenceType: options.wrongLayoutType ? 'tra' : 'layout' }] : [] };
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
@@ -105,7 +109,10 @@ async function scenario(name, options, run) {
   // Abort every external request; the harness never reaches an auth, storage or provider service.
   await page.route(/^https:\/\//, route => route.abort());
   try {
-    await page.goto(url);
+    const target = new URL(url);
+    if (options.linkedVideo) target.searchParams.set('videoMediaId', options.linkedVideo);
+    if (options.linkedLayout) target.searchParams.set('layoutMediaId', options.linkedLayout);
+    await page.goto(target.href);
     await page.getByRole('button', { name: 'Generate creatives', exact: true }).waitFor();
     await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
     await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, recoverPreviews: () => { previewFailure = false; brokenPreview = false; }, failNext: status => { failure = status; }, denyLoads: status => { loadFailure = status; }, failSource: status => { sourceFailure = status; } });
@@ -116,6 +123,37 @@ async function scenario(name, options, run) {
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  await scenario('Saved layout UI handoff preserves its role and removal without upload or paid work',
+    { noSavedReview: true, inventory: [], linkedVideo: availableB, linkedLayout: layoutMediaId }, async ({ page, calls, videoActions }) => {
+      await page.getByLabel('Remove fixture-layout.png').waitFor();
+      assert.equal(await page.getByRole('combobox', { name: 'Source role for fixture-layout.png' }).inputValue(), 'LAYOUT_REFERENCE');
+      assert.equal(new URL(page.url()).searchParams.has('layoutMediaId'), false);
+      await page.reload(); await page.getByLabel('Remove fixture-layout.png').waitFor();
+      assert.equal(videoActions.length, 0);
+      assert.equal(calls.some(([path]) => path.startsWith('/api/media/upload') || path === '/api/media/confirm' || path === '/api/creatives/portfolios'), false);
+      await page.getByLabel('Remove fixture-layout.png').click(); await page.reload();
+      await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
+      assert.equal(await page.getByLabel('Remove fixture-layout.png').count(), 0);
+    });
+  await scenario('Saved layout UI handoff refuses a TRA asset with the same ID',
+    { noSavedReview: true, inventory: [], linkedVideo: availableB, linkedLayout: layoutMediaId, wrongLayoutType: true }, async ({ page, calls }) => {
+      await page.getByText('Saved layout reference is unavailable.', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Remove fixture-layout.png').count(), 0);
+      assert.equal(calls.some(([path]) => path.startsWith('/api/media/upload') || path === '/api/creatives/portfolios'), false);
+    });
+  await scenario('Saved video UI handoff restores a fresh context without upload or paid work',
+    { noSavedReview: true, inventory: [], linkedVideo: availableB }, async ({ page, calls, videoActions }) => {
+      await page.getByLabel('Remove second.mp4').waitFor();
+      await page.getByText('Video material ready', { exact: true }).waitFor();
+      assert.equal(new URL(page.url()).searchParams.has('videoMediaId'), false);
+      await page.reload(); await page.getByLabel('Remove second.mp4').waitFor();
+      assert.equal(videoActions.length, 0);
+      assert.equal(calls.some(([path]) => path.startsWith('/api/media/upload') || path === '/api/media/confirm'), false);
+      assert.equal(calls.some(([path]) => path === '/api/creatives/portfolios'), false);
+      await page.getByLabel('Remove second.mp4').click(); await page.reload();
+      await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
+      assert.equal(await page.getByLabel('Remove second.mp4').count(), 0);
+    });
   for (const status of [401, 403, 409, 503]) await scenario(`Failed save ${status} blocks second frame and preserves saved choices`,
     { frameCount: 5 }, async ({ page, failNext, calls, response, bindings, denyLoads }) => {
       await ready(page); const panel = page.getByRole('region', { name: 'Video material review' });

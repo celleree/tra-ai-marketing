@@ -26,6 +26,17 @@ beforeEach(() => {
 });
 
 describe('resumable portfolio API', () => {
+  it('exposes the durable cached checkpoint and rejects Preview retries and unbounded creation', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    if (job.planning.phase !== 'INITIAL_PLAN') throw new Error('Fixture phase');
+    job.planning.preparation.previewPreflightReady = true;
+    expect(await (await GET(request(undefined, job.id))).json()).toHaveProperty('preflightReady', true);
+    job.planningError = 'Failed work';
+    expect((await PATCH(request({ id: job.id, action: 'retry', slotIndex: null }))).status).toBe(409);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect((await POST(request(portfolioRequest(3)))).status).toBe(409);
+    expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
+  });
   it.each([GET, POST, PATCH])('requires operator authorization before any job work', async handler => {
     mocks.access.mockResolvedValue({ allowed: false, status: 403, error: 'Denied' });
     const response = await handler(request({ id: job.id, action: 'advance' }, job.id));

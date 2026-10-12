@@ -11,18 +11,22 @@ import { readPortfolioCreatives } from '@/lib/creatives/portfolio-results';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { ReviewSelectionError } from '@/lib/video/review-selection';
+import { assertPreviewAcceptanceRequest, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 const json = (body: object, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store', ...headers } });
 const result = async (job: CreativePortfolioJob, status = 200, error?: string, retryAfterSeconds?: number) =>
-  json({ job: portfolioProgress(job), creatives: await readPortfolioCreatives(job), ...(error ? { error } : {}) },
+  json({ job: portfolioProgress(job), creatives: await readPortfolioCreatives(job),
+    ...(isPreviewAcceptance() && job.planning.phase === 'INITIAL_PLAN' && !job.planningError
+      && job.planning.preparation.previewPreflightReady ? { preflightReady: true } : {}), ...(error ? { error } : {}) },
     status, retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {});
 const failure = (error: unknown) => {
   if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body.' }, 400);
   if (error instanceof SubmissionConflictError) return json({ error: error.message }, 409);
   if (error instanceof ReviewSelectionError) return json({ error: error.message }, error.status);
+  if (error instanceof PreviewAcceptanceError) return json({ error: error.message }, error.status);
   if (error instanceof CreativeGenerationPreparationError) return json({ error: error.message }, error.status);
   console.error('Creative portfolio request failed', error);
   return json({ error: 'Creative portfolio request failed. Reload its saved progress before continuing.' }, 500);
@@ -46,6 +50,7 @@ export async function POST(request: Request) {
   try {
     const parsed = validateGenerateCreativeRequest(await request.json(), MAX_PORTFOLIO_CREATIVES);
     if (!parsed.success) return json({ error: parsed.error }, 400);
+    assertPreviewAcceptanceRequest(parsed.data);
     const submissionId = parseSubmissionId(request.headers.get(SUBMISSION_HEADER));
     if (!submissionId) return json({ error: 'A valid Idempotency-Key is required to create a portfolio.' }, 400);
     assertGenerationAvailable(parsed.data);
@@ -69,6 +74,7 @@ export async function PATCH(request: Request) {
     const job = await readCreativePortfolio(body.id);
     if (!job) return json({ error: 'Portfolio not found.' }, 404);
     if (body.action === 'retry') {
+      if (isPreviewAcceptance()) throw new PreviewAcceptanceError('Preview acceptance does not authorize paid retries. Saved results remain available.');
       const retryable = body.slotIndex === null ? !job.snapshot && job.planningError
         : job.snapshot && job.slots.some(slot => slot.index === body.slotIndex && slot.status === 'RETRY_REQUIRED');
       if (job.lease || !retryable) return json({ error: 'This work cannot be retried in its current state. Reload its progress.' }, 409);

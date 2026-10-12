@@ -38,6 +38,10 @@ Current supplied-video draft contract: use the video's information and eligible 
 
 The Create flow supports multiple explicitly typed source assets in one request while preserving each asset's role.
 
+Preview acceptance with server purpose `staging-smoke` is restricted to two 4:5 static images, one completed video with a saved selected-frame pool, one supplied layout reference and the original logo. Generate performs cached-input preparation and pauses before paid planning. Resume is a separate operator action after paid authorization. The server rejects uncached provider preparation, planning repair/re-audit and retries; the existing image ledger permits two primary Sunburst/high/PNG attempts and no fallback. Planning/audit use the existing Sol model. Optional paid library shortlisting and angle enrichment are omitted for this test purpose. These limits cap attempts, not dollars; Production and other purposes retain their existing behavior.
+
+The Preview Video Intelligence page can hand an existing completed video to Create without uploading it again. Create also accepts explicit `videoMediaId` / `layoutMediaId` UI links, rehydrates authenticated saved assets, verifies the layout-library role, and persists only convenience IDs. These links do not start analysis or generation and confer no pixel or claim approval.
+
 ### TRA Video
 
 May supply people/human identity, messaging/captions, visual context, and approved human-reference frames.

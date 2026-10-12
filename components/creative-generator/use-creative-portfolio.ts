@@ -36,7 +36,10 @@ export function useCreativePortfolio() {
   const start = (request: GenerateCreativeRequest) => execute(() => submit.current(request), true);
   const resume = () => {
     const id = current.current?.job.id;
-    if (id) return execute(() => requestPortfolio({ action: 'load', id }), true);
+    if (id) return execute(async () => {
+      const { preflightReady: _ready, ...loaded } = await requestPortfolio({ action: 'load', id });
+      return loaded;
+    }, true);
   };
   const retry = (slotIndex: number | null) => {
     const id = current.current?.job.id;

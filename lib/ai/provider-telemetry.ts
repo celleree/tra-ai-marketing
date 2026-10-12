@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { providerUsageEvent, type ProviderAttemptMetadata, type ProviderUsageContext } from '@/lib/ai/provider-usage';
 import { imageProviderFailure } from '@/lib/creatives/image-provider-failure';
 import { imageRenderPurpose } from '@/lib/creatives/image-render-request';
+import { assertPreviewAcceptanceProvider } from '@/lib/creatives/preview-acceptance';
 
 type Context = ProviderUsageContext & { operationType?: string };
 const contexts = new AsyncLocalStorage<Context>();
@@ -23,6 +24,7 @@ export function emitProviderReuse(stage: string, model?: string, context: Provid
 
 /** A start and terminal event share one attempt ID; aggregate by ID, never by log line. */
 export async function observeProviderAttempt(meta: ProviderAttemptMetadata, dispatch: () => Promise<Response>): Promise<Response> {
+  assertPreviewAcceptanceProvider(meta);
   emitProviderUsage(meta, { status: 'started' });
   let response: Response;
   try { response = await dispatch(); }

@@ -13,6 +13,7 @@ import { conceptDetails } from '../fixtures/creative-concept-details';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { withPaidPreparationScope } from '@/lib/creatives/preparation-checkpoint';
+import { advancePortfolioPreparation } from '@/lib/creatives/portfolio-preparation';
 
 // The non-durable preparation helper stays disconnected from durable portfolio Video Intelligence.
 const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
@@ -91,6 +92,19 @@ const createHistoricalPortfolio = async (data: ReturnType<typeof request>, stora
 };
 
 describe('real preparation to Astra with composed sources', () => {
+  it('checkpoints cached preparation before the planner and skips optional reference-provider stages in Preview', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    const data = { ...portfolioRequest(), sourceAssets: [request().sourceAssets[2]] };
+    mocks.library.mockResolvedValue([{ id: `media_${'7'.repeat(32)}`, referenceType: 'layout' }]);
+    const sourceLayout = { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true };
+    const prepared = await advancePortfolioPreparation(data, 'http://localhost', {
+      quotaReserved: true, analysis: analysis('Cached layout'), sourceLayout,
+    }, vi.fn(), 1, true);
+    expect(prepared).toMatchObject({ state: { previewPreflightReady: true, selectedReferences: [], sourceLayout } });
+    expect(prepared).not.toHaveProperty('prepared');
+    expect(mocks.select).not.toHaveBeenCalled(); expect(mocks.angle).not.toHaveBeenCalled();
+    expect(mocks.layout).not.toHaveBeenCalled(); expect(outbound).toHaveLength(0);
+  });
   it('rejects an all-graphic direct plan when representative frames visibly contain a TRA person', async () => {
     mocks.video.mockImplementation(async ({ frames }) => ({ ...analysis(frames[0].sourceVideoFileName), visibleHuman: true }));
     await expect(prepareCreativeGeneration(request(), 'http://localhost')).rejects.toThrow('plan ignored the human');

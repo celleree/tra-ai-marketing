@@ -17,6 +17,7 @@ const renderPanel = ({
   planningError = null,
   planReady = false,
   videoPreparation,
+  preflightReady = false,
 }: {
   count?: number;
   statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>;
@@ -25,6 +26,7 @@ const renderPanel = ({
   planningError?: string | null;
   planReady?: boolean;
   videoPreparation?: PortfolioProgress['videoPreparation'];
+  preflightReady?: boolean;
 } = {}) => {
   const base = portfolioProgress(newCreativePortfolio(portfolioRequest(count)));
   const job = {
@@ -46,7 +48,7 @@ const renderPanel = ({
   const resume = vi.fn();
   const retry = vi.fn();
   const portfolio = {
-    response: { job, creatives: [] },
+    response: { job, creatives: [], ...(preflightReady ? { preflightReady: true } : {}) },
     running,
     stopped,
     error: '',
@@ -61,6 +63,13 @@ const renderPanel = ({
 };
 
 describe('portfolio progress panel', () => {
+  it('shows the nonpaid cached checkpoint and bounded Resume scope', () => {
+    const { html } = renderPanel({ count: 2, preflightReady: true });
+    expect(html).toContain('Cached-input preflight passed');
+    expect(html).toContain('No paid planning or images have started');
+    expect(html).toContain('one initial planner, one audit and two Sunburst images');
+    expect(html).toContain('Resume generation');
+  });
   it('shows requested planning count and zero saved progress without inventing a planning percentage', () => {
     const { html } = renderPanel({ count: 12, running: true });
     expect(html).toContain('Planning 12 creatives…');

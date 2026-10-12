@@ -22,6 +22,14 @@ const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED'
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('resumable portfolio browser controller', () => {
+  it('stops at the cached preflight checkpoint and does not advance a reopened checkpoint automatically', async () => {
+    const value = initial(), ready = { ...value, preflightReady: true as const };
+    const fetcher = vi.fn().mockResolvedValue(Response.json(ready)); vi.stubGlobal('fetch', fetcher);
+    const update = vi.fn(); expect(await runPortfolio(value, update, () => false)).toEqual(ready);
+    expect(fetcher).toHaveBeenCalledOnce(); expect(update).toHaveBeenCalledOnce();
+    expect(await runPortfolio(ready, update, () => false)).toBe(ready);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
   it('preserves a submission key across transport retry and changes it only for a new action', async () => {
     const value = initial(); const fetcher = vi.fn().mockRejectedValueOnce(new Error('Lost response'))
       .mockImplementation(async () => Response.json(value));

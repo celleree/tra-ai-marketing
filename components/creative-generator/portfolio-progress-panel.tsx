@@ -34,6 +34,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
           : job.planReady ? 'Ready to resume generation.' : `Ready to resume planning ${job.requestedCount} creatives.`;
 
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
+    {portfolio.response?.preflightReady ? <p role="status">Cached-input preflight passed. No paid planning or images have started. Resume only after approval for one initial planner, one audit and two Sunburst images. Uncached preparation, repair, retries and fallback are blocked in this Preview.</p> : null}
     <div className={styles.summary} aria-live="polite">
       <p className={styles.status}><strong>{status}</strong></p>
       <p className={styles.count}><strong>{savedCount} / {job.requestedCount}</strong> creatives saved</p>

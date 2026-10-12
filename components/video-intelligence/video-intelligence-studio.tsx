@@ -75,7 +75,7 @@ export function VideoPassageCandidateSelection({ locator, segments }: { locator:
   </section>;
 }
 
-export function VideoIntelligenceStudio() {
+export function VideoIntelligenceStudio({ acceptancePreview = false }: { acceptancePreview?: boolean } = {}) {
   const [humanLibraryRevision, setHumanLibraryRevision] = useState(0);
   const [media, setMedia] = useState<CreativeSourceVideoAsset | null>(null);
   const [library, setLibrary] = useState<VideoFrameLibrary | null>(null);
@@ -293,6 +293,8 @@ export function VideoIntelligenceStudio() {
           <video controls preload="metadata" src={`/api/media/files/${encodeURIComponent(media.fileName)}`} className={styles.video} />
           <div>
             <strong>{media.originalName}</strong>
+            {acceptancePreview && status?.phase === 'COMPLETE'
+              ? <p><a href={`/?videoMediaId=${encodeURIComponent(media.id)}`}>Use saved video in Create</a></p> : null}
             <p>{Math.round(media.size / 1024 / 1024 * 10) / 10} MB · stored as TRA_VIDEO</p>
             {!status ? <button className={styles.primary} type="button" onClick={() => void analyze('START')} disabled={busy}>Start analysis (uses model/API)</button> : null}
             {status && !['COMPLETE', 'FAILED', 'RETRY_REQUIRED'].includes(status.phase) ? <button className={styles.primary} type="button" onClick={() => void analyze('ADVANCE')} disabled={busy}>Resume analysis (uses model/API)</button> : null}

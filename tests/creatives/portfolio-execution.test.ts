@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as previewAcceptance from '@/lib/creatives/preview-acceptance';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { newCreativePortfolio, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
@@ -170,6 +171,22 @@ const reachDiversityAudit = async (storage: MemoryPortfolioStorage) => {
   await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
   return job;
 };
+
+it('stops a failed initial Preview audit without entering repair, re-audit or rendering', async () => {
+  const storage = new MemoryPortfolioStorage(), job = await reachDiversityAudit(storage);
+  vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+  // Request admission is tested separately; isolate the reachable initial-audit transition here.
+  const admission = vi.spyOn(previewAcceptance, 'assertPreviewAcceptanceJob').mockImplementation(() => {});
+  try {
+    mocks.audit.mockResolvedValueOnce(repeatedAudit());
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.status).toBe(409); expect(result.error).toContain('repair and re-audit are not authorized');
+    expect(result.job.planning.phase).toBe('DIVERSITY_AUDIT'); expect(result.job.planningError).toBeTruthy();
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(mocks.plan).toHaveBeenCalledOnce(); expect(mocks.audit).toHaveBeenCalledOnce();
+    expect(mocks.render).not.toHaveBeenCalled();
+  } finally { admission.mockRestore(); vi.unstubAllEnvs(); }
+});
 
 const reachTerminalSecondAudit = async (storage: MemoryPortfolioStorage) => {
   const job = await reachDiversityAudit(storage);

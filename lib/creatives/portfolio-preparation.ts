@@ -19,8 +19,10 @@ import { advancePlanningSourceAnalysis, composedSourceCatalog, composedLayoutPro
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
 import { primaryVideoGuidance, primaryVideoDirection, representativeVideoGuidance, selectedVideoInputContract } from '@/lib/creatives/primary-video-source';
+import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
 
 export type PortfolioPreparationState = {
+  previewPreflightReady?: true;
   videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
   videoProgress?: {
     mediaId: string;
@@ -114,6 +116,7 @@ export async function advancePortfolioPreparation(
   current: PortfolioPreparationState,
   onProviderOperationStart: () => void,
   sourceCompositionVersion: 1 | 2 = 1,
+  preflightOnly = false,
 ): Promise<PortfolioPreparationResult> {
   const state = structuredClone(current);
   if (sourceCompositionVersion === 2) {
@@ -184,7 +187,7 @@ export async function advancePortfolioPreparation(
   }
 
   if (!state.selectedReferences) {
-    const library = (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
+    const library = isPreviewAcceptance() ? [] : (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
     const requestedReferenceCount = Math.min(8, data.variationCount, library.length);
     if (requestedReferenceCount > 0) {
       onProviderOperationStart();
@@ -223,7 +226,7 @@ export async function advancePortfolioPreparation(
     return { state };
   }
 
-  const enrichedCatalog = await advanceReferenceAngles(state.referenceCatalog, storage, onProviderOperationStart);
+  const enrichedCatalog = isPreviewAcceptance() ? null : await advanceReferenceAngles(state.referenceCatalog, storage, onProviderOperationStart);
   if (enrichedCatalog) {
     state.referenceCatalog = enrichedCatalog;
     return { state };
@@ -296,6 +299,7 @@ export async function advancePortfolioPreparation(
     ...(approvedHumanOptions.length ? { approvedHumanOptions } : {}),
   };
 
+  if (preflightOnly) return { state: { ...state, previewPreflightReady: true } };
   onProviderOperationStart();
   const batchPlan = await requestCreativeBatch(plannerArgs);
   const analysisSources: CreativeGenerationProvenance['analysisSources'] = [

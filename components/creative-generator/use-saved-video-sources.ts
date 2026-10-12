@@ -3,14 +3,17 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { CreativeSourceAsset, CreativeSourceVideoAsset } from '@/lib/media/types';
 import type { useVideoReviewDraft } from './use-video-review-draft';
+import type { ReferenceLibraryItem } from '@/lib/references/types';
 
 const INVENTORY = 'tra-create-video-ids-v1';
+const LINKED_LAYOUTS = 'tra-create-linked-layout-ids-v1';
 /** Convenience IDs only. Reopen rehydrates current server media without advancing video work. */
 export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources: Dispatch<SetStateAction<CreativeSourceAsset[]>>,
   review: ReturnType<typeof useVideoReviewDraft>) {
   const [pending, setPending] = useState(true), [failures, setFailures] = useState<Record<string, string>>({});
   const [attempt, setAttempt] = useState(0);
   const removed = useRef(new Set<string>()), current = useRef(sources), loaded = useRef(false);
+  const linkedLayouts = useRef(new Set<string>());
   current.current = sources;
   const savedId = review.state.choices?.video?.locator.sourceVideoMediaId;
   useEffect(() => {
@@ -20,9 +23,39 @@ export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources:
     try { const value: unknown = JSON.parse(window.localStorage.getItem(INVENTORY) ?? '[]');
       if (Array.isArray(value)) ids = value.filter(id => typeof id === 'string' && /^media_[a-f0-9]{32}$/.test(id));
     } catch { /* Saved review still restores its selected video. */ }
+    try { const value: unknown = JSON.parse(window.localStorage.getItem(LINKED_LAYOUTS) ?? '[]');
+      if (Array.isArray(value)) value.filter(id => typeof id === 'string' && /^media_[a-f0-9]{32}$/.test(id))
+        .forEach(id => linkedLayouts.current.add(id));
+    } catch { /* An explicit layout link still works. */ }
     if (savedId) ids.push(savedId);
+    const linkedUrl = new URL(window.location.href), linkedId = linkedUrl.searchParams.get('videoMediaId');
+    if (linkedId && /^media_[a-f0-9]{32}$/.test(linkedId)) {
+      ids.push(linkedId); linkedUrl.searchParams.delete('videoMediaId');
+    }
+    const layoutId = linkedUrl.searchParams.get('layoutMediaId');
+    if (layoutId && /^media_[a-f0-9]{32}$/.test(layoutId)) {
+      linkedLayouts.current.add(layoutId); linkedUrl.searchParams.delete('layoutMediaId');
+    }
+    if (linkedUrl.href !== window.location.href) window.history.replaceState(null, '', linkedUrl);
+    const layouts = [...linkedLayouts.current].filter(id => !removed.current.has(id)
+      && !current.current.some(source => source.media.id === id));
+    const loadLayouts = async () => {
+      if (!layouts.length) return [];
+      try {
+        const response = await fetch('/api/references', { cache: 'no-store', signal: controller.signal });
+        const value = await response.json();
+        if (!response.ok || !Array.isArray(value.items)) throw new Error('Saved layout references could not be loaded.');
+        return layouts.map(id => {
+          const item = (value.items as ReferenceLibraryItem[]).find(item => item.id === id && item.referenceType === 'layout');
+          if (!item) return [id, 'Saved layout reference is unavailable.'] as const;
+          if (!controller.signal.aborted && !removed.current.has(id)) setSources(existing => existing.some(source => source.media.id === id)
+            ? existing : [...existing, { role: 'LAYOUT_REFERENCE', media: { ...item, mediaType: 'IMAGE' } }]);
+          return [id, ''] as const;
+        });
+      } catch (error) { return layouts.map(id => [id, error instanceof Error ? error.message : 'Layout unavailable.'] as const); }
+    };
     setPending(true);
-    void Promise.all([...new Set(ids)].filter(id => !removed.current.has(id) && !current.current.some(source => source.media.id === id))
+    void Promise.all([loadLayouts(), ...[...new Set(ids)].filter(id => !removed.current.has(id) && !current.current.some(source => source.media.id === id))
       .map(async id => {
         try {
           const response = await fetch(`/api/video/intelligence/jobs?mediaId=${encodeURIComponent(id)}`, { cache: 'no-store', signal: controller.signal });
@@ -34,8 +67,9 @@ export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources:
             ? existing : [...existing, { role: 'TRA_VIDEO', media }]);
           return [id, ''] as const;
         } catch (error) { return [id, error instanceof Error ? error.message : 'Video unavailable.'] as const; }
-      })).then(results => {
+      })]).then(([layoutResults, ...videoResults]) => {
         if (controller.signal.aborted) return;
+        const results = [...layoutResults, ...videoResults];
         setFailures(Object.fromEntries(results.filter(([id, error]) => error && !removed.current.has(id))));
         loaded.current = true; setPending(false);
       });
@@ -44,8 +78,14 @@ export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources:
   useEffect(() => {
     if (!loaded.current || pending) return;
     try { window.localStorage.setItem(INVENTORY, JSON.stringify([...new Set([
-      ...sources.filter(source => source.role === 'TRA_VIDEO').map(source => source.media.id), ...Object.keys(failures),
-    ])])); } catch { /* Inventory convenience storage may be disabled. */ }
+      ...sources.filter(source => source.role === 'TRA_VIDEO').map(source => source.media.id),
+      ...Object.keys(failures).filter(id => !linkedLayouts.current.has(id)),
+    ])]));
+      if (linkedLayouts.current.size) window.localStorage.setItem(LINKED_LAYOUTS, JSON.stringify([...new Set([
+        ...sources.filter(source => source.role === 'LAYOUT_REFERENCE' && linkedLayouts.current.has(source.media.id)).map(source => source.media.id),
+        ...Object.keys(failures).filter(id => linkedLayouts.current.has(id)),
+      ])]));
+    } catch { /* Inventory convenience storage may be disabled. */ }
   }, [sources, failures, pending]);
   const forget = (id: string) => { removed.current.add(id); };
   const clearUnavailable = async () => {

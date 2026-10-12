@@ -4,7 +4,7 @@ import { parseCreative } from '@/lib/creatives/parse-generation-response';
 import { parsePortfolioProgress, type PortfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { createSubmissionIdentity, SUBMISSION_HEADER, type SubmissionStorage } from '@/lib/creatives/submission-id';
 
-export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number };
+export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number; preflightReady?: true };
 type Command = { action: 'create'; request: GenerateCreativeRequest; submissionId: string } | { action: 'load' | 'advance'; id: string }
   | { action: 'retry'; id: string; slotIndex: number | null };
 const endpoint = '/api/creatives/portfolios';
@@ -48,7 +48,8 @@ export async function requestPortfolio(command: Command): Promise<PortfolioRespo
   }
   const error = typeof value.error === 'string' ? value.error : !response.ok ? 'Portfolio request failed. Reload saved progress.' : undefined;
   const retryAfterMs = response.status === 202 ? parseBusyRetryAfterMs(response.headers.get('Retry-After')) : undefined;
-  return { job, creatives: creatives as GeneratedCreative[], ...(error ? { error } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
+  return { job, creatives: creatives as GeneratedCreative[], ...(value.preflightReady === true ? { preflightReady: true } : {}),
+    ...(error ? { error } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
 }
 export const portfolioCanAdvance = (job: PortfolioProgress) =>
   Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING')
@@ -60,6 +61,7 @@ export async function runPortfolio(
   wait: (delayMs: number) => Promise<void> = delayMs => new Promise(resolve => setTimeout(resolve, delayMs)),
 ) {
   if (initial.error) throw new Error(initial.error);
+  if (initial.preflightReady) return initial;
   let current = initial;
   while (!shouldStop() && portfolioCanAdvance(current.job)) {
     const parentBusy = Boolean(current.job.lease && current.job.lease.expiresAtMs > Date.now());
@@ -70,6 +72,7 @@ export async function runPortfolio(
     if (next.job.requestedCount !== previous.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
     onUpdate(next);
     current = next;
+    if (next.preflightReady && !next.error) return current;
     if (next.retryAfterMs !== undefined) {
       if (shouldStop()) break;
       await wait(next.retryAfterMs);

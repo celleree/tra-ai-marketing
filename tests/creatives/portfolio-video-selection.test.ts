@@ -6,7 +6,7 @@ import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 const mocks = vi.hoisted(() => ({ loadContext: vi.fn(), extractFrames: vi.fn(), candidateImage: vi.fn() }));
 vi.mock('@/lib/video/selection-context', () => ({ loadSavedVideoSelectionContext: mocks.loadContext, extractVideoSelectionFrames: mocks.extractFrames, loadVideoCandidateAnalysisImage: mocks.candidateImage }));
-import { createPortfolioVideoSelectionConcept, hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames, preflightPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
+import { assertCachedManualPortfolioFrames, createPortfolioVideoSelectionConcept, hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames, preflightPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
@@ -190,6 +190,20 @@ it('selects only the reviewed source, checkpoints assessment, and hydrates exact
   await expect(hydratePortfolioVideoFrameSelection({ ...input, reviewChoices: { ...input.reviewChoices, frames: [input.bindings[1]] },
     selection: selected.selection })).rejects.toThrow('closed-pool');
   expect(mocks.extractFrames).toHaveBeenCalledOnce();
+});
+
+it('requires cached assessments for every selected member before planning, without writes or paid selection', async () => {
+  const input = await manualSetup(); await selectPortfolioVideoFrames(input);
+  input.reviewChoices.frames = input.bindings;
+  const before = input.storage.counter;
+  await expect(assertCachedManualPortfolioFrames(input)).rejects.toThrow('every selected frame');
+  expect(input.request).toHaveBeenCalledOnce(); expect(input.storage.counter).toBe(before);
+  const reuseContext = { version: 1 as const, frames: [{ libraryId: input.item.library.id,
+    frameId: input.bindings[0].frameId, useCount: 1 }] };
+  await selectPortfolioVideoFrames({ ...input, reuseContext });
+  const completed = input.storage.counter;
+  await expect(assertCachedManualPortfolioFrames(input)).resolves.toBeUndefined();
+  expect(input.request).toHaveBeenCalledTimes(2); expect(input.storage.counter).toBe(completed);
 });
 
 it.each(['sourceVideoMediaId', 'sourceVideoContentHash', 'analyzerFingerprintSha256', 'librarySha256', 'preparationSha256'])
