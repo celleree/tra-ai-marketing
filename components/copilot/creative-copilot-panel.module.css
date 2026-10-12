@@ -1,10 +1,11 @@
 .panel { margin-top: 16px; min-width: 0; overflow-wrap: anywhere; }
-.panel button { max-width: 100%; white-space: normal; }
+.panel button { max-width: 100%; min-height: 44px; padding: 10px 12px; white-space: normal; border: 1px solid #bbb; border-radius: 6px; background: white; color: inherit; }
+.panel button:disabled { opacity: 0.6; }
 .panel section { display: grid; gap: 12px; padding-top: 12px; }
 .panel p, .result h4 { margin: 0; }
 .context { max-height: 240px; overflow: auto; white-space: pre-wrap; font: inherit; border: 1px solid #bbb; padding: 12px; }
-.approval { display: flex; gap: 8px; align-items: flex-start; }
-.approval input { flex-shrink: 0; }
+.approval { display: flex; gap: 8px; align-items: center; min-height: 44px; }
+.approval input { flex-shrink: 0; width: 18px; height: 18px; }
 .result { display: grid; gap: 10px; border-top: 1px solid #bbb; padding-top: 12px; }
 .result ul, .result ol { margin: 0; padding-left: 22px; }
 .result small { display: block; color: #555; }
