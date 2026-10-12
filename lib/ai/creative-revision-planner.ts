@@ -12,6 +12,8 @@ import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, resolveLayoutAwareLogoAnch
   type CreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 
 type RevisionParentConcept = Omit<PlannedCreativeConcept, 'index' | 'selectionReason'>;
+// One concept: match the batch planner's 4096 + 1536 token allowance, including reasoning.
+const REVISION_OUTPUT_TOKENS = 5632;
 export type CreativeRevisionPlan = {
   concept: PlannedCreativeConcept;
   plannerModel: string;
@@ -112,7 +114,7 @@ export async function planCreativeRevision(args: {
   if (copyMode.kind === 'INVALID') throw new Error('Saved parent has an invalid separated ad/image copy contract.');
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY is not configured.');
-  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra';
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol';
   const copySchemaForPlan = copyMode.kind === 'E2' ? E2_SCHEMA : LEGACY_SCHEMA;
   const baseSchema = args.hasBrandLogo ? {
     ...copySchemaForPlan,
@@ -125,7 +127,7 @@ export async function planCreativeRevision(args: {
   } : baseSchema;
   const response = await fetchWithProviderUsage('revision-plan', model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, input: [
+    body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, max_output_tokens: REVISION_OUTPUT_TOKENS, input: [
       { role: 'system', content: [{ type: 'input_text', text: RULES + (copyMode.kind === 'E2' ? SEPARATED_COPY_RULES : '\nReturn exactly one format, copy, strategy and selectionReason in the required schema.') + (args.proofProvenance ? INHERITED_PROOF_RULES : '') + (args.hasBrandLogo ? LOGO_RULES : '') + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(args) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_creative_revision', strict: true, schema } } }),

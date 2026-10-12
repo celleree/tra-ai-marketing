@@ -94,14 +94,16 @@ describe('single-creative revision planning', () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify(payload({ ...plan(), referenceChoices }))));
     expect((await planCreativeRevision({ ...args, referenceCatalog })).concept.strategy.referenceSelection)
       .toEqual({ ...referenceChoices, referenceRelationship: 'mixed' });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_output_tokens).toBe(5632);
     fetchMock.mockResolvedValue(new Response(JSON.stringify(payload({ ...plan(), referenceChoices }))));
     await expect(planCreativeRevision({ ...args, referenceCatalog: [] })).rejects.toThrow('Unavailable');
   });
   it('uses one Astra Medium request and permits an ordinary edit without variation requirements', async () => {
     const result = await planCreativeRevision(args);
-    expect(result).toMatchObject({ concept: { ...plan(), index: 1 }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    expect(result).toMatchObject({ concept: { ...plan(), index: 1 }, plannerModel: 'gpt-6.1-sol', reasoningEffort: 'medium' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.max_output_tokens).toBe(5632);
     expect(body.reasoning).toEqual({ effort: 'medium' });
     expect(body.store).toBe(false);
     expect(body.text.format.strict).toBe(true);
@@ -126,6 +128,7 @@ describe('single-creative revision planning', () => {
     expect(result.concept.imageCopy).toEqual({ headline: 'Revised image headline', cta: 'Start here' });
     const request = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(request.text.format.schema.required).toContain('imageCopy');
+    expect(request.max_output_tokens).toBe(5632);
     expect(request.input[0].content[0].text).toContain('Never move Meta primaryText or Meta description into imageCopy');
   });
 
@@ -151,6 +154,7 @@ describe('single-creative revision planning', () => {
 
     const request = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(JSON.parse(request.input[1].content[0].text).proofProvenance).toEqual(proofProvenance);
+    expect(request.max_output_tokens).toBe(5632);
     expect(request.input[0].content[0].text).toContain('immutable, already revalidated Proof constraint');
     expect(request.input[0].content[0].text).toContain('D2-composed Proof block');
     expect(request.input[0].content[0].text).toContain('D3 does not allow selecting, replacing');

@@ -300,7 +300,7 @@ const layoutBlueprint: LayoutBlueprint = {
 const layoutResolution = {
   blueprint: layoutBlueprint,
   contentHash: contentHash(PNG),
-  analyzerModel: 'gpt-5.6-terra',
+  analyzerModel: 'gpt-6-luna',
   cacheHit: false,
 };
 
@@ -502,7 +502,7 @@ it('uses a seeded document and rich concept from the real planner through render
   const saved = records.find(record => record.planning.strategy.execution.taxDocumentReference === 'irs-notice-v1');
   expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.execution.taxDocumentReference).toBe('irs-notice-v1');
   expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.strategy.conceptDetails).toEqual(plan.creatives[0].strategy.conceptDetails);
-  expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.portfolioAudit).toEqual(portfolioAudit());
+  expect(parseCreativePlanning(JSON.parse(JSON.stringify(saved.planning)))?.portfolioAudit).toEqual({ ...portfolioAudit(), model: 'gpt-6.1-sol' });
   expect(saved.copy).toEqual(saved.adCopy);
   expect(saved.imageCopy).toMatchObject({ headline: 'Headline 1', shortSupport: 'Short support', cta: 'Talk with TRA' });
   expect(saved.generationProvenance.imageGeneration.prompt).not.toContain(portfolioAudit().executionNotes);
@@ -653,7 +653,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
-    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-5.6-terra' });
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-6-luna' });
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
     for (const { data } of events.filter(({ event }) => event === 'creative')) {
       const provenance = parseCreativeGenerationProvenance(
@@ -1125,7 +1125,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     const events = await readStreamEvents(response);
 
     expect(response.status).toBe(200);
-    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-5.6-terra' });
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-6-luna' });
     expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(2);
     expect(mocks.getApprovedTraVideoFrames.mock.calls[0][0].stored).toBe(storedById[videoId]);
     expect(mocks.analyzeApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
@@ -1170,7 +1170,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(response.status).toBe(200);
     expect(readMediaById).toHaveBeenCalledTimes(21);
     expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
-    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-5.6-terra' });
+    expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-6-luna' });
     expect(mocks.analyzeTraSourceCreative).toHaveBeenCalledTimes(1);
     expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
     expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();

@@ -254,7 +254,7 @@ export async function requestCreativeBatch(
   if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
     throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
   }
-  const model = repairModel ?? (process.env.OPENAI_TEXT_MODEL || 'gpt-6-astra');
+  const model = repairModel ?? (process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol');
   if (args.approvedHumanOptions && (args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
     || new Set(args.approvedHumanOptions.map(option => option.id)).size !== args.approvedHumanOptions.length)) {
     throw new Error('Invalid approved-human options: IDs must be valid and unique; option count is not bounded.');

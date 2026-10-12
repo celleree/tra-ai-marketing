@@ -41,7 +41,7 @@ beforeEach(async () => {
   await getLayoutBlueprintCache().write(sha(png), 'semantic-model', candidate.blueprint);
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
     const body = JSON.parse(init.body);
-    if (body.model === 'gpt-6-astra') {
+    if (body.model === 'gpt-6.1-sol') {
       astra.push(JSON.parse(body.input[1].content[0].text));
       const creatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
         proofSelection: null,

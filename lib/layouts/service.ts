@@ -279,7 +279,7 @@ export async function getOrAnalyzeContextualLayoutAngle(
   const hash = createHash('sha256').update(source.buffer).digest('hex');
   // Hash the exact string passed to the unchanged analyzer, including whitespace.
   const contextHash = createHash('sha256').update(context).digest('hex');
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
   const activeCache = getLayoutBlueprintCache();
   const cached = await activeCache.readContextualAngle(hash, contextHash, model);
   if (cached !== null) { emitProviderReuse('source-reference-analysis', model); return cached; }

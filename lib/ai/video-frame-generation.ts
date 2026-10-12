@@ -107,7 +107,7 @@ export async function analyzeApprovedTraVideoFrames(args: {
   context: string;
 }): Promise<CreativeReferenceAnalysis> {
   const providerFrames = selectProviderVideoFrames(args.frames);
-  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-5.6-terra';
+  const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
   const rules = `Analyze still frames extracted by the server from ONE validated Tax Relief Advocates (TRA) video. These are approved TRA-owned source pixels. Use visible human identity and factual/content cues as TRA source context, NOT as a static-ad layout blueprint. Do not infer customer identity, testimonial status, outcomes, performance, or unsupported claims. Old captions, logos, and framing are context only. Preserve the visible approved person when useful; avoid stale copy/layout and unsupported implications. Classify into exactly one category:\n${categoryList}`;
   const content: Array<Record<string, unknown>> = [
     { type: 'input_text', text: `Source video: ${providerFrames[0].sourceVideoMediaId}\nTimestamps: ${providerFrames.map((frame) => `${frame.timestampMs}ms`).join(', ')}\n\nUser/company direction:\n${args.context}` },
