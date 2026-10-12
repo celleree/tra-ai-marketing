@@ -83,6 +83,8 @@ try {
   });
   await scenario({ width: 375, height: 812 }, true, async ({ page, panel, posts, mode }) => {
     await page.waitForFunction(() => !document.body.textContent.includes('Checking copilot availability'));
+    assert.equal(await panel.getByRole('button').evaluateAll(buttons => buttons.every(button => button.getBoundingClientRect().height >= 44)), true);
+    assert.equal(await panel.getByRole('checkbox').evaluate(input => input.closest('label').getBoundingClientRect().height >= 44), true);
     await panel.getByRole('checkbox').check(); mode('network'); await panel.getByRole('button', { name: 'Request paid suggestion' }).click();
     await panel.getByRole('alert').getByText(/no automatic retry/).waitFor(); assert.equal(posts.length, 1);
     mode('proposal'); await panel.getByRole('button', { name: 'Request paid suggestion' }).click();
