@@ -64,6 +64,30 @@ Server logs emit `tra_provider_usage` events with allowlisted metadata and a ver
 
 Browser recovery requires session storage and retains only a request digest and UUID in the current tab. Retry or refresh keeps an unresolved paid intent; completing it or choosing an explicit new paid action permits fresh work. Do not clear session storage during recovery. Review the offline corpus in `tests/fixtures/cost-regression-corpus.md`; actual creative quality and cost per accepted output require a separately authorized staging run and human review.
 
+## Higgsfield video generation
+
+The selected initial video provider is Higgsfield, using Kling 2.6 Motion Control Standard
+(`kling-video/motion-control/std`). The server transport in `lib/video-generation/higgsfield.ts`
+accepts a source image and motion-reference video. It does not yet provide application routes,
+job persistence, output storage or a user interface.
+
+Developer API access and billing are separate from the Higgsfield website subscription.
+Keep `HF_API_KEY_ID` and `HF_API_KEY_SECRET` server-side; never use browser-visible variables.
+Credentials alone do not authorize generation. Before enabling a caller, verify source media
+authority and permissions, duration-based pricing and an approved budget; a caller-supplied
+quote is not a provider-enforced cost cap. Sound retention must be chosen explicitly.
+
+Persist the submission's idempotency key and exact inputs before calling the provider, then
+store the returned request ID and status URL. The transport submits once without automatic
+retries or model fallback. Recover by polling the existing job; after an ambiguous submission,
+replay only the same inputs and key under the approved recovery policy. Copy completed output
+to private application storage before provider retention expires. Do not expose generated output
+as approved advertising without the normal human/compliance review.
+
+References: [model contract](https://open.higgsfield.ai/models/kling-video/motion-control/std/api-reference),
+[request lifecycle](https://docs.higgsfield.ai/docs/concepts/requests),
+[idempotency](https://docs.higgsfield.ai/docs/concepts/idempotency).
+
 ## Meta
 
 - Store `META_ACCESS_TOKEN` server-side.
