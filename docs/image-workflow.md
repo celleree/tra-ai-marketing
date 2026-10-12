@@ -44,7 +44,9 @@ Selected TRA video is the primary creative input; company knowledge supports bra
 
 Explicitly selected TRA human frames must reach every requested concept through the exact approved-frame attachment path; an unusable pool stops generation rather than becoming a graphic. In video workflows, supplied `LAYOUT_REFERENCE` assets must supply each concept's composition through a selected blueprint, while their humans, copy, claims and logos remain excluded. Automatic frame mode still permits video-grounded non-human concepts.
 
-Uploaded logo artwork is composited deterministically and retained by ID/hash for revisions. A configured but unresolvable logo or unreadable saved brand settings must block generation instead of silently omitting the asset. This does not certify that an image provider will never draw extra unwanted marks elsewhere; actual outputs require visual review.
+Saved video/layout obligations persist through edits and variations using existing source provenance. Removing them requires the operator's explicit source-removal control; a model's graphic or original-layout choice alone cannot detach them. Representative-frame analysis records whether a person is visible; legacy analysis lacking that observation requires a new preparation before automatic planning, without guessing human eligibility from prose.
+
+Uploaded logo artwork is composited deterministically and retained by ID/hash for revisions. Create requires the original approved logo to be configured on the current site origin; absent logos, configured but unresolvable logos and unreadable saved brand settings block generation instead of silently omitting the asset. The existing browser-local profile binding is retained; no header mark or invented asset becomes the canonical logo. This does not certify that an image provider will never draw extra unwanted marks elsewhere; actual outputs require visual review.
 
 ### TRA Reference
 

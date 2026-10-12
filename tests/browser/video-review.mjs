@@ -36,13 +36,14 @@ async function scenario(name, options, run) {
   const response = () => ({ draft: { id, version: 1, artifactType: 'VIDEO_REVIEW_DRAFT', providerEligible: false,
     choices, claimSnapshots: [{ reference: claim, wording: segment.text, context: { type: 'VIDEO_TRANSCRIPT', segments: [segment] } }], updatedAtMs: 1 },
     revision, issues: issue ? [{ source: 'VIDEO', message: issue }] : [], transcriptContext: null, profileSource: null });
-  await context.addInitScript(({ id, inventory, profile, hasProfile }) => {
+  await context.addInitScript(({ id, inventory, profile, hasProfile, noLogo }) => {
     if (sessionStorage.getItem('video-review-fixture-seeded')) return;
     sessionStorage.setItem('video-review-fixture-seeded', 'true');
     localStorage.setItem('tra-video-review-draft-v1', id);
     localStorage.setItem('tra-create-video-ids-v1', JSON.stringify(inventory));
-    if (hasProfile) localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', brandGuidelines: {}, guardrails: {}, ...profile }));
-  }, { id, inventory: options.inventory ?? [mediaId], profile, hasProfile: options.profile });
+    localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', guardrails: {}, ...(hasProfile ? profile : {}),
+      brandGuidelines: noLogo ? {} : { logo: '/api/media/files/media_77777777777777777777777777777777.png' } }));
+  }, { id, inventory: options.inventory ?? [mediaId], profile, hasProfile: options.profile, noLogo: options.noLogo });
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, body = request.postDataJSON();
     calls.push([path, request.method()]);
@@ -88,6 +89,11 @@ async function scenario(name, options, run) {
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  await scenario('Missing original logo blocks a new generation before paid admission', { noLogo: true }, async ({ page, submissions }) => {
+    await ready(page); await generateButton(page).click();
+    await page.getByText('The approved TRA logo is missing for this site.', { exact: false }).waitFor();
+    assert.equal(submissions.length, 0);
+  });
   await scenario('Review → Create exact revision/manual frames; refresh and reopen are read-only', {}, async ({ page, calls, submissions }) => {
     await ready(page); assert.equal(await page.locator('input[type=checkbox]').first().isChecked(), true);
     await page.reload(); await ready(page);

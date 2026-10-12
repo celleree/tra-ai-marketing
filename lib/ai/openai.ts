@@ -29,6 +29,8 @@ import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 export interface CreativeReferenceAnalysis {
+  /** Representative-video observation only; never grants human-source eligibility. */
+  visibleHuman?: boolean;
   summary: string;
   visibleText: string[];
   visualStructure: string;

@@ -36,7 +36,7 @@ describe('final non-human provider boundary', () => {
         analyzer: { kind: 'REPRESENTATIVE_VIDEO_FRAMES', model: 'fixture', schemaVersion: 1, contextSha256: 'a'.repeat(64) },
         evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'REPRESENTATIVE_VIDEO_FRAMES',
           analyzedFrames: [{ timestampMs: 1000, frameSha256: frame.frameSha256 }], analysis: {
-            summary: 'An IRS document is shown in the supplied video.', visualStructure: 'Closeup of a document.',
+            visibleHuman: false, summary: 'An IRS document is shown in the supplied video.', visualStructure: 'Closeup of a document.',
             hookOrAngle: 'Understand the notice', visibleText: [], offerOrCta: '', styleNotes: '', preserve: [], avoid: [],
             unknowns: [], dominantCategory: 'educational' } } }] },
       videoFrameSet: { source: {}, frames: [frame] } as any,

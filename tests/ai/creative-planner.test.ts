@@ -25,6 +25,7 @@ vi.mock('@/lib/proof/planning', async original => ({
 }));
 
 const analysis = {
+  visibleHuman: false,
   summary: 'Clear visual hierarchy', visibleText: [], visualStructure: 'Headline over image',
   hookOrAngle: 'Clarity', offerOrCta: 'Talk with TRA', styleNotes: 'Calm', preserve: ['hierarchy'],
   avoid: ['third-party identity'], unknowns: ['performance'], dominantCategory: 'customer-problems' as const,
@@ -740,4 +741,15 @@ describe('creative batch planner', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text', text: '{' }] }] }), { status: 200 })));
     await expect(planCreativeBatch({ count: 2, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/malformed/i);
   });
+});
+
+it('blocks legacy representative video analysis without a human assessment before a paid planning call', async () => {
+  const sourceAnalysis = sourceProjection(); sourceAnalysis.entries = sourceAnalysis.entries.filter(entry => entry.source.role === 'TRA_VIDEO').slice(0, 1);
+  const result = sourceAnalysis.entries[0].result;
+  if (result?.kind !== 'REPRESENTATIVE_VIDEO_FRAMES') throw new Error('Expected representative analysis');
+  delete result.analysis.visibleHuman;
+  const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+  await expect(requestCreativeBatch({ count: 2, context: 'Use the supplied video', analysis, sourceAnalysis, hasApprovedHumanSource: false }))
+    .rejects.toThrow('lacks a visible-human assessment');
+  expect(fetchMock).not.toHaveBeenCalled();
 });

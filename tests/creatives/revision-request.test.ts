@@ -3,6 +3,12 @@ import { validateCreativeRevisionRequest } from '@/lib/creatives/revision-reques
 import { CREATIVE_PLACEMENTS } from '@/lib/creatives/placements';
 
 describe('saved creative revision requests', () => {
+  it('requires structured source-removal choices and limits them to edits and variations', () => {
+    expect(validateCreativeRevisionRequest({ operation: 'EDIT', instruction: 'Use a graphic', removeVideoSource: true, removeLayoutReference: true }))
+      .toEqual({ success: true, data: { operation: 'EDIT', instruction: 'Use a graphic', removeVideoSource: true, removeLayoutReference: true } });
+    expect(validateCreativeRevisionRequest({ operation: 'EDIT', instruction: 'Change color', removeVideoSource: 'true' }).success).toBe(false);
+    expect(validateCreativeRevisionRequest({ operation: 'REGENERATE', removeLayoutReference: true }).success).toBe(false);
+  });
   it.each(['EDIT', 'VARIATION'])('normalizes an explicit %s instruction and approved company context', (operation) => {
     expect(validateCreativeRevisionRequest({ operation, instruction: '  Use a clearer headline  ', companyProfile: { guardrails: { approvedClaims: ' Approved claim ', unknown: 'ignored' } } })).toEqual({
       success: true, data: { operation, instruction: 'Use a clearer headline', companyProfile: { guardrails: { approvedClaims: 'Approved claim' } } },
