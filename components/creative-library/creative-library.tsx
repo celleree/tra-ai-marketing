@@ -5,6 +5,7 @@ import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import { CreativeImageFallbackNotice, RevisionControls } from '@/components/creative-library/revision-controls';
 import { HumanReviewControls } from '@/components/creative-library/human-review-controls';
+import { CreativeCopilotPanel } from '@/components/copilot/creative-copilot-panel';
 import styles from '@/components/creative-generator/creative-results.module.css';
 
 interface CreativeLibraryItem extends CreativeRecord {
@@ -115,6 +116,7 @@ export function CreativeLibrary() {
                 ) : null}
                 <RevisionControls creative={creative} onSaved={saved => setItems(current => [saved, ...current.filter(item => item.id !== saved.id)])} />
                 <HumanReviewControls creative={creative} onUpdated={saved => setItems(current => current.map(item => item.id === saved.id ? { ...item, ...saved } : item))} />
+                <CreativeCopilotPanel creativeId={creative.id} hasIdentity={Boolean(creative.identity)} />
                 {creative.referenceImageId ? (
                   <p className={styles.creativeId}>
                     Reference ID: {creative.referenceImageId}
