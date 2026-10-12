@@ -65,6 +65,10 @@ beforeEach(() => {
         strategy: { ...concept.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct ${concept.index}` },
           execution: { ...concept.strategy.execution, subjectSource: payload.selectedVideoFrameRequirement ? 'approved-tra-human' : 'non-human' } },
         proofSelection: null, referenceChoices: { angleSource: null, layoutSource: null } }));
+      if (payload.draftVideoSourceCatalog?.length) Object.assign(creatives[0], {
+        draftVideoSourceSelection: { passageId: payload.draftVideoSourceCatalog[0].passageId, imageField: 'shortSupport' },
+      });
+      if (payload.draftVideoSourceCatalog?.length) Object.assign(creatives[1], { draftVideoSourceSelection: null });
       result = { creatives: payload.replacementIndexes ? creatives.filter(c => payload.replacementIndexes.includes(c.index)) : creatives };
     }
     return Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(result) }] }] });

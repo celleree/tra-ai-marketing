@@ -106,9 +106,13 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   boundary.layoutAngle.mockImplementation(async (_source, _context, start) => { start(); return 'Layout angle'; });
   boundary.layoutBlueprint.mockResolvedValue({ blueprint: referenceCandidate('d').blueprint, analyzerModel: 'vision-model',
     contentHash: layoutHash, cacheHit: true });
-  const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text',
-    text: JSON.stringify({ creatives: [planned(1), planned(2)].map(item => ({ ...item,
-      referenceChoices: { angleSource: null, layoutSource: layoutId } })) }) }] }] }), { status: 200 }));
+  const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const input = JSON.parse(JSON.parse(String(init?.body)).input[1].content[0].text);
+    return new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text',
+      text: JSON.stringify({ creatives: [planned(1), planned(2)].map(item => ({ ...item,
+        ...(input.draftVideoSourceCatalog?.length ? { draftVideoSourceSelection: item.index === 1 ? { passageId: input.draftVideoSourceCatalog[0].passageId, imageField: 'shortSupport' } : null } : {}),
+        referenceChoices: { angleSource: null, layoutSource: layoutId } })) }) }] }] }), { status: 200 });
+  });
   vi.stubGlobal('fetch', fetchMock);
   const baseRequest = { ...portfolioRequest(), sourceAssets: sources.map(({ sha256: _hash, ...source }) => source) };
   const fixtureFor = (id: typeof videos[number]['identity']) => videos.find(fixture => fixture.mediaId === id.sourceVideoMediaId)!;
