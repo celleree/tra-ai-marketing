@@ -9,7 +9,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "postinstall": "node scripts/install-ffmpeg.mjs",
-    "test:browser": "node tests/browser/video-review.mjs"
+    "test:browser": "node tests/browser/video-review.mjs && node tests/browser/copilot.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1114.0",
