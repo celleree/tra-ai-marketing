@@ -15,10 +15,10 @@ import { loadApprovedHumanOptions } from '@/lib/video/approved-human-planning';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
-import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
+import { advancePlanningSourceAnalysis, composedSourceCatalog, composedLayoutProvenance } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
-import { primaryVideoGuidance, primaryVideoDirection } from '@/lib/creatives/primary-video-source';
+import { primaryVideoGuidance, primaryVideoDirection, selectedVideoInputContract } from '@/lib/creatives/primary-video-source';
 
 export type PortfolioPreparationState = {
   videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
@@ -251,7 +251,7 @@ export async function advancePortfolioPreparation(
   const videoGuidance = primaryVideoGuidance(state.sourceAnalysis, videoFrameSet?.source.media.id);
   const approvedHumanOptions = manualFrames || videoGuidance ? [] : await loadApprovedHumanOptions();
   const humanSourceDirection = manualFrames
-    ? 'The operator selected a closed pool of exact TRA video frames in operatorSelectedSourceGuidance. For human concepts use only that pool, with null approvedHumanId; no catalog, image, representative or neighbor substitution. Visual suitability and overlay assessment plus fresh PNG extraction are still required before rendering. Choose a non-human concept if that pool cannot support the idea.'
+    ? 'The operator explicitly selected a closed pool of TRA video human frames in operatorSelectedSourceGuidance. Every concept must use that pool, with null humanSourceId/approvedHumanId; no catalog, image, representative or neighbor substitution. Visual suitability and overlay assessment plus fresh PNG extraction are still required before rendering. Stop visibly if the pool is unusable; do not replace it with a non-human concept.'
     : approvedHumanOptions.length
     ? 'Curated approvedHumanOptions are available as independent human sources. Choose a stable ID only when that person strengthens the proposition; selecting one replaces any supplied human source for that concept. Choose null for a graphic concept or an explicitly supplied approved source. No invented people or identity-based claims.'
     : videoFrameSet
@@ -277,6 +277,7 @@ export async function advancePortfolioPreparation(
     ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, data.placement)
     : undefined;
   const plannerArgs = {
+    ...selectedVideoInputContract(data),
     ...(data.reviewHandoff ? { operatorSelectedSourceGuidance: data.reviewHandoff.operatorSelectedSourceGuidance } : {}),
     count: data.variationCount,
     context: videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext,
@@ -294,7 +295,7 @@ export async function advancePortfolioPreparation(
   onProviderOperationStart();
   const batchPlan = await requestCreativeBatch(plannerArgs);
   const analysisSources: CreativeGenerationProvenance['analysisSources'] = [
-    ...(source && generationSourceAsset?.role === 'LAYOUT_REFERENCE' && state.sourceLayout
+    ...(state.sourceAnalysis ? composedLayoutProvenance(state.sourceAnalysis) : source && generationSourceAsset?.role === 'LAYOUT_REFERENCE' && state.sourceLayout
       ? [{
           type: 'LAYOUT_REFERENCE' as const,
           mediaId: generationSourceAsset.media.id,

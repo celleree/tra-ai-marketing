@@ -1,5 +1,29 @@
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
+import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
+import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
+
+export type SelectedVideoInputContract = { requireSelectedVideoFrames?: boolean; requiredLayoutReferenceIds?: string[] };
+
+/** Explicit inputs outrank optional catalog inspiration; automatic video mode remains available. */
+export function selectedVideoInputContract(request: Pick<ValidGenerateCreativeRequest, 'sourceAssets' | 'videoFrameSelection' | 'reviewHandoff'>): SelectedVideoInputContract {
+  if (!request.sourceAssets?.some(source => source.role === 'TRA_VIDEO')) return {};
+  const layoutIds = request.sourceAssets.filter(source => source.role === 'LAYOUT_REFERENCE').map(source => source.mediaId);
+  return {
+    ...(request.videoFrameSelection || request.reviewHandoff?.choices.frames?.length ? { requireSelectedVideoFrames: true } : {}),
+    ...(layoutIds.length ? { requiredLayoutReferenceIds: layoutIds } : {}),
+  };
+}
+
+export function assertSelectedVideoInputContract(concept: Pick<PlannedCreativeConcept, 'strategy'>, contract: SelectedVideoInputContract) {
+  if (contract.requireSelectedVideoFrames && (concept.strategy.execution.subjectSource !== 'approved-tra-human'
+    || concept.strategy.humanSourceId || concept.strategy.approvedHumanId)) {
+    throw new Error('The plan ignored the explicitly selected TRA video frames. No images were generated. Use those frames or remove the selection explicitly.');
+  }
+  if (contract.requiredLayoutReferenceIds?.length && !contract.requiredLayoutReferenceIds.includes(concept.strategy.referenceSelection?.layoutSource ?? '')) {
+    throw new Error('The plan ignored the supplied video layout reference. No images were generated. Use its composition or remove the reference explicitly.');
+  }
+}
 
 /** Completed video observations are primary creative input, never proof of claims. */
 export function primaryVideoGuidance(state?: PlanningSourceAnalysisState, mediaId?: string) {
@@ -45,7 +69,7 @@ export function primaryVideoGuidance(state?: PlanningSourceAnalysisState, mediaI
 export const primaryVideoDirection = (guidance: NonNullable<ReturnType<typeof primaryVideoGuidance>>) =>
   `PRIMARY SELECTED VIDEO ${guidance.source.mediaId} (source SHA-256 ${guidance.source.sha256}).
 Use this video as the primary creative evidence. Company knowledge supports brand and verified facts; it must not replace the selected video with unrelated concepts. These bounded observations/transcript excerpts are partial source content, not approved claims or complete narratives. Preserve the supplied human through assessed fresh frames when using a person; no catalog-person substitution. ${guidance.hasHuman ? 'Include at least one concept using that visible TRA human (subjectSource approved-tra-human, no catalog humanSourceId). If usable human frames cannot be verified, stop visibly rather than substitute unrelated graphics.' : ''}
-${JSON.stringify(guidance.analysis)}`;
+Read the primary video content in referenceAnalysis and sourceAnalysis; their claims remain unverified until the approved evidence path validates them.`;
 
 /** The image renderer gets visual grounding, not unplanned transcript/claims/caption copy. */
 export const primaryVideoRenderDirection = (guidance: NonNullable<ReturnType<typeof primaryVideoGuidance>>) =>

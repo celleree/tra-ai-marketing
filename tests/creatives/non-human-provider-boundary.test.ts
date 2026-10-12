@@ -32,6 +32,13 @@ describe('final non-human provider boundary', () => {
       request, batchPlan: snapshot.batchPlan, referenceCatalog: [], selectedReferences: [],
       requestedSources: [{ role: 'TRA_VIDEO', mediaId: frame.sourceVideoMediaId, sha256: 'b'.repeat(64) }],
       analysisSources: [], reserveLogoArea: false, brandLogo: null, providerImageSource: undefined,
+      sourceAnalysis: { version: 1, entries: [{ source: { role: 'TRA_VIDEO', mediaId: frame.sourceVideoMediaId, sha256: 'b'.repeat(64) },
+        analyzer: { kind: 'REPRESENTATIVE_VIDEO_FRAMES', model: 'fixture', schemaVersion: 1, contextSha256: 'a'.repeat(64) },
+        evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'REPRESENTATIVE_VIDEO_FRAMES',
+          analyzedFrames: [{ timestampMs: 1000, frameSha256: frame.frameSha256 }], analysis: {
+            summary: 'An IRS document is shown in the supplied video.', visualStructure: 'Closeup of a document.',
+            hookOrAngle: 'Understand the notice', visibleText: [], offerOrCta: '', styleNotes: '', preserve: [], avoid: [],
+            unknowns: [], dominantCategory: 'educational' } } }] },
       videoFrameSet: { source: {}, frames: [frame] } as any,
       generatedVideoFrameSelection: { libraryId: `video-library:${'e'.repeat(64)}`, sourceVideoMediaId: frame.sourceVideoMediaId,
         sourceVideoContentHash: frame.sourceVideoContentHash, frames: [] }, storage,
@@ -39,6 +46,7 @@ describe('final non-human provider boundary', () => {
     expect(outbound).toHaveBeenCalledOnce();
     expect(outbound.mock.calls[0][0]).toBe('https://api.openai.com/v1/images/edits');
     const form = outbound.mock.calls[0][1].body as FormData;
+    expect(form.get('prompt')).toContain('An IRS document is shown in the supplied video.');
     expect(Array.from(form.getAll('image[]'))).toHaveLength(1);
     expect((form.getAll('image[]')[0] as File).name).toContain('irs-notice');
     expect(creative.generationProvenance!.attachedSource).toBeNull();

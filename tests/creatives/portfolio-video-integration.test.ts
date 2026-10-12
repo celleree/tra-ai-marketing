@@ -107,7 +107,8 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   boundary.layoutBlueprint.mockResolvedValue({ blueprint: referenceCandidate('d').blueprint, analyzerModel: 'vision-model',
     contentHash: layoutHash, cacheHit: true });
   const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ status: 'completed', output: [{ content: [{ type: 'output_text',
-    text: JSON.stringify({ creatives: [planned(1), planned(2)] }) }] }] }), { status: 200 }));
+    text: JSON.stringify({ creatives: [planned(1), planned(2)].map(item => ({ ...item,
+      referenceChoices: { angleSource: null, layoutSource: layoutId } })) }) }] }] }), { status: 200 }));
   vi.stubGlobal('fetch', fetchMock);
   const baseRequest = { ...portfolioRequest(), sourceAssets: sources.map(({ sha256: _hash, ...source }) => source) };
   const fixtureFor = (id: typeof videos[number]['identity']) => videos.find(fixture => fixture.mediaId === id.sourceVideoMediaId)!;
@@ -176,6 +177,7 @@ it('sends two cold completed video libraries beside a layout to Astra and reuses
   expect(retried.planning.phase).toBe('DIVERSITY_AUDIT');
   if (retried.planning.phase !== 'DIVERSITY_AUDIT') throw new Error();
   expect(retried.planning.checkpoint.plannerArgs.sourceAnalysis).toEqual(savedAnalysis);
+  expect(retried.planning.checkpoint.plannerArgs.requiredLayoutReferenceIds).toEqual([layoutId]);
   expect(retried.planning.checkpoint.snapshot.sourceAnalysis).toEqual(savedAnalysis);
   expect(retryReads.mock.calls.some(([key]) => key.startsWith('libraries/'))).toBe(false);
   expect(video.preparation).toHaveBeenCalledTimes(2); expect(video.transcription).toHaveBeenCalledTimes(2);

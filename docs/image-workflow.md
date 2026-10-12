@@ -42,6 +42,8 @@ May supply people/human identity, messaging/captions, visual context, and approv
 
 Selected TRA video is the primary creative input; company knowledge supports brand and verified facts. Do not replace it with unrelated knowledge-only concepts or another uploaded image. Completed Video Intelligence must contribute its timestamped content to planning and the render brief. If the primary video contains a person, the portfolio must include a concept grounded in that video human, subject to existing suitability/overlay checks and fresh-PNG extraction. Missing/unusable source evidence fails visibly; it does not authorize a graphic fallback. No-reference generation remains available when no video is supplied or the operator explicitly removes it.
 
+Explicitly selected TRA human frames must reach every requested concept through the exact approved-frame attachment path; an unusable pool stops generation rather than becoming a graphic. In video workflows, supplied `LAYOUT_REFERENCE` assets must supply each concept's composition through a selected blueprint, while their humans, copy, claims and logos remain excluded. Automatic frame mode still permits video-grounded non-human concepts.
+
 Uploaded logo artwork is composited deterministically and retained by ID/hash for revisions. A configured but unresolvable logo or unreadable saved brand settings must block generation instead of silently omitting the asset. This does not certify that an image provider will never draw extra unwanted marks elsewhere; actual outputs require visual review.
 
 ### TRA Reference

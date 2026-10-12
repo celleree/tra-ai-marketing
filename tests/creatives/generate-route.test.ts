@@ -1008,7 +1008,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     mocks.extractVideoSelectionFrames.mockImplementation(async source => ({ source, sourceVideoContentHash,
       frames: [frame], selectionProvenance: [{ frameIndex: 0, libraryFrameId: LIBRARY_FRAME_ID,
         candidateFrameSha256: 'a'.repeat(64), timestampMs: 250, approvedPngSha256: contentHash(original) }] }));
-    mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2), creatives: [plannedCreative(1, 'approved-tra-human'), plannedCreative(2)] });
+    mocks.planCreativeBatch.mockResolvedValue({ ...batchPlan(2), creatives: [plannedCreative(1, 'approved-tra-human'), plannedCreative(2, 'approved-tra-human')] });
     const attachments: Buffer[] = [];
     mocks.generateApprovedTraVideoFrameCreativeImage.mockImplementation(async ({ frames }) => {
       const providerFrames = await prepareProviderVideoFrames(frames);
@@ -1033,7 +1033,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(imageCalls);
     expect(mocks.planCreativeBatch).toHaveBeenCalledOnce();
     expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(2);
-    expect(attachments).toHaveLength(1);
+    expect(attachments).toHaveLength(2);
     expect(attachments[0]).toEqual(expected);
     expect((await sharp(attachments[0]).metadata()).height).toBe(70);
   });
@@ -1145,7 +1145,13 @@ describe('layout blueprint and final image-provider boundaries', () => {
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
   });
 
-  it('uses layout geometry for planning while attaching only the validated TRA reference from mixed sources', async () => {
+  it('keeps a supplied video primary over image inputs while retaining secondary layout geometry', async () => {
+    const originalPlanner = mocks.planCreativeBatch.getMockImplementation()!;
+    mocks.planCreativeBatch.mockImplementationOnce(async (...args) => {
+      const plan = await originalPlanner(...args);
+      for (const concept of plan.creatives) concept.strategy.execution.subjectSource = 'approved-tra-human';
+      return plan;
+    });
     const layoutId = mediaId('c');
     const videoId = mediaId('d');
     const traId = mediaId('e');
@@ -1169,15 +1175,14 @@ describe('layout blueprint and final image-provider boundaries', () => {
 
     expect(response.status).toBe(200);
     expect(readMediaById).toHaveBeenCalledTimes(21);
-    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(1);
+    expect(mocks.getApprovedTraVideoFrames).toHaveBeenCalledTimes(2);
     expect(mocks.getOrAnalyzeLayoutBlueprint).toHaveBeenCalledWith(storedById[layoutId], { analyzerModel: 'gpt-6-luna' });
     expect(mocks.analyzeTraSourceCreative).toHaveBeenCalledTimes(1);
-    expect(mocks.generateApprovedTraReferenceCreativeImage).toHaveBeenCalledTimes(2);
-    expect(mocks.generateApprovedTraVideoFrameCreativeImage).not.toHaveBeenCalled();
-    for (const [call] of mocks.generateApprovedTraReferenceCreativeImage.mock.calls) {
-      expect(call.source).toBe(storedById[traId]);
-      expect(call.source).not.toBe(storedById[layoutId]);
-      expect(call.source.mediaType).toBe('IMAGE');
+    expect(mocks.generateApprovedTraReferenceCreativeImage).not.toHaveBeenCalled();
+    expect(mocks.generateApprovedTraVideoFrameCreativeImage).toHaveBeenCalledTimes(2);
+    for (const [call] of mocks.generateApprovedTraVideoFrameCreativeImage.mock.calls) {
+      expect(call.frames[0].sourceVideoMediaId).toBe(videoId);
+      expect(call.context).toContain('PRIMARY SELECTED VIDEO');
       expect(call.context).toContain('ONE-AD RENDER BRIEF v1');
       expect(call.context).not.toContain('Runtime calm and direct.');
       expect(call.context).toContain('"layoutBlueprint"');
@@ -1197,9 +1202,10 @@ describe('layout blueprint and final image-provider boundaries', () => {
           { role: 'LAYOUT_REFERENCE', mediaId: layoutId, sha256: contentHash(PNG) },
         ],
         attachedSource: {
-          type: 'TRA_REFERENCE_IMAGE',
-          mediaId: traId,
-          sha256: contentHash(PNG),
+          type: 'TRA_VIDEO_FRAMES',
+          mediaId: videoId,
+          sourceSha256: contentHash(MP4),
+          selectionMode: 'AUTOMATIC',
         },
         analysisSources: [
           { type: 'LAYOUT_REFERENCE', mediaId: layoutId, sha256: contentHash(PNG) },
