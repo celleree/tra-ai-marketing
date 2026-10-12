@@ -53,6 +53,14 @@ describe('Higgsfield Kling 2.6 Standard server transport', () => {
     await expect(submitMotionControl(input, admission, options)).rejects.toThrow('Higgsfield ambiguous_submission.');
     expect(options.fetch).toHaveBeenCalledTimes(1);
   });
+  it('blocks browser execution and pre-aborted submissions before fetch', async () => {
+    const options = transport();
+    vi.stubGlobal('window', {});
+    try { await expect(submitMotionControl(input, admission, options)).rejects.toThrow('missing_credentials'); }
+    finally { vi.unstubAllGlobals(); }
+    await expect(submitMotionControl(input, admission, { ...options, signal: AbortSignal.abort() })).rejects.toThrow('transport_error');
+    expect(options.fetch).not.toHaveBeenCalled();
+  });
   it.each([401, 403, 422, 500])('redacts HTTP%s errors without retries', async status => {
     const options = transport(); options.fetch.mockResolvedValueOnce(new Response('test-secret', { status }));
     await expect(submitMotionControl(input, admission, options)).rejects.toThrow(status >= 500 ? 'ambiguous_submission' : 'http_error');

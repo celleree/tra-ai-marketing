@@ -43,8 +43,9 @@ function parseJob(value: unknown, expectedId?: string): HiggsfieldJob {
     videoUrl: v.status === 'completed' ? video!.url as string : null };
 }
 async function call(url: string, options: Transport, method: 'POST' | 'GET', body?: string, idempotencyKey?: string): Promise<unknown> {
-  if (!text(options.keyId, 1000) || !text(options.keySecret, 1000)
+  if (typeof window !== 'undefined' || !text(options.keyId, 1000) || !text(options.keySecret, 1000)
     || /[\r\n:]/.test(options.keyId) || /[\r\n:]/.test(options.keySecret)) throw new HiggsfieldError('missing_credentials');
+  if (options.signal?.aborted) throw new HiggsfieldError('transport_error');
   let response: Response;
   try {
     response = await (options.fetch ?? fetch)(url, { method, body, redirect: 'error',
