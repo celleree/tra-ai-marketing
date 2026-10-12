@@ -76,6 +76,8 @@ The operator route requires approval of the effective company snapshot and each 
 
 WAN 2.2 is the selected next model family. A hosted API or an approved GPU deployment, exact variant, input/output contract and cost/compute budget must be selected before live integration. Do not treat the existing Higgsfield environment variables or credentials as WAN access.
 
+Keep the application UI and control routes on Vercel; run WAN inference on a separate GPU worker or hosted API. Vercel Hobby functions provide 2 GB of CPU memory, while the official WAN TI2V-5B setup documents a GPU with at least 24 GB VRAM. Vercel free function hosting therefore does not supply suitable WAN inference compute. See [Vercel function limits](https://vercel.com/docs/functions/limitations) and [WAN 2.2 setup](https://github.com/Wan-Video/Wan2.2); verify requirements for the selected variant before provisioning.
+
 ### Preserved Higgsfield/Kling integration
 
 Kling 2.6 Motion Control Standard (`kling-video/motion-control/std`) is retained as an optional future integration. Its server transport in `lib/video-generation/higgsfield.ts` accepts a source image and motion-reference video. The offline store in `lib/video-generation/job-store.ts` preserves source-bound intents and conditional one-shot claims, with Higgsfield-specific receipts. Application execution routes, output ingestion, UI and live acceptance are still unfinished. Further Higgsfield setup is deferred while WAN 2.2 is the selected direction.
