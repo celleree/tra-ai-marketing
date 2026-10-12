@@ -15,6 +15,10 @@ describe('offline performance snapshot contract', () => {
     const input = snapshot(); input.source.kind = kind;
     expect(parsePerformanceSnapshot(JSON.parse(JSON.stringify(input)))).toEqual(input);
   });
+  it.each(['fixture', 'imported', 'live'])('rejects malformed array %s provenance instead of coercing it', kind => {
+    const input = snapshot();
+    expect(parsePerformanceSnapshot({ ...input, source: { ...input.source, kind: [kind] } })).toBeNull();
+  });
   it('retains omitted revenue and creative mapping as unknown, separately from derived diagnostics', () => {
     const input = snapshot();
     const parsed = parsePerformanceSnapshot({ ...input, creativeId: undefined, observed: { spend: 100, clicks: 0 }, revenueAttribution: null });

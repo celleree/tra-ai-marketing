@@ -50,7 +50,7 @@ const metric = (value: unknown, integer: boolean, allowNegative = false) =>
 export function parsePerformanceSnapshot(value: unknown): PerformanceSnapshot | null {
   if (!shape(value, ['version', 'source', 'window', 'currency', 'adId', 'observed'], ['creativeId', 'revenueAttribution'])
     || value.version !== 1 || !shape(value.source, ['kind', 'reference', 'observedAt'])
-    || !['imported', 'fixture', 'live'].includes(String(value.source.kind))
+    || typeof value.source.kind !== 'string' || !['imported', 'fixture', 'live'].includes(value.source.kind)
     || !text(value.source.reference) || !timestamp(value.source.observedAt)
     || !shape(value.window, ['start', 'end', 'timezone']) || !timestamp(value.window.start)
     || !timestamp(value.window.end) || Date.parse(value.window.start) >= Date.parse(value.window.end)
