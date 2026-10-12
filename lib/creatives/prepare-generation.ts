@@ -15,10 +15,10 @@ import { formatLayoutBlueprintForPlanning, LAYOUT_BLUEPRINT_SCHEMA_VERSION, type
 import { isUsableApprovedHumanSource } from '@/lib/media/types';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
-import { advancePlanningSourceAnalysis, composedSourceCatalog } from '@/lib/creatives/planning-source-composition';
+import { advancePlanningSourceAnalysis, composedSourceCatalog, composedLayoutProvenance } from '@/lib/creatives/planning-source-composition';
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { checkpointPaidPreparation } from '@/lib/creatives/preparation-checkpoint';
-import { primaryVideoGuidance, primaryVideoDirection } from '@/lib/creatives/primary-video-source';
+import { primaryVideoGuidance, primaryVideoDirection, selectedVideoInputContract } from '@/lib/creatives/primary-video-source';
 
 const buildPromptOnlyAnalysis = (
   context: string
@@ -187,6 +187,7 @@ export async function prepareCreativeGeneration(
     ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, data.placement)
     : undefined;
   const plannerArgs: CreativeBatchPlannerArgs = {
+    ...selectedVideoInputContract(data),
     count: data.variationCount,
     context: videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext,
     proofRetrievalQuery: data.proofRetrievalQuery,
@@ -211,7 +212,7 @@ export async function prepareCreativeGeneration(
   }
 
   const analysisSources: CreativeGenerationProvenance['analysisSources'] = [
-    ...(layoutBlueprint && generationSourceAsset?.role === 'LAYOUT_REFERENCE'
+    ...(sourceAnalysis ? composedLayoutProvenance(sourceAnalysis) : layoutBlueprint && generationSourceAsset?.role === 'LAYOUT_REFERENCE'
       ? [
           {
             type: 'LAYOUT_REFERENCE' as const,

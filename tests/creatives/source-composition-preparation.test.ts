@@ -74,7 +74,8 @@ beforeEach(() => {
         selectedText: proof.type === 'review' ? proof.originalReviewText : proof.approvedClaimWording,
         ...(proof.type === 'review' ? { includeAttribution: false } : {}) } : null,
       strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${c.index}` },
-        execution: { ...c.strategy.execution, taxDocumentReference: 'none' } }, referenceChoices: { angleSource: null, layoutSource: null } }));
+        execution: { ...c.strategy.execution, taxDocumentReference: 'none' } },
+      referenceChoices: { angleSource: null, layoutSource: plannerInput.requiredLayoutReferenceIds?.[0] ?? null } }));
     const creatives = plannerInput.replacementIndexes
       ? allCreatives.filter(c => plannerInput.replacementIndexes.includes(c.index))
       : allCreatives;
@@ -254,10 +255,11 @@ describe('real preparation to Astra with composed sources', () => {
     const job = { ...created, sourceCompositionVersion: marker };
     job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis: analysis('SAVED_LEGACY'),
       sourceLayout: { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true },
-      referenceCatalog: [], selectedReferences: [] } };
+      referenceCatalog: [{ ...referenceCandidate('3'), sourceSha256: hash(png) }], selectedReferences: [] } };
     const storage = new MemoryPortfolioStorage();
     await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
-    const result = await step(job, storage);
+    let result = await step(job, storage);
+    for (let index = 0; index < 3 && !outbound.length && !result.error; index++) result = await step(job, storage);
     expect(result.error).toBeUndefined(); expect(outbound[0].referenceAnalysis.summary).toBe('SAVED_LEGACY');
     expect(outbound[0]).not.toHaveProperty('sourceAnalysis'); expect(operations).toEqual(['Astra']);
     const ready = (await step(job, storage)).job;

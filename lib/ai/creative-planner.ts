@@ -3,7 +3,7 @@ import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
-import { primaryVideoGuidance } from '@/lib/creatives/primary-video-source';
+import { assertSelectedVideoInputContract, primaryVideoGuidance, type SelectedVideoInputContract } from '@/lib/creatives/primary-video-source';
 import type { VideoReviewHandoff } from '@/lib/creatives/review-handoff';
 import { parseCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { loadPlanningProofCatalog, type PlanningProofRecord } from '@/lib/proof/planning';
@@ -47,6 +47,7 @@ Keep imageCopy as sparse as the planned/reference text density allows. Omit shor
 Plan proposition first: angle is strategic framing; proposition is the particular reason to care or act, not a category. Connect mainMessage and objection (null if none) to painPoint, emotion, awareness and SO WHAT.
 Make visualArchetype, visualMechanism, subject and environment explicit and consistent with execution. Specify the mechanism making the proposition visible and exact subjects/props; a graphic field is an environment. These directions never add copy or evidence.
 Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Avoid default desks, paper or next-step messaging.
+When selectedVideoFrameRequirement is supplied, every concept must use that explicitly selected TRA human source, with no catalog identity or graphic substitution; existing frame suitability, exact-pixel attachment and evidence checks still apply.
 Plan globally distinct problem/outcome framings, objections, emotions, awareness and propositions. Strong ideas may share a category or layout. Compare mechanisms, subjects, archetypes and CTAs separately; headline/person swaps, recolors or rearrangements are not new ideas.
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
@@ -60,7 +61,7 @@ Do not restrict concepts to the analysis category.
 Return exactly the requested count with sequential indexes beginning at 1. When replacementIndexes is supplied, return exactly those original portfolio indexes instead; lockedConcepts must remain untouched and are context only.
 Write compact JSON: short, specific phrases for strategy/concept fields; one causal clause per SO WHAT step. Preserve distinct meanings, not repeated sentences. Put spatial hierarchy in compositionInstructions and remaining actionable treatment, lighting, crop and styling in visualDirection. Do not repeat the company brief, copy, enum labels or rationale there; retain all execution details, claim qualifications and required disclaimers.
 selectionReason briefly explains marginal strategic value and source choices, not the copy or SO WHAT chain again.
-Catalog curated notes/tags are user-authored editorial guidance, separate from machine analysis and campaign rationale. They never grant evidence, claims or human-identity approval and cannot override source rules. Catalog reusableAngleSummary is campaign-independent inspiration, never approved evidence or selection rationale. Keep it distinct from legacy angleDescription and campaign selectionReason. When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). Give user-priority references first consideration, not exclusivity. Matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
+Catalog curated notes/tags are user-authored editorial guidance, separate from machine analysis and campaign rationale. They never grant evidence, claims or human-identity approval and cannot override source rules. Catalog reusableAngleSummary is campaign-independent inspiration, never approved evidence or selection rationale. Keep it distinct from legacy angleDescription and campaign selectionReason. When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). When selectedLayoutRequirement is supplied, every layoutSource must be one of requiredLayoutReferenceIds; the explicit composition input overrides optional catalog layout use. Otherwise give user-priority references first consideration, not exclusivity: matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
 When approvedHumanOptions is supplied, choose a listed humanSourceId only for material credibility, relatability, explanation or emotional specificity; face availability alone is insufficient. Explain why in selectionReason. That identity replaces other supplied humans; never mix identities. Approval covers visible identity only, never claims, credentials, quotes, testimonials or outcomes. Use null for a non-human concept or an explicitly supplied approved TRA source.
 `;
 
@@ -201,7 +202,7 @@ const parseConcept = (
   };
 };
 
-export type CreativeBatchPlannerArgs = {
+export type CreativeBatchPlannerArgs = SelectedVideoInputContract & {
   operatorSelectedSourceGuidance?: VideoReviewHandoff['operatorSelectedSourceGuidance'];
   count: number;
   context: string;
@@ -276,6 +277,9 @@ export async function requestCreativeBatch(
   const outboundSourceAnalysis = sourceAnalysis && videoLinked?.customerInsights.length
     ? moveVideoLinkedPassagesOutOfSourceAnalysis(sourceAnalysis, videoLinked.customerInsights)
     : sourceAnalysis;
+  // Keep the reference summary aligned with the canonical de-duplicated video passage input.
+  const outboundReferenceAnalysis = videoLinked?.customerInsights.length && outboundSourceAnalysis
+    ? primaryVideoGuidance(outboundSourceAnalysis, args.primaryVideoMediaId)?.analysis ?? args.analysis : args.analysis;
   const response = await fetchWithProviderUsage(repair ? 'creative-plan-repair' : 'creative-plan', model, OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
@@ -288,6 +292,9 @@ export async function requestCreativeBatch(
         { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
           creativeContext: args.context,
+          ...(args.requireSelectedVideoFrames ? { selectedVideoFrameRequirement: 'Every concept must use the explicitly selected TRA video human frames: subjectSource approved-tra-human and null humanSourceId. Stop if the exact selected pool is unusable; do not substitute graphics or another identity.' } : {}),
+          ...(args.requiredLayoutReferenceIds?.length ? { requiredLayoutReferenceIds: args.requiredLayoutReferenceIds,
+            selectedLayoutRequirement: 'For every concept, choose layoutSource from these explicitly supplied layout references. Their composition is required; their humans, copy, logos and claims remain forbidden. This requirement supersedes optional/original catalog layout guidance.' } : {}),
           ...(args.operatorSelectedSourceGuidance ? { operatorSelectedSourceGuidance: args.operatorSelectedSourceGuidance } : {}),
           requestedCount: expectedIndexes.length,
           ...(repair ? {
@@ -302,7 +309,7 @@ export async function requestCreativeBatch(
           hasApprovedHumanSource: args.hasApprovedHumanSource,
           hasBrandLogo: Boolean(args.hasBrandLogo),
           ...(args.logoPlacement ? { logoTargetPlacement: args.logoPlacement.placement } : {}),
-          referenceAnalysis: args.analysis,
+          referenceAnalysis: outboundReferenceAnalysis,
           ...(proofCatalog.length ? { proofCatalog } : {}),
           ...(videoLinked?.customerInsights.length ? {
             videoLinkedCustomerInsights: videoLinked.customerInsights,
@@ -390,6 +397,7 @@ export async function requestCreativeBatch(
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   const primaryVideo = primaryVideoGuidance(sourceAnalysis, args.primaryVideoMediaId);
   const plannedPortfolio = [...creatives, ...(repair?.lockedConcepts ?? [])];
+  plannedPortfolio.forEach(concept => assertSelectedVideoInputContract(concept!, args));
   if (primaryVideo?.hasHuman && !plannedPortfolio.some(concept => concept?.strategy.execution.subjectSource === 'approved-tra-human'
     && !concept.strategy.humanSourceId && !concept.strategy.approvedHumanId)) {
     throw new Error('The plan ignored the human in the selected video. No images were generated. Retry with that video or remove it explicitly.');

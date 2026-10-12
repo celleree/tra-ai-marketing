@@ -59,6 +59,25 @@ const concept = (index: number, subjectSource: 'non-human' | 'approved-tra-human
 const payload = (value: unknown) => ({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
 const okResponse = (value: unknown) => new Response(JSON.stringify(payload(value)), { status: 200 });
 
+it('enforces explicitly selected human frames and layout through the provider response', async () => {
+  vi.stubEnv('OPENAI_API_KEY', 'test-key');
+  const catalog = [referenceCandidate()];
+  let creatives = [concept(1), concept(2)].map(item => ({ ...item, referenceChoices: { angleSource: null as string | null, layoutSource: null as string | null } }));
+  const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives })); vi.stubGlobal('fetch', fetchMock);
+  const args = { count: 2, context: 'Use the selected human frames and layout', analysis, hasApprovedHumanSource: true,
+    referenceCatalog: catalog, requireSelectedVideoFrames: true, requiredLayoutReferenceIds: [catalog[0].referenceId] };
+  await expect(requestCreativeBatch(args)).rejects.toThrow('explicitly selected TRA video frames');
+  creatives = creatives.map(item => ({ ...item, strategy: strategy('approved-tra-human') }));
+  await expect(requestCreativeBatch(args)).rejects.toThrow('supplied video layout reference');
+  creatives = creatives.map(item => ({ ...item, referenceChoices: { angleSource: null, layoutSource: catalog[0].referenceId } }));
+  const plan = await requestCreativeBatch(args);
+  expect(plan.creatives.every(item => item.strategy.execution.subjectSource === 'approved-tra-human'
+    && item.strategy.referenceSelection?.layoutSource === catalog[0].referenceId)).toBe(true);
+  const sent = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).input[1].content[0].text);
+  expect(sent.selectedVideoFrameRequirement).toContain('Every concept');
+  expect(sent.requiredLayoutReferenceIds).toEqual(args.requiredLayoutReferenceIds);
+});
+
 const sourceProjection = (): PlanningSourceAnalysisState => ({ version: 1, entries:
   (['TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE', 'TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE'] as const).flatMap((role, i) => {
     const hex = String(i + 1), source = { role, mediaId: `media_${hex.repeat(32)}`, sha256: hex.repeat(64) };

@@ -29,7 +29,7 @@ import type { ReferencePlanningCandidate } from '@/lib/references/planning';
 import { resolvePlannedHumanVideoSource, type PlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ProviderVideoFrame } from '@/lib/video/source-overlay';
-import { primaryVideoGuidance, primaryVideoRenderDirection } from '@/lib/creatives/primary-video-source';
+import { assertSelectedVideoInputContract, selectedVideoInputContract, primaryVideoGuidance, primaryVideoRenderDirection } from '@/lib/creatives/primary-video-source';
 import type { ApprovedTraVideoFrame, ApprovedTraVideoFrameSet } from '@/lib/video/types';
 import {
   revalidateSelectedProofForPaidWork,
@@ -81,6 +81,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     delete item.strategy.approvedHumanId;
     delete item.strategy.humanSourceId;
   }
+  assertSelectedVideoInputContract(item, selectedVideoInputContract(request));
   const copyMode = classifyPlannedCopy(item);
   const { human, videoFrames: itemVideoFrames } = options.preflightHumanVideo
     ?? await resolvePlannedHumanVideoSource(item, { videoFrameSet, providerImageSource });
@@ -94,7 +95,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   if (suppliedVideo && item.strategy.execution.subjectSource === 'approved-tra-human' && !itemVideoFrames) {
     throw new Error('The selected video human has no verified frames. Select usable frames before generating.');
   }
-  if (request.reviewHandoff?.choices.frames?.length && item.strategy.execution.subjectSource === 'approved-tra-human') {
+  if (request.reviewHandoff?.choices.frames?.length) {
     assertReviewedFrameSelection(request.reviewHandoff.choices, itemFrameSelection);
     if (human || itemImageSource || !itemVideoFrames) throw new Error('Manual reviewed frames require their exact fresh PNG attachment.');
   }
