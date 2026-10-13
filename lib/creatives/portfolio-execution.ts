@@ -44,7 +44,7 @@ import { isApprovedPreviewPortfolio, PREVIEW_TEST_APPROVAL, withApprovedPreviewP
 
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
 const caseAssociationHold = (job: CreativePortfolioJob): PortfolioStepResult => ({ job, status: 409,
-  error: 'Confirm the person for each planned video case in Use selected video cases before Resume. No provider work was started.' });
+  error: 'Each planned video case needs a confirmed person pairing. Review its person in Use selected video cases before Resume. No provider work was started.' });
 
 class InvalidPlannedCreativeCopyError extends CreativeGenerationPreparationError {}
 
