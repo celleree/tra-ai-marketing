@@ -32,7 +32,7 @@ export function selectedCaseAssertion(handoff: VideoReviewHandoff | undefined, c
 }
 
 export function isSelectedCaseAssertion(assertion: DraftVideoSourceAssertion, handoff: VideoReviewHandoff | undefined) {
-  return Boolean(handoff?.claimSnapshots.some((_, index) => {
+  return Boolean(handoff?.claimSnapshots?.some((_, index) => {
     try { return isDeepStrictEqual(assertion, selectedCaseAssertion(handoff, index)); } catch { return false; }
   }));
 }
@@ -123,6 +123,7 @@ export function caseReviewChoices(job: CreativePortfolioJob, slotIndex: number) 
 export function caseAssociationNeedsReview(job: CreativePortfolioJob) {
   return !job.videoCaseAmendment && !isPreviewTestPortfolio(job) && Boolean(job.request.reviewHandoff?.choices.frames?.length
     && job.snapshot?.batchPlan.creatives.some(concept => concept.draftSourceAssertion
+      && /\b(i|my|me|mine)\b/i.test(concept.draftSourceAssertion.exactText)
       && concept.strategy.execution.subjectSource === 'approved-tra-human'
       && job.slots[concept.index - 1]?.status === 'PENDING'));
 }

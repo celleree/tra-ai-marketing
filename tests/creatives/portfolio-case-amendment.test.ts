@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { proposeCaseAmendment, validateCaseAmendment, effectiveCaseConcept, caseReviewChoices, caseAmendmentOptions } from '@/lib/creatives/portfolio-case-amendment';
+import { proposeCaseAmendment, validateCaseAmendment, effectiveCaseConcept, caseReviewChoices, caseAmendmentOptions, caseAssociationNeedsReview, selectedCaseAssertion } from '@/lib/creatives/portfolio-case-amendment';
 import { applyCaseAmendment } from '@/lib/creatives/portfolio-case-amendment-storage';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
@@ -24,6 +24,14 @@ async function stored() {
 }
 
 describe('explicit source case amendments', () => {
+  it('holds personal source accounts without treating generic service statements as a person’s case', () => {
+    const { job } = videoCasePortfolio(), concept = job.snapshot!.batchPlan.creatives[0];
+    concept.strategy.execution.subjectSource = 'approved-tra-human';
+    concept.draftSourceAssertion = selectedCaseAssertion(job.request.reviewHandoff, 0);
+    expect(caseAssociationNeedsReview(job)).toBe(true);
+    concept.draftSourceAssertion.exactText = 'A free consultation is available. Eligibility varies.';
+    expect(caseAssociationNeedsReview(job)).toBe(false);
+  });
   it('prepares two different source accounts without mutating the original, changing layouts or dispatching work', () => {
     const { job, pairs, segments } = videoCasePortfolio(), original = structuredClone(job);
     const proposed = proposeCaseAmendment(job, pairs);
