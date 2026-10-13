@@ -279,7 +279,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
                 </div>
 
                 {creationMode === 'generate' && acceptancePreview ? <div className="panel">
-                  <p>Preview acceptance: Generate checks cached inputs and pauses before paid planning.</p>
+                  <p>Generate may run paid source preparation, planning, and image generation using your connected API account. Operation quotas do not guarantee a dollar ceiling.</p>
                   <label><input type="checkbox" checked={omitTestLogo} disabled={generating}
                     onChange={event => setOmitTestLogo(event.target.checked)} /> Run this Preview test without a logo</label>
                   {omitTestLogo ? <p>The images will be requested without logos. Logo fidelity is not being evaluated.</p> : null}

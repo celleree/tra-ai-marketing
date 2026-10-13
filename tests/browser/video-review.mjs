@@ -174,6 +174,8 @@ try {
   await scenario('Explicit no-logo Preview test stops at cached checkpoint and persists its scope on reload',
     { noLogo: true, acceptancePreview: true, cachedPreflight: true, linkedLayout: layoutMediaId }, async ({ page, calls, submissions }) => {
       await ready(page);
+      await page.getByText('Generate may run paid source preparation, planning, and image generation using your connected API account. Operation quotas do not guarantee a dollar ceiling.', { exact: true }).waitFor();
+      assert.equal(await page.getByText('Preview acceptance: Generate checks cached inputs and pauses before paid planning.', { exact: true }).count(), 0);
       await page.getByRole('slider', { name: 'Number of creatives to generate' }).fill('2');
       await page.getByRole('combobox', { name: 'Creative format' }).selectOption('PORTRAIT_4_5');
       await generateButton(page).click();
