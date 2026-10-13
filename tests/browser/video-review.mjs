@@ -41,6 +41,7 @@ const thumbnails = await Promise.all([[180, 320], [320, 180]].map(async ([width,
 const results = [];
 async function scenario(name, options, run) {
   if (process.env.VIDEO_REVIEW_SCENARIO && !name.includes(process.env.VIDEO_REVIEW_SCENARIO)) return;
+  if (process.env.VIDEO_REVIEW_SCENARIO && !name.includes(process.env.VIDEO_REVIEW_SCENARIO)) return;
   const context = await browser.newContext(options.width ? { viewport: { width: options.width, height: 900 }, isMobile: options.width < 700, hasTouch: options.width < 700 } : {});
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   const errors = [], calls = [], submissions = [], videoActions = [];
@@ -140,7 +141,8 @@ async function scenario(name, options, run) {
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
-      if (portfolioLoadFailure && request.method() === 'GET') { status = portfolioLoadFailure; value = { error: 'Sign in required.' }; }
+      if (options.casePortfolio) value = { job: { ...job('PENDING', 2), videoPreparation: { total: 2, completed: 2, phase: 'COMPLETE', busy: false } }, creatives: [] };
+      else if (portfolioLoadFailure && request.method() === 'GET') { status = portfolioLoadFailure; value = { error: 'Sign in required.' }; }
       else if (options.pausedRecovery) {
         if (request.method() === 'PATCH') await portfolioAdvanceGate;
         value = { job: { ...job('PENDING', 2), ...(request.method() === 'POST' ? { planReady: false, planningPhase: 'INITIAL_PLAN' } : {}) }, creatives: [] };
@@ -173,6 +175,7 @@ async function scenario(name, options, run) {
     if (options.linkedLayout) target.searchParams.set('layoutMediaId', options.linkedLayout);
     if (options.acceptancePreview) target.searchParams.set('acceptancePreview', '1');
     if (options.caseAmendment) target.searchParams.set('caseAmendment', '1');
+    if (options.casePortfolio) target.searchParams.set('portfolio', `portfolio_${'4'.repeat(32)}`);
     if (options.previewInitialization) target.searchParams.set('portfolio', previewSourceId);
     if (options.savedPortfolio) { target.searchParams.set('portfolio', job().id); target.searchParams.set('review', id); }
     await page.goto(target.href);
@@ -668,6 +671,23 @@ try {
     if (portfolioState === 'PENDING') { await page.getByRole('button', { name: 'Resume generation' }).click(); await page.getByText('Generation complete.').waitFor(); }
     else if (portfolioState === 'RETRY_REQUIRED') { await page.getByRole('button', { name: 'Retry creative 1', exact: true }).click(); await page.getByText('Generation complete.').waitFor(); }
     else await page.getByText('Generation complete.').waitFor();
+  });
+  await scenario('Saved case amendment reload releases the Resume editor hold', { casePortfolio: true, width: 375 }, async ({ page, calls }) => {
+    const resume = page.getByRole('button', { name: 'Resume generation', exact: true });
+    await page.getByRole('button', { name: 'Use selected video cases', exact: true }).click();
+    const statements = page.getByRole('combobox', { name: /case statement$/ }), frames = page.getByRole('combobox', { name: /person frame$/ });
+    await statements.nth(0).selectOption('0'); await frames.nth(0).selectOption(frame.frameId);
+    await statements.nth(1).selectOption('1'); await frames.nth(1).selectOption(`video-frame:${'9'.repeat(64)}`);
+    const editor = page.getByRole('region', { name: 'Video case amendment' });
+    await editor.getByRole('checkbox').nth(0).check(); await editor.getByRole('checkbox').nth(1).check();
+    await page.getByRole('button', { name: 'Preview amendment without generating' }).click();
+    await page.getByRole('button', { name: 'Save amendment without generating' }).click();
+    await page.getByRole('button', { name: 'Reload saved progress', exact: true }).click();
+    await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+    console.log('Saved/reloaded state: ' + JSON.stringify({ resumeDisabled: await resume.isDisabled(), editorCloseVisible: await page.getByRole('button', { name: 'Close case amendment' }).count() }));
+    assert.equal(await resume.isDisabled(), false, 'Saving and read-only reload must release the editor hold without resuming');
+    assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET'), false, 'No paid advance');
+    assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios/case-amendment' && method === 'PATCH').length, 1);
   });
   for (const { width, plannedCases } of [{ width: 375 }, { width: 1280 }, { width: 375, plannedCases: true }]) await scenario(`Video case amendment preserves distinct people and explicit save at ${width}px${plannedCases ? ' with ordinary planned cases' : ''}`, { caseAmendment: true, width, plannedCases }, async ({ page, calls }) => {
     const statements = page.getByRole('combobox', { name: /case statement$/ }), frames = page.getByRole('combobox', { name: /person frame$/ });

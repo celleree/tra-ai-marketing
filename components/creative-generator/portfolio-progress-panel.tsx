@@ -88,7 +88,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
     </div>
 
     {caseEditorOpen ? <PortfolioCaseAmendment key={job.id} id={job.id} observeAccess={portfolio.observeAccess}
-      onClose={() => setCaseEditorOpen(false)} onSaved={() => { void portfolio.restoreSaved(); }} /> : null}
+      onClose={() => setCaseEditorOpen(false)} onSaved={() => { setCaseEditorOpen(false); void portfolio.restoreSaved(); }} /> : null}
 
     {retryFailure && !boundedPreview ? <div className={styles.failures} aria-live="polite">
       <p>Retrying failed work may make another paid call.</p>
