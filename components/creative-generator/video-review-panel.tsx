@@ -76,9 +76,9 @@ export function VideoReviewPanel({ videos, draft, disabled = false, authRequired
   const matching = review && JSON.stringify(draft.state.choices?.video) === JSON.stringify(review.video);
   const frames = matching ? draft.state.choices?.frames ?? [] : [];
   const blocked = disabled || authRequired || Boolean(draft.state.error || draft.state.conflict || draft.state.saved?.issues.length);
-  const blockingReason = authRequired ? 'Sign in and reload the unavailable material before editing or continuing generation.'
+  const blockingReason = draft.state.error || (authRequired ? 'Sign in and reload the unavailable material before editing or continuing generation.'
     : disabled ? 'Frame selection is paused while portfolio generation is active. Stop or finish generation to edit.'
-    : draft.state.error || (draft.state.conflict ? 'Reload saved review to read the latest revision before selecting more frames.'
+    : draft.state.conflict ? 'Reload saved review to read the latest revision before selecting more frames.'
       : draft.state.saved?.issues.length ? 'Saved material is unavailable or changed. Reload saved review or remove unavailable material below. Saved choices are preserved.' : '');
   const selected = (frame: VideoCandidateFrameBinding) => frames.some(item => item.frameId === frame.frameId);
   const choose = (frame: VideoCandidateFrameBinding) => review && !blocked && void draft.update(review.video,
@@ -110,7 +110,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false, authRequired
         });
         const response = await fetch(`/api/video/review-sources?mediaId=${encodeURIComponent(mediaId!)}&candidateIndexes=${indexes.join(',')}`,
           { cache: 'no-store' });
-        if (!controller.signal.aborted) observeAccess?.('video-previews:' + mediaId, response.status);
+        if (!controller.signal.aborted) observeAccess?.('video-material:' + mediaId, response.status);
         const next: ReviewSource & { error?: string } = await response.json().catch(error => { if (response.ok) throw error; return {}; });
         if (!response.ok) throw Object.assign(new Error(next.error || 'Nearby frames unavailable.'), { status: response.status });
         if (!controller.signal.aborted) {

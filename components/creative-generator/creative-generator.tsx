@@ -329,7 +329,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
                   <PortfolioProgressPanel portfolio={portfolio} />
                 </> : null}
                 {videoReview.state.error || videoReview.state.saved?.issues.length || (displayGenerationError && videoReview.state.saved) ? (
-                  <div role="alert" className="error-message">
+                  <div role={videoReview.state.error || videoReview.state.saved?.issues.length ? 'alert' : undefined} className="error-message">
                     {videoReview.state.error || videoReview.state.saved?.issues.length ? <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ')}</p> : null}
                     <button type="button" disabled={videoReview.state.pending > 0} onClick={() => void videoReview.reload()}>Reload saved review</button>
                     {videoReview.state.saved?.issues.length ? <button type="button" disabled={generating || videoReview.state.pending > 0 || Boolean(videoReview.state.error)}
@@ -337,7 +337,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
                   </div>
                 ) : null}
                 {displayGenerationError ? (
-                  <p className="error-message generation-error">{displayGenerationError}</p>
+                  <p role="alert" className="error-message generation-error">{displayGenerationError}</p>
                 ) : null}
               </div>
             </div>

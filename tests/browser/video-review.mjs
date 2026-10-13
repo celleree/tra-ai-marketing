@@ -3,6 +3,8 @@ import sharp from 'sharp';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // Default to the lockfile-pinned test dependency; optional overrides are diagnostic only.
 const browserTypes = await import(process.env.PLAYWRIGHT_MODULE_PATH ? pathToFileURL(process.env.PLAYWRIGHT_MODULE_PATH).href : 'playwright');
@@ -106,7 +108,7 @@ async function scenario(name, options, run) {
       else value = { source: currentMedia, status: { phase, locator: currentVideo.locator, completedRepresentatives: 1, totalRepresentatives: 1, busy: false,
         failure: { message: 'Fixture preparation failed.' }, retry: { message: 'Uncertain prior attempt.' } },
         review: phase !== 'COMPLETE' ? null : { video: currentVideo, frameBindings: bindings, onScreenStatements: [], library: { transcript: { segments },
-          representativeFrames: bindings.slice(0, options.savedNeighbors ? 1 : bindings.length).map((binding, index) => ({ ...binding, id: binding.frameId, thumbnailDataUrl: thumbnails[index % 2] })) } } };
+          representativeFrames: bindings.slice(0, options.representativeCount ?? (options.savedNeighbors ? 1 : bindings.length)).map((binding, index) => ({ ...binding, id: binding.frameId, thumbnailDataUrl: thumbnails[index % 2] })) } } };
       const indexes = new URL(request.url()).searchParams.get('candidateIndexes');
       if (indexes && value.review) {
         const batch = indexes.split(',').map(Number); previewBatches.push(batch); isPreview = true;
@@ -214,6 +216,19 @@ try {
       denyAccess('GET /api/video/review-sources', 0); await page.getByRole('button', { name: 'Reload video material', exact: true }).click();
       await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
       assert.equal(await resume.isEnabled(), true);
+      assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET'), false);
+    });
+  await scenario('Unselected nearby preview authentication recovery reloads the same video without a stranded paid gate',
+    { savedPortfolio: true, pausedRecovery: true, frameCount: 3, representativeCount: 1 }, async ({ page, calls, denyAccess, response }) => {
+      await ready(page); const panel = page.getByRole('region', { name: 'Video material review' });
+      const saved = structuredClone(response()); await panel.getByRole('button', { name: 'View nearby frames', exact: true }).click();
+      denyAccess('GET /api/video/review-sources', 401); await panel.getByRole('button', { name: 'Preview 00:02', exact: true }).click();
+      await panel.getByText('HTTP 401:', { exact: false }).waitFor();
+      const resume = page.getByRole('button', { name: 'Resume generation', exact: true }); assert.equal(await resume.isDisabled(), true);
+      denyAccess('GET /api/video/review-sources', 0); await panel.getByRole('button', { name: 'Reload video material', exact: true }).click();
+      await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+      assert.equal(await resume.isEnabled(), true); assert.deepEqual(response(), saved);
+      assert.equal(await page.getByRole('link', { name: 'Sign in to restore saved progress', exact: true }).count(), 0);
       assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET'), false);
     });
   await scenario('Saved portfolio recovery on navigation and focus is read-only', { savedPortfolio: true, pausedRecovery: true }, async ({ page, calls }) => {
@@ -453,7 +468,7 @@ try {
         const control = panel.getByRole('checkbox').nth(index).locator('..');
         const box = await control.boundingBox(), image = await images.nth(index).boundingBox();
         assert.ok(box.height >= 44); assert.ok(image.x >= 0 && image.x + image.width <= width);
-        await page.screenshot({ path: `/tmp/tra-307-mobile-${width}-${index}.png`, fullPage: true });
+        await page.screenshot({ path: join(tmpdir(), `tra-307-mobile-${width}-${index}.png`), fullPage: true });
       }
     });
   for (const width of [375, 390, 430]) await scenario(`Failed neighboring previews retain touch selection and retry at ${width}px`,
