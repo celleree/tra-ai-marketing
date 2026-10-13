@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { ReviewSelectionError } from '@/lib/video/review-selection';
+import { effectiveCaseConcept, caseReviewChoices, caseAssociationNeedsReview } from '@/lib/creatives/portfolio-case-amendment';
 import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
 import { isDeepStrictEqual } from 'node:util';
 import { loadReviewVideoSource } from '@/lib/video/review-selection-sources';
@@ -70,6 +72,9 @@ async function advancePortfolio(
   options: { deadlineAtMs?: number; video?: Omit<VideoIntelligenceServiceDependencies, 'storage' | 'deadlineAtMs'> } = {},
 ): Promise<PortfolioStepResult> {
   const deadlineAtMs = options.deadlineAtMs ?? Date.now() + 290_000;
+  const beforeWork = await readCreativePortfolio(id, storage);
+  if (beforeWork && !beforeWork.lease && caseAssociationNeedsReview(beforeWork)) return { job: beforeWork, status: 409,
+    error: 'This video account needs a confirmed person pairing. Use selected video cases to preview an amendment before Resume. No provider work was started.' };
   if (isPreviewAcceptanceOperation()) await updateCreativePortfolio(id, current => {
     const now = Date.now();
     return isApprovedPreviewPortfolio(current) && current.lease && current.lease.expiresAtMs <= now
@@ -86,7 +91,7 @@ async function advancePortfolio(
   const slotIndex = job.lease.slotIndex;
   const render = (...args: Parameters<typeof renderPlannedCreative>) => withImageAttemptScope({
     runId: `portfolio:${job.id}`, operationId: args[2]!.creativeId!, jobId: job.id, portfolioId: job.id, creativeId: args[2]!.creativeId!,
-    budget: imageAttemptBudget(job.request.variationCount), storage,
+    budget: { ...imageAttemptBudget(job.request.variationCount), ...(job.videoCaseAmendment ? { fallbackLimit: 0 } : {}) }, storage,
   }, () => renderPlannedCreative(...args));
   const assertCurrentWork = async () => {
     const current = await readCreativePortfolio(id, storage);
@@ -277,11 +282,13 @@ async function advancePortfolio(
       throw new Error('Portfolio planning phase is not executable.');
     }
 
-    const context = await restoreCreativePortfolio(job.snapshot!);
+    const restored = await restoreCreativePortfolio(job.snapshot!);
+    const context = job.videoCaseAmendment ? { ...restored, batchPlan: { ...restored.batchPlan,
+      portfolioAudit: undefined, creatives: job.slots.map(slot => effectiveCaseConcept(job, slot.index)) } } : restored;
     const slot = job.slots[slotIndex - 1];
     const concept = context.batchPlan.creatives[slotIndex - 1];
     assertValidPlannedCreativeCopy(concept);
-    const reviewChoices = job.request.reviewHandoff?.choices;
+    const reviewChoices = caseReviewChoices(job, slotIndex);
     const manualVideoSelection = Boolean(reviewChoices?.frames?.length)
       && concept.strategy.execution.subjectSource === 'approved-tra-human';
     const durableVideoSelection = job.videoPreparationVersion === 1
@@ -423,7 +430,7 @@ async function advancePortfolio(
       return { job: await updateCreativePortfolio(id, current =>
         blockPortfolioVideoSelection(current, token, admissionAttempt!, message), storage), error: message, status: 409 };
     }
-    const message = error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError || error instanceof GeneratedImageValidationError
+    const message = error instanceof ReviewSelectionError || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError || error instanceof GeneratedImageValidationError
       ? error.message : 'Portfolio work could not be completed. Review its status before retrying.';
     const current = await updateCreativePortfolio(id, value => {
       if (value.lease?.id !== token) return value;
@@ -435,6 +442,6 @@ async function advancePortfolio(
       return stopAfterError(next, message);
     }, storage);
     return { job: current, error: message, status: error instanceof OperatorQuotaUnavailableError ? 503
-      : error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError ? error.status : 500 };
+      : error instanceof ReviewSelectionError || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError ? error.status : 500 };
   }
 }

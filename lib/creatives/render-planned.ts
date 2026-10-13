@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
+import { isSelectedCaseAssertion } from '@/lib/creatives/portfolio-case-amendment';
 import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
 import { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
 import { generateApprovedTraReferenceCreativeImage } from '@/lib/ai/openai';
@@ -86,7 +87,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   assertSelectedVideoInputContract(item, selectedVideoInputContract(request));
   const copyMode = classifyPlannedCopy(item);
   assertDraftVideoAssertionCopy(item.draftSourceAssertion, item);
-  if (item.draftSourceAssertion) {
+  if (item.draftSourceAssertion && !isSelectedCaseAssertion(item.draftSourceAssertion, request.reviewHandoff)) {
     const { imageField: _field, ...passage } = item.draftSourceAssertion;
     const catalog = projectDraftVideoSourcePassages(sourceAnalysis, request.reviewHandoff?.operatorSelectedSourceGuidance, passage.sourceMediaId);
     if (!catalog.some(current => JSON.stringify(current) === JSON.stringify(passage))) {

@@ -60,6 +60,7 @@ async function scenario(name, options, run) {
   if (options.longStatements) choices.claims = segments.map(item => ({ ...claim, startSegmentIndex: item.segmentIndex, endSegmentIndex: item.segmentIndex }));
   const previewBatches = [], previewActivity = { active: 0, peak: 0 }; let previewFailure = Boolean(options.failPreviews), brokenPreview = Boolean(options.brokenPreview);
   const saves = []; let failure = 0, loadFailure = 0, sourceFailure = 0, revisionNumber = 1;
+  let caseApplied = false;
   let revision = 'revision-1', phase = options.phase ?? 'COMPLETE', issue = options.issue;
   const response = () => ({ draft: { id, version: 1, artifactType: 'VIDEO_REVIEW_DRAFT', providerEligible: false,
     choices, claimSnapshots: segments.filter(item => choices.claims?.some(reference => reference.type === 'VIDEO_TRANSCRIPT' && reference.startSegmentIndex === item.segmentIndex))
@@ -90,7 +91,20 @@ async function scenario(name, options, run) {
     const currentVideo = { ...video, locator: { ...video.locator, sourceVideoMediaId: requestedId } };
     const currentMedia = { ...media, id: requestedId, originalName: requestedId === mediaId ? options.videoName ?? 'fixture.mp4' : requestedId === availableB ? 'second.mp4' : 'third.mp4' };
     let value = {}, status = 200, isPreview = false;
-    if (path === '/api/video/review-selection') {
+    if (path === '/api/creatives/portfolios/case-amendment') {
+      const caseClaims = ['My debt went from $42,000 to $250. This was my individual result.', 'TRA reduced what I owed by 78%. I felt relieved about my case.'];
+      const caseFrames = [frame.frameId, `video-frame:${'9'.repeat(64)}`];
+      if (request.method() === 'GET') value = caseApplied ? { applied: true } : { attributionNotice: 'Cached observations do not verify speaker identity. Confirm the statement belongs to this person.',
+        slots: [{ index: 1 }, { index: 2 }], claims: caseClaims.map((wording, claimIndex) => ({ claimIndex, wording,
+          frames: [{ frameId: caseFrames[claimIndex], timestampMs: claimIndex ? 12000 : 6000, observationIsExactFrame: true,
+            observation: { summary: claimIndex ? 'Bearded person outdoors' : 'Bald person indoors', uncertainties: [] } }] })) };
+      else if (request.method() === 'POST') {
+        assert.deepEqual(body.pairs.map(pair => [pair.claimIndex, pair.frameId]), [[0, caseFrames[0]], [1, caseFrames[1]]]);
+        value = { amendment: { version: 1, intent: 'VIDEO_CASE_STUDY', pairs: body.pairs },
+          creatives: caseClaims.map((shortSupport, index) => ({ index: index + 1, imageCopy: { shortSupport } })),
+          providerOperations: { maximumFrameAssessments: 2, maximumPrimaryImages: 2 } };
+      } else { assert.ok(body.amendment.pairs.every(pair => pair.attributionConfirmed)); caseApplied = true; value = { applied: true }; }
+    } else if (path === '/api/video/review-selection') {
       if ((request.method() === 'POST' && failure) || (request.method() === 'GET' && loadFailure)) {
         status = request.method() === 'POST' ? failure : loadFailure; failure = 0; value = { error: 'Fixture denial or failure.' };
       } else if (options.missingDraft) { status = 404; value = { error: 'Review draft was not found.' }; }
@@ -157,10 +171,11 @@ async function scenario(name, options, run) {
     if (options.linkedVideo) target.searchParams.set('videoMediaId', options.linkedVideo);
     if (options.linkedLayout) target.searchParams.set('layoutMediaId', options.linkedLayout);
     if (options.acceptancePreview) target.searchParams.set('acceptancePreview', '1');
+    if (options.caseAmendment) target.searchParams.set('caseAmendment', '1');
     if (options.previewInitialization) target.searchParams.set('portfolio', previewSourceId);
     if (options.savedPortfolio) { target.searchParams.set('portfolio', job().id); target.searchParams.set('review', id); }
     await page.goto(target.href);
-    await page.getByRole('button', { name: 'Generate creatives', exact: true }).waitFor();
+    await page.getByRole('button', { name: options.caseAmendment ? 'Preview amendment without generating' : 'Generate creatives', exact: true }).waitFor();
     if (!options.runWhilePending) await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
     await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, releaseSourceReads, releasePortfolioAdvance,
       denyAccess: (key, status) => { accessDenials[key] = status; },
@@ -652,6 +667,23 @@ try {
     if (portfolioState === 'PENDING') { await page.getByRole('button', { name: 'Resume generation' }).click(); await page.getByText('Generation complete.').waitFor(); }
     else if (portfolioState === 'RETRY_REQUIRED') { await page.getByRole('button', { name: 'Retry creative 1', exact: true }).click(); await page.getByText('Generation complete.').waitFor(); }
     else await page.getByText('Generation complete.').waitFor();
+  });
+  for (const width of [375, 1280]) await scenario(`Video case amendment preserves distinct people and explicit save at ${width}px`, { caseAmendment: true, width }, async ({ page, calls }) => {
+    const statements = page.getByRole('combobox', { name: /case statement$/ }), frames = page.getByRole('combobox', { name: /person frame$/ });
+    await statements.nth(0).selectOption('0'); await frames.nth(0).selectOption(frame.frameId);
+    await statements.nth(1).selectOption('1'); await frames.nth(1).selectOption(`video-frame:${'9'.repeat(64)}`);
+    await page.getByRole('button', { name: 'Preview amendment without generating' }).click();
+    const save = page.getByRole('button', { name: 'Save amendment without generating' }); await save.waitFor();
+    assert.equal(await save.isDisabled(), true);
+    const confirmations = page.getByRole('checkbox'); await confirmations.nth(0).check(); await confirmations.nth(1).check();
+    assert.equal(await save.count(), 0, 'Changing attribution invalidates the previous proposal');
+    await page.getByRole('button', { name: 'Preview amendment without generating' }).click(); await save.waitFor();
+    const beforeSave = calls.filter(([, method]) => method === 'PATCH').length; assert.equal(beforeSave, 0);
+    await save.click(); await page.getByText('Case amendment saved.', { exact: false }).waitFor();
+    await page.reload(); await page.getByText('Case amendment saved.', { exact: false }).waitFor();
+    assert.equal(calls.filter(([, method]) => method === 'PATCH').length, 1);
+    assert.equal(calls.some(([path]) => path !== '/api/creatives/portfolios/case-amendment'), false, 'No source analysis, generation or portfolio advance');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   });
   console.log(`${results.length} offline ${browserName === 'webkit' ? 'WebKit' : 'Chromium'} scenarios passed.`);
 } finally { await browser.close(); await server.close(); }

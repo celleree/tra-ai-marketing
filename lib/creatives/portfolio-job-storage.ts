@@ -65,6 +65,14 @@ export async function updateCreativePortfolio(
     const current = await read(id, storage);
     if (!current) throw new Error('Creative portfolio was not found.');
     const next = change(structuredClone(current.job));
+    if (current.job.videoCaseAmendment && !isDeepStrictEqual(next.videoCaseAmendment, current.job.videoCaseAmendment)) {
+      throw new Error('Applied case amendment is immutable.');
+    }
+    if (!current.job.videoCaseAmendment && next.videoCaseAmendment && (!current.job.lease || next.lease || current.job.previewAcceptanceError
+      || current.job.slots.some(slot => slot.status !== 'PENDING' || slot.videoSelection || slot.error)
+      || !isDeepStrictEqual(current.job.slots, next.slots))) {
+      throw new Error('Case amendment may not replace active, attempted or completed work.');
+    }
     // Preserve the stored marker exactly, including its absence on historical portfolios.
     if (next.sourceCompositionVersion !== current.job.sourceCompositionVersion) {
       throw new Error('Portfolio source composition version is immutable.');

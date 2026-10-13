@@ -1,5 +1,8 @@
 'use client';
 
+import { useState } from 'react';
+import { PortfolioCaseAmendment } from './portfolio-case-amendment';
+
 import { portfolioCanAdvance } from '@/lib/creatives/portfolio-client';
 import type { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
 import styles from './portfolio-progress-panel.module.css';
@@ -11,6 +14,7 @@ const videoLabel = {
 const activeVideoPhases = new Set(['PREPARING', 'TRANSCRIBING', 'OBSERVING', 'FINALIZING']);
 
 export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: { portfolio: ReturnType<typeof useCreativePortfolio>; canAdvance?: () => boolean }) {
+  const [caseEditorOpen, setCaseEditorOpen] = useState(false);
   const job = portfolio.response?.job;
   const signInNotice = portfolio.authRequired ? <p role="alert">Generation is paused. Sign in to restore the same saved portfolio.
     {' '}<a href={portfolio.signInUrl}>Sign in to restore saved progress</a></p> : null;
@@ -74,10 +78,17 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
       {initializationAvailable ? <button type="button" className="button button-primary" disabled={portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease)}
         onClick={() => { void portfolio.initializeApprovedPreview(); }}>Prepare approved reassessment</button> : portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.stopped} onClick={portfolio.stop}>
         {portfolio.stopped ? 'Stopping generation…' : 'Stop generation'}
-      </button> : portfolioCanAdvance(job, portfolio.response?.previewPreparationApproved) ? <button type="button" className="button button-primary" disabled={portfolio.loading || portfolio.authRequired || !canAdvance()} onClick={() => { if (canAdvance()) void portfolio.resume(); }}>Resume generation</button> : null}
+      </button> : portfolioCanAdvance(job, portfolio.response?.previewPreparationApproved) ? <button type="button" className="button button-primary" disabled={caseEditorOpen || portfolio.loading || portfolio.authRequired || !canAdvance()} onClick={() => { if (!caseEditorOpen && canAdvance()) void portfolio.resume(); }}>Resume generation</button> : null}
+      {job.planReady && job.videoPreparation && !boundedPreview && !hasFailure && savedCount === 0
+        && job.slots.every(slot => slot.status === 'PENDING' && !slot.videoSelection) ? <button type="button"
+          disabled={caseEditorOpen || portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease)}
+          onClick={() => setCaseEditorOpen(true)}>Use selected video cases</button> : null}
       <button type="button" className="button button-secondary" disabled={portfolio.running || portfolio.loading} onClick={() => { void portfolio.restoreSaved(); }}>Reload saved progress</button>
       <a href={'?' + savedQuery.toString()} target="_blank" rel="noreferrer">Open saved portfolio</a>
     </div>
+
+    {caseEditorOpen ? <PortfolioCaseAmendment key={job.id} id={job.id} observeAccess={portfolio.observeAccess}
+      onClose={() => setCaseEditorOpen(false)} onSaved={() => { void portfolio.restoreSaved(); }} /> : null}
 
     {retryFailure && !boundedPreview ? <div className={styles.failures} aria-live="polite">
       <p>Retrying failed work may make another paid call.</p>

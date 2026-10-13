@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
+import { proposeCaseAmendment, selectedCaseAssertion } from '@/lib/creatives/portfolio-case-amendment';
+import { applyCaseAmendment } from '@/lib/creatives/portfolio-case-amendment-storage';
 import { claimCreativePortfolio, finishPortfolioPlan, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
@@ -425,4 +427,56 @@ it.each([null, []])('keeps automatic rendering available with empty manual pool 
   await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
   expect(mocks.select).toHaveBeenCalledOnce(); expect(mocks.render).toHaveBeenCalledOnce();
   expect(mocks.render.mock.calls[0][2].preflightHumanVideo).toBeUndefined();
+});
+
+async function readyTwoCases(storage: MemoryPortfolioStorage) {
+  const secondFrame = { frameId: videoCandidateFrameId(sourceHash, 5000, '9'.repeat(64)),
+    representativeFrameId: videoCandidateFrameId(sourceHash, 5000, '9'.repeat(64)), candidateIndex: 1,
+    timestampMs: 5000, frameSha256: '9'.repeat(64) };
+  const request = manualRequest([...selection.candidateBindings, secondFrame]);
+  const loaded = await mocks.reviewDraft();
+  const segments = [{ segmentIndex: 0, startMs: 0, endMs: 2000, text: 'My debt went from $42,000 to $250. This was my case.' },
+    { segmentIndex: 1, startMs: 4000, endMs: 7000, text: 'TRA reduced what I owed by 78%. This was my experience.' }];
+  const claimSnapshots = segments.map(segment => ({ reference: { type: 'VIDEO_TRANSCRIPT', startSegmentIndex: segment.segmentIndex,
+    endSegmentIndex: segment.segmentIndex }, wording: segment.text, context: { type: 'VIDEO_TRANSCRIPT', segments: [segment] } }));
+  loaded.draft.claimSnapshots = claimSnapshots; loaded.draft.choices.claims = claimSnapshots.map(claim => claim.reference);
+  loaded.selectedFrameContexts = loaded.selectedFrameContexts.map((context: object, index: number) => ({ ...context,
+    observationIsExactFrame: true, observation: { sceneType: 'PERSON', summary: index ? 'Bearded person outdoors' : 'Bald person indoors',
+      visibleText: [], composition: 'Portrait', topics: ['person'], uncertainties: [] } }));
+  mocks.reviewDraft.mockResolvedValue(loaded);
+  return { job: await ready(storage, request), secondFrame, segments };
+}
+
+it('holds an unbound manual source account before leases, assessment or quota, leaving amendment available', async () => {
+  const storage = new MemoryPortfolioStorage(), { job } = await readyTwoCases(storage);
+  // Represent a historical paid plan, without changing its later immutable saved snapshot.
+  const stored = (await storage.read(`creative-portfolios/v1/${job.id}.json`))!;
+  job.snapshot!.batchPlan.creatives[0].draftSourceAssertion = selectedCaseAssertion(job.request.reviewHandoff, 0);
+  job.snapshot!.batchPlan.creatives[0].imageCopy!.shortSupport = job.snapshot!.batchPlan.creatives[0].draftSourceAssertion.exactText;
+  job.snapshot!.batchPlan.creatives[0].adCopy!.primaryText = job.snapshot!.batchPlan.creatives[0].draftSourceAssertion.exactText;
+  await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), stored.etag);
+  const before = (await storage.read(`creative-portfolios/v1/${job.id}.json`))!.bytes;
+  const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(result.status).toBe(409); expect(result.error).toContain('confirmed person pairing');
+  expect(result.job.slots[0].status).toBe('PENDING'); expect(result.job.lease).toBeNull();
+  expect((await storage.read(`creative-portfolios/v1/${job.id}.json`))!.bytes).toEqual(before);
+  expect(mocks.restore).not.toHaveBeenCalled(); expect(mocks.select).not.toHaveBeenCalled(); expect(quotaGroups()).toEqual([]);
+});
+
+it('sends each amended case’s exact one-frame pool to selection, hydration and renderer, and rejects wrong-person completion', async () => {
+  const storage = new MemoryPortfolioStorage(), { job, secondFrame, segments } = await readyTwoCases(storage);
+  const pairs = [selection.candidateBindings[0], secondFrame].map((frame, index) => ({ slotIndex: index + 1,
+    claimIndex: index, frameId: frame.frameId, attributionConfirmed: true }));
+  const amended = await applyCaseAmendment(job.id, proposeCaseAmendment(job, pairs).amendment, storage);
+  mocks.restore.mockResolvedValue(contextFor(amended));
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.preflight.mock.calls[0][0].reviewChoices.frames).toEqual([selection.candidateBindings[0]]);
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.hydrate.mock.calls[0][0].reviewChoices.frames).toEqual([selection.candidateBindings[0]]);
+  expect(mocks.render.mock.calls[0][0].imageCopy.shortSupport).toBe(segments[0].text);
+  const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.select.mock.calls[1][0].reviewChoices.frames).toEqual([secondFrame]);
+  expect(mocks.select.mock.calls[1][0].finalConcept.imageCopy.shortSupport).toBe(segments[1].text);
+  expect(failed.job.slots[1].status).toBe('RETRY_REQUIRED'); expect(mocks.render).toHaveBeenCalledOnce();
+  expect(failed.job.slots[1].error).toContain('closed-pool');
 });

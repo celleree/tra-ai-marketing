@@ -70,6 +70,14 @@ async function change<T>(runId: string, storage: VideoIntelligenceStorage,
   throw new Error('Image attempt changed concurrently; reload before continuing.');
 }
 
+/** An amendment must not recycle an already purchased or uncertain image intent. Read-only. */
+export async function assertNoImageAttempts(runId: string, storage = getVideoIntelligenceStorage()) {
+  const stored = await storage.read(key(runId));
+  if (stored && Object.keys(parse(stored.bytes).attempts).length) {
+    throw new Error('This portfolio has image attempts. Preserve its paid intent; a case amendment cannot replace it.');
+  }
+}
+
 /** Reservation and budget consumption are the same CAS write. Never reclaim unknown work. */
 export async function reserveImageAttempt(input: ImageAttemptInput, storage = getVideoIntelligenceStorage(), now = Date.now()): Promise<ImageAttemptClaim> {
   if (!validBudget(input.budget) || !hashPattern.test(input.fingerprint) || !Number.isSafeInteger(now)) return unavailable();

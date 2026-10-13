@@ -1,5 +1,7 @@
 import { parsePortfolioVideoDependencies, UnsupportedVideoPreparationVersionError } from '@/lib/creatives/portfolio-video-dependency';
 import { isDeepStrictEqual } from 'node:util';
+import { validateCaseAmendment, caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
+import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
 import { CREATIVE_CATEGORIES } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -260,6 +262,12 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
     if (job.lease !== null && (!text(job.lease.id) || !time(job.lease.expiresAtMs)
       || (job.lease.slotIndex === null ? job.snapshot !== null
         : !job.snapshot || job.slots.find(slot => slot.index === job.lease!.slotIndex)?.status !== 'PENDING'))) throw new Error();
+    if (job.videoCaseAmendment !== undefined) {
+      validateCaseAmendment(job, job.videoCaseAmendment);
+      for (const slot of job.slots) if (slot.videoSelection?.selection) {
+        assertReviewedFrameSelection(caseReviewChoices(job, slot.index), slot.videoSelection.selection);
+      }
+    }
     return job;
   } catch (error) {
     if (error instanceof UnsupportedSourceCompositionVersionError || error instanceof UnsupportedVideoPreparationVersionError) throw error;

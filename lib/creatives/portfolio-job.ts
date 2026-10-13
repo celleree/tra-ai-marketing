@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
+import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
 import { isDeepStrictEqual } from 'node:util';
 import type { CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
@@ -47,6 +49,8 @@ export type CreativePortfolioJob = {
   // Present only on durable portfolios created with a video; absence preserves existing behavior.
   readonly videoPreparationVersion?: 1;
   request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
+  // Explicit operator overlay; the original snapshot remains immutable.
+  videoCaseAmendment?: import('@/lib/creatives/portfolio-case-amendment').VideoCaseAmendment;
   planning: PortfolioPlanningState; planningError?: string;
   // A terminal approved-Preview stop survives individual saved-slot reconciliation.
   previewAcceptanceError?: string;
@@ -306,6 +310,7 @@ export function finishPortfolioVideoFrameSelection(
   }
   const parsed = parseGenerateVideoFrameSelection(selection);
   if (!parsed) throw new Error('Completed video frame selection is invalid.');
+  if (current.videoCaseAmendment) assertReviewedFrameSelection(caseReviewChoices(current, currentSlot.index), parsed);
   const job = structuredClone(current);
   const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
   slot.videoSelection = currentSlot.videoSelection.version === 1
