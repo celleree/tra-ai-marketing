@@ -99,6 +99,8 @@ describe('portfolio progress panel', () => {
   it('offers saved-context sign-in recovery and prevents paid actions while signed out', () => {
     const html = renderPanel({ count: 2, planReady: true, authRequired: true }).html;
     expect(html).toContain('Sign in to restore saved progress');
+    expect(html).toContain('Sign in required. Saved progress is preserved. Reload after signing in.');
+    expect(html).not.toContain('Generation is paused. Resume to continue the saved plan.');
     expect(html).toContain('portfolio%3Dsaved%26review%3Dreview');
     expect(html).toMatch(/disabled=""[^>]*>Resume generation/);
   });

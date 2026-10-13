@@ -99,8 +99,8 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
   const handoffConsumedRef = useRef(false);
   const handoffGenerationStartedRef = useRef(false);
   const portfolio = useCreativePortfolio();
-  const videoReview = useVideoReviewDraft();
-  const videos = useSavedVideoSources(sourceAssets, setSourceAssets, videoReview);
+  const videoReview = useVideoReviewDraft(portfolio.observeAccess);
+  const videos = useSavedVideoSources(sourceAssets, setSourceAssets, videoReview, portfolio.observeAccess);
   const generating = portfolio.running || portfolio.loading;
   const savedPortfolio = portfolio.response?.job;
   const creatives = creationMode === 'generate' ? portfolio.response?.creatives ?? [] : uploadedCreatives;
@@ -110,7 +110,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
     .map(slot => [slot.index, slot.error || 'Could not be completed.']));
   const displayGenerationError = creationMode === 'generate' ? portfolio.error || generationError : generationError;
 
-  const ready = Boolean(context.trim()) && !videos.pending && !videos.error && videoReview.canGenerate();
+  const ready = Boolean(context.trim()) && !portfolio.authRequired && !videos.pending && !videos.error && videoReview.canGenerate();
 
   useEffect(() => {
     if (handoffConsumedRef.current) return;
@@ -325,12 +325,12 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
                     <button type="button" disabled={generating || videoReview.state.pending > 0} onClick={() => void videoReview.useCurrentProfile()}>Use current Company Profile</button>
                   </div> : null}
                   <SavedVideoReviewSummary draft={videoReview} />
-                  <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} />
+                  <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} authRequired={portfolio.authRequired} observeAccess={portfolio.observeAccess} />
                   <PortfolioProgressPanel portfolio={portfolio} />
                 </> : null}
                 {videoReview.state.error || videoReview.state.saved?.issues.length || (displayGenerationError && videoReview.state.saved) ? (
                   <div role="alert" className="error-message">
-                    <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ') || displayGenerationError}</p>
+                    {videoReview.state.error || videoReview.state.saved?.issues.length ? <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ')}</p> : null}
                     <button type="button" disabled={videoReview.state.pending > 0} onClick={() => void videoReview.reload()}>Reload saved review</button>
                     {videoReview.state.saved?.issues.length ? <button type="button" disabled={generating || videoReview.state.pending > 0 || Boolean(videoReview.state.error)}
                       onClick={() => void videoReview.clearUnavailable()}>Remove unavailable material</button> : null}

@@ -9,6 +9,7 @@ import { runVideoIntelligence } from '@/lib/video/intelligence-client';
 import { VideoReviewStatements } from './video-review-statements';
 import { MAX_REVIEW_PREVIEW_BATCH } from '@/lib/video/review-preview-policy';
 import { reviewRequestFailure } from '@/lib/video/review-selection-client';
+import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
 export type ReviewSource = Awaited<ReturnType<typeof discoverVideoReviewSource>>;
 const preparationLabel = { PREPARING: 'Preparing source', TRANSCRIBING: 'Transcribing', OBSERVING: 'Analyzing scenes',
@@ -33,8 +34,8 @@ export function SavedVideoReviewSummary({ draft }: { draft: ReturnType<typeof us
   </section>;
 }
 
-export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: Array<{ id: string; name: string }>;
-  draft: ReturnType<typeof useVideoReviewDraft>; disabled?: boolean }) {
+export function VideoReviewPanel({ videos, draft, disabled = false, authRequired = false, observeAccess }: { videos: Array<{ id: string; name: string }>;
+  draft: ReturnType<typeof useVideoReviewDraft>; disabled?: boolean; authRequired?: boolean; observeAccess?: WorkspaceAccessObserver }) {
   const [active, setActive] = useState(''), [source, setSource] = useState<ReviewSource | null>(null);
   const [error, setError] = useState(''), [collapsed, setCollapsed] = useState(false);
   const [nearby, setNearby] = useState(false), [previews, setPreviews] = useState<Record<string, NonNullable<NonNullable<ReviewSource['review']>['preview']>>>({});
@@ -59,6 +60,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
       reading = true; clearTimeout(timer);
       try {
         const response = await fetch(`/api/video/review-sources?mediaId=${encodeURIComponent(mediaId)}`, { cache: 'no-store', signal: controller.signal });
+        if (!controller.signal.aborted) observeAccess?.('video-material:' + mediaId, response.status);
         const next: ReviewSource & { error?: string } = await response.json().catch(error => { if (response.ok) throw error; return {}; });
         if (!response.ok) throw Object.assign(new Error(next.error || 'Video material could not be loaded.'), { status: response.status });
         if (controller.signal.aborted) return;
@@ -73,8 +75,9 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
   const review = source?.status?.phase === 'COMPLETE' && source.review?.video.locator.sourceVideoMediaId === mediaId ? source.review : null;
   const matching = review && JSON.stringify(draft.state.choices?.video) === JSON.stringify(review.video);
   const frames = matching ? draft.state.choices?.frames ?? [] : [];
-  const blocked = disabled || Boolean(draft.state.error || draft.state.conflict || draft.state.saved?.issues.length);
-  const blockingReason = disabled ? 'Frame selection is paused while portfolio generation is active. Stop or finish generation to edit.'
+  const blocked = disabled || authRequired || Boolean(draft.state.error || draft.state.conflict || draft.state.saved?.issues.length);
+  const blockingReason = authRequired ? 'Sign in and reload the unavailable material before editing or continuing generation.'
+    : disabled ? 'Frame selection is paused while portfolio generation is active. Stop or finish generation to edit.'
     : draft.state.error || (draft.state.conflict ? 'Reload saved review to read the latest revision before selecting more frames.'
       : draft.state.saved?.issues.length ? 'Saved material is unavailable or changed. Reload saved review or remove unavailable material below. Saved choices are preserved.' : '');
   const selected = (frame: VideoCandidateFrameBinding) => frames.some(item => item.frameId === frame.frameId);
@@ -107,6 +110,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
         });
         const response = await fetch(`/api/video/review-sources?mediaId=${encodeURIComponent(mediaId!)}&candidateIndexes=${indexes.join(',')}`,
           { cache: 'no-store' });
+        if (!controller.signal.aborted) observeAccess?.('video-previews:' + mediaId, response.status);
         const next: ReviewSource & { error?: string } = await response.json().catch(error => { if (response.ok) throw error; return {}; });
         if (!response.ok) throw Object.assign(new Error(next.error || 'Nearby frames unavailable.'), { status: response.status });
         if (!controller.signal.aborted) {
@@ -122,13 +126,15 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
     } })().finally(() => { if (!controller.signal.aborted) setPreviewBusy(false); });
     return () => controller.abort();
   }, [JSON.stringify(previewIndexes), mediaId, review, previewRetry]);
+  useEffect(() => { if (authRequired) work.current?.abort(); }, [authRequired]);
   const selectedClaims = draft.state.choices?.claims?.filter(reference => matching || !reference.type.startsWith('VIDEO_')) ?? [];
   const prepare = async () => {
-    if (disabled || work.current || !source || source.status?.busy || source.status?.phase === 'FAILED') return;
+    if (disabled || authRequired || work.current || !source || source.status?.busy || source.status?.phase === 'FAILED') return;
     const controller = new AbortController(); work.current = controller; setWorking(true); setError('');
     try {
       await runVideoIntelligence(source.status ? { action: source.status.phase === 'RETRY_REQUIRED' ? 'RETRY' : 'ADVANCE', locator: source.status.locator }
         : { action: 'START', mediaId: mediaId! }, { signal: controller.signal,
+        observeAccess: observeAccess ? (_resource, status) => observeAccess('video-material:' + mediaId, status) : undefined,
         onStatus: status => setSource(current => current ? { ...current, status } : current) });
       if (!controller.signal.aborted) setRefresh(value => value + 1);
     } catch (failure) { if (!controller.signal.aborted) setError((failure as Error).message); }
@@ -154,7 +160,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
       onClick={() => retryPreview(binding)}>Retry preview</button> : null}
   </div>;
   return <section className={`panel ${styles.card}`} aria-label="Video material review">
-    {videos.length > 1 ? <label>Video <select value={mediaId} disabled={disabled || draft.state.pending > 0} onChange={event => { setActive(event.target.value); setCandidate(null); }}>
+    {videos.length > 1 ? <label className={styles.videoSelector}>Video <select aria-label="Video" title={videos.find(video => video.id === mediaId)?.name} value={mediaId} disabled={disabled || draft.state.pending > 0} onChange={event => { setActive(event.target.value); setCandidate(null); }}>
       {videos.map(video => <option key={video.id} value={video.id}>{video.name}</option>)}
     </select></label> : null}
     <div className={styles.heading}><strong>{review ? collapsed ? `Video material · ${frames.length} frames · ${selectedClaims.length} statements` : 'Video material ready' : 'Video material'}</strong>
@@ -172,7 +178,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
         : source.status.phase === 'RETRY_REQUIRED' ? `Retry required: ${source.status.retry?.message ?? 'Previous work was not completed.'}`
         : `Video preparation: ${preparationLabel[source.status.phase]} · ${source.status.completedRepresentatives} / ${source.status.totalRepresentatives ?? '?'} scenes`}</p>
       {source?.status?.phase === 'FAILED' ? <p>Remove this video and upload a replacement, or inspect the failure in Video Intelligence.</p> : null}
-      {source && source.status?.phase !== 'FAILED' ? <button type="button" disabled={disabled || working || source.status?.busy}
+      {source && source.status?.phase !== 'FAILED' ? <button type="button" disabled={disabled || authRequired || working || source.status?.busy}
         onClick={() => void prepare()}>{working || source.status?.busy ? 'Preparing video…' : !source.status ? 'Prepare video'
           : source.status.phase === 'RETRY_REQUIRED' ? 'Retry video preparation' : 'Resume video preparation'}</button> : null}
       {source?.status?.phase === 'RETRY_REQUIRED' ? <p>Retry may make another paid analysis call.</p> : null}
@@ -190,7 +196,7 @@ export function VideoReviewPanel({ videos, draft, disabled = false }: { videos: 
             onClick={() => { setError(''); setCandidate(binding.candidateIndex); }}>Preview {reviewTime(binding.timestampMs)}</button>)}
         {previewBusy ? <span role="status">Loading nearby frame…</span> : null}
       </div> : null}
-      <VideoReviewStatements review={review} draft={draft} disabled={blocked} />
+      <VideoReviewStatements review={review} draft={draft} disabled={blocked} observeAccess={observeAccess} />
     </> : null}
     <a className={styles.advanced} href={`/studio/video?mediaId=${encodeURIComponent(mediaId)}`}>Advanced Video Intelligence →</a>
   </section>;

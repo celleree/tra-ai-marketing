@@ -8,6 +8,8 @@ import type { ReviewClaimReference, ReviewClaimSnapshot } from '@/lib/video/revi
 import type { useVideoReviewDraft } from './use-video-review-draft';
 import { reviewTime, type ReviewSource } from './video-review-panel';
 import styles from './video-review-panel.module.css';
+import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
+import { reviewRequestFailure } from '@/lib/video/review-selection-client';
 
 type StatementSource = Awaited<ReturnType<typeof discoverReviewStatements>>;
 const key = (reference: ReviewClaimReference) => JSON.stringify(reference);
@@ -39,9 +41,10 @@ function StatementContext({ statement, review }: { statement: ReviewClaimSnapsho
     .map(segment => <p key={segment.segmentIndex}><time>{reviewTime(segment.startMs)}</time> {segment.text}</p>)}</>;
 }
 
-export function VideoReviewStatements({ review, draft, disabled }: { review: NonNullable<ReviewSource['review']>;
-  draft: ReturnType<typeof useVideoReviewDraft>; disabled: boolean }) {
+export function VideoReviewStatements({ review, draft, disabled, observeAccess }: { review: NonNullable<ReviewSource['review']>;
+  draft: ReturnType<typeof useVideoReviewDraft>; disabled: boolean; observeAccess?: WorkspaceAccessObserver }) {
   const [sources, setSources] = useState<StatementSource | null>(null), [error, setError] = useState('');
+  const [refresh, setRefresh] = useState(0);
   const profile = draft.state.choices?.companyProfile ?? readStoredRuntimeCompanyProfile() ?? null;
   useEffect(() => {
     const controller = new AbortController(); setSources(null); setError('');
@@ -49,13 +52,19 @@ export function VideoReviewStatements({ review, draft, disabled }: { review: Non
       try {
         const response = await fetch('/api/video/review-sources', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ companyProfile: profile }), cache: 'no-store', signal: controller.signal });
-        const next = await response.json();
-        if (!response.ok) throw new Error(next.error || 'Statement sources could not be loaded.');
+        if (!controller.signal.aborted) observeAccess?.('statement-sources', response.status);
+        const next = await response.json().catch(error => { if (response.ok) throw error; return {}; });
+        if (!response.ok) throw Object.assign(new Error(next.error || 'Statement sources could not be loaded.'), { status: response.status });
         if (!controller.signal.aborted) setSources(next);
-      } catch (failure) { if (!controller.signal.aborted) setError((failure as Error).message); }
+      } catch (failure) { if (!controller.signal.aborted) setError(reviewRequestFailure(failure, 'statement sources')); }
     })();
     return () => controller.abort();
-  }, [JSON.stringify(profile)]);
+  }, [JSON.stringify(profile), refresh]);
+  useEffect(() => {
+    const reload = () => setRefresh(value => value + 1);
+    window.addEventListener('focus', reload);
+    return () => window.removeEventListener('focus', reload);
+  }, []);
   const matching = JSON.stringify(draft.state.choices?.video) === JSON.stringify(review.video);
   const claims = draft.state.choices?.claims?.filter(reference => matching || !reference.type.startsWith('VIDEO_')) ?? [];
   const available = [...videoReviewStatements(review), ...(sources?.statements ?? [])];
@@ -67,7 +76,7 @@ export function VideoReviewStatements({ review, draft, disabled }: { review: Non
     companyProfile: statement.reference.type === 'COMPANY_PROFILE' ? sources?.companyProfile ?? choices.companyProfile : choices.companyProfile }));
   return <div className={styles.statements}>
     <div className={styles.heading}><strong>Statements</strong><span>{claims.length} selected</span></div>
-    {error ? <p role="alert">{error}</p> : null}
+    {error ? <div role="alert"><p>{error}</p><button type="button" onClick={() => setRefresh(value => value + 1)}>Reload statement sources</button></div> : null}
     {draft.state.choices?.companyProfile && JSON.stringify(draft.state.choices.companyProfile) !== JSON.stringify(readStoredRuntimeCompanyProfile() ?? null)
       ? <p className={styles.metadata}>Using saved Company Profile context.</p> : null}
     {statements.map(statement => { const checked = claims.some(reference => key(reference) === key(statement.reference));

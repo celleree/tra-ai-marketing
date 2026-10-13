@@ -4,6 +4,7 @@ import { parseCreative } from '@/lib/creatives/parse-generation-response';
 import { parsePortfolioProgress, type PortfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { createSubmissionIdentity, SUBMISSION_HEADER, type SubmissionStorage } from '@/lib/creatives/submission-id';
 import { PREVIEW_ADVANCE_HEADER, PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-binding';
+import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
 export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number;
   preflightReady?: true; previewOmitBrandLogo?: true; previewPreparationApproved?: true; previewInitializationAvailable?: true };
@@ -22,11 +23,12 @@ const MAX_BUSY_RETRY_AFTER_MS = 30000;
 export class PortfolioSignInRequiredError extends Error {}
 const LOAD_TIMEOUT_MS = 30_000;
 const STEP_TIMEOUT_MS = 310_000; // Longer than the route's 300-second maximum; never replay a timed-out step.
-async function fetchPortfolioResponse(url: string, init: RequestInit, timeoutMs: number) {
+async function fetchPortfolioResponse(url: string, init: RequestInit, timeoutMs: number, observeAccess?: WorkspaceAccessObserver) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!controller.signal.aborted) observeAccess?.('portfolio', response.status);
     if (response.status === 401) throw new PortfolioSignInRequiredError('Sign in again to restore saved progress. Generation has paused.');
     const value = await response.json().catch(() => { throw new Error('Portfolio response was interrupted. Reload saved progress before resuming.'); });
     return { response, value };
@@ -42,26 +44,26 @@ const parseBusyRetryAfterMs = (value: string | null) => {
 };
 
 /** Retain an unresolved browser submission across failed deliveries. */
-export function createPortfolioSubmitter(storage?: () => SubmissionStorage) {
+export function createPortfolioSubmitter(storage?: () => SubmissionStorage, observeAccess?: WorkspaceAccessObserver) {
   const identity = createSubmissionIdentity('portfolio', storage);
   return async (request: GenerateCreativeRequest) => {
     const command = { action: 'create' as const, request: structuredClone(request),
       submissionId: await identity.forInput(JSON.stringify(request)) };
-    const response = await requestPortfolio(command);
+    const response = await requestPortfolio(command, observeAccess);
     identity.complete(command.submissionId);
     return response;
   };
 }
 
-export async function requestPortfolio(command: Command): Promise<PortfolioResponse> {
-  try { return await requestPortfolioStep(command); }
+export async function requestPortfolio(command: Command, observeAccess?: WorkspaceAccessObserver): Promise<PortfolioResponse> {
+  try { return await requestPortfolioStep(command, observeAccess); }
   catch (error) {
     if ('id' in command) stopPreviewContinuation(command.id);
     throw error;
   }
 }
 
-async function requestPortfolioStep(command: Command): Promise<PortfolioResponse> {
+async function requestPortfolioStep(command: Command, observeAccess?: WorkspaceAccessObserver): Promise<PortfolioResponse> {
   const initialize = command.action === 'initialize-approved-preview';
   const fenced = 'id' in command && command.id === PREVIEW_TEST_APPROVAL.portfolioId;
   const session = fenced && typeof window !== 'undefined' ? window.sessionStorage : undefined;
@@ -73,7 +75,7 @@ async function requestPortfolioStep(command: Command): Promise<PortfolioResponse
       ...(previous ? { [PREVIEW_ADVANCE_HEADER]: previous } : {}),
       ...(command.action === 'create' ? { [SUBMISSION_HEADER]: command.submissionId } : {}) },
       body: JSON.stringify(command.action === 'create' ? command.request : command) }),
-  }, command.action === 'load' ? LOAD_TIMEOUT_MS : STEP_TIMEOUT_MS);
+  }, command.action === 'load' ? LOAD_TIMEOUT_MS : STEP_TIMEOUT_MS, observeAccess);
   const job = parsePortfolioProgress(value?.job);
   if (!job || !Array.isArray(value.creatives)) throw new Error(typeof value?.error === 'string' ? value.error : 'Invalid portfolio response. Reload saved progress.');
   if (command.action === 'create' ? job.requestedCount !== command.request.variationCount
@@ -117,6 +119,7 @@ export async function runPortfolio(...args: Parameters<typeof runPortfolioSteps>
 async function runPortfolioSteps(
   initial: PortfolioResponse, onUpdate: (value: PortfolioResponse) => void, shouldStop: () => boolean,
   wait: (delayMs: number) => Promise<void> = delayMs => new Promise(resolve => setTimeout(resolve, delayMs)),
+  observeAccess?: WorkspaceAccessObserver,
 ) {
   if (initial.error) throw new Error(initial.error);
   if (initial.preflightReady) return initial;
@@ -127,7 +130,7 @@ async function runPortfolioSteps(
     const polling = parentBusy || current.job.videoPreparation?.busy === true;
     if (polling) { await wait(POLL_DELAY_MS); if (shouldStop()) break; }
     const previous = current;
-    const next = await requestPortfolio({ action: parentBusy ? 'load' : 'advance', id: previous.job.id });
+    const next = await requestPortfolio({ action: parentBusy ? 'load' : 'advance', id: previous.job.id }, observeAccess);
     if (next.job.requestedCount !== previous.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
     onUpdate(next);
     current = next;

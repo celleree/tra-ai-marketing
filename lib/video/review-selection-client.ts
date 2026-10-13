@@ -1,5 +1,6 @@
 import type { ReviewSelectionChoices, ReviewVideoReference } from '@/lib/video/review-selection';
 import type { loadVideoReviewDraft } from '@/lib/video/review-selection-store';
+import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
 export type ReviewDraftResponse = Awaited<ReturnType<typeof loadVideoReviewDraft>>;
 export type ReviewDraftClientState = { saved: ReviewDraftResponse | null; choices: ReviewSelectionChoices | null;
@@ -35,6 +36,7 @@ export const replaceReviewVideo = (choices: ReviewSelectionChoices, video: Revie
 
 /** One queue owns server revisions. A failed/uncertain write requires a server reload before any further save. */
 export const createReviewDraftClient = (options: { request?: typeof fetch; onChange?: (state: ReviewDraftClientState) => void;
+  observeAccess?: WorkspaceAccessObserver;
   onSaved?: (id: string) => void; onCreated?: (id: string) => void; createId?: () => string } = {}) => {
   let state = structuredClone(EMPTY_REVIEW_CLIENT_STATE), tail = Promise.resolve(), blocked = false, edit = 0;
   let draftId: string | null = null;
@@ -44,6 +46,7 @@ export const createReviewDraftClient = (options: { request?: typeof fetch; onCha
   const request = async (url: string, body?: unknown): Promise<ReviewDraftResponse> => {
     const response = await (options.request ?? fetch)(url, { cache: 'no-store', ...(body === undefined ? {} :
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
+    options.observeAccess?.('saved-review', response.status);
     const result = await response.json().catch(error => { if (response.ok) throw error; return {}; });
     if (!response.ok) throw Object.assign(new Error(result.error || 'Review draft request failed.'), { status: response.status });
     return result as ReviewDraftResponse;

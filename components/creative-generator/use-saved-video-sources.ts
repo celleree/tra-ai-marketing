@@ -4,12 +4,13 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import type { CreativeSourceAsset, CreativeSourceVideoAsset } from '@/lib/media/types';
 import type { useVideoReviewDraft } from './use-video-review-draft';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
+import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
 const INVENTORY = 'tra-create-video-ids-v1';
 const LINKED_LAYOUTS = 'tra-create-linked-layout-ids-v1';
 /** Convenience IDs only. Reopen rehydrates current server media without advancing video work. */
 export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources: Dispatch<SetStateAction<CreativeSourceAsset[]>>,
-  review: ReturnType<typeof useVideoReviewDraft>) {
+  review: ReturnType<typeof useVideoReviewDraft>, observeAccess?: WorkspaceAccessObserver) {
   const [pending, setPending] = useState(true), [failures, setFailures] = useState<Record<string, string>>({});
   const [attempt, setAttempt] = useState(0);
   const removed = useRef(new Set<string>()), current = useRef(sources), loaded = useRef(false);
@@ -51,6 +52,7 @@ export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources:
       if (!layouts.length) return [];
       try {
         const response = await fetch('/api/references', { cache: 'no-store', signal: controller.signal });
+        if (!controller.signal.aborted) observeAccess?.('saved-layouts', response.status);
         const value = await response.json();
         if (!response.ok || !Array.isArray(value.items)) throw new Error('Saved layout references could not be loaded.');
         return layouts.map(id => {
@@ -67,6 +69,7 @@ export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources:
       .map(async id => {
         try {
           const response = await fetch(`/api/video/intelligence/jobs?mediaId=${encodeURIComponent(id)}`, { cache: 'no-store', signal: controller.signal });
+          if (!controller.signal.aborted) observeAccess?.('saved-video:' + id, response.status);
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || 'Video unavailable.');
           const media = result.source as CreativeSourceVideoAsset;

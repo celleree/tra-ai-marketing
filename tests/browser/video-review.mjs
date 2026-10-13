@@ -5,7 +5,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
 
 // Default to the lockfile-pinned test dependency; optional overrides are diagnostic only.
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE_PATH ? pathToFileURL(process.env.PLAYWRIGHT_MODULE_PATH).href : 'playwright');
+const browserTypes = await import(process.env.PLAYWRIGHT_MODULE_PATH ? pathToFileURL(process.env.PLAYWRIGHT_MODULE_PATH).href : 'playwright');
+const browserName = process.env.VIDEO_REVIEW_BROWSER ?? 'chromium';
+assert.ok(['chromium', 'webkit'].includes(browserName));
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const server = await createServer({ root, configFile: false, cacheDir: root + 'node_modules/.vite-browser',
@@ -16,7 +18,7 @@ const server = await createServer({ root, configFile: false, cacheDir: root + 'n
   server: { host: '127.0.0.1', port: 0 }, define: { 'process.env': '{}', __dirname: JSON.stringify('/'), 'process.browser': 'true', global: 'globalThis' } });
 await server.listen();
 const url = `http://127.0.0.1:${server.httpServer.address().port}/tests/browser/video-review.html`;
-const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {}) });
+const browser = await browserTypes[browserName].launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_PATH && browserName === 'chromium' ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {}) });
 const id = `review_${'a'.repeat(32)}`, mediaId = `media_${'b'.repeat(32)}`;
 const availableB = `media_${'9'.repeat(32)}`, availableC = `media_${'8'.repeat(32)}`;
 const layoutMediaId = `media_${'1'.repeat(32)}`;
@@ -37,9 +39,12 @@ const thumbnails = await Promise.all([[180, 320], [320, 180]].map(async ([width,
 const results = [];
 async function scenario(name, options, run) {
   if (process.env.VIDEO_REVIEW_SCENARIO && !name.includes(process.env.VIDEO_REVIEW_SCENARIO)) return;
-  const context = await browser.newContext(options.width ? { viewport: { width: options.width, height: 900 }, isMobile: true, hasTouch: true } : {});
+  const context = await browser.newContext(options.width ? { viewport: { width: options.width, height: 900 }, isMobile: options.width < 700, hasTouch: options.width < 700 } : {});
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   const errors = [], calls = [], submissions = [], videoActions = [];
+  const accessDenials = { ...options.accessDenials };
+  const segments = Array.from({ length: options.statementCount ?? 1 }, (_, index) => ({ ...segment, segmentIndex: index,
+    text: options.longStatements ? `Saved consultation wording ${index + 1}. ${'A detailed statement with several useful lines of text. '.repeat(6)} ${'reference_'.repeat(18)}` : segment.text }));
   let releaseSourceReads = () => {};
   let releasePortfolioAdvance = () => {}, portfolioLoadFailure = 0;
   const portfolioAdvanceGate = options.holdPortfolioAdvance ? new Promise(resolve => { releasePortfolioAdvance = resolve; }) : null;
@@ -49,11 +54,14 @@ async function scenario(name, options, run) {
   const bindings = Array.from({ length: options.frameCount ?? 1 }, (_, index) => index ? { ...frame,
     frameId: `video-frame:${String(index + 4).repeat(64)}`, candidateIndex: index, timestampMs: (index + 1) * 1000 } : frame);
   if (options.savedNeighbors) choices.frames = bindings.slice(1);
+  if (options.selectedFrameCount) choices.frames = bindings.slice(0, options.selectedFrameCount);
+  if (options.longStatements) choices.claims = segments.map(item => ({ ...claim, startSegmentIndex: item.segmentIndex, endSegmentIndex: item.segmentIndex }));
   const previewBatches = [], previewActivity = { active: 0, peak: 0 }; let previewFailure = Boolean(options.failPreviews), brokenPreview = Boolean(options.brokenPreview);
   const saves = []; let failure = 0, loadFailure = 0, sourceFailure = 0, revisionNumber = 1;
   let revision = 'revision-1', phase = options.phase ?? 'COMPLETE', issue = options.issue;
   const response = () => ({ draft: { id, version: 1, artifactType: 'VIDEO_REVIEW_DRAFT', providerEligible: false,
-    choices, claimSnapshots: [{ reference: claim, wording: segment.text, context: { type: 'VIDEO_TRANSCRIPT', segments: [segment] } }], updatedAtMs: 1 },
+    choices, claimSnapshots: segments.filter(item => choices.claims?.some(reference => reference.type === 'VIDEO_TRANSCRIPT' && reference.startSegmentIndex === item.segmentIndex))
+      .map(item => ({ reference: { ...claim, startSegmentIndex: item.segmentIndex, endSegmentIndex: item.segmentIndex }, wording: item.text, context: { type: 'VIDEO_TRANSCRIPT', segments: [item] } })), updatedAtMs: 1 },
     revision, issues: issue ? [{ source: 'VIDEO', message: issue }] : [], transcriptContext: null, profileSource: null });
   await context.addInitScript(({ id, inventory, profile, hasProfile, noLogo }) => {
     if (sessionStorage.getItem('video-review-fixture-seeded')) return;
@@ -66,6 +74,10 @@ async function scenario(name, options, run) {
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, body = request.postDataJSON();
     calls.push([path, request.method()]);
+    if (accessDenials[request.method() + ' ' + path]) {
+      await route.fulfill({ status: accessDenials[request.method() + ' ' + path], contentType: options.htmlDenial ? 'text/html' : 'application/json',
+        body: options.htmlDenial ? '<html><body>Sign in required.</body></html>' : JSON.stringify({ error: 'Sign in required.' }) }); return;
+    }
     if (sourceReadGate && request.method() === 'GET'
       && (options.holdSourceReadPaths ?? ['/api/video/intelligence/jobs', '/api/references']).includes(path)) {
       await sourceReadGate;
@@ -74,7 +86,7 @@ async function scenario(name, options, run) {
     const requestedId = new URL(request.url()).searchParams.get('mediaId') ?? mediaId;
     const missing = options.missingMedia || (options.missingReviewed && requestedId === mediaId);
     const currentVideo = { ...video, locator: { ...video.locator, sourceVideoMediaId: requestedId } };
-    const currentMedia = { ...media, id: requestedId, originalName: requestedId === mediaId ? 'fixture.mp4' : requestedId === availableB ? 'second.mp4' : 'third.mp4' };
+    const currentMedia = { ...media, id: requestedId, originalName: requestedId === mediaId ? options.videoName ?? 'fixture.mp4' : requestedId === availableB ? 'second.mp4' : 'third.mp4' };
     let value = {}, status = 200, isPreview = false;
     if (path === '/api/video/review-selection') {
       if ((request.method() === 'POST' && failure) || (request.method() === 'GET' && loadFailure)) {
@@ -93,7 +105,7 @@ async function scenario(name, options, run) {
       else if (missing) { status = 404; value = { error: 'Stored video is missing.' }; }
       else value = { source: currentMedia, status: { phase, locator: currentVideo.locator, completedRepresentatives: 1, totalRepresentatives: 1, busy: false,
         failure: { message: 'Fixture preparation failed.' }, retry: { message: 'Uncertain prior attempt.' } },
-        review: phase !== 'COMPLETE' ? null : { video: currentVideo, frameBindings: bindings, onScreenStatements: [], library: { transcript: { segments: [segment] },
+        review: phase !== 'COMPLETE' ? null : { video: currentVideo, frameBindings: bindings, onScreenStatements: [], library: { transcript: { segments },
           representativeFrames: bindings.slice(0, options.savedNeighbors ? 1 : bindings.length).map((binding, index) => ({ ...binding, id: binding.frameId, thumbnailDataUrl: thumbnails[index % 2] })) } } };
       const indexes = new URL(request.url()).searchParams.get('candidateIndexes');
       if (indexes && value.review) {
@@ -149,6 +161,7 @@ async function scenario(name, options, run) {
     await page.getByRole('button', { name: 'Generate creatives', exact: true }).waitFor();
     if (!options.runWhilePending) await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
     await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, releaseSourceReads, releasePortfolioAdvance,
+      denyAccess: (key, status) => { accessDenials[key] = status; },
       denyPortfolioLoads: status => { portfolioLoadFailure = status; }, recoverPreviews: () => { previewFailure = false; brokenPreview = false; }, failNext: status => { failure = status; }, denyLoads: status => { loadFailure = status; }, failSource: status => { sourceFailure = status; } });
     assert.deepEqual(errors, [], 'Browser runtime errors');
     results.push(name); console.log(`PASS ${name}`);
@@ -157,6 +170,52 @@ async function scenario(name, options, run) {
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  for (const width of [375, 390, 430, 1280]) await scenario(`Mobile layout recovery keeps long video names and saved statements within ${width}px`,
+    { width, inventory: [mediaId, availableB], videoName: 'media_989a125a5f274761a27ff9115f1bae19.mp4', frameCount: 15, selectedFrameCount: 11,
+      statementCount: 4, longStatements: true, savedPortfolio: true, pausedRecovery: true }, async ({ page, calls, response }) => {
+      await ready(page); const panel = page.getByRole('region', { name: 'Video material review' });
+      await panel.getByText('11 selected', { exact: true }).waitFor();
+      const select = panel.getByLabel('Video', { exact: true }); await select.waitFor();
+      // Native controls can use larger platform/user text metrics than Windows WebKit's default.
+      await page.addStyleTag({ content: 'select { font-size: 20px !important; }' });
+      const bounds = await page.evaluate(() => ({ viewport: innerWidth, width: document.documentElement.scrollWidth,
+        offenders: [...document.querySelectorAll('main *')].filter(element => element.getBoundingClientRect().right > innerWidth + 1 && !element.closest('[class*="frames"]')).slice(0, 8).map(element => ({ tag: element.tagName, class: element.className, right: element.getBoundingClientRect().right })) }));
+      assert.ok(bounds.width <= width + 1, JSON.stringify(bounds)); assert.equal(bounds.viewport, width);
+      const box = await select.boundingBox(); assert.ok(box.x >= 0 && box.x + box.width <= width);
+      await select.selectOption(availableB); await select.selectOption(mediaId); await ready(page);
+      const before = structuredClone(response()); await page.reload(); await ready(page);
+      assert.deepEqual(response(), before); assert.equal(response().draft.choices.frames.length, 11);
+      const viewport = await page.locator('meta[name=viewport]').getAttribute('content');
+      assert.ok(!/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(?:[,\s]|$)/i.test(viewport));
+      assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET'), false);
+    });
+  for (const key of ['GET /api/video/review-sources', 'POST /api/video/review-sources', 'GET /api/video/review-selection', 'GET /api/video/intelligence/jobs']) await scenario(`Cross-panel authentication recovery blocks paid controls for ${key}`,
+    { savedPortfolio: true, pausedRecovery: true, accessDenials: { [key]: 401 } }, async ({ page, calls, denyAccess }) => {
+      const resume = page.getByRole('button', { name: 'Resume generation', exact: true }); await resume.waitFor();
+      await page.getByRole('link', { name: 'Sign in to restore saved progress', exact: true }).waitFor();
+      assert.equal(await resume.isDisabled(), true);
+      await page.getByRole('button', { name: 'Reload saved progress', exact: true }).click();
+      await page.waitForFunction(() => !document.body.textContent.includes('Loading saved progress.'));
+      assert.equal(await resume.isDisabled(), true, 'A portfolio GET cannot clear another resource\'s 401');
+      denyAccess(key, 0);
+      if (key === 'GET /api/video/review-selection') await page.getByRole('button', { name: 'Reload saved review', exact: true }).click();
+      else if (key === 'GET /api/video/intelligence/jobs') await page.getByRole('button', { name: 'Reload saved videos', exact: true }).click();
+      else if (key.startsWith('POST')) await page.getByRole('button', { name: 'Reload statement sources', exact: true }).click();
+      else await page.getByRole('button', { name: 'Reload video material', exact: true }).click();
+      await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+      assert.equal(await resume.isEnabled(), true);
+      assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET'), false);
+    });
+  await scenario('HTML video authentication recovery preserves saved work and blocks paid controls',
+    { savedPortfolio: true, pausedRecovery: true, htmlDenial: true, accessDenials: { 'GET /api/video/review-sources': 401 } }, async ({ page, calls, denyAccess }) => {
+      await page.getByRole('link', { name: 'Sign in to restore saved progress', exact: true }).waitFor();
+      const resume = page.getByRole('button', { name: 'Resume generation', exact: true }); assert.equal(await resume.isDisabled(), true);
+      await page.getByText('HTTP 401:', { exact: false }).waitFor();
+      denyAccess('GET /api/video/review-sources', 0); await page.getByRole('button', { name: 'Reload video material', exact: true }).click();
+      await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+      assert.equal(await resume.isEnabled(), true);
+      assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET'), false);
+    });
   await scenario('Saved portfolio recovery on navigation and focus is read-only', { savedPortfolio: true, pausedRecovery: true }, async ({ page, calls }) => {
     await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
     const savedLink = new URL(await page.getByRole('link', { name: 'Open saved portfolio', exact: true }).getAttribute('href'), page.url());
@@ -579,5 +638,5 @@ try {
     else if (portfolioState === 'RETRY_REQUIRED') { await page.getByRole('button', { name: 'Retry creative 1', exact: true }).click(); await page.getByText('Generation complete.').waitFor(); }
     else await page.getByText('Generation complete.').waitFor();
   });
-  console.log(`${results.length} offline Chromium scenarios passed.`);
+  console.log(`${results.length} offline ${browserName === 'webkit' ? 'WebKit' : 'Chromium'} scenarios passed.`);
 } finally { await browser.close(); await server.close(); }

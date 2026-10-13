@@ -29,7 +29,8 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
   const savedQuery = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search);
   savedQuery.set('portfolio', job.id);
 
-  const status = portfolio.loading ? initializationAvailable ? 'Preparing the approved reassessment. No AI calls are started.' : 'Loading saved progress. This check does not start generation.'
+  const status = portfolio.authRequired ? 'Sign in required. Saved progress is preserved. Reload after signing in.'
+    : portfolio.loading ? initializationAvailable ? 'Preparing the approved reassessment. No AI calls are started.' : 'Loading saved progress. This check does not start generation.'
     : portfolio.running && initializationAvailable ? 'Preparing the approved reassessment. No AI calls are started.' : !portfolio.running && complete
     ? 'Generation complete.'
     : portfolio.stopped

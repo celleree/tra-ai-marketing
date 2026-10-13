@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { GenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { createPortfolioSubmitter, PortfolioSignInRequiredError, requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
 import { workspaceSignInUrl } from '@/lib/auth/return-path';
+import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
 const LAST_PORTFOLIO = 'tra-creative-portfolio-v1';
 export function useCreativePortfolio() {
@@ -12,7 +13,15 @@ export function useCreativePortfolio() {
   const [loading, setLoading] = useState(false), [authRequired, setAuthRequired] = useState(false);
   const current = useRef<PortfolioResponse | null>(null), busy = useRef(false), stopRequested = useRef(false), mounted = useRef(true);
   const advancing = useRef(false), refreshPending = useRef(false);
-  const submit = useRef(createPortfolioSubmitter());
+  const accessFailures = useRef(new Set<string>());
+  const observeAccess = useRef<WorkspaceAccessObserver>((resource, status) => {
+    if (status === 401) accessFailures.current.add(resource);
+    else if (status >= 200 && status < 300) accessFailures.current.delete(resource);
+    const denied = accessFailures.current.size > 0;
+    if (mounted.current) setAuthRequired(denied);
+    if (denied && advancing.current) { stopRequested.current = true; if (mounted.current) setStopped(true); }
+  }).current;
+  const submit = useRef(createPortfolioSubmitter(undefined, observeAccess));
   useEffect(() => {
     mounted.current = true; stopRequested.current = false;
     const pause = () => { if (advancing.current) { stopRequested.current = true; setStopped(true); } };
@@ -39,16 +48,16 @@ export function useCreativePortfolio() {
     setResponse(value);
   };
   const execute = async (task: () => Promise<PortfolioResponse>, advance: boolean) => {
-    if (busy.current) return;
+    if (busy.current || (advance && accessFailures.current.size)) return;
     busy.current = true; advancing.current = advance; stopRequested.current = false;
-    setStopped(false); setRunning(advance); setLoading(!advance); setAuthRequired(false); setError('');
+    setStopped(false); setRunning(advance); setLoading(!advance); setError('');
     try {
       const value = await task(); update(value);
       if (value.error) throw new Error(value.error);
-      if (advance) await runPortfolio(value, update, () => stopRequested.current || !mounted.current || document.visibilityState === 'hidden');
+      if (advance) await runPortfolio(value, update, () => stopRequested.current || !mounted.current || document.visibilityState === 'hidden', undefined, observeAccess);
     } catch (failure) {
       if (mounted.current) {
-        setAuthRequired(failure instanceof PortfolioSignInRequiredError);
+        if (failure instanceof PortfolioSignInRequiredError) observeAccess('portfolio', 401);
         setError(failure instanceof Error ? failure.message : 'Portfolio work failed. Reload saved progress.');
       }
     } finally {
@@ -61,29 +70,30 @@ export function useCreativePortfolio() {
   };
   const start = (request: GenerateCreativeRequest) => execute(() => submit.current(request), true);
   const initializeApprovedPreview = () => {
+    if (accessFailures.current.size) return;
     const source = current.current;
     if (source?.previewInitializationAvailable) return execute(() => requestPortfolio({
       action: 'initialize-approved-preview', sourcePortfolioId: source.job.id,
-    }), false);
+    }, observeAccess), false);
   };
   const resume = () => {
     const id = current.current?.job.id;
     if (id) return execute(async () => {
-      const { preflightReady: _ready, ...loaded } = await requestPortfolio({ action: 'load', id });
+      const { preflightReady: _ready, ...loaded } = await requestPortfolio({ action: 'load', id }, observeAccess);
       return loaded;
     }, true);
   };
   const retry = (slotIndex: number | null) => {
     const id = current.current?.job.id;
-    if (id) return execute(() => requestPortfolio({ action: 'retry', id, slotIndex }), true);
+    if (id) return execute(() => requestPortfolio({ action: 'retry', id, slotIndex }, observeAccess), true);
   };
   const restoreSaved = () => {
     if (busy.current) { if (advancing.current) refreshPending.current = true; return; }
     let id = new URL(window.location.href).searchParams.get('portfolio');
     try { id ||= window.localStorage.getItem(LAST_PORTFOLIO); } catch { /* Query links also support reopening. */ }
-    if (id) return execute(() => requestPortfolio({ action: 'load', id: id! }), false);
+    if (id) return execute(() => requestPortfolio({ action: 'load', id: id! }, observeAccess), false);
   };
   const stop = () => { stopRequested.current = true; setStopped(true); };
   const signInUrl = workspaceSignInUrl(typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search);
-  return { response, running, loading, stopped, authRequired, signInUrl, error, start, initializeApprovedPreview, resume, retry, restoreSaved, stop };
+  return { response, running, loading, stopped, authRequired, signInUrl, error, start, initializeApprovedPreview, resume, retry, restoreSaved, stop, observeAccess };
 }
