@@ -128,6 +128,20 @@ describe('creative batch planner', () => {
     expect(sent.requiredVideoCaseGuidance).toContain('operator confirmation');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it('keeps ordinary default-count case plans eligible for the unchanged diversity audit', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const { job } = videoCasePortfolio(), handoff = job.request.reviewHandoff!;
+    const cases = requestedVideoCases('Create ads using my selected source inputs', handoff)!;
+    const headlines = ['Understand the debt outcome', 'A more manageable settlement', 'Relief after a resolution', 'A house preservation story'];
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [1, 2, 3, 4].map(index => ({ ...concept(index, 'approved-tra-human'),
+      adCopy: { ...concept(index).adCopy, headline: headlines[index - 1] }, draftVideoSourceSelection: null })) })));
+    const plan = await planCreativeBatch({ count: 4, context: 'Create source case ads', analysis, hasApprovedHumanSource: true,
+      requireSelectedVideoFrames: true, requestedVideoCases: cases, operatorSelectedSourceGuidance: handoff.operatorSelectedSourceGuidance });
+    expect(plan.creatives.map(item => item.copy.headline)).toEqual(headlines);
+    expect(plan.creatives.map(item => item.imageCopy?.shortSupport)).toEqual([cases[0].exactText, cases[1].exactText, cases[0].exactText, cases[1].exactText]);
+    expect(plan.portfolioAudit?.conceptCount).toBe(4);
+    expect(auditCreativePortfolio).toHaveBeenCalledTimes(1);
+  });
   it('does not turn company policies or unrelated service requests into required case studies', () => {
     const { job } = videoCasePortfolio();
     const unrelated = structuredClone(job.request.reviewHandoff!); Object.assign(unrelated, { claimSnapshots: [] });

@@ -435,10 +435,15 @@ export async function requestCreativeBatch(
     const concept = parseConcept(selected, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog, draftVideoSourceCatalog);
     if (required && concept) {
       // Model copy cannot retain another person's result beside the assigned exact case.
-      concept.copy = concept.adCopy = { headline: 'A video case account', primaryText: required.exactText, description: '' };
+      const numbers = (text: string) => text.match(/\d[\d,.]*(?:\s*%)?/g)?.map(value => value.replace(/[\s,]/g, '')) ?? [];
+      const ownNumbers = new Set(numbers(required.exactText));
+      const headline = numbers(concept.adCopy!.headline).some(value => !ownNumbers.has(value))
+        || requiredCases!.some(other => other.passageId !== required.passageId && concept.adCopy!.headline.includes(other.exactText))
+        ? required.exactText : concept.adCopy!.headline;
+      concept.copy = concept.adCopy = { headline, primaryText: required.exactText, description: '' };
       concept.imageCopy = { ...concept.imageCopy!, headline: "One person's TRA experience", shortSupport: required.exactText,
         proofAttribution: 'Supplied video account' };
-      concept.strategy.conceptDetails = { ...concept.strategy.conceptDetails!, mainMessage: required.exactText, proposition: required.exactText };
+      concept.strategy.conceptDetails = { ...concept.strategy.conceptDetails!, mainMessage: required.exactText };
     }
     return concept;
   });
