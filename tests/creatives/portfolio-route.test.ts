@@ -9,8 +9,9 @@ vi.mock('@/lib/creatives/portfolio-job-storage', () => ({
 vi.mock('@/lib/creatives/portfolio-execution', () => ({ advanceCreativePortfolio: mocks.advance }));
 vi.mock('@/lib/creatives/portfolio-results', () => ({ readPortfolioCreatives: mocks.creatives }));
 import { GET, POST, PATCH } from '@/app/api/creatives/portfolios/route';
+import * as previewApproval from '@/lib/creatives/preview-test-approval';
 let job: CreativePortfolioJob;
-afterEach(() => { vi.unstubAllEnvs(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 const request = (body?: unknown, id?: string) => new Request('http://localhost/api/creatives/portfolios' + (id ? '?id=' + id : ''),
   body === undefined ? undefined : { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json',
     'Idempotency-Key': '11111111-1111-4111-8111-111111111111' } });
@@ -26,6 +27,16 @@ beforeEach(() => {
 });
 
 describe('resumable portfolio API', () => {
+  it('offers approved preparation Resume on read without clearing the saved error or doing work', async () => {
+    job.planningError = previewApproval.PREVIEW_OLD_PREPARATION_BLOCK;
+    vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
+    vi.spyOn(previewApproval, 'canResumeApprovedPreviewPreparation').mockReturnValue(true);
+    const value = await (await GET(request(undefined, job.id))).json();
+    expect(value).toMatchObject({ previewPreparationApproved: true,
+      job: { previewPreparationResume: true, planningError: previewApproval.PREVIEW_OLD_PREPARATION_BLOCK } });
+    expect(job.planningError).toBe(previewApproval.PREVIEW_OLD_PREPARATION_BLOCK);
+    expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
+  });
   it('reports the frozen no-logo test choice on reload without advancing paid work', async () => {
     vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
     job.request.previewOmitBrandLogo = true; delete job.request.brandLogoMediaId;

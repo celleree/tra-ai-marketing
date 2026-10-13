@@ -22,6 +22,7 @@ import { primaryVideoGuidance, primaryVideoDirection, representativeVideoGuidanc
 import { isPreviewAcceptance, PREVIEW_NO_LOGO_DIRECTION } from '@/lib/creatives/preview-acceptance';
 
 export type PortfolioPreparationState = {
+  previewPreparedFrameCount?: number;
   previewPreflightReady?: true;
   videoDependencies?: import('@/lib/creatives/portfolio-video-dependency').PortfolioVideoDependency[];
   videoProgress?: {

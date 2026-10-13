@@ -19,7 +19,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
   const blocked = job.slots.filter(slot => slot.status === 'BLOCKED');
   const complete = savedCount === job.requestedCount;
   const videoFailed = job.videoPreparation?.phase === 'FAILED';
-  const hasFailure = Boolean(job.planningError) || failed.length > 0 || blocked.length > 0 || videoFailed;
+  const hasFailure = Boolean(job.planningError && !job.previewPreparationResume) || failed.length > 0 || blocked.length > 0 || videoFailed;
   const retryFailure = Boolean(job.planningError) || failed.length > 0;
   const preparingVideo = Boolean(job.videoPreparation && activeVideoPhases.has(job.videoPreparation.phase));
 
@@ -34,7 +34,10 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
           : job.planReady ? 'Ready to resume generation.' : `Ready to resume planning ${job.requestedCount} creatives.`;
 
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
-    {portfolio.response?.preflightReady ? <p role="status">Cached-input preflight passed. No paid planning or images have started. Resume only after approval for one initial planner, one audit and two Sunburst images. Uncached preparation, repair, retries and fallback are blocked in this Preview.</p> : null}
+    {portfolio.response?.previewPreparationApproved ? <p role="status">This saved Preview test permits four approved preparations once each. The $1 budget is an estimate, with no guaranteed dollar ceiling. No retries, repair or fallback are authorized.</p> : null}
+    {portfolio.response?.preflightReady ? <p role="status">{portfolio.response.previewPreparationApproved
+      ? 'Approved preparation is complete. Planning and images have not started. Resume for one initial planner, one audit and at most two Sunburst images.'
+      : 'Cached-input preflight passed. No paid planning or images have started. Resume only after approval for one initial planner, one audit and two Sunburst images. Uncached preparation, repair, retries and fallback are blocked in this Preview.'}</p> : null}
     {portfolio.response?.previewOmitBrandLogo ? <p role="status">Logo omitted for this Preview test. Logo fidelity is not being evaluated.</p> : null}
     <div className={styles.summary} aria-live="polite">
       <p className={styles.status}><strong>{status}</strong></p>
@@ -62,13 +65,17 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
       <a href={`?portfolio=${job.id}`} target="_blank" rel="noreferrer">Open saved portfolio</a>
     </div>
 
-    {retryFailure ? <div className={styles.failures} aria-live="polite">
+    {retryFailure && !portfolio.response?.previewPreparationApproved ? <div className={styles.failures} aria-live="polite">
       <p>Retrying failed work may make another paid call.</p>
       {job.planningError ? <p>{job.planningError} <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease) || !canAdvance()}
         onClick={() => { if (canAdvance()) void portfolio.retry(null); }}>Retry planning</button></p> : null}
       {failed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}{' '}
         <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease) || !canAdvance()}
           onClick={() => { if (canAdvance()) void portfolio.retry(slot.index); }}>Retry creative {slot.index}</button></p>)}
+    </div> : null}
+    {portfolio.response?.previewPreparationApproved && hasFailure ? <div role="alert" className={styles.failures}>
+      {job.planningError ? <p>{job.planningError}</p> : null}
+      {failed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}</p>)}
     </div> : null}
     {blocked.length ? <div className={styles.failures} aria-live="polite">
       {blocked.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error}</p>)}

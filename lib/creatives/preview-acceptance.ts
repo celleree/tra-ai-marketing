@@ -1,6 +1,7 @@
 import type { ProviderAttemptMetadata } from '@/lib/ai/provider-usage';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
+import { approvedPreviewProviderContext, PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-approval';
 
 /** Existing server purpose scopes this restriction to Preview acceptance only. */
 export const isPreviewAcceptance = () => process.env.VERCEL_ENV === 'preview'
@@ -36,10 +37,13 @@ export function assertPreviewAcceptanceJob(job: CreativePortfolioJob) {
 /** Check before dispatch; cached reuse never enters this boundary. */
 export function assertPreviewAcceptanceProvider(meta: ProviderAttemptMetadata) {
   if (!isPreviewAcceptance()) return;
-  if (meta.portfolioId && meta.endpoint === 'responses' && meta.model === 'gpt-6.1-sol'
+  const approved = approvedPreviewProviderContext(meta);
+  if (approved && meta.endpoint === 'responses' && meta.model === 'gpt-6-luna'
+    && ['source-reference-analysis', 'layout-analysis', 'video-human-selection'].includes(meta.stage)) return;
+  if (approved && meta.endpoint === 'responses' && meta.model === 'gpt-6.1-sol'
     && ['creative-plan', 'portfolio-audit'].includes(meta.stage)) return;
-  if (meta.portfolioId && meta.endpoint === 'images' && meta.stage === 'image'
+  if (approved && PREVIEW_TEST_APPROVAL.creativeIds.includes(meta.creativeId ?? '') && meta.endpoint === 'images' && meta.stage === 'image'
     && meta.model === 'gpt-image-2.5-sunburst' && meta.n === 1 && meta.purpose === 'staging-smoke'
     && meta.dimensions === '1024x1280' && meta.quality === 'high') return;
-  throw new PreviewAcceptanceError(`Preview acceptance blocked ${meta.stage} before dispatch. Preparation must be cached; only the initial planner, initial audit and two Sunburst images are permitted.`);
+  throw new PreviewAcceptanceError(`Preview acceptance blocked ${meta.stage} before dispatch. Only the approved saved test's four preparations, initial planner, initial audit and two Sunburst images are permitted.`);
 }

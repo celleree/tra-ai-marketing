@@ -60,25 +60,18 @@ describe('Preview acceptance spend boundary', () => {
       fetchWithProviderUsage(stage, 'existing-model', 'https://api.openai.com/v1/responses', {}, dispatch))).rejects.toThrow('before dispatch');
     expect(dispatch).not.toHaveBeenCalled(); expect(events).not.toHaveBeenCalled();
   });
-  it('allows initial plan/audit and exactly two ledger-backed primary images, with no repeat purchase', async () => {
-    enable(); vi.spyOn(console, 'info').mockImplementation(() => {});
-    const text = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ status: 'completed', output: [] }));
-    await withProviderUsageContext({ portfolioId: 'owned' }, async () => {
-      for (const stage of ['creative-plan', 'portfolio-audit']) {
-        await fetchWithProviderUsage(stage, 'gpt-6.1-sol', 'https://api.openai.com/v1/responses', {}, text);
-      }
-    });
-    expect(text).toHaveBeenCalledTimes(2);
-    const storage = new MemoryPortfolioStorage();
-    const image = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ data: [{ b64_json: 'cGl4ZWxz' }] }));
-    const render = (operationId: string, model = 'gpt-image-2.5-sunburst') => withImageAttemptScope({
-      runId: 'one-portfolio', portfolioId: 'owned', operationId, storage, budget: imageAttemptBudget(2),
-    }, () => fetchCreativeImage('https://api.openai.com/v1/images/generations', { method: 'POST',
-      body: JSON.stringify({ model, size: '1024x1280', prompt: 'Approved static draft' }) }));
-    await render('one'); await render('two'); await render('one');
-    await expect(render('three')).rejects.toThrow();
-    await expect(render('one', 'gpt-image-2.5-flare')).rejects.toThrow();
-    expect(image).toHaveBeenCalledTimes(2);
+  it('rejects planning and images from any other portfolio before paid dispatch', async () => {
+    enable(); const dispatch = vi.fn<typeof fetch>(); const events = vi.spyOn(console, 'info').mockImplementation(() => {});
+    for (const stage of ['creative-plan', 'portfolio-audit']) {
+      await expect(withProviderUsageContext({ portfolioId: 'other' }, () =>
+        fetchWithProviderUsage(stage, 'gpt-6.1-sol', 'https://api.openai.com/v1/responses', {}, dispatch))).rejects.toThrow('before dispatch');
+    }
+    const image = vi.spyOn(globalThis, 'fetch');
+    await expect(withImageAttemptScope({ runId: 'other', portfolioId: 'other', operationId: 'one',
+      storage: new MemoryPortfolioStorage(), budget: imageAttemptBudget(2) }, () =>
+      fetchCreativeImage('https://api.openai.com/v1/images/generations', { method: 'POST',
+        body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', size: '1024x1280', prompt: 'Extra image' }) }))).rejects.toThrow();
+    expect(dispatch).not.toHaveBeenCalled(); expect(image).not.toHaveBeenCalled(); expect(events).not.toHaveBeenCalled();
   });
   it('leaves production and diagnostic Preview unchanged', async () => {
     const dispatch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ status: 'completed', output: [] }));

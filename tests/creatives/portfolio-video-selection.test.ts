@@ -6,7 +6,7 @@ import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
 const mocks = vi.hoisted(() => ({ loadContext: vi.fn(), extractFrames: vi.fn(), candidateImage: vi.fn() }));
 vi.mock('@/lib/video/selection-context', () => ({ loadSavedVideoSelectionContext: mocks.loadContext, extractVideoSelectionFrames: mocks.extractFrames, loadVideoCandidateAnalysisImage: mocks.candidateImage }));
-import { assertCachedManualPortfolioFrames, createPortfolioVideoSelectionConcept, hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames, preflightPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
+import { assertCachedManualPortfolioFrames, prepareApprovedManualPortfolioFrame, createPortfolioVideoSelectionConcept, hydratePortfolioVideoFrameSelection, selectPortfolioVideoFrames, preflightPortfolioVideoFrames } from '@/lib/creatives/portfolio-video-selection';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
@@ -190,6 +190,28 @@ it('selects only the reviewed source, checkpoints assessment, and hydrates exact
   await expect(hydratePortfolioVideoFrameSelection({ ...input, reviewChoices: { ...input.reviewChoices, frames: [input.bindings[1]] },
     selection: selected.selection })).rejects.toThrow('closed-pool');
   expect(mocks.extractFrames).toHaveBeenCalledOnce();
+});
+
+it('prepares one missing manual member per advance, then reuses both cached assessments without another call', async () => {
+  const input = await manualSetup(); input.reviewChoices.frames = input.bindings;
+  const onProviderOperationStart = vi.fn();
+  const preparation = { ...input, onProviderOperationStart };
+  expect(await prepareApprovedManualPortfolioFrame(preparation)).toBe(true);
+  expect(input.request).toHaveBeenCalledOnce();
+  expect(await prepareApprovedManualPortfolioFrame(preparation)).toBe(true);
+  expect(input.request).toHaveBeenCalledTimes(2);
+  expect(await prepareApprovedManualPortfolioFrame(preparation)).toBe(false);
+  await expect(assertCachedManualPortfolioFrames(input)).resolves.toBeUndefined();
+  expect(input.request).toHaveBeenCalledTimes(2); expect(onProviderOperationStart).toHaveBeenCalledTimes(2);
+});
+
+it('stops an interrupted approved frame assessment without a second assessment or wider pool', async () => {
+  const input = await manualSetup(); input.reviewChoices.frames = input.bindings;
+  input.request.mockResolvedValueOnce(new Response(null, { status: 429 }));
+  const preparation = { ...input, onProviderOperationStart: vi.fn() };
+  await expect(prepareApprovedManualPortfolioFrame(preparation)).rejects.toThrow('did not complete');
+  await expect(prepareApprovedManualPortfolioFrame(preparation)).rejects.toThrow('unavailable');
+  expect(input.request).toHaveBeenCalledOnce();
 });
 
 it('requires cached assessments for every selected member before planning, without writes or paid selection', async () => {

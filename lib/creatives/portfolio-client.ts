@@ -5,7 +5,7 @@ import { parsePortfolioProgress, type PortfolioProgress } from '@/lib/creatives/
 import { createSubmissionIdentity, SUBMISSION_HEADER, type SubmissionStorage } from '@/lib/creatives/submission-id';
 
 export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number;
-  preflightReady?: true; previewOmitBrandLogo?: true };
+  preflightReady?: true; previewOmitBrandLogo?: true; previewPreparationApproved?: true };
 type Command = { action: 'create'; request: GenerateCreativeRequest; submissionId: string } | { action: 'load' | 'advance'; id: string }
   | { action: 'retry'; id: string; slotIndex: number | null };
 const endpoint = '/api/creatives/portfolios';
@@ -51,11 +51,12 @@ export async function requestPortfolio(command: Command): Promise<PortfolioRespo
   const retryAfterMs = response.status === 202 ? parseBusyRetryAfterMs(response.headers.get('Retry-After')) : undefined;
   return { job, creatives: creatives as GeneratedCreative[], ...(value.preflightReady === true ? { preflightReady: true } : {}),
     ...(value.previewOmitBrandLogo === true ? { previewOmitBrandLogo: true } : {}),
+    ...(value.previewPreparationApproved === true ? { previewPreparationApproved: true } : {}),
     ...(error ? { error } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
 }
 export const portfolioCanAdvance = (job: PortfolioProgress) =>
   Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING')
-    : !job.planningError && job.videoPreparation?.phase !== 'FAILED');
+    : (!job.planningError || job.previewPreparationResume === true) && job.videoPreparation?.phase !== 'FAILED');
 
 /** Called only after Generate/Resume. Poll active work with GET; never retry a failed slot automatically. */
 export async function runPortfolio(

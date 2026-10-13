@@ -19,6 +19,8 @@ const renderPanel = ({
   videoPreparation,
   preflightReady = false,
   previewOmitBrandLogo = false,
+  previewPreparationApproved = false,
+  previewPreparationResume = false,
 }: {
   count?: number;
   statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>;
@@ -29,6 +31,8 @@ const renderPanel = ({
   videoPreparation?: PortfolioProgress['videoPreparation'];
   preflightReady?: boolean;
   previewOmitBrandLogo?: boolean;
+  previewPreparationApproved?: boolean;
+  previewPreparationResume?: boolean;
 } = {}) => {
   const base = portfolioProgress(newCreativePortfolio(portfolioRequest(count)));
   const job = {
@@ -36,6 +40,7 @@ const renderPanel = ({
     planReady,
     planningPhase: planReady ? 'READY_TO_RENDER' as const : base.planningPhase,
     planningError,
+    ...(previewPreparationResume ? { previewPreparationResume: true } : {}),
     ...(videoPreparation ? { videoPreparation } : {}),
     ...(statuses ? {
       slots: base.slots.map((slot, index) => ({
@@ -51,7 +56,8 @@ const renderPanel = ({
   const retry = vi.fn();
   const portfolio = {
     response: { job, creatives: [], ...(preflightReady ? { preflightReady: true } : {}),
-      ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}) },
+      ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
+      ...(previewPreparationApproved ? { previewPreparationApproved: true } : {}) },
     running,
     stopped,
     error: '',
@@ -66,6 +72,19 @@ const renderPanel = ({
 };
 
 describe('portfolio progress panel', () => {
+  it('offers Resume for the approved pre-dispatch block, labels the estimated budget and hides Retry', () => {
+    const { html } = renderPanel({ count: 2, planningError: 'Old before-dispatch block',
+      previewPreparationApproved: true, previewPreparationResume: true, previewOmitBrandLogo: true });
+    expect(html).toContain('four approved preparations once each');
+    expect(html).toContain('estimate, with no guaranteed dollar ceiling');
+    expect(html).toContain('Resume generation'); expect(html).not.toContain('Retry planning');
+    const checkpoint = renderPanel({ count: 2, previewPreparationApproved: true, preflightReady: true }).html;
+    expect(checkpoint).toContain('Approved preparation is complete. Planning and images have not started.');
+    expect(checkpoint).not.toContain('Cached-input preflight passed');
+    const failure = renderPanel({ count: 2, previewPreparationApproved: true, planningError: 'Provider outcome is unknown.' }).html;
+    expect(failure).toContain('Provider outcome is unknown.'); expect(failure).toContain('role="alert"');
+    expect(failure).not.toContain('Resume generation'); expect(failure).not.toContain('Retry planning');
+  });
   it('marks the frozen no-logo scope separately from cached preflight or image completion', () => {
     const { html } = renderPanel({ count: 2, preflightReady: true, previewOmitBrandLogo: true });
     expect(html).toContain('Logo omitted for this Preview test. Logo fidelity is not being evaluated.');

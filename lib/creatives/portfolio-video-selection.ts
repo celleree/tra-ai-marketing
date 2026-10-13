@@ -110,6 +110,29 @@ const humanBindings = (restored: readonly Restored[]) => restored.map(({ context
 });
 
 /** Read every closed-pool member before the first planner; later least-used choices cannot buy assessments. */
+export async function prepareApprovedManualPortfolioFrame(input: {
+  sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
+  reviewChoices: VideoReviewHandoff['choices']; cache: VideoSelectionCacheDependencies;
+  onProviderOperationStart: () => void;
+}): Promise<boolean> {
+  const [source] = await restorePool(input.sources, input.sourceAnalysis, input.reviewChoices);
+  for (const frame of input.reviewChoices.frames ?? []) {
+    const plan = await planManualCandidateHumanSelection(source, [frame], createVideoFrameReuseContext([]), input.cache.model, input.cache);
+    if (plan.status === 'READY') {
+      input.onProviderOperationStart();
+      const result = await advanceCandidateHumanSelection(plan, input.cache);
+      if (!['COMPLETE', 'CONTINUE', 'NO_SUITABLE_HUMAN'].includes(result.status)) {
+        throw new PreviewAcceptanceError('Approved frame preparation did not complete. No retry or replacement frame is authorized.');
+      }
+      return true;
+    }
+    if (!['COMPLETE', 'NO_SUITABLE_HUMAN'].includes(plan.status)) {
+      throw new PreviewAcceptanceError('Approved frame preparation is unavailable. No retry or replacement frame is authorized.');
+    }
+  }
+  return false;
+}
+
 export async function assertCachedManualPortfolioFrames(input: {
   sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
   reviewChoices: VideoReviewHandoff['choices']; cache: VideoSelectionCacheDependencies;

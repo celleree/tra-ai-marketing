@@ -12,13 +12,16 @@ import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { ReviewSelectionError } from '@/lib/video/review-selection';
 import { assertPreviewAcceptanceRequest, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
+import { canResumeApprovedPreviewPreparation, isApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 const json = (body: object, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store', ...headers } });
 const result = async (job: CreativePortfolioJob, status = 200, error?: string, retryAfterSeconds?: number) =>
-    json({ job: portfolioProgress(job), creatives: await readPortfolioCreatives(job),
+    json({ job: { ...portfolioProgress(job), ...(canResumeApprovedPreviewPreparation(job) ? { previewPreparationResume: true } : {}) },
+      creatives: await readPortfolioCreatives(job),
+      ...(isApprovedPreviewPortfolio(job) ? { previewPreparationApproved: true } : {}),
       ...(job.request.previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
     ...(isPreviewAcceptance() && job.planning.phase === 'INITIAL_PLAN' && !job.planningError
       && job.planning.preparation.previewPreflightReady ? { preflightReady: true } : {}), ...(error ? { error } : {}) },

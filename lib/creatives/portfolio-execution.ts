@@ -36,7 +36,8 @@ import type { VideoIntelligenceServiceDependencies } from '@/lib/video/intellige
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
 import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 import { assertPreviewAcceptanceJob, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
-import { assertCachedManualPortfolioFrames } from '@/lib/creatives/portfolio-video-selection';
+import { assertCachedManualPortfolioFrames, prepareApprovedManualPortfolioFrame } from '@/lib/creatives/portfolio-video-selection';
+import { isApprovedPreviewPortfolio, resumeApprovedPreviewPreparation, withApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
 
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
 
@@ -55,7 +56,10 @@ const assertValidPlannedCreativeCopy = (concept: Parameters<typeof classifyCreat
 
 /** One persisted provider-capable planning step OR one image; no background loop or automatic failed-provider retry. */
 export function advanceCreativePortfolio(...args: Parameters<typeof advancePortfolio>) {
-  return withProviderUsageContext({ runId: `portfolio:${args[0]}`, jobId: args[0], portfolioId: args[0] }, () => advancePortfolio(...args));
+  return withProviderUsageContext({ runId: `portfolio:${args[0]}`, jobId: args[0], portfolioId: args[0] }, async () =>
+    isPreviewAcceptance()
+      ? withApprovedPreviewPortfolio(await readCreativePortfolio(args[0], args[3]), args[3], () => advancePortfolio(...args))
+      : advancePortfolio(...args));
 }
 
 async function advancePortfolio(
@@ -65,7 +69,8 @@ async function advancePortfolio(
   const deadlineAtMs = options.deadlineAtMs ?? Date.now() + 290_000;
   await reconcilePortfolioResults(id, storage);
   const token = randomUUID();
-  const job = await updateCreativePortfolio(id, current => claimCreativePortfolio(current, Date.now(), token).job, storage);
+  const job = await updateCreativePortfolio(id, current =>
+    claimCreativePortfolio(resumeApprovedPreviewPreparation(current), Date.now(), token).job, storage);
   if (job.lease?.id !== token) return { job };
   const slotIndex = job.lease.slotIndex;
   const render = (...args: Parameters<typeof renderPlannedCreative>) => withImageAttemptScope({
@@ -183,10 +188,17 @@ async function advancePortfolio(
         }
         if (isPreviewAcceptance() && job.planning.preparation.sourceAnalysis?.entries.every(entry => entry.result !== undefined)) {
           const inventory = await hydratePlanningSourceInventory(job.request.sourceAssets);
-          await assertCachedManualPortfolioFrames({ sourceAnalysis: job.planning.preparation.sourceAnalysis,
+          const input = { sourceAnalysis: job.planning.preparation.sourceAnalysis,
             sources: inventory.filter(item => item.source.role === 'TRA_VIDEO').map(item => item.source as HydratedTraVideoSource),
             reviewChoices: job.request.reviewHandoff!.choices,
-            cache: { storage, deadlineAtMs, model: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna').trim() } });
+            cache: { storage, deadlineAtMs, model: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna').trim() } };
+          if (isApprovedPreviewPortfolio(job) && await prepareApprovedManualPortfolioFrame({ ...input,
+            onProviderOperationStart: () => { providerWorkStarted = true; } })) {
+            const state = { ...job.planning.preparation,
+              previewPreparedFrameCount: (job.planning.preparation.previewPreparedFrameCount ?? 0) + 1 };
+            return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, state), storage) };
+          }
+          await assertCachedManualPortfolioFrames(input);
         }
         const result = await advancePortfolioPreparation(
           job.request,

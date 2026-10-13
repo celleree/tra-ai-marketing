@@ -101,6 +101,8 @@ const validSelectedReferences = (value: unknown) => Array.isArray(value) && valu
 const validPreparation = (value: unknown, job: CreativePortfolioJob): value is PortfolioPreparationState => {
   if (!record(value) || typeof value.quotaReserved !== 'boolean') return false;
   if (value.previewPreflightReady !== undefined && value.previewPreflightReady !== true) return false;
+  if (value.previewPreparedFrameCount !== undefined && (!Number.isInteger(value.previewPreparedFrameCount)
+    || Number(value.previewPreparedFrameCount) < 0 || Number(value.previewPreparedFrameCount) > 2)) return false;
   if (value.videoDependencies !== undefined) {
     if (job.videoPreparationVersion !== 1) return false;
     const dependencies = parsePortfolioVideoDependencies(value.videoDependencies, job.request.sourceAssets);

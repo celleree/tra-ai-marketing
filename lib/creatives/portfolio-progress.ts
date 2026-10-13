@@ -4,6 +4,7 @@ import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 export type PortfolioProgress = {
   id: string; requestedCount: number; planReady: boolean; planningPhase: PortfolioPlanningPhase; planningCheckpoint: number;
   preparationFingerprint?: string;
+  previewPreparationResume?: true;
   videoPreparation?: { total: number; completed: number; phase: import('@/lib/video/intelligence-job').VideoIntelligenceJob['phase']; busy: boolean };
   slots: PortfolioSlot[]; planningError: string | null;
   lease: { slotIndex: number | null; expiresAtMs: number } | null;
@@ -60,6 +61,8 @@ export const portfolioProgress = (job: CreativePortfolioJob): PortfolioProgress 
 export function parsePortfolioProgress(value: unknown): PortfolioProgress | null {
   const job = value as PortfolioProgress;
   if (!job || !/^portfolio_[a-f0-9]{32}$/.test(job.id) || typeof job.planReady !== 'boolean'
+    || (job.previewPreparationResume !== undefined && (job.previewPreparationResume !== true
+      || job.planReady || job.planningPhase !== 'INITIAL_PLAN' || !job.planningError || job.lease !== null))
     || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planningPhase)
     || !Number.isSafeInteger(job.planningCheckpoint) || job.planningCheckpoint < 0
     || (job.preparationFingerprint !== undefined && (!/^[a-f0-9]{8}$/.test(job.preparationFingerprint)
