@@ -95,6 +95,7 @@ async function scenario(name, options, run) {
       const caseClaims = ['My debt went from $42,000 to $250. This was my individual result.', 'TRA reduced what I owed by 78%. I felt relieved about my case.'];
       const caseFrames = [frame.frameId, `video-frame:${'9'.repeat(64)}`];
       if (request.method() === 'GET') value = caseApplied ? { applied: true } : { attributionNotice: 'Cached observations do not verify speaker identity. Confirm the statement belongs to this person.',
+        ...(options.plannedCases ? { plannedPairs: caseClaims.map((_, claimIndex) => ({ slotIndex: claimIndex + 1, claimIndex, frameId: '', attributionConfirmed: false })) } : {}),
         slots: [{ index: 1 }, { index: 2 }], claims: caseClaims.map((wording, claimIndex) => ({ claimIndex, wording,
           frames: [{ frameId: caseFrames[claimIndex], timestampMs: claimIndex ? 12000 : 6000, observationIsExactFrame: true,
             observation: { summary: claimIndex ? 'Bearded person outdoors' : 'Bald person indoors', uncertainties: [] } }] })) };
@@ -668,8 +669,14 @@ try {
     else if (portfolioState === 'RETRY_REQUIRED') { await page.getByRole('button', { name: 'Retry creative 1', exact: true }).click(); await page.getByText('Generation complete.').waitFor(); }
     else await page.getByText('Generation complete.').waitFor();
   });
-  for (const width of [375, 1280]) await scenario(`Video case amendment preserves distinct people and explicit save at ${width}px`, { caseAmendment: true, width }, async ({ page, calls }) => {
+  for (const { width, plannedCases } of [{ width: 375 }, { width: 1280 }, { width: 375, plannedCases: true }]) await scenario(`Video case amendment preserves distinct people and explicit save at ${width}px${plannedCases ? ' with ordinary planned cases' : ''}`, { caseAmendment: true, width, plannedCases }, async ({ page, calls }) => {
     const statements = page.getByRole('combobox', { name: /case statement$/ }), frames = page.getByRole('combobox', { name: /person frame$/ });
+    if (plannedCases) {
+      await page.getByRole('heading', { name: 'Confirm planned video cases' }).waitFor();
+      assert.equal(await statements.nth(0).inputValue(), '0'); assert.equal(await statements.nth(1).inputValue(), '1');
+      assert.equal(await frames.nth(0).inputValue(), frame.frameId); assert.equal(await frames.nth(1).inputValue(), `video-frame:${'9'.repeat(64)}`);
+      assert.equal(await page.getByRole('checkbox').nth(0).isChecked(), false); assert.equal(await page.getByRole('checkbox').nth(1).isChecked(), false);
+    }
     await statements.nth(0).selectOption('0'); await frames.nth(0).selectOption(frame.frameId);
     await statements.nth(1).selectOption('1'); await frames.nth(1).selectOption(`video-frame:${'9'.repeat(64)}`);
     await page.getByRole('button', { name: 'Preview amendment without generating' }).click();

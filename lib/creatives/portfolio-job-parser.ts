@@ -1,4 +1,5 @@
 import { parsePortfolioVideoDependencies, UnsupportedVideoPreparationVersionError } from '@/lib/creatives/portfolio-video-dependency';
+import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCaseAmendment, caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
 import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
@@ -184,6 +185,8 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
   const checkpoint = value as unknown as PortfolioPlanningCheckpoint, args = checkpoint.plannerArgs;
   if (args.count !== job.slots.length || !text(args.context) || args.proofRetrievalQuery !== job.request.proofRetrievalQuery || !validAnalysis(args.analysis)
     || !isDeepStrictEqual(args.operatorSelectedSourceGuidance, job.request.reviewHandoff?.operatorSelectedSourceGuidance)
+    || (args.requestedVideoCases !== undefined && !isDeepStrictEqual(args.requestedVideoCases,
+      requestedVideoCases(job.request.context, job.request.reviewHandoff)))
     || typeof args.hasApprovedHumanSource !== 'boolean'
     || (args.hasBrandLogo !== undefined && typeof args.hasBrandLogo !== 'boolean')
     || (args.hasBrandLogo !== undefined && args.hasBrandLogo !== Boolean(job.request.brandLogoMediaId))

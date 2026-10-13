@@ -24,7 +24,7 @@ import { CREATIVE_FORMATS, isCreativeFormat } from '@/lib/creative-formats';
 import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, isCreativeLogoPlacementContext,
   resolveLayoutAwareLogoAnchor, type CreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generated';
-import { composeDraftVideoAssertion, projectDraftVideoSourcePassages, type DraftVideoSourcePassage } from '@/lib/creatives/draft-video-assertion';
+import { composeDraftVideoAssertion, projectDraftVideoSourcePassages, parseDraftVideoSourceAssertion, type DraftVideoSourcePassage, type DraftVideoSourceAssertion } from '@/lib/creatives/draft-video-assertion';
 import { MAX_PORTFOLIO_CREATIVES, type CreativeBatchPlan, type PlannedCreativeConcept } from '@/lib/creatives/planned';
 import {
   CREATIVE_STRATEGY_JSON_SCHEMA,
@@ -209,6 +209,7 @@ const parseConcept = (
 
 export type CreativeBatchPlannerArgs = SelectedVideoInputContract & {
   operatorSelectedSourceGuidance?: VideoReviewHandoff['operatorSelectedSourceGuidance'];
+  requestedVideoCases?: DraftVideoSourceAssertion[];
   count: number;
   context: string;
   proofRetrievalQuery?: string;
@@ -262,7 +263,13 @@ export async function requestCreativeBatch(
   const expectedIndexes = replacementIndexes ?? Array.from({ length: args.count }, (_, index) => index + 1);
   const sourceAnalysis = args.sourceAnalysis === undefined ? undefined : parsePlanningSourceAnalysis(args.sourceAnalysis, undefined, true);
   const primaryVideo = primaryVideoGuidance(sourceAnalysis, args.primaryVideoMediaId);
-  const draftVideoSourceCatalog = projectDraftVideoSourcePassages(sourceAnalysis, args.operatorSelectedSourceGuidance, args.primaryVideoMediaId ?? primaryVideo?.source.mediaId);
+  const requiredCases = args.requestedVideoCases;
+  if (requiredCases && (!requiredCases.length || requiredCases.length > args.count || requiredCases.some(item => !parseDraftVideoSourceAssertion(item)))) {
+    throw new Error('Choose no more selected video cases than requested images; no selected case will be silently dropped.');
+  }
+  // Case wording stays separate: adding adjacent transcript segments can combine different people.
+  const draftVideoSourceCatalog = requiredCases ?? projectDraftVideoSourcePassages(sourceAnalysis, args.operatorSelectedSourceGuidance, args.primaryVideoMediaId ?? primaryVideo?.source.mediaId);
+  const requiredCaseFor = (index: number) => requiredCases?.[(index - 1) % requiredCases.length];
   const videoHasHuman = primaryVideo?.hasHuman ?? args.primaryVideoHasHuman;
   if ((primaryVideo || args.primaryVideoMediaId) && typeof videoHasHuman !== 'boolean' && !args.requireSelectedVideoFrames) {
     throw new Error('The saved video analysis lacks a visible-human assessment. Prepare a new generation before planning; no graphic substitution is allowed.');
@@ -305,6 +312,8 @@ export async function requestCreativeBatch(
         { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
           creativeContext: args.context,
+          ...(requiredCases ? { requiredVideoCases: expectedIndexes.map(index => ({ index, ...requiredCaseFor(index) })),
+            requiredVideoCaseGuidance: 'These exact operator-selected individual source accounts are required, one assigned case per image. Shape the proposition, SO WHAT and visual direction around its result and supplied layout. The application inserts the assigned entire statement into shortSupport and Meta copy. Do not paraphrase, omit, combine speakers, infer attribution or replace cases with generic process copy. Person/frame attribution requires operator confirmation before paid rendering. No Proof Library re-entry is required for this unverified draft.' } : {}),
           ...(draftVideoSourceCatalog.length ? { draftVideoSourceCatalog: draftVideoSourceCatalog.map(({ exactText, contextSegments, ...passage }) => {
             const reviewIndex = args.operatorSelectedSourceGuidance?.statements?.findIndex(statement => statement.context.type === 'VIDEO_ON_SCREEN'
               && statement.context.observation.visibleText.join(' ') === exactText && statement.reference.type === 'VIDEO_ON_SCREEN'
@@ -418,7 +427,21 @@ export async function requestCreativeBatch(
   if (!isRecord(parsed) || !hasOnly(parsed, ['creatives']) || !Array.isArray(parsed.creatives) || parsed.creatives.length !== expectedIndexes.length) {
     throw new Error(`OpenAI returned an invalid creative batch plan; expected exactly ${expectedIndexes.length} creatives.`);
   }
-  const creatives = parsed.creatives.map((value, index) => parseConcept(value, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog, draftVideoSourceCatalog));
+  const creatives = parsed.creatives.map((value, index) => {
+    const required = requiredCaseFor(expectedIndexes[index]);
+    // Application-owned insertion prevents a model's generic/incorrect selection from dropping requested cases.
+    const selected = required && isRecord(value) ? { ...value, proofSelection: null,
+      draftVideoSourceSelection: { passageId: required.passageId, imageField: 'shortSupport' } } : value;
+    const concept = parseConcept(selected, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog, draftVideoSourceCatalog);
+    if (required && concept) {
+      // Model copy cannot retain another person's result beside the assigned exact case.
+      concept.copy = concept.adCopy = { headline: 'A video case account', primaryText: required.exactText, description: '' };
+      concept.imageCopy = { ...concept.imageCopy!, headline: "One person's TRA experience", shortSupport: required.exactText,
+        proofAttribution: 'Supplied video account' };
+      concept.strategy.conceptDetails = { ...concept.strategy.conceptDetails!, mainMessage: required.exactText, proposition: required.exactText };
+    }
+    return concept;
+  });
   if (creatives.some((creative) => !creative)) throw new Error('OpenAI returned an invalid creative batch plan concept.');
   const plannedPortfolio = [...creatives, ...(repair?.lockedConcepts ?? [])];
   if (draftVideoSourceCatalog.length && !plannedPortfolio.some(concept => concept?.draftSourceAssertion)) {

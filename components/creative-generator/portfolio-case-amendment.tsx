@@ -32,8 +32,12 @@ export function PortfolioCaseAmendment({ id, observeAccess, onClose, onSaved }: 
       const value = await request('GET');
       if (!mounted.current) return;
       if (value.applied) { setApplied(true); return; }
-      setOptions(value); setPairs(value.slots.map((slot: { index: number }) => ({ slotIndex: slot.index,
-        claimIndex: -1, frameId: '', attributionConfirmed: false })));
+      setOptions(value); setPairs(value.slots.map((slot: { index: number }) => {
+        const planned = value.plannedPairs?.find((pair: VideoCasePair) => pair.slotIndex === slot.index);
+        const claim = value.claims.find((candidate: Options['claims'][number]) => candidate.claimIndex === planned?.claimIndex);
+        return { slotIndex: slot.index, claimIndex: claim?.claimIndex ?? -1,
+          frameId: claim?.frames.length === 1 ? claim.frames[0].frameId : '', attributionConfirmed: false };
+      }));
     } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not load saved cases.'); }
     finally { if (mounted.current) setBusy(false); }
   }, [request]);
@@ -51,9 +55,10 @@ export function PortfolioCaseAmendment({ id, observeAccess, onClose, onSaved }: 
     } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not amend the saved cases.'); }
     finally { if (mounted.current) setBusy(false); }
   };
+  const confirmingPlan = Boolean(options?.plannedPairs?.every(pair => pair.claimIndex >= 0));
   return <section aria-label="Video case amendment">
-    <h3>Use selected video cases</h3>
-    <p>Choose the case statement and its person for each image. The original plan and supplied layouts stay saved. Previewing and saving this amendment start no AI calls; Resume is separate.</p>
+    <h3>{confirmingPlan ? 'Confirm planned video cases' : 'Use selected video cases'}</h3>
+    <p>{confirmingPlan ? 'Your selected case statements are already in the plan. Review each person association and confirm it before rendering.' : 'Choose the case statement and its person for each image.'} The original plan and supplied layouts stay saved. Previewing and saving start no AI calls; Resume is separate.</p>
     {error ? <p role="alert">{error}</p> : null}
     {applied ? <p role="status">Case amendment saved. Reload saved progress before choosing whether to Resume generation.</p> : <>
       {options ? <><p>{options.attributionNotice}</p>{pairs.map((pair, index) => {
@@ -70,7 +75,7 @@ export function PortfolioCaseAmendment({ id, observeAccess, onClose, onSaved }: 
           <label>Person frame <select aria-label={`Image ${pair.slotIndex} person frame`} style={{ width: '100%', maxWidth: '100%', fontSize: 16 }} value={pair.frameId}
             onChange={event => choose(index, { frameId: event.target.value, attributionConfirmed: false })}>
             <option value="">Choose a frame from this statement</option>
-            {claim?.frames.map(candidate => <option key={candidate.frameId} value={candidate.frameId}>{(candidate.timestampMs / 1000).toFixed(3)}s — {candidate.observation.summary}</option>)}
+            {claim?.frames.map(candidate => <option key={candidate.frameId} value={candidate.frameId}>{(candidate.timestampMs / 1000).toFixed(3)}s â€” {candidate.observation.summary}</option>)}
           </select></label>
           {frame ? <p>Cached observation, {frame.observationIsExactFrame ? 'exact frame' : 'nearby representative'}: {frame.observation.summary} {frame.observation.uncertainties.join(' ')}</p> : null}
           <label><input type="checkbox" checked={pair.attributionConfirmed} disabled={!frame}

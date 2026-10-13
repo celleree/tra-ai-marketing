@@ -1,3 +1,4 @@
+import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { proposeCaseAmendment, validateCaseAmendment, effectiveCaseConcept, caseReviewChoices, caseAmendmentOptions, caseAssociationNeedsReview, selectedCaseAssertion } from '@/lib/creatives/portfolio-case-amendment';
@@ -24,6 +25,25 @@ async function stored() {
 }
 
 describe('explicit source case amendments', () => {
+  it('prefills ordinary planned cases without confirming identities and holds all provider work until exact pairings are saved', () => {
+    const { job, pairs } = videoCasePortfolio();
+    const cases = requestedVideoCases('Use the selected video case studies', job.request.reviewHandoff)!;
+    job.snapshot!.batchPlan.creatives.forEach((concept, index) => {
+      concept.draftSourceAssertion = cases[index];
+      concept.strategy.execution.subjectSource = 'approved-tra-human';
+    });
+    expect(caseAssociationNeedsReview(job)).toBe(true);
+    expect(caseAmendmentOptions(job).plannedPairs).toEqual(pairs.map(pair => ({ ...pair, frameId: '', attributionConfirmed: false })));
+    expect(() => proposeCaseAmendment(job, [{ ...pairs[0], frameId: pairs[1].frameId }, pairs[1]])).toThrow('time window');
+    const proposal = proposeCaseAmendment(job, pairs);
+    job.videoCaseAmendment = proposal.amendment;
+    expect(caseAssociationNeedsReview(job)).toBe(false);
+    expect(caseReviewChoices(job, 1)?.frames).toEqual([job.request.reviewHandoff!.choices.frames![0]]);
+    expect(caseReviewChoices(job, 2)?.frames).toEqual([job.request.reviewHandoff!.choices.frames![1]]);
+    expect(effectiveCaseConcept(job, 1).draftSourceAssertion?.exactText).toBe(cases[0].exactText);
+    expect(effectiveCaseConcept(job, 2).draftSourceAssertion?.exactText).toBe(cases[1].exactText);
+  });
+
   it('holds personal source accounts without treating generic service statements as a person’s case', () => {
     const { job } = videoCasePortfolio(), concept = job.snapshot!.batchPlan.creatives[0];
     concept.strategy.execution.subjectSource = 'approved-tra-human';

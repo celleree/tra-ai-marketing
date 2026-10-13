@@ -131,7 +131,15 @@ export function caseAssociationNeedsReview(job: CreativePortfolioJob) {
 export function caseAmendmentOptions(job: CreativePortfolioJob) {
   assertCaseAmendmentAvailable(job);
   const video = job.request.reviewHandoff!.choices.video!;
-  return { attributionNotice: CASE_ATTRIBUTION_NOTICE, video: { mediaId: video.locator.sourceVideoMediaId,
+  const plannedPairs = job.slots.map(slot => {
+    const assertion = job.snapshot!.batchPlan.creatives[slot.index - 1].draftSourceAssertion;
+    const claimIndex = assertion ? job.request.reviewHandoff!.claimSnapshots.findIndex((_, index) => {
+      try { return isDeepStrictEqual(assertion, selectedCaseAssertion(job.request.reviewHandoff, index)); }
+      catch { return false; }
+    }) : -1;
+    return { slotIndex: slot.index, claimIndex, frameId: '', attributionConfirmed: false };
+  });
+  return { plannedPairs, attributionNotice: CASE_ATTRIBUTION_NOTICE, video: { mediaId: video.locator.sourceVideoMediaId,
     libraryId: video.libraryId, sourceVideoContentHash: video.locator.sourceVideoContentHash }, slots: job.slots.map(slot => ({ index: slot.index,
     layoutSource: job.snapshot!.batchPlan.creatives[slot.index - 1].strategy.referenceSelection?.layoutSource ?? null })),
     claims: job.request.reviewHandoff!.claimSnapshots.flatMap((_, claimIndex) => {

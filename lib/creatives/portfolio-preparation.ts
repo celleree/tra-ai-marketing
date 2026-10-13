@@ -1,5 +1,6 @@
 import { withCuratedReferenceMetadata, advanceReferenceAngles } from '@/lib/references/planning.server';
 import { analyzeReferenceCreative, analyzeTraSourceCreative, type CreativeReferenceAnalysis } from '@/lib/ai/openai';
+import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { analyzeApprovedTraVideoFrames } from '@/lib/ai/video-frame-generation';
 import { selectBestReferenceCreatives, type ReferenceSelectionCandidate, type SelectedReferenceCreative } from '@/lib/ai/reference-selector';
@@ -287,6 +288,7 @@ export async function advancePortfolioPreparation(
   const plannerArgs = {
     ...selectedVideoInputContract(data),
     ...(data.reviewHandoff ? { operatorSelectedSourceGuidance: data.reviewHandoff.operatorSelectedSourceGuidance } : {}),
+    requestedVideoCases: requestedVideoCases(data.context, data.reviewHandoff),
     count: data.variationCount,
     context: `${data.previewOmitBrandLogo ? PREVIEW_NO_LOGO_DIRECTION + '\n\n' : ''}${videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext}`,
     proofRetrievalQuery: data.proofRetrievalQuery,
