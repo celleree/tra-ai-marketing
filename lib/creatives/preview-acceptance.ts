@@ -39,11 +39,11 @@ export function assertPreviewAcceptanceProvider(meta: ProviderAttemptMetadata) {
   if (!isPreviewAcceptance()) return;
   const approved = approvedPreviewProviderContext(meta);
   if (approved && meta.endpoint === 'responses' && meta.model === 'gpt-6-luna'
-    && ['source-reference-analysis', 'layout-analysis', 'video-human-selection'].includes(meta.stage)) return;
+    && meta.stage === 'video-human-selection') return;
   if (approved && meta.endpoint === 'responses' && meta.model === 'gpt-6.1-sol'
     && ['creative-plan', 'portfolio-audit'].includes(meta.stage)) return;
   if (approved && PREVIEW_TEST_APPROVAL.creativeIds.includes(meta.creativeId ?? '') && meta.endpoint === 'images' && meta.stage === 'image'
     && meta.model === 'gpt-image-2.5-sunburst' && meta.n === 1 && meta.purpose === 'staging-smoke'
     && meta.dimensions === '1024x1280' && meta.quality === 'high') return;
-  throw new PreviewAcceptanceError(`Preview acceptance blocked ${meta.stage} before dispatch. Only the approved saved test's four preparations, initial planner, initial audit and two Sunburst images are permitted.`);
+  throw new PreviewAcceptanceError(`Preview acceptance blocked ${meta.stage} before dispatch. Only the approved test's two new frame assessments, initial planner, initial audit and two Sunburst images are permitted; layout preparation must be reused.`);
 }

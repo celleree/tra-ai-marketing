@@ -81,10 +81,11 @@ describe('portfolio progress panel', () => {
     expect(html).toContain('unknown image outcome'); expect(html).toContain('role="alert"');
     expect(html).not.toContain('Resume generation'); expect(html).not.toContain('Retry creative');
   });
-  it('offers Resume for the approved pre-dispatch block, labels the estimated budget and hides Retry', () => {
-    const { html } = renderPanel({ count: 2, planningError: 'Old before-dispatch block',
-      previewPreparationApproved: true, previewPreparationResume: true, previewOmitBrandLogo: true });
-    expect(html).toContain('four approved preparations once each');
+  it('offers Resume for the new approved run, labels the estimated budget and hides Retry', () => {
+    const { html } = renderPanel({ count: 2,
+      previewPreparationApproved: true, previewOmitBrandLogo: true });
+    expect(html).toContain('two new selected-frame assessments once each');
+    expect(html).toContain('Both frames must pass before planning');
     expect(html).toContain('estimate, with no guaranteed dollar ceiling');
     expect(html).toContain('Resume generation'); expect(html).not.toContain('Retry planning');
     const checkpoint = renderPanel({ count: 2, previewPreparationApproved: true, preflightReady: true }).html;

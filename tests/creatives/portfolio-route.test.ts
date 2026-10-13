@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newCreativePortfolio, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
-const mocks = vi.hoisted(() => ({ access: vi.fn(), create: vi.fn(), read: vi.fn(), update: vi.fn(), advance: vi.fn(), creatives: vi.fn() }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), create: vi.fn(), initialize: vi.fn(), read: vi.fn(), update: vi.fn(), advance: vi.fn(), creatives: vi.fn() }));
+vi.mock('@/lib/creatives/preview-test-initialization', () => ({ initializeApprovedPreviewPortfolio: mocks.initialize }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.access }));
 vi.mock('@/lib/creatives/portfolio-job-storage', () => ({
   createCreativePortfolio: mocks.create, readCreativePortfolio: mocks.read, updateCreativePortfolio: mocks.update,
@@ -39,15 +40,26 @@ describe('resumable portfolio API', () => {
     expect(value.job).not.toHaveProperty('previewPreparationResume');
     expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
   });
-  it('offers approved preparation Resume on read without clearing the saved error or doing work', async () => {
-    job.planningError = previewApproval.PREVIEW_OLD_PREPARATION_BLOCK;
+  it('preserves a saved preparation failure on read without offering Resume or doing work', async () => {
+    job.planningError = 'Prior preparation failure';
     vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
-    vi.spyOn(previewApproval, 'canResumeApprovedPreviewPreparation').mockReturnValue(true);
     const value = await (await GET(request(undefined, job.id))).json();
     expect(value).toMatchObject({ previewPreparationApproved: true,
-      job: { previewPreparationResume: true, planningError: previewApproval.PREVIEW_OLD_PREPARATION_BLOCK } });
-    expect(job.planningError).toBe(previewApproval.PREVIEW_OLD_PREPARATION_BLOCK);
+      job: { planningError: 'Prior preparation failure' } });
+    expect(value.job).not.toHaveProperty('previewPreparationResume');
+    expect(job.planningError).toBe('Prior preparation failure');
     expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
+  });
+  it('initializes only the fixed approved copy through the authenticated action without advancing work', async () => {
+    const body = { action: 'initialize-approved-preview', sourcePortfolioId: 'preserved-source' };
+    mocks.initialize.mockResolvedValue(job);
+    expect((await POST(request({ ...body, context: 'changed' }))).status).toBe(400);
+    expect(mocks.initialize).not.toHaveBeenCalled();
+    expect((await POST(request(body))).status).toBe(201);
+    expect(mocks.initialize).toHaveBeenCalledExactlyOnceWith('preserved-source');
+    mocks.initialize.mockClear(); mocks.access.mockResolvedValue({ allowed: false, status: 403, error: 'Denied' });
+    expect((await POST(request(body))).status).toBe(403);
+    expect(mocks.initialize).not.toHaveBeenCalled(); expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
   });
   it('reports the frozen no-logo test choice on reload without advancing paid work', async () => {
     vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');

@@ -37,7 +37,7 @@ import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalizat
 import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
 import { assertPreviewAcceptanceJob, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
 import { assertCachedManualPortfolioFrames, prepareApprovedManualPortfolioFrame } from '@/lib/creatives/portfolio-video-selection';
-import { isApprovedPreviewPortfolio, resumeApprovedPreviewPreparation, withApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
+import { isApprovedPreviewPortfolio, PREVIEW_TEST_APPROVAL, withApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
 
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
 
@@ -75,7 +75,7 @@ async function advancePortfolio(
   await reconcilePortfolioResults(id, storage);
   const token = randomUUID();
   const job = await updateCreativePortfolio(id, current =>
-    claimCreativePortfolio(resumeApprovedPreviewPreparation(current), Date.now(), token, isApprovedPreviewPortfolio(current)).job, storage);
+    claimCreativePortfolio(current, Date.now(), token, isApprovedPreviewPortfolio(current)).job, storage);
   if (job.lease?.id !== token) return { job };
   const approvedPreview = isApprovedPreviewPortfolio(job);
   const stopAfterError = (current: CreativePortfolioJob, message: string) => approvedPreview
@@ -203,7 +203,8 @@ async function advancePortfolio(
           const input = { sourceAnalysis: job.planning.preparation.sourceAnalysis,
             sources: inventory.filter(item => item.source.role === 'TRA_VIDEO').map(item => item.source as HydratedTraVideoSource),
             reviewChoices: job.request.reviewHandoff!.choices,
-            cache: { storage, deadlineAtMs, model: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna').trim() } };
+            cache: { storage, deadlineAtMs, model: (process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna').trim(),
+              ...(approvedPreview ? { assessmentContract: PREVIEW_TEST_APPROVAL.assessmentContract } : {}) } };
           if (isApprovedPreviewPortfolio(job) && await prepareApprovedManualPortfolioFrame({ ...input,
             onProviderOperationStart: () => { providerWorkStarted = true; } })) {
             const state = { ...job.planning.preparation,
@@ -306,7 +307,8 @@ async function advancePortfolio(
             ? [candidate.videoSelection.selection] : [])) };
         const attempt = resolvePortfolioVideoSelectionAttempt(job, token, proposed);
         admissionAttempt = attempt;
-        const cache = { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}) };
+        const cache = { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}),
+          ...(approvedPreview ? { assessmentContract: PREVIEW_TEST_APPROVAL.assessmentContract } : {}) };
         const preflight = await preflightPortfolioVideoFrames({ sourceAnalysis: context.sourceAnalysis,
           sources: videoSources, finalConcept: concept, selectionPolicy: attempt.selectionPolicy,
           reuseContext: attempt.reuseContext, cache, reviewChoices }).catch(error => {

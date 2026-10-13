@@ -147,8 +147,8 @@ export async function assertCachedManualPortfolioFrames(input: {
   if (missing.length) {
     throw new PreviewAcceptanceError(`Preview acceptance requires completed cached suitability for every selected frame. ${missing.length} unavailable: ${missing.slice(0, 2).join(', ')}. No assessment was purchased.`);
   }
-  if (!results.some(result => result.status === 'COMPLETE')) {
-    throw new PreviewAcceptanceError('The cached selected frame pool contains no suitable human frame. No planner or image was purchased.');
+  if (results.some(result => result.status !== 'COMPLETE')) {
+    throw new PreviewAcceptanceError('Both selected frames must pass human and source-overlay suitability. At least one frame failed. No planner or image was purchased.');
   }
 }
 

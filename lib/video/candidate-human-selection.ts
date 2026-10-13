@@ -150,6 +150,7 @@ export const planManualCandidateHumanSelection = async (source: CandidateSelecti
       sourceVideoMediaId: library.sourceVideoMediaId, sourceVideoContentHash: library.sourceVideoContentHash,
       librarySha256, preparationSha256, representativeFrameId: binding.representativeFrameId,
       candidateIndex: binding.candidateIndex, timestampMs: binding.timestampMs, frameSha256: binding.frameSha256,
+      ...(dependencies.assessmentContract ? { assessmentContract: dependencies.assessmentContract } : {}),
     } };
     const state = await readCandidateSuitability(candidate.identity, dependencies);
     if (state.status === 'BUSY') return state;

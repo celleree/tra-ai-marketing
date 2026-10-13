@@ -12,7 +12,8 @@ import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { ReviewSelectionError } from '@/lib/video/review-selection';
 import { assertPreviewAcceptanceRequest, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
-import { canResumeApprovedPreviewPreparation, isApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
+import { isApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
+import { initializeApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-initialization';
 import { assertPreviewAdvanceResponse, isApprovedPreviewAdvanceId, previewAdvanceReadback, PREVIEW_ADVANCE_HEADER,
   stopApprovedPreviewAdvance, withApprovedPreviewAdvance } from '@/lib/creatives/preview-advance-fence';
 
@@ -22,7 +23,7 @@ const json = (body: object, status = 200, headers: Record<string, string> = {}) 
   Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store', ...headers } });
 const result = async (saved: CreativePortfolioJob, status = 200, error?: string, retryAfterSeconds?: number, previous?: string) => {
   const job = await previewAdvanceReadback(saved, previous);
-  return json({ job: { ...portfolioProgress(job), ...(canResumeApprovedPreviewPreparation(job) ? { previewPreparationResume: true } : {}) },
+  return json({ job: portfolioProgress(job),
       creatives: await readPortfolioCreatives(job),
       ...(isApprovedPreviewPortfolio(job) ? { previewPreparationApproved: true } : {}),
       ...(job.request.previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
@@ -56,7 +57,14 @@ export async function POST(request: Request) {
   const access = await getOperatorAccess();
   if (!access.allowed) return operatorAccessDeniedResponse(access);
   try {
-    const parsed = validateGenerateCreativeRequest(await request.json(), MAX_PORTFOLIO_CREATIVES);
+    const body = await request.json();
+    if (body?.action === 'initialize-approved-preview') {
+      if (Object.keys(body).some(key => !['action', 'sourcePortfolioId'].includes(key)) || typeof body.sourcePortfolioId !== 'string') {
+        return json({ error: 'Invalid approved Preview initialization.' }, 400);
+      }
+      return await result(await initializeApprovedPreviewPortfolio(body.sourcePortfolioId), 201);
+    }
+    const parsed = validateGenerateCreativeRequest(body, MAX_PORTFOLIO_CREATIVES);
     if (!parsed.success) return json({ error: parsed.error }, 400);
     assertPreviewAcceptanceRequest(parsed.data);
     const submissionId = parseSubmissionId(request.headers.get(SUBMISSION_HEADER));

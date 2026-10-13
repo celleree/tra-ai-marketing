@@ -34,7 +34,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
           : job.planReady ? 'Ready to resume generation.' : `Ready to resume planning ${job.requestedCount} creatives.`;
 
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
-    {portfolio.response?.previewPreparationApproved ? <p role="status">This saved Preview test permits four approved preparations once each. The $1 budget is an estimate, with no guaranteed dollar ceiling. No retries, repair or fallback are authorized.</p> : null}
+    {portfolio.response?.previewPreparationApproved ? <p role="status">This saved Preview test reuses the saved layout preparation and permits two new selected-frame assessments once each. Both frames must pass before planning. The $1 budget is an estimate, with no guaranteed dollar ceiling. No retries, repair or fallback are authorized.</p> : null}
     {portfolio.response?.preflightReady ? <p role="status">{portfolio.response.previewPreparationApproved
       ? 'Approved preparation is complete. Planning and images have not started. Resume for one initial planner, one audit and at most two Sunburst images.'
       : 'Cached-input preflight passed. No paid planning or images have started. Resume only after approval for one initial planner, one audit and two Sunburst images. Uncached preparation, repair, retries and fallback are blocked in this Preview.'}</p> : null}

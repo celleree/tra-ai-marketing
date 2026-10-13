@@ -195,6 +195,33 @@ describe('manual candidate closed pool', () => {
     return next.status === 'READY' ? advanceCandidateHumanSelection(next, { ...state.dependencies, retry }) : next;
   };
 
+  it('isolates the clarified crop contract from old negative caches and reuses the new exact-frame assessments', async () => {
+    const unsafe = assessment({ sourceOverlay: { status: 'UNSAFE', edge: 'NONE', removePermille: 0, overlayDepthPermille: 0 } });
+    const state = setup(unsafe, unsafe,
+      assessment({ sourceOverlay: { status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 400, overlayDepthPermille: 390 } }),
+      assessment({ sourceOverlay: { status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 350, overlayDepthPermille: 340 } }));
+    for (const index of [0, 1]) await manualStep([index], state);
+    const oldRows = [...state.storage.values.entries()].map(([key, row]) => [key, Buffer.from(row.bytes)] as const);
+    const clarified = { ...state, dependencies: { ...state.dependencies, assessmentContract: 'head-and-shoulders-v1' as const } };
+    for (const index of [0, 1]) expect(await manualStep([index], clarified)).toMatchObject({ status: 'COMPLETE' });
+    expect(state.request).toHaveBeenCalledTimes(4);
+    for (const index of [0, 1]) {
+      expect(await manualStep([index], clarified)).toMatchObject({ status: 'COMPLETE' });
+      expect(await manualStep([index], state)).toEqual({ status: 'NO_SUITABLE_HUMAN' });
+    }
+    expect(state.request).toHaveBeenCalledTimes(4);
+    oldRows.forEach(([key, bytes]) => expect(state.storage.values.get(key)?.bytes).toEqual(bytes));
+    for (const [, options] of state.request.mock.calls.slice(2)) {
+      const body = JSON.parse(String(options!.body));
+      const prompt = body.input[0].content[0].text;
+      expect(JSON.parse(body.input[1].content[0].text).assessmentContract).toBe('head-and-shoulders-v1');
+      expect(prompt).toContain('final ad canvas is composed separately');
+      expect(prompt).toContain('Keep the 450-permille maximum');
+      expect(prompt).toContain('actual pixels, never a preset crop percentage');
+      expect(prompt).toContain('retained face/identity/framing');
+    }
+  });
+
   it('assesses an exact nonrepresentative outside automatic top alternatives and reuses it after reload', async () => {
     const state = setup(assessment({ sourceOverlay: { status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 150, overlayDepthPermille: 120 } }));
     expect(await manualStep([3], state)).toMatchObject({ status: 'COMPLETE', selection: {

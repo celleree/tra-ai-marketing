@@ -214,6 +214,23 @@ it('stops an interrupted approved frame assessment without a second assessment o
   expect(input.request).toHaveBeenCalledOnce();
 });
 
+it('requires both selected frames to pass even when one cached frame is usable, without replacing the failed member', async () => {
+  const input = await manualSetup(); input.reviewChoices.frames = input.bindings;
+  const original = input.request.getMockImplementation()!;
+  input.request.mockImplementationOnce(async (...args) => {
+    const response = await original(...args); const body = await response.json();
+    const assessment = JSON.parse(body.output[0].content[0].text);
+    assessment.sourceOverlay = { status: 'UNSAFE', edge: 'NONE', removePermille: 0, overlayDepthPermille: 0 };
+    body.output[0].content[0].text = JSON.stringify(assessment); return Response.json(body);
+  });
+  const preparation = { ...input, onProviderOperationStart: vi.fn() };
+  expect(await prepareApprovedManualPortfolioFrame(preparation)).toBe(true);
+  expect(await prepareApprovedManualPortfolioFrame(preparation)).toBe(true);
+  expect(await prepareApprovedManualPortfolioFrame(preparation)).toBe(false);
+  await expect(assertCachedManualPortfolioFrames(input)).rejects.toThrow('Both selected frames must pass');
+  expect(input.request).toHaveBeenCalledTimes(2);
+});
+
 it('requires cached assessments for every selected member before planning, without writes or paid selection', async () => {
   const input = await manualSetup(); await selectPortfolioVideoFrames(input);
   input.reviewChoices.frames = input.bindings;

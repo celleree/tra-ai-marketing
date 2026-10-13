@@ -6,7 +6,6 @@ import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/li
 
 import { PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-binding';
 export { PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-binding';
-export const PREVIEW_OLD_PREPARATION_BLOCK = 'Preview acceptance blocked source-reference-analysis before dispatch. Preparation must be cached; only the initial planner, initial audit and two Sunburst images are permitted.';
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort()
@@ -16,13 +15,6 @@ const active = () => process.env.VERCEL_ENV === 'preview' && process.env.TRA_IMA
 export const isApprovedPreviewPortfolio = (job: CreativePortfolioJob | null) => Boolean(active() && job
   && job.id === PREVIEW_TEST_APPROVAL.portfolioId && previewTestRequestHash(job.request) === PREVIEW_TEST_APPROVAL.requestSha256
   && job.slots.length === 2 && job.slots.every((slot, index) => slot.creativeId === PREVIEW_TEST_APPROVAL.creativeIds[index]));
-export const canResumeApprovedPreviewPreparation = (job: CreativePortfolioJob) => isApprovedPreviewPortfolio(job)
-  && !job.previewAcceptanceError && !job.lease && !job.snapshot && job.planning.phase === 'INITIAL_PLAN'
-  && job.planningError === PREVIEW_OLD_PREPARATION_BLOCK && job.slots.every(slot => slot.status === 'PENDING');
-export const resumeApprovedPreviewPreparation = (job: CreativePortfolioJob) => {
-  if (!canResumeApprovedPreviewPreparation(job)) return job;
-  const resumed = structuredClone(job); delete resumed.planningError; return resumed;
-};
 const scopes = new AsyncLocalStorage<{ portfolioId: string; storage?: VideoIntelligenceStorage } | undefined>();
 export const withApprovedPreviewPortfolio = <T>(job: CreativePortfolioJob | null, storage: VideoIntelligenceStorage | undefined,
   work: () => Promise<T>) => scopes.run(isApprovedPreviewPortfolio(job) ? { portfolioId: job!.id, storage } : undefined, work);
@@ -62,20 +54,12 @@ export async function reserveApprovedPreviewResponse(meta: ProviderAttemptMetada
   } else {
     if (meta.model !== 'gpt-6-luna' || inputHashes.length !== 1) return deny();
     const name = body.text?.format?.name;
-    if (meta.stage === 'source-reference-analysis' && name === 'tra_reference_analysis') {
-      const text = body.input[1]?.content?.[0]?.text;
-      const prefix = 'Analyze this uploaded reference ad as creative inspiration for an original TRA adaptation.\n\nUser direction:\n';
-      if (inputHashes[0] !== PREVIEW_TEST_APPROVAL.layoutSha256 || typeof text !== 'string'
-        || !text.startsWith(prefix) || sha(text.slice(prefix.length)) !== PREVIEW_TEST_APPROVAL.contextSha256) return deny();
-      step = 'layout-angle'; limit = 4096;
-    } else if (meta.stage === 'layout-analysis' && name === 'layout_blueprint_v1') {
-      if (inputHashes[0] !== PREVIEW_TEST_APPROVAL.layoutSha256) return deny();
-      step = 'layout-blueprint'; limit = 4096;
-    } else if (meta.stage === 'video-human-selection' && name === 'tra_candidate_human_suitability') {
+    if (meta.stage === 'video-human-selection' && name === 'tra_candidate_human_suitability') {
       const index = PREVIEW_TEST_APPROVAL.frameSha256s.indexOf(inputHashes[0]);
       if (index < 0) return deny();
       const binding = JSON.parse(body.input[1]?.content?.[0]?.text);
       if (binding.policy !== 'human-frame-candidate-suitability-v3' || binding.frameSha256 !== inputHashes[0]
+        || binding.assessmentContract !== PREVIEW_TEST_APPROVAL.assessmentContract
         || binding.candidateIndex !== PREVIEW_TEST_APPROVAL.frameCandidateIndexes[index]) return deny();
       step = 'frame-' + index; limit = 2048;
     } else return deny();
