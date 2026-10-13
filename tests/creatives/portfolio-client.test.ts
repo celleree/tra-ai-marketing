@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPortfolioSubmitter, requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
+import { createPortfolioSubmitter, PortfolioSignInRequiredError, requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
 import { portfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { portfolioRequest } from '../fixtures/creative-portfolio';
@@ -20,9 +20,36 @@ const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED'
     finalization: { status: 'SAVED', createdAt: '2026-09-11T00:00:00.000Z' },
   })),
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('resumable portfolio browser controller', () => {
+  it.each(['json', 'html'])('surfaces a %s 401 as sign-in recovery without any automatic retry', async format => {
+    const fetcher = vi.fn().mockResolvedValue(format === 'json' ? Response.json({ error: 'Sign in required.' }, { status: 401 })
+      : new Response('<html>Sign in</html>', { status: 401 }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(requestPortfolio({ action: 'load', id: initial().job.id })).rejects.toBeInstanceOf(PortfolioSignInRequiredError);
+    expect(fetcher).toHaveBeenCalledOnce(); expect(fetcher.mock.calls[0][1].method).toBe('GET');
+  });
+  it.each([['load', 30_000], ['advance', 310_000]] as const)('bounds an interrupted %s request without replay', async (action, timeout) => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn((_url: string, options: RequestInit) => new Promise((_resolve, reject) =>
+      options.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true })));
+    vi.stubGlobal('fetch', fetcher);
+    const pending = requestPortfolio({ action, id: initial().job.id });
+    const rejected = expect(pending).rejects.toThrow('outcome is unconfirmed');
+    await vi.advanceTimersByTimeAsync(timeout); await rejected;
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0][1].signal?.aborted).toBe(true);
+  });
+  it('keeps the fixed QA continuation stopped after an uncertain timeout', async () => {
+    vi.useFakeTimers(); const savedSession = session(); vi.stubGlobal('window', { sessionStorage: savedSession });
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => new Promise((_resolve, reject) =>
+      options.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))));
+    const rejected = expect(requestPortfolio({ action: 'advance', id: PREVIEW_TEST_APPROVAL.portfolioId })).rejects.toThrow('unconfirmed');
+    await vi.advanceTimersByTimeAsync(310_000); await rejected;
+    expect(savedSession.getItem('tra-preview-advance:' + PREVIEW_TEST_APPROVAL.id)).toBe('stopped');
+    expect(fetch).toHaveBeenCalledOnce();
+  });
   it('posts only explicit approved initialization and validates the fixed new identity without advancing', async () => {
     const value = initial(); value.job.id = PREVIEW_TEST_APPROVAL.portfolioId;
     value.previewPreparationApproved = true; value.previewOmitBrandLogo = true;

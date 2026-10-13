@@ -101,7 +101,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
   const portfolio = useCreativePortfolio();
   const videoReview = useVideoReviewDraft();
   const videos = useSavedVideoSources(sourceAssets, setSourceAssets, videoReview);
-  const generating = portfolio.running;
+  const generating = portfolio.running || portfolio.loading;
   const savedPortfolio = portfolio.response?.job;
   const creatives = creationMode === 'generate' ? portfolio.response?.creatives ?? [] : uploadedCreatives;
   const generationComplete = !savedPortfolio || savedPortfolio.slots.every(slot => slot.status === 'SAVED');

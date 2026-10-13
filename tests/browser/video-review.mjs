@@ -41,6 +41,8 @@ async function scenario(name, options, run) {
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   const errors = [], calls = [], submissions = [], videoActions = [];
   let releaseSourceReads = () => {};
+  let releasePortfolioAdvance = () => {}, portfolioLoadFailure = 0;
+  const portfolioAdvanceGate = options.holdPortfolioAdvance ? new Promise(resolve => { releasePortfolioAdvance = resolve; }) : null;
   const sourceReadGate = options.holdSourceReads || options.holdSourceReadPaths ? new Promise(resolve => { releaseSourceReads = resolve; }) : null;
   page.on('pageerror', error => errors.push(error.message));
   let choices = { video, frames: options.frames === undefined ? [frame] : options.frames, claims: [claim], companyProfile: options.profile ? profile : null };
@@ -109,7 +111,11 @@ async function scenario(name, options, run) {
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
-      if (options.previewInitialization) {
+      if (portfolioLoadFailure && request.method() === 'GET') { status = portfolioLoadFailure; value = { error: 'Sign in required.' }; }
+      else if (options.pausedRecovery) {
+        if (request.method() === 'PATCH') await portfolioAdvanceGate;
+        value = { job: { ...job('PENDING', 2), ...(request.method() === 'POST' ? { planReady: false, planningPhase: 'INITIAL_PLAN' } : {}) }, creatives: [] };
+      } else if (options.previewInitialization) {
         assert.notEqual(request.method(), 'PATCH', 'Initialization or refresh must not advance providers');
         const initializing = request.method() === 'POST';
         if (initializing) assert.deepEqual(body, { action: 'initialize-approved-preview', sourcePortfolioId: previewSourceId });
@@ -138,17 +144,52 @@ async function scenario(name, options, run) {
     if (options.linkedLayout) target.searchParams.set('layoutMediaId', options.linkedLayout);
     if (options.acceptancePreview) target.searchParams.set('acceptancePreview', '1');
     if (options.previewInitialization) target.searchParams.set('portfolio', previewSourceId);
+    if (options.savedPortfolio) { target.searchParams.set('portfolio', job().id); target.searchParams.set('review', id); }
     await page.goto(target.href);
     await page.getByRole('button', { name: 'Generate creatives', exact: true }).waitFor();
     if (!options.runWhilePending) await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
-    await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, releaseSourceReads, recoverPreviews: () => { previewFailure = false; brokenPreview = false; }, failNext: status => { failure = status; }, denyLoads: status => { loadFailure = status; }, failSource: status => { sourceFailure = status; } });
+    await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, releaseSourceReads, releasePortfolioAdvance,
+      denyPortfolioLoads: status => { portfolioLoadFailure = status; }, recoverPreviews: () => { previewFailure = false; brokenPreview = false; }, failNext: status => { failure = status; }, denyLoads: status => { loadFailure = status; }, failSource: status => { sourceFailure = status; } });
     assert.deepEqual(errors, [], 'Browser runtime errors');
     results.push(name); console.log(`PASS ${name}`);
-  } finally { releaseSourceReads(); await context.close(); }
+  } finally { releaseSourceReads(); releasePortfolioAdvance(); await context.close(); }
 }
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  await scenario('Saved portfolio recovery on navigation and focus is read-only', { savedPortfolio: true, pausedRecovery: true }, async ({ page, calls }) => {
+    await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+    const savedLink = new URL(await page.getByRole('link', { name: 'Open saved portfolio', exact: true }).getAttribute('href'), page.url());
+    assert.equal(savedLink.searchParams.get('review'), id); assert.equal(savedLink.searchParams.get('portfolio'), job().id);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.getByRole('button', { name: 'Reload saved progress', exact: true }).click();
+    await page.reload(); await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get('review'), id);
+    assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET'), false);
+  });
+  await scenario('Background return recovery pauses after current step and never advances automatically', { pausedRecovery: true, holdPortfolioAdvance: true }, async ({ page, calls, releasePortfolioAdvance }) => {
+    await ready(page); await page.getByRole('slider', { name: 'Number of creatives to generate' }).fill('2');
+    const advanceStarted = page.waitForRequest(request => new URL(request.url()).pathname === '/api/creatives/portfolios' && request.method() === 'PATCH');
+    await generateButton(page).click();
+    await advanceStarted.catch(async () => { throw new Error('Background fixture could not start an advance: ' + await page.locator('body').innerText()); });
+    await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+    releasePortfolioAdvance();
+    await page.getByText('Generation stopped. Saved progress is preserved.', { exact: true }).waitFor();
+    await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
+    await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+    assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method === 'PATCH').length, 1);
+    assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method === 'POST').length, 1);
+  });
+  await scenario('Expired session recovery preserves portfolio and review query without paid work', { savedPortfolio: true, pausedRecovery: true }, async ({ page, calls, denyPortfolioLoads }) => {
+    await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+    await page.evaluate(({ portfolio, review }) => window.history.replaceState(null, '', `/?portfolio=${portfolio}&review=${review}`), { portfolio: job().id, review: id });
+    denyPortfolioLoads(401); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    const signIn = page.getByRole('link', { name: 'Sign in to restore saved progress', exact: true }); await signIn.waitFor();
+    const href = new URL(await signIn.getAttribute('href'), page.url());
+    assert.equal(href.pathname, '/sign-in'); assert.equal(href.searchParams.get('redirect_url'), `/?portfolio=${job().id}&review=${id}`);
+    assert.equal(await page.getByRole('button', { name: 'Resume generation', exact: true }).isDisabled(), true);
+    assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET'), false);
+  });
   for (const initializationDenied of [false, true]) await scenario(`Visible approved reassessment initialization ${initializationDenied ? 'denied' : 'succeeds without paid advance'}`,
     { previewInitialization: true, initializationDenied, generationDelay: 300, noLogo: true, acceptancePreview: true }, async ({ page, calls, submissions }) => {
       const button = page.getByRole('button', { name: 'Prepare approved reassessment', exact: true });

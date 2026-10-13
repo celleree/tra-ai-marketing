@@ -13,6 +13,8 @@ const renderPanel = ({
   count = 12,
   statuses,
   running = false,
+  loading = false,
+  authRequired = false,
   stopped = false,
   planningError = null,
   planReady = false,
@@ -27,6 +29,8 @@ const renderPanel = ({
   count?: number;
   statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>;
   running?: boolean;
+  loading?: boolean;
+  authRequired?: boolean;
   stopped?: boolean;
   planningError?: string | null;
   planReady?: boolean;
@@ -65,6 +69,9 @@ const renderPanel = ({
       ...(previewPreparationApproved ? { previewPreparationApproved: true } : {}),
       ...(previewInitializationAvailable ? { previewInitializationAvailable: true } : {}) },
     running,
+    loading,
+    authRequired,
+    signInUrl: '/sign-in?redirect_url=%2F%3Fportfolio%3Dsaved%26review%3Dreview',
     stopped,
     error: '',
     start: vi.fn(),
@@ -79,6 +86,22 @@ const renderPanel = ({
 };
 
 describe('portfolio progress panel', () => {
+  it('distinguishes a read-only refresh and an idle saved plan from active generation', () => {
+    const idle = renderPanel({ count: 2, planReady: true }).html;
+    expect(idle).toContain('Generation is paused. Resume to continue the saved plan.');
+    expect(idle).toContain('returning does not restart generation');
+    expect(idle).toContain('Reload saved progress');
+    const loading = renderPanel({ count: 2, planReady: true, loading: true }).html;
+    expect(loading).toContain('Loading saved progress. This check does not start generation.');
+    expect(loading).not.toContain('Generating creatives.');
+    expect(loading).toMatch(/disabled=""[^>]*>Resume generation/);
+  });
+  it('offers saved-context sign-in recovery and prevents paid actions while signed out', () => {
+    const html = renderPanel({ count: 2, planReady: true, authRequired: true }).html;
+    expect(html).toContain('Sign in to restore saved progress');
+    expect(html).toContain('portfolio%3Dsaved%26review%3Dreview');
+    expect(html).toMatch(/disabled=""[^>]*>Resume generation/);
+  });
   it('shows an explicit nonpaid initialization button on the eligible stopped run and disables it while busy', () => {
     const args = { count: 2, planningError: 'Prior assessment failed', previewAcceptanceError: 'Old run stopped', previewInitializationAvailable: true };
     const { html } = renderPanel(args);

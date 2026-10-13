@@ -2,15 +2,34 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { GenerateCreativeRequest } from '@/lib/creatives/generate-request';
-import { createPortfolioSubmitter, requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
+import { createPortfolioSubmitter, PortfolioSignInRequiredError, requestPortfolio, runPortfolio, type PortfolioResponse } from '@/lib/creatives/portfolio-client';
+import { workspaceSignInUrl } from '@/lib/auth/return-path';
 
 const LAST_PORTFOLIO = 'tra-creative-portfolio-v1';
 export function useCreativePortfolio() {
   const [response, setResponse] = useState<PortfolioResponse | null>(null);
   const [running, setRunning] = useState(false), [stopped, setStopped] = useState(false), [error, setError] = useState('');
+  const [loading, setLoading] = useState(false), [authRequired, setAuthRequired] = useState(false);
   const current = useRef<PortfolioResponse | null>(null), busy = useRef(false), stopRequested = useRef(false), mounted = useRef(true);
+  const advancing = useRef(false), refreshPending = useRef(false);
   const submit = useRef(createPortfolioSubmitter());
-  useEffect(() => { mounted.current = true; stopRequested.current = false; return () => { mounted.current = false; stopRequested.current = true; }; }, []);
+  useEffect(() => {
+    mounted.current = true; stopRequested.current = false;
+    const pause = () => { if (advancing.current) { stopRequested.current = true; setStopped(true); } };
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (busy.current) { if (advancing.current) { pause(); refreshPending.current = true; } return; }
+      void restoreSaved(); // Status only. Returning never grants paid continuation.
+    };
+    const visibility = () => { if (document.visibilityState === 'hidden') pause(); else refresh(); };
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('pagehide', pause); window.addEventListener('focus', refresh); window.addEventListener('pageshow', refresh);
+    return () => {
+      mounted.current = false; stopRequested.current = true;
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', pause); window.removeEventListener('focus', refresh); window.removeEventListener('pageshow', refresh);
+    };
+  }, []);
   const update = (value: PortfolioResponse) => {
     current.current = value;
     try { window.localStorage.setItem(LAST_PORTFOLIO, value.job.id); } catch { /* URL remains available when storage is disabled. */ }
@@ -21,16 +40,23 @@ export function useCreativePortfolio() {
   };
   const execute = async (task: () => Promise<PortfolioResponse>, advance: boolean) => {
     if (busy.current) return;
-    busy.current = true; stopRequested.current = false; setStopped(false); setRunning(true); setError('');
+    busy.current = true; advancing.current = advance; stopRequested.current = false;
+    setStopped(false); setRunning(advance); setLoading(!advance); setAuthRequired(false); setError('');
     try {
       const value = await task(); update(value);
       if (value.error) throw new Error(value.error);
-      if (advance) await runPortfolio(value, update, () => stopRequested.current || !mounted.current);
+      if (advance) await runPortfolio(value, update, () => stopRequested.current || !mounted.current || document.visibilityState === 'hidden');
     } catch (failure) {
-      if (mounted.current) setError(failure instanceof Error ? failure.message : 'Portfolio work failed. Reload saved progress.');
+      if (mounted.current) {
+        setAuthRequired(failure instanceof PortfolioSignInRequiredError);
+        setError(failure instanceof Error ? failure.message : 'Portfolio work failed. Reload saved progress.');
+      }
     } finally {
-      busy.current = false;
-      if (mounted.current) setRunning(false);
+      busy.current = false; advancing.current = false;
+      if (mounted.current) {
+        setRunning(false); setLoading(false);
+        if (refreshPending.current && document.visibilityState === 'visible') { refreshPending.current = false; void restoreSaved(); }
+      }
     }
   };
   const start = (request: GenerateCreativeRequest) => execute(() => submit.current(request), true);
@@ -57,5 +83,6 @@ export function useCreativePortfolio() {
     if (id) return execute(() => requestPortfolio({ action: 'load', id: id! }), false);
   };
   const stop = () => { stopRequested.current = true; setStopped(true); };
-  return { response, running, stopped, error, start, initializeApprovedPreview, resume, retry, restoreSaved, stop };
+  const signInUrl = workspaceSignInUrl(typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search);
+  return { response, running, loading, stopped, authRequired, signInUrl, error, start, initializeApprovedPreview, resume, retry, restoreSaved, stop };
 }

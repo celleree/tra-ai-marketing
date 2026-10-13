@@ -19,6 +19,22 @@ const stopPreviewContinuation = (id: string) => {
 };
 const POLL_DELAY_MS = 2000;
 const MAX_BUSY_RETRY_AFTER_MS = 30000;
+export class PortfolioSignInRequiredError extends Error {}
+const LOAD_TIMEOUT_MS = 30_000;
+const STEP_TIMEOUT_MS = 310_000; // Longer than the route's 300-second maximum; never replay a timed-out step.
+async function fetchPortfolioResponse(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (response.status === 401) throw new PortfolioSignInRequiredError('Sign in again to restore saved progress. Generation has paused.');
+    const value = await response.json().catch(() => { throw new Error('Portfolio response was interrupted. Reload saved progress before resuming.'); });
+    return { response, value };
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('The request timed out. Its outcome is unconfirmed. Reload saved progress before deciding whether to resume.');
+    throw error;
+  } finally { clearTimeout(timer); }
+}
 const parseBusyRetryAfterMs = (value: string | null) => {
   const trimmed = value?.trim() ?? '';
   const seconds = /^\d+$/.test(trimmed) ? Number(trimmed) : NaN;
@@ -50,15 +66,14 @@ async function requestPortfolioStep(command: Command): Promise<PortfolioResponse
   const fenced = 'id' in command && command.id === PREVIEW_TEST_APPROVAL.portfolioId;
   const session = fenced && typeof window !== 'undefined' ? window.sessionStorage : undefined;
   const previous = session?.getItem(continuationKey);
-  const response = await fetch(command.action === 'load' ? endpoint + '?id=' + encodeURIComponent(command.id) : endpoint, {
+  const { response, value } = await fetchPortfolioResponse(command.action === 'load' ? endpoint + '?id=' + encodeURIComponent(command.id) : endpoint, {
     method: command.action === 'load' ? 'GET' : command.action === 'create' || initialize ? 'POST' : 'PATCH', cache: 'no-store',
     ...(command.action === 'load' && previous ? { headers: { [PREVIEW_ADVANCE_HEADER]: previous } } : {}),
     ...(command.action === 'load' ? {} : { headers: { 'Content-Type': 'application/json',
       ...(previous ? { [PREVIEW_ADVANCE_HEADER]: previous } : {}),
       ...(command.action === 'create' ? { [SUBMISSION_HEADER]: command.submissionId } : {}) },
       body: JSON.stringify(command.action === 'create' ? command.request : command) }),
-  });
-  const value = await response.json().catch(() => { throw new Error('Portfolio response was interrupted. Reload saved progress before resuming.'); });
+  }, command.action === 'load' ? LOAD_TIMEOUT_MS : STEP_TIMEOUT_MS);
   const job = parsePortfolioProgress(value?.job);
   if (!job || !Array.isArray(value.creatives)) throw new Error(typeof value?.error === 'string' ? value.error : 'Invalid portfolio response. Reload saved progress.');
   if (command.action === 'create' ? job.requestedCount !== command.request.variationCount

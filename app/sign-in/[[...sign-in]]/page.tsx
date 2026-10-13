@@ -1,6 +1,7 @@
 import { SignIn } from '@clerk/nextjs';
 import { connection } from 'next/server';
 import { isClerkConfigured } from '@/lib/auth/server-access';
+import { safeWorkspaceReturnPath } from '@/lib/auth/return-path';
 
 const authPageStyle = {
   minHeight: '100dvh',
@@ -9,7 +10,9 @@ const authPageStyle = {
   padding: '24px',
 } as const;
 
-export default async function SignInPage() {
+export default async function SignInPage({ searchParams }: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   await connection();
   if (!isClerkConfigured()) {
     return (
@@ -23,7 +26,7 @@ export default async function SignInPage() {
   }
   return (
     <main style={authPageStyle}>
-      <SignIn />
+      <SignIn forceRedirectUrl={safeWorkspaceReturnPath((await searchParams)?.redirect_url)} />
     </main>
   );
 }
