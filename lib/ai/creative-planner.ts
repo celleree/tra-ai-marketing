@@ -129,7 +129,8 @@ const parseConcept = (
   referenceCatalog?: ReferencePlanningCandidate[],
   approvedHumanOptions?: ApprovedHumanOption[],
   proofCatalog: readonly PlanningProofRecord[] = [],
-  draftVideoSourceCatalog: readonly DraftVideoSourcePassage[] = []
+  draftVideoSourceCatalog: readonly DraftVideoSourcePassage[] = [],
+  ownsCasePrimaryText = false
 ): PlannedCreativeConcept | null => {
   const expectedKeys = ['index', 'format', 'adCopy', 'imageCopy', 'proofSelection', 'strategy', 'selectionReason', ...(draftVideoSourceCatalog.length ? ['draftVideoSourceSelection'] : []), ...(hasBrandLogo ? ['logoAnchor'] : []), ...(referenceCatalog ? ['referenceChoices'] : []), ...(approvedHumanOptions ? ['humanSourceId'] : [])];
   if (!isRecord(value) || (!hasOnly(value, expectedKeys) && !hasOnly(value, [...expectedKeys, 'copy']))) return null;
@@ -186,7 +187,7 @@ const parseConcept = (
   } catch {
     return null;
   }
-  const draft = draftVideoSourceCatalog.length ? composeDraftVideoAssertion(value.draftVideoSourceSelection, draftVideoSourceCatalog, adCopy, imageCopy) : { adCopy, imageCopy };
+  const draft = draftVideoSourceCatalog.length ? composeDraftVideoAssertion(value.draftVideoSourceSelection, draftVideoSourceCatalog, adCopy, imageCopy, ownsCasePrimaryText) : { adCopy, imageCopy };
   const composed = composePlanningCopyWithProof(selectedProof, draft.adCopy, draft.imageCopy);
   if (!parseCreativeCopyContract({
     copy: composed.adCopy,
@@ -432,7 +433,7 @@ export async function requestCreativeBatch(
     // Application-owned insertion prevents a model's generic/incorrect selection from dropping requested cases.
     const selected = required && isRecord(value) ? { ...value, proofSelection: null,
       draftVideoSourceSelection: { passageId: required.passageId, imageField: 'shortSupport' } } : value;
-    const concept = parseConcept(selected, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog, draftVideoSourceCatalog);
+    const concept = parseConcept(selected, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog, draftVideoSourceCatalog, Boolean(required));
     if (required && concept) {
       // Model copy cannot retain another person's result beside the assigned exact case.
       const numbers = (text: string) => text.match(/\d[\d,.]*(?:\s*%)?/g)?.map(value => value.replace(/[\s,]/g, '')) ?? [];

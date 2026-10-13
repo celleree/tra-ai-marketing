@@ -128,6 +128,22 @@ describe('creative batch planner', () => {
     expect(sent.requiredVideoCaseGuidance).toContain('operator confirmation');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it.each(['exact case', 'long generic copy'])('validates application-owned case copy without appending model %s first', async mode => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const exactText = 'My debt went from $42,000 to $250. ' + 'This was my individual result. '.repeat(20).trim();
+    expect(exactText.length).toBeGreaterThan(500); expect(exactText.length).toBeLessThan(900);
+    const { job } = videoCasePortfolio(exactText), handoff = job.request.reviewHandoff!;
+    const cases = requestedVideoCases('Use selected humans and source results', handoff)!;
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: [1, 2].map(index => ({ ...concept(index, 'approved-tra-human'),
+      adCopy: { ...concept(index).adCopy, headline: index === 1 ? 'A qualified debt account' : 'A separate result story',
+        primaryText: index === 1 ? mode === 'exact case' ? exactText : 'Generic '.repeat(125).trim() : 'A separate source account' },
+      draftVideoSourceSelection: null })) })));
+    const plan = await requestCreativeBatch({ count: 2, context: 'Create source case ads', analysis, hasApprovedHumanSource: true,
+      requireSelectedVideoFrames: true, requestedVideoCases: cases, operatorSelectedSourceGuidance: handoff.operatorSelectedSourceGuidance });
+    expect(plan.creatives[0].adCopy?.primaryText).toBe(exactText);
+    expect(plan.creatives[0].imageCopy?.shortSupport).toBe(exactText);
+    expect(plan.creatives[0].draftSourceAssertion?.exactText).toBe(exactText);
+  });
   it('keeps ordinary default-count case plans eligible for the unchanged diversity audit', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const { job } = videoCasePortfolio(), handoff = job.request.reviewHandoff!;

@@ -5,9 +5,9 @@ import { portfolioRequest, portfolioSnapshot } from './creative-portfolio';
 import { frame, video } from './video-review-selection';
 import { referenceCandidate } from './reference-catalog';
 
-export function videoCasePortfolio() {
+export function videoCasePortfolio(firstCaseText = 'My debt went from $42,000 to $250. This was my individual result.') {
   const segments = [{ segmentIndex: 0, startMs: 5000, endMs: 9000,
-    text: 'My debt went from $42,000 to $250. This was my individual result.' },
+    text: firstCaseText },
   { segmentIndex: 1, startMs: 10000, endMs: 15000,
     text: 'TRA reduced what I owed by 78%. I felt relieved about my case.' }];
   const frames = [frame(6), frame(12)];

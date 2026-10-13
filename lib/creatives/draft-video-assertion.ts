@@ -113,13 +113,13 @@ export function projectDraftVideoSourcePassages(state?: PlanningSourceAnalysisSt
   return passages;
 }
 
-export function composeDraftVideoAssertion(selection: unknown, catalog: readonly DraftVideoSourcePassage[], adCopy: CreativeAdCopy, imageCopy: CreativeImageCopy) {
+export function composeDraftVideoAssertion(selection: unknown, catalog: readonly DraftVideoSourcePassage[], adCopy: CreativeAdCopy, imageCopy: CreativeImageCopy, replacePrimaryText = false) {
   if (selection === null) return { adCopy, imageCopy };
   if (!record(selection) || Object.keys(selection).length !== 2 || !['headline', 'shortSupport'].includes(String(selection.imageField))) throw new SelectedVideoInputError('The plan returned an invalid video source passage selection. No images were generated.');
   const passage = catalog.find(item => item.passageId === selection.passageId);
   if (!passage) throw new SelectedVideoInputError('The selected video source passage is unavailable. No images were generated.');
   const assertion: DraftVideoSourceAssertion = { ...structuredClone(passage), imageField: selection.imageField as DraftVideoSourceAssertion['imageField'] };
-  return { adCopy: { ...adCopy, primaryText: `${adCopy.primaryText}\n\n${passage.exactText}` },
+  return { adCopy: { ...adCopy, primaryText: replacePrimaryText ? passage.exactText : `${adCopy.primaryText}\n\n${passage.exactText}` },
     imageCopy: { ...imageCopy, [assertion.imageField]: passage.exactText }, draftSourceAssertion: assertion };
 }
 
