@@ -93,7 +93,7 @@ const createHistoricalPortfolio = async (data: ReturnType<typeof request>, stora
 };
 
 describe('real preparation to Astra with composed sources', () => {
-  it('keeps source context unchanged while adding no-logo direction only to initial planning after cached preflight', async () => {
+  it('keeps no-logo planner direction separate from source context and denies unapproved Preview admission', async () => {
     vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
     const data = { ...portfolioRequest(), previewOmitBrandLogo: true as const, sourceAssets: [request().sourceAssets[2]] };
     const sourceLayout = { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true };
@@ -101,7 +101,15 @@ describe('real preparation to Astra with composed sources', () => {
       quotaReserved: true, analysis: analysis('Cached layout'), sourceLayout,
     }, vi.fn(), 1, true);
     expect(cached.state?.previewPreflightReady).toBe(true); expect(outbound).toHaveLength(0);
-    await withProviderUsageContext({ portfolioId: 'bounded-test' }, () => advancePortfolioPreparation(data, 'http://localhost', cached.state!, vi.fn(), 1));
+    await expect(withProviderUsageContext({ portfolioId: 'bounded-test' }, () => advancePortfolioPreparation(
+      data, 'http://localhost', cached.state!, vi.fn(), 1))).rejects.toThrow('Preview acceptance blocked creative-plan before dispatch');
+    expect(outbound).toHaveLength(0);
+    // Exercise context construction with the mocked local provider; Preview requires the exact approved saved job.
+    vi.stubEnv('VERCEL_ENV', 'development');
+    let local = cached;
+    for (let index = 0; index < 3 && local.state; index++) local = await withProviderUsageContext(
+      { portfolioId: 'bounded-test' }, () => advancePortfolioPreparation(data, 'http://localhost', local.state!, vi.fn(), 1));
+    expect(local.prepared).toBeDefined();
     expect(outbound).toHaveLength(1); expect(outbound[0].creativeContext).toContain('Do not render, invent or redraw any logo');
     expect(data.context).not.toContain('unbranded Preview'); expect(mocks.angle).not.toHaveBeenCalled();
   });
