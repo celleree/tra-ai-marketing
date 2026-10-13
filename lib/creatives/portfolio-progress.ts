@@ -64,7 +64,7 @@ export function parsePortfolioProgress(value: unknown): PortfolioProgress | null
   const job = value as PortfolioProgress;
   if (!job || !/^portfolio_[a-f0-9]{32}$/.test(job.id) || typeof job.planReady !== 'boolean'
     || (job.previewAcceptanceError !== undefined && (typeof job.previewAcceptanceError !== 'string'
-      || !job.previewAcceptanceError.trim() || job.previewAcceptanceError.length > 1000 || job.lease !== null || job.previewPreparationResume !== undefined))
+      || !job.previewAcceptanceError.trim() || job.previewAcceptanceError.length > 1000 || job.previewPreparationResume !== undefined))
     || (job.previewPreparationResume !== undefined && (job.previewPreparationResume !== true
       || job.planReady || job.planningPhase !== 'INITIAL_PLAN' || !job.planningError || job.lease !== null))
     || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planningPhase)

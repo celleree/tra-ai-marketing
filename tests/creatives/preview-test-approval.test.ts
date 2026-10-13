@@ -16,7 +16,7 @@ vi.mock('@/lib/creatives/preview-test-binding', async () => {
   const sha = (v: string) => createHash('sha256').update(v).digest('hex');
   const c = (v: any): any => Array.isArray(v) ? v.map(c) : v && typeof v === 'object'
     ? Object.fromEntries(Object.keys(v).sort().map(k => [k,c(v[k])])) : v;
-  return { PREVIEW_TEST_APPROVAL: { id: 'fixture-approval', portfolioId: fixture.id,
+  return { PREVIEW_ADVANCE_HEADER: 'X-TRA-Preview-Advance', PREVIEW_TEST_APPROVAL: { id: 'fixture-approval', portfolioId: fixture.id,
     requestSha256: sha(JSON.stringify(c(fixture.request))), contextSha256: sha(fixture.context),
     layoutSha256: sha(fixture.layout), frameSha256s: fixture.frames.map(sha), frameCandidateIndexes: [49,66],
     creativeIds: fixture.creatives } };
@@ -142,7 +142,7 @@ describe('one approved Preview preparation scope',()=>{
     const dispatch=vi.spyOn(globalThis,'fetch').mockResolvedValue(Response.json({job:progress,creatives:[],previewPreparationApproved:true}));
     const loaded=await requestPortfolio({action:'load',id:saved.id});expect(loaded.previewPreparationApproved).toBe(true);
     const stopped={...loaded,job:{...progress,planningError:null,previewPreparationResume:undefined},preflightReady:true as const};
-    dispatch.mockResolvedValueOnce(Response.json(stopped));
+    dispatch.mockResolvedValueOnce(Response.json({...stopped,previewAdvanceNonce:'e'.repeat(32)}));
     const update=vi.fn();await runPortfolio(loaded,update,()=>false);expect(dispatch).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(dispatch.mock.calls[1][1]?.body))).toEqual({action:'advance',id:saved.id});
     expect(update).toHaveBeenCalledWith(expect.objectContaining({preflightReady:true}));

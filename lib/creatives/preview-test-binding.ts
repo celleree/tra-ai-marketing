@@ -1,4 +1,5 @@
 /** One human-approved estimated-budget test. No dollar ceiling is asserted. */
+export const PREVIEW_ADVANCE_HEADER = 'X-TRA-Preview-Advance';
 export const PREVIEW_TEST_APPROVAL = Object.freeze({
   id: 'd80f390c74f881919584528534353f4b',
   portfolioId: 'portfolio_6c97da21ad5d8ea9a2381ecba2284539',

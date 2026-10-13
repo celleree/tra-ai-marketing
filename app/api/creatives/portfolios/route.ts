@@ -13,19 +13,23 @@ import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@
 import { ReviewSelectionError } from '@/lib/video/review-selection';
 import { assertPreviewAcceptanceRequest, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
 import { canResumeApprovedPreviewPreparation, isApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
+import { assertPreviewAdvanceResponse, isApprovedPreviewAdvanceId, previewAdvanceReadback, PREVIEW_ADVANCE_HEADER,
+  stopApprovedPreviewAdvance, withApprovedPreviewAdvance } from '@/lib/creatives/preview-advance-fence';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 const json = (body: object, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store', ...headers } });
-const result = async (job: CreativePortfolioJob, status = 200, error?: string, retryAfterSeconds?: number) =>
-    json({ job: { ...portfolioProgress(job), ...(canResumeApprovedPreviewPreparation(job) ? { previewPreparationResume: true } : {}) },
+const result = async (saved: CreativePortfolioJob, status = 200, error?: string, retryAfterSeconds?: number, previous?: string) => {
+  const job = await previewAdvanceReadback(saved, previous);
+  return json({ job: { ...portfolioProgress(job), ...(canResumeApprovedPreviewPreparation(job) ? { previewPreparationResume: true } : {}) },
       creatives: await readPortfolioCreatives(job),
       ...(isApprovedPreviewPortfolio(job) ? { previewPreparationApproved: true } : {}),
       ...(job.request.previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
-    ...(isPreviewAcceptance() && job.planning.phase === 'INITIAL_PLAN' && !job.planningError
+    ...(isPreviewAcceptance() && job.planning.phase === 'INITIAL_PLAN' && !job.planningError && !job.previewAcceptanceError
       && job.planning.preparation.previewPreflightReady ? { preflightReady: true } : {}), ...(error ? { error } : {}) },
     status, retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {});
+};
 const failure = (error: unknown) => {
   if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body.' }, 400);
   if (error instanceof SubmissionConflictError) return json({ error: error.message }, 409);
@@ -43,7 +47,7 @@ export async function GET(request: Request) {
     const id = new URL(request.url).searchParams.get('id') ?? '';
     if (!isPortfolioId(id)) return json({ error: 'Invalid portfolio ID.' }, 400);
     const job = await readCreativePortfolio(id);
-    return job ? await result(job) : json({ error: 'Portfolio not found.' }, 404);
+    return job ? await result(job, 200, undefined, undefined, request.headers.get(PREVIEW_ADVANCE_HEADER) ?? undefined) : json({ error: 'Portfolio not found.' }, 404);
   } catch (error) { return failure(error); }
 }
 
@@ -75,16 +79,30 @@ export async function PATCH(request: Request) {
         && (!Number.isInteger(body.slotIndex) || body.slotIndex < 1 || body.slotIndex > MAX_PORTFOLIO_CREATIVES))) {
       return json({ error: 'Invalid portfolio action.' }, 400);
     }
-    const job = await readCreativePortfolio(body.id);
-    if (!job) return json({ error: 'Portfolio not found.' }, 404);
-    if (body.action === 'retry') {
-      if (isPreviewAcceptance()) throw new PreviewAcceptanceError('Preview acceptance does not authorize paid retries. Saved results remain available.');
-      const retryable = body.slotIndex === null ? !job.snapshot && job.planningError
-        : job.snapshot && job.slots.some(slot => slot.index === body.slotIndex && slot.status === 'RETRY_REQUIRED');
-      if (job.lease || !retryable) return json({ error: 'This work cannot be retried in its current state. Reload its progress.' }, 409);
-      return await result(await updateCreativePortfolio(body.id, current => retryPortfolioWork(current, body.slotIndex)));
-    }
-    const step = await advanceCreativePortfolio(body.id, access.userId, request.url, undefined, { deadlineAtMs });
-    return await result(step.job, step.status, step.error, step.retryAfterSeconds);
+    const execute = async (nonce?: string) => {
+      const job = await readCreativePortfolio(body.id);
+      if (!job) return json({ error: 'Portfolio not found.' }, 404);
+      if (body.action === 'retry') {
+        if (isPreviewAcceptance()) throw new PreviewAcceptanceError('Preview acceptance does not authorize paid retries. Saved results remain available.');
+        const retryable = body.slotIndex === null ? !job.snapshot && job.planningError
+          : job.snapshot && job.slots.some(slot => slot.index === body.slotIndex && slot.status === 'RETRY_REQUIRED');
+        if (job.lease || !retryable) return json({ error: 'This work cannot be retried in its current state. Reload its progress.' }, 409);
+        return await result(await updateCreativePortfolio(body.id, current => retryPortfolioWork(current, body.slotIndex)));
+      }
+      const step = await advanceCreativePortfolio(body.id, access.userId, request.url, undefined, { deadlineAtMs });
+      const failed = Boolean(step.error || step.job.previewAcceptanceError || step.job.planningError
+        || step.job.slots.some(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status))
+        || (step.job.planning.phase === 'INITIAL_PLAN' && ['FAILED', 'RETRY_REQUIRED'].includes(step.job.planning.preparation.videoProgress?.phase ?? '')));
+      if (nonce && failed) await stopApprovedPreviewAdvance(body.id);
+      const response = await result(step.job, step.status, step.error, step.retryAfterSeconds, nonce);
+      if (!nonce || failed || step.job.lease || response.status !== 200
+        || (step.job.planning.phase === 'INITIAL_PLAN' && step.job.planning.preparation.videoProgress?.busy)) return response;
+      const value = await response.json(); // Complete serialization before exposing continuation authority.
+      await assertPreviewAdvanceResponse(nonce);
+      return json({ ...value, previewAdvanceNonce: nonce }, response.status);
+    };
+    return body.action === 'advance' && isApprovedPreviewAdvanceId(body.id)
+      ? await withApprovedPreviewAdvance(body.id, request.headers.get(PREVIEW_ADVANCE_HEADER) ?? undefined, execute)
+      : await execute();
   } catch (error) { return failure(error); }
 }

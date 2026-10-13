@@ -8,6 +8,9 @@ vi.mock('@/lib/creatives/portfolio-job-storage', () => ({
 }));
 vi.mock('@/lib/creatives/portfolio-execution', () => ({ advanceCreativePortfolio: mocks.advance }));
 vi.mock('@/lib/creatives/portfolio-results', () => ({ readPortfolioCreatives: mocks.creatives }));
+vi.mock('@/lib/creatives/preview-advance-fence', async original => ({
+  ...await original<typeof import('@/lib/creatives/preview-advance-fence')>(), previewAdvanceReadback: async (job: CreativePortfolioJob) => job,
+}));
 import { GET, POST, PATCH } from '@/app/api/creatives/portfolios/route';
 import * as previewApproval from '@/lib/creatives/preview-test-approval';
 let job: CreativePortfolioJob;
