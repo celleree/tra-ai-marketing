@@ -55,13 +55,17 @@ describe('Create generation review-save gate', () => {
     expect(tree.find(node => node.type === PortfolioProgressPanel)!.props).not.toHaveProperty('canAdvance');
   });
   it('guards Resume and Retry handlers as well as their disabled state', () => {
-    const portfolio = { running: false, resume: mocks.resume, retry: mocks.retry, response: { job: {
+    const restoreSaved = vi.fn();
+    const portfolio = { running: false, resume: mocks.resume, retry: mocks.retry, restoreSaved, response: { job: {
       id: 'portfolio', requestedCount: 1, planReady: true, slots: [{ status: 'PENDING' }, { status: 'RETRY_REQUIRED', index: 2 }] } } } as unknown as ReturnType<typeof useCreativePortfolio>;
     const buttons = nodes(PortfolioProgressPanel({ portfolio, canAdvance: () => mocks.settled })).filter(node => node.type === 'button');
+    const paidButtons = (tree: unknown) => nodes(tree).filter(node => node.type === 'button' && node.props.children !== 'Reload saved progress');
     mocks.settled = false; buttons.forEach(button => (button.props.onClick as () => void)());
     expect(mocks.resume).not.toHaveBeenCalled(); expect(mocks.retry).not.toHaveBeenCalled();
-    expect(nodes(PortfolioProgressPanel({ portfolio, canAdvance: () => false })).filter(node => node.type === 'button').every(node => node.props.disabled)).toBe(true);
+    expect(restoreSaved).toHaveBeenCalledOnce(); // Read-only status remains available when mutable review edits block paid work.
+    expect(paidButtons(PortfolioProgressPanel({ portfolio, canAdvance: () => false })).every(node => node.props.disabled)).toBe(true);
     mocks.settled = true; buttons.forEach(button => (button.props.onClick as () => void)());
     expect(mocks.resume).toHaveBeenCalledTimes(1); expect(mocks.retry).toHaveBeenCalledTimes(1);
+    expect(restoreSaved).toHaveBeenCalledTimes(2);
   });
 });

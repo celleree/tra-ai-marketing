@@ -78,6 +78,7 @@ export function useCreativePortfolio() {
     if (id) return execute(() => requestPortfolio({ action: 'retry', id, slotIndex }), true);
   };
   const restoreSaved = () => {
+    if (busy.current) { if (advancing.current) refreshPending.current = true; return; }
     let id = new URL(window.location.href).searchParams.get('portfolio');
     try { id ||= window.localStorage.getItem(LAST_PORTFOLIO); } catch { /* Query links also support reopening. */ }
     if (id) return execute(() => requestPortfolio({ action: 'load', id: id! }), false);

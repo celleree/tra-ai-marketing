@@ -180,6 +180,24 @@ try {
     assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method === 'PATCH').length, 1);
     assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method === 'POST').length, 1);
   });
+  for (const returnWhilePending of [false, true]) await scenario(`Sidebar navigation recovery pauses continuation and reloads on return ${returnWhilePending ? 'during' : 'after'} the current step`,
+    { pausedRecovery: true, holdPortfolioAdvance: true }, async ({ page, calls, releasePortfolioAdvance }) => {
+      await ready(page); await page.getByRole('slider', { name: 'Number of creatives to generate' }).fill('2');
+      const started = page.waitForRequest(request => new URL(request.url()).pathname === '/api/creatives/portfolios' && request.method() === 'PATCH');
+      await generateButton(page).click(); await started;
+      await page.locator('nav button').filter({ hasText: 'Company' }).click();
+      const create = page.locator('nav button').filter({ hasText: 'Create' });
+      if (returnWhilePending) await create.click();
+      const settled = page.waitForResponse(response => new URL(response.url()).pathname === '/api/creatives/portfolios' && response.request().method() === 'PATCH');
+      releasePortfolioAdvance(); await settled;
+      if (!returnWhilePending) await create.click();
+      await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+      assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method === 'PATCH').length, 1);
+      assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method === 'POST').length, 1);
+      assert.ok(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method === 'GET'));
+      assert.equal(new URL(page.url()).searchParams.get('portfolio'), job().id);
+      assert.equal(new URL(page.url()).searchParams.get('review'), id);
+    });
   await scenario('Expired session recovery preserves portfolio and review query without paid work', { savedPortfolio: true, pausedRecovery: true }, async ({ page, calls, denyPortfolioLoads }) => {
     await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
     await page.evaluate(({ portfolio, review }) => window.history.replaceState(null, '', `/?portfolio=${portfolio}&review=${review}`), { portfolio: job().id, review: id });

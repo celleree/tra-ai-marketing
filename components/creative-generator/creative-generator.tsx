@@ -176,6 +176,13 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
     setGenerationError('');
   };
 
+  const switchWorkspaceSection = (nextSection: WorkspaceSection) => {
+    if (nextSection === activeSection) return;
+    if (activeSection === 'upload') portfolio.stop();
+    setActiveSection(nextSection);
+    if (nextSection === 'upload') void portfolio.restoreSaved();
+  };
+
   const generate = async () => {
     if (!ready || generating || !videoReview.canGenerate()) return;
     setGenerationError('');
@@ -231,7 +238,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
               className={`workspace-nav-item ${
                 activeSection === item.id ? 'workspace-nav-item-active' : ''
               }`}
-              onClick={() => setActiveSection(item.id)}
+              onClick={() => switchWorkspaceSection(item.id)}
             >
               <span className="workspace-nav-icon" aria-hidden="true">
                 {item.icon}
