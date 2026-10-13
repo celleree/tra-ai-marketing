@@ -19,7 +19,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
   const blocked = job.slots.filter(slot => slot.status === 'BLOCKED');
   const complete = savedCount === job.requestedCount;
   const videoFailed = job.videoPreparation?.phase === 'FAILED';
-  const hasFailure = Boolean(job.planningError && !job.previewPreparationResume) || failed.length > 0 || blocked.length > 0 || videoFailed;
+  const hasFailure = Boolean(job.previewAcceptanceError || (job.planningError && !job.previewPreparationResume)) || failed.length > 0 || blocked.length > 0 || videoFailed;
   const retryFailure = Boolean(job.planningError) || failed.length > 0;
   const preparingVideo = Boolean(job.videoPreparation && activeVideoPhases.has(job.videoPreparation.phase));
 
@@ -61,7 +61,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
     <div className={styles.actions}>
       {portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.stopped} onClick={portfolio.stop}>
         {portfolio.stopped ? 'Stopping generation…' : 'Stop generation'}
-      </button> : portfolioCanAdvance(job) ? <button type="button" className="button button-primary" disabled={!canAdvance()} onClick={() => { if (canAdvance()) void portfolio.resume(); }}>Resume generation</button> : null}
+      </button> : portfolioCanAdvance(job, portfolio.response?.previewPreparationApproved) ? <button type="button" className="button button-primary" disabled={!canAdvance()} onClick={() => { if (canAdvance()) void portfolio.resume(); }}>Resume generation</button> : null}
       <a href={`?portfolio=${job.id}`} target="_blank" rel="noreferrer">Open saved portfolio</a>
     </div>
 
@@ -74,6 +74,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
           onClick={() => { if (canAdvance()) void portfolio.retry(slot.index); }}>Retry creative {slot.index}</button></p>)}
     </div> : null}
     {portfolio.response?.previewPreparationApproved && hasFailure ? <div role="alert" className={styles.failures}>
+      {job.previewAcceptanceError ? <p>{job.previewAcceptanceError}</p> : null}
       {job.planningError ? <p>{job.planningError}</p> : null}
       {failed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}</p>)}
     </div> : null}

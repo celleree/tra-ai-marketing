@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
+import { claimCreativePortfolio, newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
 
 const fixture = vi.hoisted(() => ({
@@ -62,6 +62,7 @@ describe('one approved Preview preparation scope',()=>{
     const saved=job(); saved.planningError=PREVIEW_OLD_PREPARATION_BLOCK;
     expect(isApprovedPreviewPortfolio(saved)).toBe(true);expect(canResumeApprovedPreviewPreparation(saved)).toBe(true);
     const resumed=resumeApprovedPreviewPreparation(saved);expect(resumed.planningError).toBeUndefined();expect(saved.planningError).toBeTruthy();
+    expect(claimCreativePortfolio(resumed,Date.now(),'approved-resume',true).status).toBe('WORK');
     for(const mutate of [(v:any)=>{v.id='portfolio_'+'f'.repeat(32);},(v:any)=>{v.request.context+='changed';},
       (v:any)=>{v.request.reviewHandoff.choices.statements.pop();},(v:any)=>{v.request.reviewHandoff.choices.frames.reverse();},
       (v:any)=>{v.slots[0].creativeId='creative_'+'f'.repeat(32);}]) {
@@ -72,6 +73,7 @@ describe('one approved Preview preparation scope',()=>{
       const v={...saved,planningError:error};expect(canResumeApprovedPreviewPreparation(v)).toBe(false);
     }
     expect(canResumeApprovedPreviewPreparation({...saved,lease:{id:'busy',slotIndex:null,expiresAtMs:Date.now()+1000}})).toBe(false);
+    expect(canResumeApprovedPreviewPreparation({...saved,previewAcceptanceError:'Later approved-test failure'})).toBe(false);
     vi.stubEnv('VERCEL_ENV','production');expect(isApprovedPreviewPortfolio(saved)).toBe(false);
   });
   it('admits exactly four named preparations and one plan/audit, bounds outputs and rejects every repeat',async()=>{

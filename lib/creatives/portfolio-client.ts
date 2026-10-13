@@ -54,9 +54,10 @@ export async function requestPortfolio(command: Command): Promise<PortfolioRespo
     ...(value.previewPreparationApproved === true ? { previewPreparationApproved: true } : {}),
     ...(error ? { error } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
 }
-export const portfolioCanAdvance = (job: PortfolioProgress) =>
-  Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING')
-    : (!job.planningError || job.previewPreparationResume === true) && job.videoPreparation?.phase !== 'FAILED');
+export const portfolioCanAdvance = (job: PortfolioProgress, approvedPreview = false) =>
+  !job.previewAcceptanceError && !(approvedPreview && job.slots.some(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)))
+  && (Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING')
+    : (!job.planningError || job.previewPreparationResume === true) && job.videoPreparation?.phase !== 'FAILED'));
 
 /** Called only after Generate/Resume. Poll active work with GET; never retry a failed slot automatically. */
 export async function runPortfolio(
@@ -65,8 +66,9 @@ export async function runPortfolio(
 ) {
   if (initial.error) throw new Error(initial.error);
   if (initial.preflightReady) return initial;
+  const approvedPreview = initial.previewPreparationApproved === true;
   let current = initial;
-  while (!shouldStop() && portfolioCanAdvance(current.job)) {
+  while (!shouldStop() && portfolioCanAdvance(current.job, approvedPreview)) {
     const parentBusy = Boolean(current.job.lease && current.job.lease.expiresAtMs > Date.now());
     const polling = parentBusy || current.job.videoPreparation?.busy === true;
     if (polling) { await wait(POLL_DELAY_MS); if (shouldStop()) break; }
@@ -75,6 +77,7 @@ export async function runPortfolio(
     if (next.job.requestedCount !== previous.job.requestedCount) throw new Error('Saved portfolio size changed. Reload its progress.');
     onUpdate(next);
     current = next;
+    if (approvedPreview && (next.error || next.job.previewAcceptanceError)) throw new Error(next.error || next.job.previewAcceptanceError);
     if (next.preflightReady && !next.error) return current;
     if (next.retryAfterMs !== undefined) {
       if (shouldStop()) break;
@@ -83,8 +86,8 @@ export async function runPortfolio(
       continue;
     }
     const newFailedSlot = next.job.slots.some((slot, index) => slot.status === 'RETRY_REQUIRED' && previous.job.slots[index].status !== 'RETRY_REQUIRED');
-    if (next.error && !(newFailedSlot && next.job.planReady && !next.job.lease && portfolioCanAdvance(next.job))) throw new Error(next.error);
-    if (!polling && !next.job.lease && JSON.stringify(next.job) === JSON.stringify(previous.job) && portfolioCanAdvance(next.job)) {
+    if (next.error && !(newFailedSlot && next.job.planReady && !next.job.lease && portfolioCanAdvance(next.job, approvedPreview))) throw new Error(next.error);
+    if (!polling && !next.job.lease && JSON.stringify(next.job) === JSON.stringify(previous.job) && portfolioCanAdvance(next.job, approvedPreview)) {
       throw new Error('Portfolio progress did not advance. Reload saved progress before resuming.');
     }
     if (shouldStop()) break;

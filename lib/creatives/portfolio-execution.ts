@@ -67,11 +67,19 @@ async function advancePortfolio(
   options: { deadlineAtMs?: number; video?: Omit<VideoIntelligenceServiceDependencies, 'storage' | 'deadlineAtMs'> } = {},
 ): Promise<PortfolioStepResult> {
   const deadlineAtMs = options.deadlineAtMs ?? Date.now() + 290_000;
+  if (isPreviewAcceptance()) await updateCreativePortfolio(id, current => {
+    const now = Date.now();
+    return isApprovedPreviewPortfolio(current) && current.lease && current.lease.expiresAtMs <= now
+      ? claimCreativePortfolio(current, now, undefined, true).job : current;
+  }, storage);
   await reconcilePortfolioResults(id, storage);
   const token = randomUUID();
   const job = await updateCreativePortfolio(id, current =>
-    claimCreativePortfolio(resumeApprovedPreviewPreparation(current), Date.now(), token).job, storage);
+    claimCreativePortfolio(resumeApprovedPreviewPreparation(current), Date.now(), token, isApprovedPreviewPortfolio(current)).job, storage);
   if (job.lease?.id !== token) return { job };
+  const approvedPreview = isApprovedPreviewPortfolio(job);
+  const stopAfterError = (current: CreativePortfolioJob, message: string) => approvedPreview
+    ? { ...current, previewAcceptanceError: current.previewAcceptanceError ?? (message.slice(0, 1000) || 'This approved Preview test is stopped.') } : current;
   const slotIndex = job.lease.slotIndex;
   const render = (...args: Parameters<typeof renderPlannedCreative>) => withImageAttemptScope({
     runId: `portfolio:${job.id}`, operationId: args[2]!.creativeId!, jobId: job.id, portfolioId: job.id, creativeId: args[2]!.creativeId!,
@@ -81,13 +89,17 @@ async function advancePortfolio(
     const current = await readCreativePortfolio(id, storage);
     if (current?.lease?.id !== token || current.lease.expiresAtMs <= Date.now()) throw new Error('Portfolio work lease is no longer current.');
   };
+  const quotaMessage = approvedPreview ? 'Operator quota reached. This approved Preview test is stopped.'
+    : 'Operator quota reached. Resume after the quota window resets.';
+  const failOrReleaseQuota = (current: CreativePortfolioJob) => approvedPreview
+    ? stopAfterError(failPortfolioWork(current, token, quotaMessage), quotaMessage) : releasePortfolioWork(current, token);
   const reserveWorkQuota = async (group: 'VIDEO_SELECTION' | 'CREATIVE_GENERATION') => {
     const quota = await reserveOperatorQuota({ operatorId, group, units: 1 }, { storage });
     if (quota.allowed) return null;
     return {
-      job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
+      job: await updateCreativePortfolio(id, failOrReleaseQuota, storage),
       status: 429,
-      error: 'Operator quota reached. Resume after the quota window resets.',
+      error: quotaMessage,
       retryAfterSeconds: quota.retryAfterSeconds,
     } satisfies PortfolioStepResult;
   };
@@ -102,9 +114,9 @@ async function advancePortfolio(
         units: job.request.variationCount,
       }, { storage });
       if (!quota.allowed) return {
-        job: await updateCreativePortfolio(id, current => releasePortfolioWork(current, token), storage),
+        job: await updateCreativePortfolio(id, failOrReleaseQuota, storage),
         status: 429,
-        error: 'Operator quota reached. Resume after the quota window resets.',
+        error: quotaMessage,
         retryAfterSeconds: quota.retryAfterSeconds,
       };
       const preparation = { ...job.planning.preparation, quotaReserved: true };
@@ -410,10 +422,12 @@ async function advancePortfolio(
       ? error.message : 'Portfolio work could not be completed. Review its status before retrying.';
     const current = await updateCreativePortfolio(id, value => {
       if (value.lease?.id !== token) return value;
-      if (value.lease.expiresAtMs <= Date.now()) return claimCreativePortfolio(value).job;
-      return providerWorkStarted || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError || error instanceof InvalidPlannedCreativeCopyError
+      if (value.lease.expiresAtMs <= Date.now()) return stopAfterError(
+        claimCreativePortfolio(value, Date.now(), undefined, approvedPreview).job, message);
+      const next = approvedPreview || providerWorkStarted || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError || error instanceof InvalidPlannedCreativeCopyError
         ? failPortfolioWork(value, token, message)
         : releasePortfolioWork(value, token);
+      return stopAfterError(next, message);
     }, storage);
     return { job: current, error: message, status: error instanceof OperatorQuotaUnavailableError ? 503
       : error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError ? error.status : 500 };

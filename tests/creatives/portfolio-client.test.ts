@@ -170,6 +170,20 @@ describe('resumable portfolio browser controller', () => {
     expect((await runPortfolio(value, vi.fn(), () => false)).job.slots[0].status).toBe('RETRY_REQUIRED');
     expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).action)).toEqual(['advance', 'advance']);
   });
+  it('stops the approved Preview on its first unknown image and never advances a reopened terminal stop', async () => {
+    const value = { ...withSlots(initial(), ['PENDING', 'PENDING']), previewPreparationApproved: true as const };
+    const failed = { ...withSlots(value, ['RETRY_REQUIRED', 'PENDING']), previewPreparationApproved: true, error: 'Image outcome unknown' };
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(failed, { status: 500 })); vi.stubGlobal('fetch', fetchMock);
+    await expect(runPortfolio(value, vi.fn(), () => false)).rejects.toThrow('Image outcome unknown');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const recovered = withSlots(value, ['SAVED', 'PENDING']);
+    const stopped = { ...recovered, previewPreparationApproved: true, job: { ...recovered.job, previewAcceptanceError: 'Image outcome unknown' } };
+    fetchMock.mockResolvedValueOnce(Response.json(stopped));
+    const reloaded = await requestPortfolio({ action: 'load', id: value.job.id });
+    expect(reloaded.job.previewAcceptanceError).toBe('Image outcome unknown');
+    expect(await runPortfolio(reloaded, vi.fn(), () => false)).toEqual(reloaded);
+    expect(fetchMock).toHaveBeenCalledTimes(2); expect(fetchMock.mock.calls[1][1].method).toBe('GET');
+  });
   it('parses blocked progress, advances other pending slots, and never retries blocked work', async () => {
     const value = withSlots(initial(), ['BLOCKED', 'PENDING']);
     const finished = withSlots(value, ['BLOCKED', 'SAVED']);

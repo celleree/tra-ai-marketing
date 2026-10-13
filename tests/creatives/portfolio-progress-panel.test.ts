@@ -21,6 +21,7 @@ const renderPanel = ({
   previewOmitBrandLogo = false,
   previewPreparationApproved = false,
   previewPreparationResume = false,
+  previewAcceptanceError,
 }: {
   count?: number;
   statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>;
@@ -33,6 +34,7 @@ const renderPanel = ({
   previewOmitBrandLogo?: boolean;
   previewPreparationApproved?: boolean;
   previewPreparationResume?: boolean;
+  previewAcceptanceError?: string;
 } = {}) => {
   const base = portfolioProgress(newCreativePortfolio(portfolioRequest(count)));
   const job = {
@@ -40,6 +42,7 @@ const renderPanel = ({
     planReady,
     planningPhase: planReady ? 'READY_TO_RENDER' as const : base.planningPhase,
     planningError,
+    ...(previewAcceptanceError ? { previewAcceptanceError } : {}),
     ...(previewPreparationResume ? { previewPreparationResume: true } : {}),
     ...(videoPreparation ? { videoPreparation } : {}),
     ...(statuses ? {
@@ -72,6 +75,12 @@ const renderPanel = ({
 };
 
 describe('portfolio progress panel', () => {
+  it.each(['RETRY_REQUIRED', 'SAVED'] as const)('retains the approved stop after slot recovery=%s and hides Resume/Retry', status => {
+    const { html } = renderPanel({ count: 2, planReady: true, previewPreparationApproved: true,
+      statuses: [status, 'PENDING'], previewAcceptanceError: 'Approved test stopped after an unknown image outcome.' });
+    expect(html).toContain('unknown image outcome'); expect(html).toContain('role="alert"');
+    expect(html).not.toContain('Resume generation'); expect(html).not.toContain('Retry creative');
+  });
   it('offers Resume for the approved pre-dispatch block, labels the estimated budget and hides Retry', () => {
     const { html } = renderPanel({ count: 2, planningError: 'Old before-dispatch block',
       previewPreparationApproved: true, previewPreparationResume: true, previewOmitBrandLogo: true });

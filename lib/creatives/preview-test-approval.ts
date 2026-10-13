@@ -17,7 +17,7 @@ export const isApprovedPreviewPortfolio = (job: CreativePortfolioJob | null) => 
   && job.id === PREVIEW_TEST_APPROVAL.portfolioId && previewTestRequestHash(job.request) === PREVIEW_TEST_APPROVAL.requestSha256
   && job.slots.length === 2 && job.slots.every((slot, index) => slot.creativeId === PREVIEW_TEST_APPROVAL.creativeIds[index]));
 export const canResumeApprovedPreviewPreparation = (job: CreativePortfolioJob) => isApprovedPreviewPortfolio(job)
-  && !job.lease && !job.snapshot && job.planning.phase === 'INITIAL_PLAN'
+  && !job.previewAcceptanceError && !job.lease && !job.snapshot && job.planning.phase === 'INITIAL_PLAN'
   && job.planningError === PREVIEW_OLD_PREPARATION_BLOCK && job.slots.every(slot => slot.status === 'PENDING');
 export const resumeApprovedPreviewPreparation = (job: CreativePortfolioJob) => {
   if (!canResumeApprovedPreviewPreparation(job)) return job;

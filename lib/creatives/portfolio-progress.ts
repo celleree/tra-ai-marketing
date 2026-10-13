@@ -5,6 +5,7 @@ export type PortfolioProgress = {
   id: string; requestedCount: number; planReady: boolean; planningPhase: PortfolioPlanningPhase; planningCheckpoint: number;
   preparationFingerprint?: string;
   previewPreparationResume?: true;
+  previewAcceptanceError?: string;
   videoPreparation?: { total: number; completed: number; phase: import('@/lib/video/intelligence-job').VideoIntelligenceJob['phase']; busy: boolean };
   slots: PortfolioSlot[]; planningError: string | null;
   lease: { slotIndex: number | null; expiresAtMs: number } | null;
@@ -54,6 +55,7 @@ export const portfolioProgress = (job: CreativePortfolioJob): PortfolioProgress 
     planningCheckpoint: planningCheckpoint(job), ...(fingerprint ? { preparationFingerprint: fingerprint } : {}),
     ...(video ? { videoPreparation: video } : {}),
     slots: job.slots, planningError: job.planningError ?? null,
+    ...(job.previewAcceptanceError ? { previewAcceptanceError: job.previewAcceptanceError } : {}),
     lease: job.lease ? { slotIndex: job.lease.slotIndex, expiresAtMs: job.lease.expiresAtMs } : null,
   };
 };
@@ -61,6 +63,8 @@ export const portfolioProgress = (job: CreativePortfolioJob): PortfolioProgress 
 export function parsePortfolioProgress(value: unknown): PortfolioProgress | null {
   const job = value as PortfolioProgress;
   if (!job || !/^portfolio_[a-f0-9]{32}$/.test(job.id) || typeof job.planReady !== 'boolean'
+    || (job.previewAcceptanceError !== undefined && (typeof job.previewAcceptanceError !== 'string'
+      || !job.previewAcceptanceError.trim() || job.previewAcceptanceError.length > 1000 || job.lease !== null || job.previewPreparationResume !== undefined))
     || (job.previewPreparationResume !== undefined && (job.previewPreparationResume !== true
       || job.planReady || job.planningPhase !== 'INITIAL_PLAN' || !job.planningError || job.lease !== null))
     || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planningPhase)

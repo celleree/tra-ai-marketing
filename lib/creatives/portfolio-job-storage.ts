@@ -72,6 +72,9 @@ export async function updateCreativePortfolio(
     if (next.videoPreparationVersion !== current.job.videoPreparationVersion) {
       throw new Error('Portfolio video preparation version is immutable.');
     }
+    if (current.job.previewAcceptanceError !== undefined && next.previewAcceptanceError !== current.job.previewAcceptanceError) {
+      throw new Error('Approved Preview terminal stop is immutable.');
+    }
     const dependencies = (job: CreativePortfolioJob) => job.planning.phase === 'INITIAL_PLAN'
       ? job.planning.preparation.videoDependencies ?? []
       : job.planning.phase === 'READY_TO_RENDER'

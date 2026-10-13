@@ -27,6 +27,15 @@ beforeEach(() => {
 });
 
 describe('resumable portfolio API', () => {
+  it('keeps an approved terminal stop visible on GET after a slot is saved, without doing work', async () => {
+    job.snapshot = portfolioSnapshot(job); job.planning = { phase: 'READY_TO_RENDER' }; job.slots[0].status = 'SAVED';
+    job.previewAcceptanceError = 'Approved test stopped after an unknown outcome.';
+    vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
+    const value = await (await GET(request(undefined, job.id))).json();
+    expect(value).toMatchObject({ previewPreparationApproved: true, job: { previewAcceptanceError: job.previewAcceptanceError } });
+    expect(value.job).not.toHaveProperty('previewPreparationResume');
+    expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
+  });
   it('offers approved preparation Resume on read without clearing the saved error or doing work', async () => {
     job.planningError = previewApproval.PREVIEW_OLD_PREPARATION_BLOCK;
     vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);

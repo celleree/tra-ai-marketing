@@ -10,6 +10,14 @@ const encode = (value: unknown) => Buffer.from(JSON.stringify(value));
 afterEach(() => vi.unstubAllEnvs());
 
 describe('durable creative portfolio storage', () => {
+  it('persists an approved terminal stop and refuses to clear or replace it', async () => {
+    const storage = new MemoryStorage(), job = await createCreativePortfolio(request(), storage);
+    const stopped = await updateCreativePortfolio(job.id, current => ({ ...current, previewAcceptanceError: 'Approved test stopped.' }), storage);
+    expect(await readCreativePortfolio(job.id, storage)).toEqual(stopped);
+    for (const previewAcceptanceError of [undefined, 'Replace stop']) await expect(updateCreativePortfolio(job.id,
+      current => ({ ...current, previewAcceptanceError }), storage)).rejects.toThrow('terminal stop is immutable');
+    expect(() => retryPortfolioWork(stopped, null)).toThrow('test is stopped');
+  });
   it('retains the explicit no-logo Preview choice through durable readback', async () => {
     vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
     const data = { ...request(2), previewOmitBrandLogo: true as true | undefined };

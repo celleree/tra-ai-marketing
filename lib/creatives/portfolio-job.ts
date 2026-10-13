@@ -48,6 +48,8 @@ export type CreativePortfolioJob = {
   readonly videoPreparationVersion?: 1;
   request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
   planning: PortfolioPlanningState; planningError?: string;
+  // A terminal approved-Preview stop survives individual saved-slot reconciliation.
+  previewAcceptanceError?: string;
   lease: { id: string; slotIndex: number | null; expiresAtMs: number } | null;
 };
 export type PortfolioClaim = { status: 'WORK' | 'BUSY' | 'COMPLETE' | 'RETRY_REQUIRED' | 'BLOCKED'; job: CreativePortfolioJob };
@@ -97,11 +99,18 @@ const failed = (job: CreativePortfolioJob, message: string) => {
 };
 
 /** Expired work may have incurred provider cost. Never silently claim it again. */
-export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date.now(), leaseId: string = randomUUID()): PortfolioClaim {
+export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date.now(), leaseId: string = randomUUID(), stopOnFailure = false): PortfolioClaim {
   const job = structuredClone(current);
+  if (job.previewAcceptanceError) return { status: 'BLOCKED', job };
+  const priorError = job.planningError ?? job.slots.find(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status))?.error;
+  if (stopOnFailure && !job.lease && (priorError || job.slots.some(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)))) {
+    return { status: 'BLOCKED', job: { ...job, previewAcceptanceError: priorError?.slice(0, 1000) || 'This approved Preview test is stopped.', updatedAtMs: now } };
+  }
   if (job.lease) {
     if (job.lease.expiresAtMs > now) return { status: 'BUSY', job };
-    return { status: 'RETRY_REQUIRED', job: { ...failed(job, 'Previous work was interrupted; its provider outcome may be uncertain. Explicit retry is required.'), updatedAtMs: now } };
+    const message = stopOnFailure ? 'Previous work was interrupted; its provider outcome may be uncertain. This approved Preview test is stopped.'
+      : 'Previous work was interrupted; its provider outcome may be uncertain. Explicit retry is required.';
+    return { status: 'RETRY_REQUIRED', job: { ...failed(job, message), ...(stopOnFailure ? { previewAcceptanceError: message } : {}), updatedAtMs: now } };
   }
   // Older portfolios may have blocked a graphic concept during unnecessary human-frame selection.
   // No image provider work occurred for a blocked slot, so it can proceed with its frozen plan.
@@ -346,6 +355,7 @@ export function continuePortfolioVideoFrameSelection(current: CreativePortfolioJ
 
 /** An explicit operator action; successful slots and the completed plan are never reset. */
 export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: number | null, now = Date.now()) {
+  if (current.previewAcceptanceError) throw new Error('This approved Preview test is stopped; further work is not authorized.');
   if (current.lease) throw new Error('Portfolio work is still leased.');
   const job = structuredClone(current);
   if (slotIndex === null) {

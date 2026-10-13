@@ -256,6 +256,7 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
       }
     }
     if (job.planningError !== undefined && (!text(job.planningError) || job.snapshot || job.lease)) throw new Error();
+    if (job.previewAcceptanceError !== undefined && (!text(job.previewAcceptanceError) || job.previewAcceptanceError.length > 1000 || job.lease)) throw new Error();
     if (job.lease !== null && (!text(job.lease.id) || !time(job.lease.expiresAtMs)
       || (job.lease.slotIndex === null ? job.snapshot !== null
         : !job.snapshot || job.slots.find(slot => slot.index === job.lease!.slotIndex)?.status !== 'PENDING'))) throw new Error();
