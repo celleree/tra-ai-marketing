@@ -21,6 +21,7 @@ const renderPanel = ({
   previewOmitBrandLogo = false,
   previewPreparationApproved = false,
   previewPreparationResume = false,
+  previewInitializationAvailable = false,
   previewAcceptanceError,
 }: {
   count?: number;
@@ -34,6 +35,7 @@ const renderPanel = ({
   previewOmitBrandLogo?: boolean;
   previewPreparationApproved?: boolean;
   previewPreparationResume?: boolean;
+  previewInitializationAvailable?: boolean;
   previewAcceptanceError?: string;
 } = {}) => {
   const base = portfolioProgress(newCreativePortfolio(portfolioRequest(count)));
@@ -60,11 +62,13 @@ const renderPanel = ({
   const portfolio = {
     response: { job, creatives: [], ...(preflightReady ? { preflightReady: true } : {}),
       ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
-      ...(previewPreparationApproved ? { previewPreparationApproved: true } : {}) },
+      ...(previewPreparationApproved ? { previewPreparationApproved: true } : {}),
+      ...(previewInitializationAvailable ? { previewInitializationAvailable: true } : {}) },
     running,
     stopped,
     error: '',
     start: vi.fn(),
+    initializeApprovedPreview: vi.fn(),
     resume,
     retry,
     restoreSaved: vi.fn(),
@@ -75,6 +79,16 @@ const renderPanel = ({
 };
 
 describe('portfolio progress panel', () => {
+  it('shows an explicit nonpaid initialization button on the eligible stopped run and disables it while busy', () => {
+    const args = { count: 2, planningError: 'Prior assessment failed', previewAcceptanceError: 'Old run stopped', previewInitializationAvailable: true };
+    const { html } = renderPanel(args);
+    expect(html).toContain('Prepare approved reassessment'); expect(html).toContain('This starts no AI calls');
+    expect(html).toContain('Old run stopped'); expect(html).not.toContain('Retry planning'); expect(html).not.toContain('Resume generation');
+    const busy = renderPanel({ ...args, running: true }).html;
+    expect(busy).toMatch(/disabled=""[^>]*>Prepare approved reassessment/);
+    expect(busy).toContain('No AI calls are started');
+    expect(renderPanel().html).not.toContain('Prepare approved reassessment');
+  });
   it.each(['RETRY_REQUIRED', 'SAVED'] as const)('retains the approved stop after slot recovery=%s and hides Resume/Retry', status => {
     const { html } = renderPanel({ count: 2, planReady: true, previewPreparationApproved: true,
       statuses: [status, 'PENDING'], previewAcceptanceError: 'Approved test stopped after an unknown image outcome.' });

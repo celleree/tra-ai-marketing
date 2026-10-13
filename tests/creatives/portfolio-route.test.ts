@@ -31,6 +31,18 @@ beforeEach(() => {
 });
 
 describe('resumable portfolio API', () => {
+  it('offers the visible initialization action only on the exact stopped Preview source without mutating it', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    job.id = previewApproval.PREVIEW_TEST_APPROVAL.previousPortfolioId;
+    expect(await (await GET(request(undefined, job.id))).json()).not.toHaveProperty('previewInitializationAvailable');
+    job.previewAcceptanceError = 'Prior frame assessment stopped';
+    expect(await (await GET(request(undefined, job.id))).json()).toHaveProperty('previewInitializationAvailable', true);
+    vi.stubEnv('VERCEL_ENV', 'production');
+    expect(await (await GET(request(undefined, job.id))).json()).not.toHaveProperty('previewInitializationAvailable');
+    vi.stubEnv('VERCEL_ENV', 'preview'); job.id = 'portfolio_' + 'f'.repeat(32);
+    expect(await (await GET(request(undefined, job.id))).json()).not.toHaveProperty('previewInitializationAvailable');
+    expect(mocks.initialize).not.toHaveBeenCalled(); expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
+  });
   it('keeps an approved terminal stop visible on GET after a slot is saved, without doing work', async () => {
     job.snapshot = portfolioSnapshot(job); job.planning = { phase: 'READY_TO_RENDER' }; job.slots[0].status = 'SAVED';
     job.previewAcceptanceError = 'Approved test stopped after an unknown outcome.';

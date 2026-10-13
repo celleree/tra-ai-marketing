@@ -30,6 +30,8 @@ const segment = { segmentIndex: 0, startMs: 0, endMs: 2000, text: 'Exact saved v
 const job = (status = 'BLOCKED', count = 4) => ({ id: `portfolio_${'4'.repeat(32)}`, requestedCount: count, planReady: true, planningPhase: 'READY_TO_RENDER',
   planningCheckpoint: 0, planningError: null, lease: null, slots: Array.from({ length: count }, (_, i) => ({ index: i + 1,
     creativeId: `creative_${String(i + 5).repeat(32)}`, status, ...(status === 'BLOCKED' ? { error: 'Offline fixture stop.' } : {}) })) });
+const previewSourceId = 'portfolio_6c97da21ad5d8ea9a2381ecba2284539';
+const previewNewId = 'portfolio_346c546916ed361d9d4c58ced212d512';
 const thumbnails = await Promise.all([[180, 320], [320, 180]].map(async ([width, height]) =>
   'data:image/png;base64,' + (await sharp(Buffer.from(`<svg width="${width}" height="${height}"><rect width="100%" height="100%" fill="#cddbe8"/><text x="8" y="18">TOP CAPTION</text><text x="8" y="${height - 8}">BOTTOM CAPTION</text></svg>`)).png().toBuffer()).toString('base64')));
 const results = [];
@@ -107,7 +109,19 @@ async function scenario(name, options, run) {
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
-      if (options.invalidRevision && request.method() === 'POST') { status = 409; value = { error: 'Review draft changed. Reload the saved review before generating.' }; }
+      if (options.previewInitialization) {
+        assert.notEqual(request.method(), 'PATCH', 'Initialization or refresh must not advance providers');
+        const initializing = request.method() === 'POST';
+        if (initializing) assert.deepEqual(body, { action: 'initialize-approved-preview', sourcePortfolioId: previewSourceId });
+        const newRun = initializing || new URL(request.url()).searchParams.get('id') === previewNewId;
+        if (initializing && options.initializationDenied) { status = 409; value = { error: 'Fixture initialization denied.' }; }
+        else { status = initializing ? 201 : 200;
+          value = { job: { ...job('PENDING', 2), id: newRun ? previewNewId : previewSourceId,
+            planReady: false, planningPhase: 'INITIAL_PLAN',
+            ...(newRun ? {} : { planningError: 'Prior frame assessment failed.', previewAcceptanceError: 'Old approved run remains stopped.' }) },
+          creatives: [], previewOmitBrandLogo: true, ...(newRun ? { previewPreparationApproved: true } : { previewInitializationAvailable: true }) };
+        }
+      } else if (options.invalidRevision && request.method() === 'POST') { status = 409; value = { error: 'Review draft changed. Reload the saved review before generating.' }; }
       else value = options.cachedPreflight ? {
         job: { ...job('PENDING', 2), planReady: false, planningPhase: 'INITIAL_PLAN' }, creatives: [],
         preflightReady: true, previewOmitBrandLogo: true,
@@ -123,6 +137,7 @@ async function scenario(name, options, run) {
     if (options.linkedVideo) target.searchParams.set('videoMediaId', options.linkedVideo);
     if (options.linkedLayout) target.searchParams.set('layoutMediaId', options.linkedLayout);
     if (options.acceptancePreview) target.searchParams.set('acceptancePreview', '1');
+    if (options.previewInitialization) target.searchParams.set('portfolio', previewSourceId);
     await page.goto(target.href);
     await page.getByRole('button', { name: 'Generate creatives', exact: true }).waitFor();
     if (!options.runWhilePending) await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
@@ -134,6 +149,28 @@ async function scenario(name, options, run) {
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  for (const initializationDenied of [false, true]) await scenario(`Visible approved reassessment initialization ${initializationDenied ? 'denied' : 'succeeds without paid advance'}`,
+    { previewInitialization: true, initializationDenied, generationDelay: 300, noLogo: true, acceptancePreview: true }, async ({ page, calls, submissions }) => {
+      const button = page.getByRole('button', { name: 'Prepare approved reassessment', exact: true });
+      await button.waitFor(); assert.equal(submissions.length, 0);
+      assert.equal(await page.getByRole('button', { name: 'Retry planning', exact: true }).count(), 0);
+      await button.click(); assert.equal(await button.isDisabled(), true);
+      if (initializationDenied) {
+        await page.locator('.generation-error').filter({ hasText: 'Fixture initialization denied.' }).waitFor();
+        assert.equal(new URL(page.url()).searchParams.get('portfolio'), previewSourceId);
+        assert.equal(await page.getByRole('button', { name: 'Resume generation', exact: true }).count(), 0);
+      } else {
+        await page.getByRole('button', { name: 'Resume generation', exact: true }).waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Resume generation', exact: true }).isEnabled(), true);
+        assert.equal(new URL(page.url()).searchParams.get('portfolio'), previewNewId);
+        assert.equal(await button.count(), 0);
+        await page.reload(); await page.getByRole('button', { name: 'Resume generation', exact: true }).waitFor();
+        assert.equal(new URL(page.url()).searchParams.get('portfolio'), previewNewId);
+        await page.getByText('Logo omitted for this Preview test. Logo fidelity is not being evaluated.', { exact: true }).waitFor();
+      }
+      assert.equal(submissions.length, 1);
+      assert.equal(calls.some(([path, method]) => path === '/api/creatives/portfolios' && method === 'PATCH'), false);
+    });
   await scenario('Explicit no-logo Preview test stops at cached checkpoint and persists its scope on reload',
     { noLogo: true, acceptancePreview: true, cachedPreflight: true, linkedLayout: layoutMediaId }, async ({ page, calls, submissions }) => {
       await ready(page);

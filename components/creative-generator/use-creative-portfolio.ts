@@ -34,6 +34,12 @@ export function useCreativePortfolio() {
     }
   };
   const start = (request: GenerateCreativeRequest) => execute(() => submit.current(request), true);
+  const initializeApprovedPreview = () => {
+    const source = current.current;
+    if (source?.previewInitializationAvailable) return execute(() => requestPortfolio({
+      action: 'initialize-approved-preview', sourcePortfolioId: source.job.id,
+    }), false);
+  };
   const resume = () => {
     const id = current.current?.job.id;
     if (id) return execute(async () => {
@@ -51,5 +57,5 @@ export function useCreativePortfolio() {
     if (id) return execute(() => requestPortfolio({ action: 'load', id: id! }), false);
   };
   const stop = () => { stopRequested.current = true; setStopped(true); };
-  return { response, running, stopped, error, start, resume, retry, restoreSaved, stop };
+  return { response, running, stopped, error, start, initializeApprovedPreview, resume, retry, restoreSaved, stop };
 }

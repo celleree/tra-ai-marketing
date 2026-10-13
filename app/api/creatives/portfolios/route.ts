@@ -12,7 +12,7 @@ import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { ReviewSelectionError } from '@/lib/video/review-selection';
 import { assertPreviewAcceptanceRequest, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
-import { isApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
+import { isApprovedPreviewPortfolio, PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-approval';
 import { initializeApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-initialization';
 import { assertPreviewAdvanceResponse, isApprovedPreviewAdvanceId, previewAdvanceReadback, PREVIEW_ADVANCE_HEADER,
   stopApprovedPreviewAdvance, withApprovedPreviewAdvance } from '@/lib/creatives/preview-advance-fence';
@@ -26,6 +26,8 @@ const result = async (saved: CreativePortfolioJob, status = 200, error?: string,
   return json({ job: portfolioProgress(job),
       creatives: await readPortfolioCreatives(job),
       ...(isApprovedPreviewPortfolio(job) ? { previewPreparationApproved: true } : {}),
+      ...(isPreviewAcceptance() && job.id === PREVIEW_TEST_APPROVAL.previousPortfolioId && job.previewAcceptanceError
+        ? { previewInitializationAvailable: true } : {}),
       ...(job.request.previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
     ...(isPreviewAcceptance() && job.planning.phase === 'INITIAL_PLAN' && !job.planningError && !job.previewAcceptanceError
       && job.planning.preparation.previewPreflightReady ? { preflightReady: true } : {}), ...(error ? { error } : {}) },

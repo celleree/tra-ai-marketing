@@ -3,6 +3,7 @@ import { createPortfolioSubmitter, requestPortfolio, runPortfolio, type Portfoli
 import { portfolioProgress } from '@/lib/creatives/portfolio-progress';
 import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { portfolioRequest } from '../fixtures/creative-portfolio';
+import { PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-binding';
 
 const session = () => { const values = new Map<string, string>(); return { getItem: (key: string) => values.get(key) ?? null,
   setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } }; };
@@ -22,6 +23,21 @@ const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED'
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('resumable portfolio browser controller', () => {
+  it('posts only explicit approved initialization and validates the fixed new identity without advancing', async () => {
+    const value = initial(); value.job.id = PREVIEW_TEST_APPROVAL.portfolioId;
+    value.previewPreparationApproved = true; value.previewOmitBrandLogo = true;
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json(value, { status: 201 })); vi.stubGlobal('fetch', fetcher);
+    const command = { action: 'initialize-approved-preview' as const, sourcePortfolioId: PREVIEW_TEST_APPROVAL.previousPortfolioId };
+    expect(await requestPortfolio(command)).toEqual(value);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0][0]).toBe('/api/creatives/portfolios');
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'POST', body: JSON.stringify(command) });
+    fetcher.mockResolvedValueOnce(Response.json(initial(), { status: 201 }));
+    await expect(requestPortfolio(command)).rejects.toThrow('does not match');
+    fetcher.mockResolvedValueOnce(Response.json({ error: 'Initialization denied' }, { status: 403 }));
+    await expect(requestPortfolio(command)).rejects.toThrow('Initialization denied');
+    expect(fetcher.mock.calls.every(([, options]) => options.method === 'POST')).toBe(true);
+  });
   it('stops at the cached preflight checkpoint and does not advance a reopened checkpoint automatically', async () => {
     const value = initial(), ready = { ...value, preflightReady: true as const, previewOmitBrandLogo: true as const };
     const fetcher = vi.fn().mockResolvedValue(Response.json(ready)); vi.stubGlobal('fetch', fetcher);

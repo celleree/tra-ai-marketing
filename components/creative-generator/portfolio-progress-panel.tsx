@@ -22,8 +22,10 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
   const hasFailure = Boolean(job.previewAcceptanceError || (job.planningError && !job.previewPreparationResume)) || failed.length > 0 || blocked.length > 0 || videoFailed;
   const retryFailure = Boolean(job.planningError) || failed.length > 0;
   const preparingVideo = Boolean(job.videoPreparation && activeVideoPhases.has(job.videoPreparation.phase));
+  const initializationAvailable = portfolio.response?.previewInitializationAvailable === true;
+  const boundedPreview = portfolio.response?.previewPreparationApproved || initializationAvailable;
 
-  const status = !portfolio.running && complete
+  const status = portfolio.running && initializationAvailable ? 'Preparing the approved reassessment. No AI calls are started.' : !portfolio.running && complete
     ? 'Generation complete.'
     : portfolio.stopped
       ? portfolio.running ? 'Stopping after current work…' : 'Generation stopped. Saved progress is preserved.'
@@ -34,6 +36,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
           : job.planReady ? 'Ready to resume generation.' : `Ready to resume planning ${job.requestedCount} creatives.`;
 
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
+    {initializationAvailable ? <p role="status">The stopped run is preserved. Prepare the approved reassessment with the same saved inputs and layout preparation. This starts no AI calls; use Resume separately for the two approved frame assessments.</p> : null}
     {portfolio.response?.previewPreparationApproved ? <p role="status">This saved Preview test reuses the saved layout preparation and permits two new selected-frame assessments once each. Both frames must pass before planning. The $1 budget is an estimate, with no guaranteed dollar ceiling. No retries, repair or fallback are authorized.</p> : null}
     {portfolio.response?.preflightReady ? <p role="status">{portfolio.response.previewPreparationApproved
       ? 'Approved preparation is complete. Planning and images have not started. Resume for one initial planner, one audit and at most two Sunburst images.'
@@ -59,13 +62,14 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
     </p> : null}
 
     <div className={styles.actions}>
-      {portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.stopped} onClick={portfolio.stop}>
+      {initializationAvailable ? <button type="button" className="button button-primary" disabled={portfolio.running || Boolean(job.lease)}
+        onClick={() => { void portfolio.initializeApprovedPreview(); }}>Prepare approved reassessment</button> : portfolio.running ? <button type="button" className="button button-secondary" disabled={portfolio.stopped} onClick={portfolio.stop}>
         {portfolio.stopped ? 'Stopping generation…' : 'Stop generation'}
       </button> : portfolioCanAdvance(job, portfolio.response?.previewPreparationApproved) ? <button type="button" className="button button-primary" disabled={!canAdvance()} onClick={() => { if (canAdvance()) void portfolio.resume(); }}>Resume generation</button> : null}
       <a href={`?portfolio=${job.id}`} target="_blank" rel="noreferrer">Open saved portfolio</a>
     </div>
 
-    {retryFailure && !portfolio.response?.previewPreparationApproved ? <div className={styles.failures} aria-live="polite">
+    {retryFailure && !boundedPreview ? <div className={styles.failures} aria-live="polite">
       <p>Retrying failed work may make another paid call.</p>
       {job.planningError ? <p>{job.planningError} <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease) || !canAdvance()}
         onClick={() => { if (canAdvance()) void portfolio.retry(null); }}>Retry planning</button></p> : null}
@@ -73,7 +77,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
         <button type="button" className="button button-secondary" disabled={portfolio.running || Boolean(job.lease) || !canAdvance()}
           onClick={() => { if (canAdvance()) void portfolio.retry(slot.index); }}>Retry creative {slot.index}</button></p>)}
     </div> : null}
-    {portfolio.response?.previewPreparationApproved && hasFailure ? <div role="alert" className={styles.failures}>
+    {boundedPreview && hasFailure ? <div role="alert" className={styles.failures}>
       {job.previewAcceptanceError ? <p>{job.previewAcceptanceError}</p> : null}
       {job.planningError ? <p>{job.planningError}</p> : null}
       {failed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}</p>)}

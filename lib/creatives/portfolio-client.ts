@@ -6,9 +6,10 @@ import { createSubmissionIdentity, SUBMISSION_HEADER, type SubmissionStorage } f
 import { PREVIEW_ADVANCE_HEADER, PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-binding';
 
 export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number;
-  preflightReady?: true; previewOmitBrandLogo?: true; previewPreparationApproved?: true };
+  preflightReady?: true; previewOmitBrandLogo?: true; previewPreparationApproved?: true; previewInitializationAvailable?: true };
 type Command = { action: 'create'; request: GenerateCreativeRequest; submissionId: string } | { action: 'load' | 'advance'; id: string }
-  | { action: 'retry'; id: string; slotIndex: number | null };
+  | { action: 'retry'; id: string; slotIndex: number | null }
+  | { action: 'initialize-approved-preview'; sourcePortfolioId: string };
 const endpoint = '/api/creatives/portfolios';
 const continuationKey = 'tra-preview-advance:' + PREVIEW_TEST_APPROVAL.id;
 const stopPreviewContinuation = (id: string) => {
@@ -39,17 +40,18 @@ export function createPortfolioSubmitter(storage?: () => SubmissionStorage) {
 export async function requestPortfolio(command: Command): Promise<PortfolioResponse> {
   try { return await requestPortfolioStep(command); }
   catch (error) {
-    if (command.action !== 'create') stopPreviewContinuation(command.id);
+    if ('id' in command) stopPreviewContinuation(command.id);
     throw error;
   }
 }
 
 async function requestPortfolioStep(command: Command): Promise<PortfolioResponse> {
-  const fenced = command.action !== 'create' && command.id === PREVIEW_TEST_APPROVAL.portfolioId;
+  const initialize = command.action === 'initialize-approved-preview';
+  const fenced = 'id' in command && command.id === PREVIEW_TEST_APPROVAL.portfolioId;
   const session = fenced && typeof window !== 'undefined' ? window.sessionStorage : undefined;
   const previous = session?.getItem(continuationKey);
   const response = await fetch(command.action === 'load' ? endpoint + '?id=' + encodeURIComponent(command.id) : endpoint, {
-    method: command.action === 'load' ? 'GET' : command.action === 'create' ? 'POST' : 'PATCH', cache: 'no-store',
+    method: command.action === 'load' ? 'GET' : command.action === 'create' || initialize ? 'POST' : 'PATCH', cache: 'no-store',
     ...(command.action === 'load' && previous ? { headers: { [PREVIEW_ADVANCE_HEADER]: previous } } : {}),
     ...(command.action === 'load' ? {} : { headers: { 'Content-Type': 'application/json',
       ...(previous ? { [PREVIEW_ADVANCE_HEADER]: previous } : {}),
@@ -59,7 +61,9 @@ async function requestPortfolioStep(command: Command): Promise<PortfolioResponse
   const value = await response.json().catch(() => { throw new Error('Portfolio response was interrupted. Reload saved progress before resuming.'); });
   const job = parsePortfolioProgress(value?.job);
   if (!job || !Array.isArray(value.creatives)) throw new Error(typeof value?.error === 'string' ? value.error : 'Invalid portfolio response. Reload saved progress.');
-  if (command.action === 'create' ? job.requestedCount !== command.request.variationCount : job.id !== command.id) {
+  if (command.action === 'create' ? job.requestedCount !== command.request.variationCount
+    : command.action === 'initialize-approved-preview' ? job.id !== PREVIEW_TEST_APPROVAL.portfolioId || job.requestedCount !== 2
+    : job.id !== command.id) {
     throw new Error('Portfolio response does not match the requested work. Reload saved progress.');
   }
   const creatives = value.creatives.map(parseCreative) as Array<GeneratedCreative | null>;
@@ -78,6 +82,7 @@ async function requestPortfolioStep(command: Command): Promise<PortfolioResponse
   return { job, creatives: creatives as GeneratedCreative[], ...(value.preflightReady === true ? { preflightReady: true } : {}),
     ...(value.previewOmitBrandLogo === true ? { previewOmitBrandLogo: true } : {}),
     ...(value.previewPreparationApproved === true ? { previewPreparationApproved: true } : {}),
+    ...(value.previewInitializationAvailable === true ? { previewInitializationAvailable: true } : {}),
     ...(error ? { error } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
 }
 export const portfolioCanAdvance = (job: PortfolioProgress, approvedPreview = false) =>
