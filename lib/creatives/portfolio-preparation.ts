@@ -19,7 +19,7 @@ import { advancePlanningSourceAnalysis, composedSourceCatalog, composedLayoutPro
 import { parsePlanningSourceAnalysis } from '@/lib/creatives/planning-source-parser';
 import { resolveCreativeBrandLogoPlacementContext } from '@/lib/creatives/brand-logo.server';
 import { primaryVideoGuidance, primaryVideoDirection, representativeVideoGuidance, selectedVideoInputContract } from '@/lib/creatives/primary-video-source';
-import { isPreviewAcceptance, PREVIEW_NO_LOGO_DIRECTION } from '@/lib/creatives/preview-acceptance';
+import { isPreviewAcceptanceOperation, PREVIEW_NO_LOGO_DIRECTION } from '@/lib/creatives/preview-acceptance';
 
 export type PortfolioPreparationState = {
   previewPreparedFrameCount?: number;
@@ -188,7 +188,7 @@ export async function advancePortfolioPreparation(
   }
 
   if (!state.selectedReferences) {
-    const library = isPreviewAcceptance() ? [] : (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
+    const library = isPreviewAcceptanceOperation() ? [] : (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
     const requestedReferenceCount = Math.min(8, data.variationCount, library.length);
     if (requestedReferenceCount > 0) {
       onProviderOperationStart();
@@ -227,7 +227,7 @@ export async function advancePortfolioPreparation(
     return { state };
   }
 
-  const enrichedCatalog = isPreviewAcceptance() ? null : await advanceReferenceAngles(state.referenceCatalog, storage, onProviderOperationStart);
+  const enrichedCatalog = isPreviewAcceptanceOperation() ? null : await advanceReferenceAngles(state.referenceCatalog, storage, onProviderOperationStart);
   if (enrichedCatalog) {
     state.referenceCatalog = enrichedCatalog;
     return { state };

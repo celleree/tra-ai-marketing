@@ -11,7 +11,8 @@ import { readPortfolioCreatives } from '@/lib/creatives/portfolio-results';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { ReviewSelectionError } from '@/lib/video/review-selection';
-import { assertPreviewAcceptanceRequest, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
+import { isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
+import { isPreviewTestPortfolio } from '@/lib/creatives/preview-portfolio-scope';
 import { isApprovedPreviewPortfolio, PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-approval';
 import { initializeApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-initialization';
 import { assertPreviewAdvanceResponse, isApprovedPreviewAdvanceId, previewAdvanceReadback, PREVIEW_ADVANCE_HEADER,
@@ -29,7 +30,7 @@ const result = async (saved: CreativePortfolioJob, status = 200, error?: string,
       ...(isPreviewAcceptance() && job.id === PREVIEW_TEST_APPROVAL.previousPortfolioId && job.previewAcceptanceError
         ? { previewInitializationAvailable: true } : {}),
       ...(job.request.previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
-    ...(isPreviewAcceptance() && job.planning.phase === 'INITIAL_PLAN' && !job.planningError && !job.previewAcceptanceError
+    ...(isApprovedPreviewPortfolio(job) && job.planning.phase === 'INITIAL_PLAN' && !job.planningError && !job.previewAcceptanceError
       && job.planning.preparation.previewPreflightReady ? { preflightReady: true } : {}), ...(error ? { error } : {}) },
     status, retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {});
 };
@@ -68,7 +69,6 @@ export async function POST(request: Request) {
     }
     const parsed = validateGenerateCreativeRequest(body, MAX_PORTFOLIO_CREATIVES);
     if (!parsed.success) return json({ error: parsed.error }, 400);
-    assertPreviewAcceptanceRequest(parsed.data);
     const submissionId = parseSubmissionId(request.headers.get(SUBMISSION_HEADER));
     if (!submissionId) return json({ error: 'A valid Idempotency-Key is required to create a portfolio.' }, 400);
     assertGenerationAvailable(parsed.data);
@@ -93,7 +93,7 @@ export async function PATCH(request: Request) {
       const job = await readCreativePortfolio(body.id);
       if (!job) return json({ error: 'Portfolio not found.' }, 404);
       if (body.action === 'retry') {
-        if (isPreviewAcceptance()) throw new PreviewAcceptanceError('Preview acceptance does not authorize paid retries. Saved results remain available.');
+        if (isPreviewAcceptance() && isPreviewTestPortfolio(job)) throw new PreviewAcceptanceError('Preview acceptance does not authorize paid retries. Saved results remain available.');
         const retryable = body.slotIndex === null ? !job.snapshot && job.planningError
           : job.snapshot && job.slots.some(slot => slot.index === body.slotIndex && slot.status === 'RETRY_REQUIRED');
         if (job.lease || !retryable) return json({ error: 'This work cannot be retried in its current state. Reload its progress.' }, 409);

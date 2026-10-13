@@ -79,19 +79,24 @@ describe('resumable portfolio API', () => {
     if (job.planning.phase !== 'INITIAL_PLAN') throw new Error('Fixture');
     job.planning.preparation.previewPreflightReady = true;
     const value = await (await GET(request(undefined, job.id))).json();
-    expect(value).toMatchObject({ previewOmitBrandLogo: true, preflightReady: true });
+    expect(value).toMatchObject({ previewOmitBrandLogo: true });
+    expect(value).not.toHaveProperty('preflightReady');
     expect(mocks.advance).not.toHaveBeenCalled();
   });
-  it('exposes the durable cached checkpoint and rejects Preview retries and unbounded creation', async () => {
+  it('keeps the QA checkpoint/retry restriction while ordinary Preview Create uses normal validation', async () => {
     vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
     if (job.planning.phase !== 'INITIAL_PLAN') throw new Error('Fixture phase');
     job.planning.preparation.previewPreflightReady = true;
+    job.id = previewApproval.PREVIEW_TEST_APPROVAL.portfolioId;
+    vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
     expect(await (await GET(request(undefined, job.id))).json()).toHaveProperty('preflightReady', true);
     job.planningError = 'Failed work';
     expect((await PATCH(request({ id: job.id, action: 'retry', slotIndex: null }))).status).toBe(409);
     expect(mocks.update).not.toHaveBeenCalled();
-    expect((await POST(request(portfolioRequest(3)))).status).toBe(409);
-    expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
+    const response = await POST(request({ ...portfolioRequest(3), context: 'A new ordinary user prompt' }));
+    expect(response.status).toBe(201);
+    expect(mocks.create).toHaveBeenCalledOnce(); expect(mocks.advance).not.toHaveBeenCalled();
+    expect((await response.json()).job.requestedCount).toBe(3);
   });
   it.each([GET, POST, PATCH])('requires operator authorization before any job work', async handler => {
     mocks.access.mockResolvedValue({ allowed: false, status: 403, error: 'Denied' });

@@ -8,6 +8,7 @@ import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { choices } from '../fixtures/video-review-selection';
 import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
+import * as previewApproval from '@/lib/creatives/preview-test-approval';
 
 const enable = () => { vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke'); };
 const request = (): ValidGenerateCreativeRequest => ({ context: 'Use saved video and layout.', variationCount: 2,
@@ -45,6 +46,8 @@ describe('Preview acceptance spend boundary', () => {
       expect(() => assertPreviewAcceptanceRequest(changed, true)).toThrow('Preview acceptance requires');
     }
     const job = newCreativePortfolio(valid);
+    job.id = previewApproval.PREVIEW_TEST_APPROVAL.portfolioId;
+    vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
     expect(() => assertPreviewAcceptanceJob(job)).not.toThrow();
     job.planning = { phase: 'TARGETED_REPAIR' } as typeof job.planning;
     expect(() => assertPreviewAcceptanceJob(job)).toThrow('repair');

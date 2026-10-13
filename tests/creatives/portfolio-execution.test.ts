@@ -108,6 +108,31 @@ beforeEach(() => {
   });
 });
 
+it('runs changed-prompt ordinary Preview preparation under normal controls without inheriting QA cache/call constraints', async () => {
+  vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+  const storage = new MemoryPortfolioStorage();
+  const job = await createCreativePortfolio({ ...portfolioRequest(3), context: 'User supplied a changed ordinary prompt.' }, storage);
+  const dispatch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ status: 'completed' }));
+  mocks.prepareStep.mockImplementationOnce(async (request, _url, state, start, _composition, preflight) => {
+    expect(preflight).toBe(false); expect(request.context).toBe(job.request.context);
+    start(); await fetchWithProviderUsage('source-reference-analysis', 'gpt-6-luna', 'https://api.openai.com/v1/responses',
+      { method: 'POST', body: JSON.stringify({ model: 'gpt-6-luna', store: false, input: request.context }) }, dispatch);
+    return { state: { ...state, analysis } };
+  });
+  try {
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage); // Existing planning quota first.
+    const prepared = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(prepared.error).toBeUndefined(); expect(prepared.job.request.context).toBe(job.request.context);
+    expect(prepared.job.planning).toMatchObject({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis } });
+    expect(prepared.job).not.toHaveProperty('previewAcceptanceError'); expect(dispatch).toHaveBeenCalledOnce();
+    expect([...storage.data.keys()].some(key => key.startsWith('preview-test-calls/'))).toBe(false);
+    const quota = vi.spyOn(operatorQuota, 'reserveOperatorQuota').mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 60 });
+    const other = await createCreativePortfolio(portfolioRequest(3), storage);
+    expect((await advanceCreativePortfolio(other.id, 'operator', 'http://localhost', storage)).status).toBe(429);
+    expect(quota).toHaveBeenCalledOnce(); expect(dispatch).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllEnvs(); }
+});
+
 const readyPortfolio = async (
   storage: MemoryPortfolioStorage,
   request: Parameters<typeof createCreativePortfolio>[0] = portfolioRequest(),
@@ -166,7 +191,7 @@ it.each(['planning', 'image'])('makes an approved-test %s quota denial terminal 
 
 it('records an approved expired-lease stop before recovering a saved image', async () => {
   vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
-  vi.spyOn(previewAcceptance, 'isPreviewAcceptance').mockReturnValue(true);
+    vi.spyOn(previewAcceptance, 'isPreviewAcceptanceOperation').mockReturnValue(true);
   const storage = new MemoryPortfolioStorage(), job = await readyPortfolio(storage);
   await mocks.render(job.snapshot!.batchPlan.creatives[0], job.snapshot, { creativeId: job.slots[0].creativeId, assertCurrentWork: async () => {} });
   await updateCreativePortfolio(job.id, current => ({ ...current, lease: { id: 'lost-worker', slotIndex: 1, expiresAtMs: Date.now() - 1 } }), storage);
@@ -235,6 +260,7 @@ it('stops a failed initial Preview audit without entering repair, re-audit or re
   vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
   // Request admission is tested separately; isolate the reachable initial-audit transition here.
   const admission = vi.spyOn(previewAcceptance, 'assertPreviewAcceptanceJob').mockImplementation(() => {});
+  const mode = vi.spyOn(previewAcceptance, 'isPreviewAcceptanceOperation').mockReturnValue(true);
   try {
     mocks.audit.mockResolvedValueOnce(repeatedAudit());
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
@@ -243,7 +269,7 @@ it('stops a failed initial Preview audit without entering repair, re-audit or re
     await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(mocks.plan).toHaveBeenCalledOnce(); expect(mocks.audit).toHaveBeenCalledOnce();
     expect(mocks.render).not.toHaveBeenCalled();
-  } finally { admission.mockRestore(); vi.unstubAllEnvs(); }
+  } finally { admission.mockRestore(); mode.mockRestore(); vi.unstubAllEnvs(); }
 });
 
 const reachTerminalSecondAudit = async (storage: MemoryPortfolioStorage) => {

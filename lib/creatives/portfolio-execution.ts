@@ -35,7 +35,8 @@ import type { VideoIntelligenceStorage } from '@/lib/video/intelligence-storage'
 import type { VideoIntelligenceServiceDependencies } from '@/lib/video/intelligence-service';
 import { loadVideoIntelligenceLibrary } from '@/lib/video/intelligence-finalization-runner';
 import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
-import { assertPreviewAcceptanceJob, isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
+import { assertPreviewAcceptanceJob, isPreviewAcceptance, isPreviewAcceptanceOperation, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
+import { withNormalPreviewPortfolio } from '@/lib/creatives/preview-portfolio-scope';
 import { assertCachedManualPortfolioFrames, prepareApprovedManualPortfolioFrame } from '@/lib/creatives/portfolio-video-selection';
 import { isApprovedPreviewPortfolio, PREVIEW_TEST_APPROVAL, withApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
 
@@ -56,10 +57,12 @@ const assertValidPlannedCreativeCopy = (concept: Parameters<typeof classifyCreat
 
 /** One persisted provider-capable planning step OR one image; no background loop or automatic failed-provider retry. */
 export function advanceCreativePortfolio(...args: Parameters<typeof advancePortfolio>) {
-  return withProviderUsageContext({ runId: `portfolio:${args[0]}`, jobId: args[0], portfolioId: args[0] }, async () =>
-    isPreviewAcceptance()
-      ? withApprovedPreviewPortfolio(await readCreativePortfolio(args[0], args[3]), args[3], () => advancePortfolio(...args))
-      : advancePortfolio(...args));
+  return withProviderUsageContext({ runId: `portfolio:${args[0]}`, jobId: args[0], portfolioId: args[0] }, async () => {
+    if (!isPreviewAcceptance()) return advancePortfolio(...args);
+    const saved = await readCreativePortfolio(args[0], args[3]);
+    return withNormalPreviewPortfolio(saved, args[1], () =>
+      withApprovedPreviewPortfolio(saved, args[3], () => advancePortfolio(...args)));
+  });
 }
 
 async function advancePortfolio(
@@ -67,7 +70,7 @@ async function advancePortfolio(
   options: { deadlineAtMs?: number; video?: Omit<VideoIntelligenceServiceDependencies, 'storage' | 'deadlineAtMs'> } = {},
 ): Promise<PortfolioStepResult> {
   const deadlineAtMs = options.deadlineAtMs ?? Date.now() + 290_000;
-  if (isPreviewAcceptance()) await updateCreativePortfolio(id, current => {
+  if (isPreviewAcceptanceOperation()) await updateCreativePortfolio(id, current => {
     const now = Date.now();
     return isApprovedPreviewPortfolio(current) && current.lease && current.lease.expiresAtMs <= now
       ? claimCreativePortfolio(current, now, undefined, true).job : current;
@@ -198,7 +201,7 @@ async function advancePortfolio(
             return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, state), storage) };
           }
         }
-        if (isPreviewAcceptance() && job.planning.preparation.sourceAnalysis?.entries.every(entry => entry.result !== undefined)) {
+        if (isPreviewAcceptanceOperation() && job.planning.preparation.sourceAnalysis?.entries.every(entry => entry.result !== undefined)) {
           const inventory = await hydratePlanningSourceInventory(job.request.sourceAssets);
           const input = { sourceAnalysis: job.planning.preparation.sourceAnalysis,
             sources: inventory.filter(item => item.source.role === 'TRA_VIDEO').map(item => item.source as HydratedTraVideoSource),
@@ -219,7 +222,7 @@ async function advancePortfolio(
           job.planning.preparation,
           () => { providerWorkStarted = true; },
           job.sourceCompositionVersion,
-          isPreviewAcceptance() && !job.planning.preparation.previewPreflightReady,
+          isPreviewAcceptanceOperation() && !job.planning.preparation.previewPreflightReady,
         );
         if (result.state) {
           return { job: await updateCreativePortfolio(id, current => finishPortfolioPreparation(current, token, result.state), storage) };
@@ -240,7 +243,7 @@ async function advancePortfolio(
           snapshot.batchPlan.portfolioAudit = audit;
           return { job: await updateCreativePortfolio(id, current => finishPortfolioPlan(current, token, snapshot), storage) };
         }
-        if (isPreviewAcceptance()) {
+        if (isPreviewAcceptanceOperation()) {
           const message = `Preview acceptance stopped after the initial audit: ${issue}. Planning repair and re-audit are not authorized; no images were generated.`;
           return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token, message), storage),
             error: message, status: 409 };
@@ -332,7 +335,7 @@ async function advancePortfolio(
           return failPortfolioWork(checkpointed, token,
             `Video frame selection requires explicit Retry (${preflight.reason}).`);
         }, storage) };
-        if (isPreviewAcceptance()) throw new PreviewAcceptanceError('Selected-frame cache is no longer complete. Preview acceptance does not authorize a new assessment.');
+        if (isPreviewAcceptanceOperation()) throw new PreviewAcceptanceError('Selected-frame cache is no longer complete. Preview acceptance does not authorize a new assessment.');
         const denied = await reserveWorkQuota('VIDEO_SELECTION');
         if (denied) return denied;
         await updateCreativePortfolio(id, current => checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job, storage);
