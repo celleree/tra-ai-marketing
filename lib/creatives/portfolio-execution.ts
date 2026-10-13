@@ -43,6 +43,8 @@ import { assertCachedManualPortfolioFrames, prepareApprovedManualPortfolioFrame 
 import { isApprovedPreviewPortfolio, PREVIEW_TEST_APPROVAL, withApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
 
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
+const caseAssociationHold = (job: CreativePortfolioJob): PortfolioStepResult => ({ job, status: 409,
+  error: 'This video account needs a confirmed person pairing. Use selected video cases to preview an amendment before Resume. No provider work was started.' });
 
 class InvalidPlannedCreativeCopyError extends CreativeGenerationPreparationError {}
 
@@ -73,8 +75,7 @@ async function advancePortfolio(
 ): Promise<PortfolioStepResult> {
   const deadlineAtMs = options.deadlineAtMs ?? Date.now() + 290_000;
   const beforeWork = await readCreativePortfolio(id, storage);
-  if (beforeWork && !beforeWork.lease && caseAssociationNeedsReview(beforeWork)) return { job: beforeWork, status: 409,
-    error: 'This video account needs a confirmed person pairing. Use selected video cases to preview an amendment before Resume. No provider work was started.' };
+  if (beforeWork && !beforeWork.lease && caseAssociationNeedsReview(beforeWork)) return caseAssociationHold(beforeWork);
   if (isPreviewAcceptanceOperation()) await updateCreativePortfolio(id, current => {
     const now = Date.now();
     return isApprovedPreviewPortfolio(current) && current.lease && current.lease.expiresAtMs <= now
@@ -83,8 +84,9 @@ async function advancePortfolio(
   await reconcilePortfolioResults(id, storage);
   const token = randomUUID();
   const job = await updateCreativePortfolio(id, current =>
-    claimCreativePortfolio(current, Date.now(), token, isApprovedPreviewPortfolio(current)).job, storage);
-  if (job.lease?.id !== token) return { job };
+    !current.lease && caseAssociationNeedsReview(current) ? current
+      : claimCreativePortfolio(current, Date.now(), token, isApprovedPreviewPortfolio(current)).job, storage);
+  if (job.lease?.id !== token) return !job.lease && caseAssociationNeedsReview(job) ? caseAssociationHold(job) : { job };
   const approvedPreview = isApprovedPreviewPortfolio(job);
   const stopAfterError = (current: CreativePortfolioJob, message: string) => approvedPreview
     ? { ...current, previewAcceptanceError: current.previewAcceptanceError ?? (message.slice(0, 1000) || 'This approved Preview test is stopped.') } : current;

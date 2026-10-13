@@ -480,3 +480,31 @@ it('sends each amended case’s exact one-frame pool to selection, hydration and
   expect(failed.job.slots[1].status).toBe('RETRY_REQUIRED'); expect(mocks.render).toHaveBeenCalledOnce();
   expect(failed.job.slots[1].error).toContain('closed-pool');
 });
+
+it('holds attribution inside the atomic claim when concurrent planning finishes after the initial read', async () => {
+  const storage = new MemoryPortfolioStorage(), { job } = await readyTwoCases(storage);
+  const concept = job.snapshot!.batchPlan.creatives[0];
+  concept.draftSourceAssertion = selectedCaseAssertion(job.request.reviewHandoff, 0);
+  concept.imageCopy!.shortSupport = concept.draftSourceAssertion.exactText;
+  concept.adCopy!.primaryText = concept.draftSourceAssertion.exactText;
+  concept.copy.primaryText = concept.draftSourceAssertion.exactText;
+  const initial = { ...structuredClone(job), snapshot: null, planning: { phase: 'INITIAL_PLAN' as const, preparation: { quotaReserved: false } } };
+  const key = `creative-portfolios/v1/${job.id}.json`, prior = (await storage.read(key))!;
+  await storage.write(key, Buffer.from(JSON.stringify(initial)), prior.etag);
+  const read = storage.read.bind(storage); let first = true;
+  storage.read = async path => {
+    const state = await read(path);
+    if (first && path === key) {
+      first = false;
+      // Another worker commits its valid final planning checkpoint while this caller still sees INITIAL_PLAN.
+      await storage.write(key, Buffer.from(JSON.stringify(job)), state!.etag);
+    }
+    return state;
+  };
+  const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(result.status).toBe(409); expect(result.error).toContain('confirmed person pairing');
+  expect(result.job.slots.every(slot => slot.status === 'PENDING' && !slot.videoSelection)).toBe(true);
+  expect(result.job.lease).toBeNull();
+  expect(mocks.restore).not.toHaveBeenCalled(); expect(mocks.select).not.toHaveBeenCalled(); expect(quotaGroups()).toEqual([]);
+  expect(JSON.parse((await read(key))!.bytes.toString())).toEqual(job);
+});
