@@ -102,7 +102,7 @@ describe('creative batch planner', () => {
   it('preserves every explicitly requested selected case in ordinary plans even when the model returns generic or swapped selections', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     const { job, segments } = videoCasePortfolio(), handoff = job.request.reviewHandoff!;
-    const cases = requestedVideoCases('Use these selected humans and video case studies in the supplied layouts.', handoff)!;
+    const cases = requestedVideoCases('Generate TRA creative and use the layout reference library.', handoff)!;
     const catalog = job.snapshot!.referenceCatalog;
     const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives: [1, 2].map(index => ({ ...concept(index, 'approved-tra-human'),
       referenceChoices: { angleSource: null, layoutSource: catalog[index - 1].referenceId },
@@ -130,7 +130,9 @@ describe('creative batch planner', () => {
   });
   it('does not turn company policies or unrelated service requests into required case studies', () => {
     const { job } = videoCasePortfolio();
-    expect(requestedVideoCases('USER CREATIVE DIRECTION:\nExplain a free consultation.\n\nAPPROVED TRA COMPANY CONTEXT\nCase studies and testimonial rules', job.request.reviewHandoff)).toBeUndefined();
+    const unrelated = structuredClone(job.request.reviewHandoff!); Object.assign(unrelated, { claimSnapshots: [] });
+    expect(requestedVideoCases('USER CREATIVE DIRECTION:\nExplain a free consultation.\n\nAPPROVED TRA COMPANY CONTEXT\nCase studies and testimonial rules', unrelated)).toBeUndefined();
+    expect(requestedVideoCases('Explain a consultation without case studies', job.request.reviewHandoff)).toBeUndefined();
     expect(requestsVideoCases('Use selected humans without case studies')).toBe(false);
     expect(requestsVideoCases('Use the cases described in this video')).toBe(true);
   });
@@ -138,6 +140,8 @@ describe('creative batch planner', () => {
     const { job } = videoCasePortfolio(), handoff = structuredClone(job.request.reviewHandoff!);
     Object.assign(handoff, { claimSnapshots: [] });
     expect(() => requestedVideoCases('Use video case studies', handoff)).toThrow('Select the complete');
+    const automatic = structuredClone(job.request.reviewHandoff!); Object.assign(automatic, { choices: { ...automatic.choices, frames: null } });
+    expect(() => requestedVideoCases('Create ads from selected statements', automatic)).toThrow('Select the source person frames');
   });
 
   it('uses source case wording directly in draft image/ad copy with no Proof Library prerequisite', async () => {
