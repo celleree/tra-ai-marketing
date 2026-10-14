@@ -21,6 +21,24 @@ export const videoReviewStatements = (review: NonNullable<ReviewSource['review']
     reference: { type: 'VIDEO_TRANSCRIPT' as const, startSegmentIndex: segment.segmentIndex, endSegmentIndex: segment.segmentIndex },
     wording: segment.text, context: { type: 'VIDEO_TRANSCRIPT' as const, segments: [segment] } })), ...review.onScreenStatements,
 ];
+// Group only byte-for-byte identical on-screen wording; every original reference stays intact.
+export function compactStatementRows(statements: ReviewClaimSnapshot[]): ReviewClaimSnapshot[][] {
+  const rows: ReviewClaimSnapshot[][] = [], observed = new Map<string, ReviewClaimSnapshot[]>();
+  for (const statement of statements) {
+    if (statement.reference.type !== 'VIDEO_ON_SCREEN') { rows.push([statement]); continue; }
+    const row = observed.get(statement.wording);
+    if (row) row.push(statement);
+    else { const next = [statement]; observed.set(statement.wording, next); rows.push(next); }
+  }
+  return rows;
+}
+export function toggleStatementRow(claims: ReviewClaimReference[] | null, row: ReviewClaimSnapshot[]) {
+  const references = row.map(statement => statement.reference), current = claims ?? [];
+  const all = references.every(reference => current.some(item => key(item) === key(reference)));
+  if (all) return current.filter(item => !references.some(reference => key(item) === key(reference)));
+  const missing = references.filter(reference => !current.some(item => key(item) === key(reference)));
+  return current.length + missing.length <= 50 ? [...current, ...missing] : current;
+}
 const sourceLabel = (statement: ReviewClaimSnapshot) => {
   const context = statement.context;
   switch (context.type) {
@@ -79,7 +97,19 @@ export function VideoReviewStatements({ review, draft, disabled, observeAccess }
     {error ? <div role="alert"><p>{error}</p><button type="button" onClick={() => setRefresh(value => value + 1)}>Reload statement sources</button></div> : null}
     {draft.state.choices?.companyProfile && JSON.stringify(draft.state.choices.companyProfile) !== JSON.stringify(readStoredRuntimeCompanyProfile() ?? null)
       ? <p className={styles.metadata}>Using saved Company Profile context.</p> : null}
-    {statements.map(statement => { const checked = claims.some(reference => key(reference) === key(statement.reference));
+    {compactStatementRows(statements).map(row => { const statement = row[0]; const checked = claims.some(reference => key(reference) === key(statement.reference));
+      if (statement.reference.type === 'VIDEO_ON_SCREEN') {
+        const selected = row.filter(item => claims.some(reference => key(reference) === key(item.reference))).length;
+        const all = selected === row.length, mixed = selected > 0 && !all;
+        const times = [...new Set(row.map(item => reviewTime((item.reference as Extract<ReviewClaimReference, { type: 'VIDEO_ON_SCREEN' }>).frame.timestampMs)))];
+        return <div key={key(statement.reference)} className={styles.statement}>
+          <label><input type="checkbox" checked={all} aria-checked={mixed ? 'mixed' : all}
+            ref={input => { if (input) input.indeterminate = mixed; }}
+            disabled={disabled || (!all && claims.length + row.length - selected > 50)}
+            onChange={() => void draft.update(review.video, choices => ({ ...choices, claims: toggleStatementRow(choices.claims, row) }))} />
+            <span>{statement.wording}</span><time className={styles.metadata}>{times.join(', ')}</time></label>
+        </div>;
+      }
       const proof = statement.context.type === 'PROOF' && statement.context.record.type === 'case-study' ? statement.context.record : null;
       return <div key={key(statement.reference)} className={styles.statement}>
         <label><input type="checkbox" checked={checked} disabled={disabled || (!checked && claims.length >= 50)} onChange={() => choose(statement)} />

@@ -19,11 +19,18 @@ export async function providerPortraitInput(selection: GenerateVideoFrameSelecti
   }
   const state: ProviderPortraitState = { version: 1, providerPngSha256: prepared.providerPngSha256,
     sourcePngSha256: prepared.frameSha256, crop: prepared.crop, verified: false };
-  const identity: CandidateAssessmentIdentity = { policy: 'human-frame-candidate-suitability-v3', model,
+  const identity = providerPortraitIdentity(selection, state, model);
+  return { state, identity };
+}
+
+/** Reconstruct the same read-only cache key from the pinned saved state, without extraction or assessment. */
+export function providerPortraitIdentity(selection: GenerateVideoFrameSelection, state: ProviderPortraitState, model: string): CandidateAssessmentIdentity {
+  const binding = selection.version === 3 && selection.candidateBindings?.length === 1 ? selection.candidateBindings[0] : null;
+  if (!binding || !selection.sourceVideoMediaId || !selection.librarySha256) throw new Error('A single source-bound portrait is required.');
+  return { policy: 'human-frame-candidate-suitability-v3', model,
     sourceVideoMediaId: selection.sourceVideoMediaId, sourceVideoContentHash: selection.sourceVideoContentHash,
     librarySha256: selection.librarySha256!,
     representativeFrameId: binding.representativeFrameId, candidateIndex: binding.candidateIndex, timestampMs: binding.timestampMs,
-    frameSha256: prepared.providerPngSha256, sourcePngSha256: prepared.frameSha256, sourceCrop: prepared.crop,
+    frameSha256: state.providerPngSha256, sourcePngSha256: state.sourcePngSha256, sourceCrop: state.crop,
     assessmentContract: 'clean-provider-portrait-v1' };
-  return { state, identity };
 }

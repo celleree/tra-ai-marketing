@@ -56,6 +56,11 @@ async function scenario(name, options, run) {
   let choices = { video, frames: options.frames === undefined ? [frame] : options.frames, claims: [claim], companyProfile: options.profile ? profile : null };
   const bindings = Array.from({ length: options.frameCount ?? 1 }, (_, index) => index ? { ...frame,
     frameId: `video-frame:${String(index + 4).repeat(64)}`, candidateIndex: index, timestampMs: (index + 1) * 1000 } : frame);
+  const onScreen = options.compactStatements ? bindings.slice(0, 2).map(binding => ({
+    reference: { type: 'VIDEO_ON_SCREEN', frame: binding, statementIndex: 0 }, wording: 'Exact repeated $100 statement.',
+    context: { type: 'VIDEO_ON_SCREEN', observation: { sceneType: 'PERSON', summary: 'Source observation', composition: 'Portrait',
+      visibleText: ['Exact repeated $100 statement.'], topics: [], uncertainties: ['Unverified observation.'] } } })) : [];
+  if (options.compactStatements) choices.claims = [onScreen[1].reference];
   if (options.savedNeighbors) choices.frames = bindings.slice(1);
   if (options.selectedFrameCount) choices.frames = bindings.slice(0, options.selectedFrameCount);
   if (options.longStatements) choices.claims = segments.map(item => ({ ...claim, startSegmentIndex: item.segmentIndex, endSegmentIndex: item.segmentIndex }));
@@ -92,7 +97,11 @@ async function scenario(name, options, run) {
     const currentVideo = { ...video, locator: { ...video.locator, sourceVideoMediaId: requestedId } };
     const currentMedia = { ...media, id: requestedId, originalName: requestedId === mediaId ? options.videoName ?? 'fixture.mp4' : requestedId === availableB ? 'second.mp4' : 'third.mp4' };
     let value = {}, status = 200, isPreview = false;
-    if (path === '/api/creatives/portfolios/case-amendment') {
+    if (path === '/api/creatives/portfolios/portrait-diagnostic') {
+      assert.equal(request.method(), 'GET'); value = { slotIndex: 2, timestampMs: 21333, crop: { left: 0, top: 0, width: 600, height: 330 },
+        assessmentStatus: 'COMPLETE', assessment: { eyes: 'UNCERTAIN', sourceOverlay: { version: 2, status: 'UNSAFE' }, observableReason: 'Visible mark remains.' },
+        failedChecks: ['eyes', 'sourceOverlay'], png: { dataUrl: thumbnails[0], width: 600, height: 330, matchesPinned: true }, previewError: '' };
+    } else if (path === '/api/creatives/portfolios/case-amendment') {
       const caseClaims = ['My debt went from $42,000 to $250. This was my individual result.', 'TRA reduced what I owed by 78%. I felt relieved about my case.'];
       const caseFrames = [frame.frameId, `video-frame:${'9'.repeat(64)}`];
       if (request.method() === 'GET') value = caseApplied ? { applied: true } : { attributionNotice: 'Cached observations do not verify speaker identity. Confirm the statement belongs to this person.',
@@ -123,7 +132,7 @@ async function scenario(name, options, run) {
       else if (missing) { status = 404; value = { error: 'Stored video is missing.' }; }
       else value = { source: currentMedia, status: { phase, locator: currentVideo.locator, completedRepresentatives: 1, totalRepresentatives: 1, busy: false,
         failure: { message: 'Fixture preparation failed.' }, retry: { message: 'Uncertain prior attempt.' } },
-        review: phase !== 'COMPLETE' ? null : { video: currentVideo, frameBindings: bindings, onScreenStatements: [], library: { transcript: { segments },
+        review: phase !== 'COMPLETE' ? null : { video: currentVideo, frameBindings: bindings, onScreenStatements: onScreen, library: { transcript: { segments },
           representativeFrames: bindings.slice(0, options.representativeCount ?? (options.savedNeighbors ? 1 : bindings.length)).map((binding, index) => ({ ...binding, id: binding.frameId, thumbnailDataUrl: thumbnails[index % 2] })) } } };
       const indexes = new URL(request.url()).searchParams.get('candidateIndexes');
       if (indexes && value.review) {
@@ -141,7 +150,11 @@ async function scenario(name, options, run) {
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
-      if (options.caseRecovery) {
+      if (options.portraitDiagnostic) {
+        const savedJob = job('RETRY_REQUIRED', 2); savedJob.slots[0].status = 'SAVED';
+        savedJob.slots[1].videoSelection = { version: 2, providerPortrait: { verified: false } };
+        value = { job: savedJob, creatives: [] };
+      } else if (options.caseRecovery) {
         if (request.method() === 'PATCH') { assert.equal(body.action, 'recover-bound-case-crop'); assert.equal(body.slotIndex, 2); caseRecovered = true; }
         const savedJob = job('PENDING', 2); savedJob.slots[0].status = 'SAVED';
         savedJob.slots[1] = { ...savedJob.slots[1], status: caseRecovered ? 'PENDING' : 'BLOCKED',
@@ -198,6 +211,28 @@ async function scenario(name, options, run) {
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  await scenario('Compact observations retain duplicate timestamps and mixed selections after mobile reload', { compactStatements: true, frameCount: 2, width: 375 }, async ({ page, response }) => {
+    const row = page.getByRole('checkbox', { name: 'Exact repeated $100 statement. 00:01, 00:02', exact: true });
+    await row.waitFor(); assert.equal(await row.evaluate(input => input.indeterminate), true);
+    assert.equal(response().draft.choices.claims.length, 1);
+    await row.click(); await page.waitForFunction(() => !document.body.textContent.includes('Saving review'));
+    await page.reload(); await row.waitFor(); assert.equal(await row.isChecked(), true);
+    assert.equal(response().draft.choices.claims.length, 2);
+    assert.equal(await page.getByText('On-screen video text', { exact: false }).count(), 0);
+    const bounds = await page.evaluate(() => ({ viewport: innerWidth, width: document.documentElement.scrollWidth }));
+    assert.ok(bounds.width <= bounds.viewport + 1);
+  });
+  for (const denial of [false, true]) await scenario(`Portrait diagnostic reads saved fields without generation${denial ? ' after sign-in failure' : ''}`, {
+    casePortfolio: true, portraitDiagnostic: true, width: 375,
+    ...(denial ? { accessDenials: { 'GET /api/creatives/portfolios/portrait-diagnostic': 401 } } : {}) }, async ({ page, calls }) => {
+    await page.getByRole('button', { name: 'Show portrait diagnostic for Creative 2', exact: true }).click();
+    if (denial) await page.getByText('Generation is paused. Sign in to restore the same saved portfolio.', { exact: false }).waitFor();
+    else { await page.getByText('Model reason: Visible mark remains.', { exact: true }).waitFor();
+      await page.getByRole('img', { name: 'Exact assessed portrait crop for Creative 2' }).waitFor(); }
+    assert.equal(await page.getByText('1 / 2', { exact: true }).count(), 1);
+    assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 0);
+    assert.ok(calls.filter(([path]) => path.includes('portrait-diagnostic')).every(([, method]) => method === 'GET'));
+  });
   for (const width of [375, 390, 430, 1280]) await scenario(`Mobile layout recovery keeps long video names and saved statements within ${width}px`,
     { width, inventory: [mediaId, availableB], videoName: 'media_989a125a5f274761a27ff9115f1bae19.mp4', frameCount: 15, selectedFrameCount: 11,
       statementCount: 4, longStatements: true, savedPortfolio: true, pausedRecovery: true }, async ({ page, calls, response }) => {
