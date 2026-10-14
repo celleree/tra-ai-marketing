@@ -1,3 +1,4 @@
+import { validProviderPortraitState } from '@/lib/video/provider-portrait-contract';
 import { parsePortfolioVideoDependencies, UnsupportedVideoPreparationVersionError } from '@/lib/creatives/portfolio-video-dependency';
 import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
 import { isDeepStrictEqual } from 'node:util';
@@ -62,9 +63,13 @@ const validSlotVideoSelection = (value: unknown, slotStatus: string, job: Creati
     || value.selectionModel.trim().length < 1 || value.selectionModel.length > MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH
     || job.videoPreparationVersion !== 1 || job.planning.phase !== 'READY_TO_RENDER' || !job.snapshot
     || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO')) return false;
-  const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value;
+  const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value, hasPortrait = 'providerPortrait' in value;
   const versionedKeys = value.version === 2 ? ['selectionPolicy', 'reuseContext'] : [];
-  if (!exact(value, ['version', 'selectionModel', ...versionedKeys, ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : [])])
+  if (!exact(value, ['version', 'selectionModel', ...versionedKeys, ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : []), ...(hasPortrait ? ['providerPortrait'] : [])])
+    || (hasPortrait && (value.version !== 2 || !job.videoCaseAmendment || !hasSelection
+      || !validProviderPortraitState(value.providerPortrait)
+      || (slotStatus === 'SAVED' && !value.providerPortrait.verified)
+      || (value.providerPortrait.retryAuthorized && slotStatus !== 'PENDING')))
     || (hasSelection && !parseGenerateVideoFrameSelection(value.selection)) || (hasSelection && hasRetry)
     || (slotStatus === 'SAVED' && !hasSelection) || (slotStatus === 'BLOCKED' && (hasSelection || hasRetry))) return false;
   if (value.version === 2) {

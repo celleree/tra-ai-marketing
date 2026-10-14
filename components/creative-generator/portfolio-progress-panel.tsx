@@ -83,9 +83,17 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
         && job.slots.every(slot => slot.status === 'PENDING' && !slot.videoSelection) ? <button type="button"
           disabled={caseEditorOpen || portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease)}
           onClick={() => setCaseEditorOpen(true)}>Use selected video cases</button> : null}
+      {portfolio.response?.boundCaseCropRecoverySlot !== undefined ? <button type="button" className="button button-secondary"
+        disabled={caseEditorOpen || portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease)}
+        onClick={() => { void portfolio.recoverBoundCaseCrop(portfolio.response!.boundCaseCropRecoverySlot!); }}>
+        Prepare clean-frame recovery for Creative {portfolio.response.boundCaseCropRecoverySlot}
+      </button> : null}
       <button type="button" className="button button-secondary" disabled={portfolio.running || portfolio.loading} onClick={() => { void portfolio.restoreSaved(); }}>Reload saved progress</button>
       <a href={'?' + savedQuery.toString()} target="_blank" rel="noreferrer">Open saved portfolio</a>
     </div>
+
+    {portfolio.response?.boundCaseCropRecoverySlot !== undefined || job.slots.some(slot => slot.boundCaseCropRecovery && slot.status !== 'SAVED')
+      ? <p role="status">Preparing clean-frame recovery preserves saved creatives and starts no AI calls. Use Resume separately to assess the frame and continue the saved creative.</p> : null}
 
     {caseEditorOpen ? <PortfolioCaseAmendment key={job.id} id={job.id} observeAccess={portfolio.observeAccess}
       onClose={() => setCaseEditorOpen(false)} onSaved={() => { setCaseEditorOpen(false); void portfolio.restoreSaved(); }} /> : null}

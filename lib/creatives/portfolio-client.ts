@@ -7,9 +7,10 @@ import { PREVIEW_ADVANCE_HEADER, PREVIEW_TEST_APPROVAL } from '@/lib/creatives/p
 import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
 export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCreative[]; error?: string; retryAfterMs?: number;
-  preflightReady?: true; previewOmitBrandLogo?: true; previewPreparationApproved?: true; previewInitializationAvailable?: true };
+  boundCaseCropRecoverySlot?: number; preflightReady?: true; previewOmitBrandLogo?: true; previewPreparationApproved?: true; previewInitializationAvailable?: true };
 type Command = { action: 'create'; request: GenerateCreativeRequest; submissionId: string } | { action: 'load' | 'advance'; id: string }
   | { action: 'retry'; id: string; slotIndex: number | null }
+  | { action: 'recover-bound-case-crop'; id: string; slotIndex: number }
   | { action: 'initialize-approved-preview'; sourcePortfolioId: string };
 const endpoint = '/api/creatives/portfolios';
 const continuationKey = 'tra-preview-advance:' + PREVIEW_TEST_APPROVAL.id;
@@ -96,7 +97,10 @@ async function requestPortfolioStep(command: Command, observeAccess?: WorkspaceA
       || !/^[a-f0-9]{32}$/.test(value.previewAdvanceNonce)) throw new Error('Preview response was interrupted. Further work is not authorized.');
     session?.setItem(continuationKey, value.previewAdvanceNonce);
   }
-  return { job, creatives: creatives as GeneratedCreative[], ...(value.preflightReady === true ? { preflightReady: true } : {}),
+  if (value.boundCaseCropRecoverySlot !== undefined && (!Number.isInteger(value.boundCaseCropRecoverySlot)
+    || job.slots[value.boundCaseCropRecoverySlot - 1]?.status !== 'BLOCKED')) throw new Error('Invalid frame recovery availability. Reload saved progress.');
+  return { job, creatives: creatives as GeneratedCreative[],
+    ...(value.boundCaseCropRecoverySlot !== undefined ? { boundCaseCropRecoverySlot: value.boundCaseCropRecoverySlot } : {}), ...(value.preflightReady === true ? { preflightReady: true } : {}),
     ...(value.previewOmitBrandLogo === true ? { previewOmitBrandLogo: true } : {}),
     ...(value.previewPreparationApproved === true ? { previewPreparationApproved: true } : {}),
     ...(value.previewInitializationAvailable === true ? { previewInitializationAvailable: true } : {}),

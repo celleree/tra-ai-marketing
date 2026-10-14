@@ -29,6 +29,7 @@ export type PortfolioVideoSelectionState = LegacyPortfolioVideoSelectionState | 
   version: 2;
   selectionModel: string;
   selectionPolicy: AutomaticVideoSelectionPolicy;
+  providerPortrait?: import('@/lib/video/provider-portrait-contract').ProviderPortraitState;
   reuseContext: VideoFrameReuseContext;
   selection?: GenerateVideoFrameSelection;
   retryAuthorization?: { version: 1 };
@@ -96,7 +97,10 @@ const failed = (job: CreativePortfolioJob, message: string) => {
   else {
     const slot = next.slots.find(slot => slot.index === next.lease!.slotIndex)!;
     slot.status = 'RETRY_REQUIRED'; slot.error = message;
-    if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;
+    if (slot.videoSelection) {
+      delete slot.videoSelection.retryAuthorization;
+      if (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait) delete slot.videoSelection.providerPortrait.retryAuthorized;
+    }
   }
   next.lease = null;
   return next;
@@ -120,7 +124,7 @@ export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date
   // No image provider work occurred for a blocked slot, so it can proceed with its frozen plan.
   if (job.snapshot) for (const slot of job.slots) {
     const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
-    if (slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy?.execution?.subjectSource === 'non-human') {
+    if (!job.videoCaseAmendment && slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy?.execution?.subjectSource === 'non-human') {
       slot.status = 'PENDING'; delete slot.error; delete slot.videoSelection;
     }
   }
@@ -328,8 +332,10 @@ export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: stri
   const slot = job.slots.find(slot => slot.index === lease.slotIndex);
   if (!job.snapshot || !slot || slot.creativeId !== creativeId || slot.status !== 'PENDING') throw new Error('Portfolio result does not match the reserved creative.');
   const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
-  if (concept?.strategy?.execution?.subjectSource === 'non-human') delete slot.videoSelection;
+  if (!job.videoCaseAmendment && concept?.strategy?.execution?.subjectSource === 'non-human') delete slot.videoSelection;
   if (slot.videoSelection && (!slot.videoSelection.selection || slot.videoSelection.retryAuthorization
+    || (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait
+      && (!slot.videoSelection.providerPortrait.verified || slot.videoSelection.providerPortrait.retryAuthorized))
     || !parseGenerateVideoFrameSelection(slot.videoSelection.selection))) {
     throw new Error('Completed video frame selection is required before saving this creative.');
   }
@@ -401,7 +407,12 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
         || slot.videoSelection.selectionPolicy === 'human-frame-visual-quality-v1')) {
       delete slot.videoSelection;
     } else if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
-    else if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;
+    else if (slot.videoSelection) {
+      delete slot.videoSelection.retryAuthorization;
+      if (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait && !slot.videoSelection.providerPortrait.verified) {
+        slot.videoSelection.providerPortrait.retryAuthorized = true;
+      }
+    }
   }
   job.updatedAtMs = now;
   return job;

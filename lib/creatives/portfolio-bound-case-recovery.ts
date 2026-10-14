@@ -24,6 +24,13 @@ function assertRecoverable(job: CreativePortfolioJob, slotIndex: number) {
   return slot;
 }
 
+/** UI availability hint only; applying recovery still checks target attempts and persisted outputs. */
+export function boundCaseCropRecoverySlot(job: CreativePortfolioJob): number | undefined {
+  const index = job.slots.find(slot => slot.status === 'BLOCKED')?.index;
+  if (index === undefined) return undefined;
+  try { assertRecoverable(job, index); return index; } catch { return undefined; }
+}
+
 /** Explicit non-paid preparation only. No cache/ledger deletion, provider dispatch or automatic Resume. */
 export async function recoverBoundCaseCrop(id: string, slotIndex: number,
   storage: VideoIntelligenceStorage = getVideoIntelligenceStorage()) {

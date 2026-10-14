@@ -25,6 +25,7 @@ const renderPanel = ({
   previewPreparationResume = false,
   previewInitializationAvailable = false,
   previewAcceptanceError,
+  boundCaseCropRecoverySlot,
 }: {
   count?: number;
   statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>;
@@ -41,6 +42,7 @@ const renderPanel = ({
   previewPreparationResume?: boolean;
   previewInitializationAvailable?: boolean;
   previewAcceptanceError?: string;
+  boundCaseCropRecoverySlot?: number;
 } = {}) => {
   const base = portfolioProgress(newCreativePortfolio(portfolioRequest(count)));
   const job = {
@@ -64,7 +66,7 @@ const renderPanel = ({
   const resume = vi.fn();
   const retry = vi.fn();
   const portfolio = {
-    response: { job, creatives: [], ...(preflightReady ? { preflightReady: true } : {}),
+    response: { job, creatives: [], ...(boundCaseCropRecoverySlot !== undefined ? { boundCaseCropRecoverySlot } : {}), ...(preflightReady ? { preflightReady: true } : {}),
       ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
       ...(previewPreparationApproved ? { previewPreparationApproved: true } : {}),
       ...(previewInitializationAvailable ? { previewInitializationAvailable: true } : {}) },
@@ -247,4 +249,16 @@ describe('portfolio progress panel', () => {
     expect(html).not.toContain('Generation complete.');
     expect(html).toContain('Resume generation');
   });
+});
+
+it('offers only the server-advertised non-paid recovery and preserves authentication/loading guards', () => {
+  for (const guard of [{}, { authRequired: true }, { loading: true }, { running: true }]) {
+    const { html: markup } = renderPanel({ count: 2, statuses: ['SAVED', 'BLOCKED'], planReady: true, boundCaseCropRecoverySlot: 2, ...guard });
+    expect(markup).toContain('Prepare clean-frame recovery for Creative 2');
+    expect(markup).toContain('starts no AI calls');
+    const button = markup.match(/<button[^>]*>Prepare clean-frame recovery for Creative 2<\/button>/)?.[0];
+    expect(button).toBeDefined(); expect(button?.includes('disabled')).toBe(Object.keys(guard).length > 0);
+  }
+  expect(renderPanel({ count: 2, statuses: ['SAVED', 'BLOCKED'], planReady: true }).html)
+    .not.toContain('Prepare clean-frame recovery');
 });

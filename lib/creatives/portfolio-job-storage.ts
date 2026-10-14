@@ -1,3 +1,4 @@
+import { sameProviderPortrait } from '@/lib/video/provider-portrait-contract';
 import { preservesVideoDependencies } from '@/lib/creatives/portfolio-video-dependency';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -92,6 +93,13 @@ export async function updateCreativePortfolio(
     if (!preservesVideoDependencies(dependencies(current.job), dependencies(next))) {
       throw new Error('Portfolio video dependency bindings and completed references are immutable.');
     }
+    for (const [index, previous] of current.job.slots.entries()) {
+      const before = previous.videoSelection?.version === 2 ? previous.videoSelection.providerPortrait : undefined;
+      const after = next.slots[index].videoSelection?.version === 2 ? next.slots[index].videoSelection.providerPortrait : undefined;
+      if (before && (!after || !sameProviderPortrait(before, after) || (before.verified && !after.verified))) {
+        throw new Error('Pinned provider portrait pixels and crop are immutable.');
+      }
+    }
     const recoveredIndex = options.boundCaseCropRecoverySlot;
     const allowsCropRecovery = (index: number) => {
       const previous = current.job.slots[index], target = next.slots[index];
@@ -110,7 +118,7 @@ export async function updateCreativePortfolio(
       || current.job.slots.some((slot, index) => (slot.status === 'SAVED' && next.slots[index].status !== 'SAVED')
         || (slot.boundCaseCropRecovery && !isDeepStrictEqual(slot.boundCaseCropRecovery, next.slots[index].boundCaseCropRecovery))
         || (slot.status === 'BLOCKED' && next.slots[index].status !== 'BLOCKED' && !allowsCropRecovery(index)
-          && !(slot.videoSelection && current.job.snapshot?.batchPlan.creatives[index]?.strategy.execution.subjectSource === 'non-human'
+          && !(!current.job.videoCaseAmendment && slot.videoSelection && current.job.snapshot?.batchPlan.creatives[index]?.strategy.execution.subjectSource === 'non-human'
             && next.slots[index].status === 'PENDING' && !next.slots[index].videoSelection)))) {
       throw new Error('Portfolio update may not replace its request, plan, identities or completed work.');
     }

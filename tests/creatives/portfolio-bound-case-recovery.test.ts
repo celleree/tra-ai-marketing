@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { recoverBoundCaseCrop } from '@/lib/creatives/portfolio-bound-case-recovery';
+import { claimCreativePortfolio } from '@/lib/creatives/portfolio-job';
+import { recoverBoundCaseCrop, boundCaseCropRecoverySlot } from '@/lib/creatives/portfolio-bound-case-recovery';
 import { proposeCaseAmendment } from '@/lib/creatives/portfolio-case-amendment';
 import { parseCreativePortfolioJob } from '@/lib/creatives/portfolio-job-parser';
 import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
@@ -27,11 +28,13 @@ describe('explicit bound case crop recovery', () => {
   it('preserves saved slot, immutable intent and existing ledger, and is idempotent without paid dispatch', async () => {
     const { job, storage } = await setup(); await reserve(job.id, job.slots[0].creativeId, storage);
     const ledger = [...storage.data.entries()].find(([key]) => key.startsWith('paid-image-runs/'))!;
+    expect(boundCaseCropRecoverySlot(job)).toBe(2);
+    expect(claimCreativePortfolio(job).status).toBe('BLOCKED');
     const original = structuredClone(job), recovered = await recoverBoundCaseCrop(job.id, 2, storage);
     expect(recovered.slots[0]).toEqual(original.slots[0]); expect(recovered.snapshot).toEqual(original.snapshot);
     expect(recovered.videoCaseAmendment).toEqual(original.videoCaseAmendment);
     expect(recovered.slots[1]).toMatchObject({ status: 'PENDING', boundCaseCropRecovery: { version: 1, previousError: original.slots[1].error } });
-    expect(recovered.lease).toBeNull(); expect(storage.data.get(ledger[0])).toEqual(ledger[1]);
+    expect(recovered.lease).toBeNull(); expect(boundCaseCropRecoverySlot(recovered)).toBeUndefined(); expect(storage.data.get(ledger[0])).toEqual(ledger[1]);
     expect(parseCreativePortfolioJob(Buffer.from(JSON.stringify(recovered)), job.id)).toEqual(recovered);
     expect(await recoverBoundCaseCrop(job.id, 2, storage)).toEqual(recovered);
   });

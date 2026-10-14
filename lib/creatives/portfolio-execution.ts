@@ -42,6 +42,10 @@ import { withNormalPreviewPortfolio } from '@/lib/creatives/preview-portfolio-sc
 import { assertCachedManualPortfolioFrames, prepareApprovedManualPortfolioFrame } from '@/lib/creatives/portfolio-video-selection';
 import { isApprovedPreviewPortfolio, PREVIEW_TEST_APPROVAL, withApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-approval';
 
+import { providerPortraitInput } from '@/lib/video/provider-portrait';
+import { sameProviderPortrait } from '@/lib/video/provider-portrait-contract';
+import { readCandidateSuitability, assessCandidateWithCache, isSuitableCandidate } from '@/lib/video/candidate-suitability';
+
 export type PortfolioStepResult = { job: CreativePortfolioJob; error?: string; status?: number; retryAfterSeconds?: number };
 const caseAssociationHold = (job: CreativePortfolioJob): PortfolioStepResult => ({ job, status: 409,
   error: 'Each planned video case needs a confirmed person pairing. Review its person in Use selected video cases before Resume. No provider work was started.' });
@@ -323,7 +327,7 @@ async function advancePortfolio(
         const attempt = resolvePortfolioVideoSelectionAttempt(job, token, proposed);
         admissionAttempt = attempt;
         const cache = { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}),
-          ...(job.videoCaseAmendment ? { assessmentContract: 'bound-case-portrait-v1' as const }
+          ...(job.videoCaseAmendment ? { assessmentContract: 'bound-case-portrait-v2' as const }
             : approvedPreview ? { assessmentContract: PREVIEW_TEST_APPROVAL.assessmentContract } : {}) };
         const preflight = await preflightPortfolioVideoFrames({ sourceAnalysis: context.sourceAnalysis,
           sources: videoSources, finalConcept: concept, selectionPolicy: attempt.selectionPolicy,
@@ -384,7 +388,7 @@ async function advancePortfolio(
           finishPortfolioVideoFrameSelection(current, token, selected.selection), storage) };
       }
 
-      const selectedFrames = await hydratePortfolioVideoFrameSelection({
+      let selectedFrames = await hydratePortfolioVideoFrameSelection({
         sourceAnalysis: context.sourceAnalysis,
         sources: videoSources,
         selection: slot.videoSelection.selection, reviewChoices,
@@ -392,10 +396,65 @@ async function advancePortfolio(
         const message = error instanceof Error ? error.message : 'Saved human-frame selection could not be hydrated.';
         throw new CreativeGenerationPreparationError(message, 409);
       });
-      await prepareProviderVideoFrames(selectedFrames.frames).catch(error => {
+      const preparedFrames = await prepareProviderVideoFrames(selectedFrames.frames).catch(error => {
         const message = error instanceof Error ? error.message : 'Selected TRA video frames failed local validation.';
         throw new CreativeGenerationPreparationError(`${message} Create a new portfolio with an assessed source frame.`, 409);
       });
+      if (job.videoCaseAmendment && slot.videoSelection.version === 2) {
+        if (preparedFrames.length !== 1) throw new CreativeGenerationPreparationError('A bound case requires its single confirmed portrait.', 409);
+        const prepared = preparedFrames[0];
+        const portrait = await providerPortraitInput(slot.videoSelection.selection, prepared, slot.videoSelection.selectionModel)
+          .catch(error => { throw new CreativeGenerationPreparationError(error.message, 409); });
+        const pinned = slot.videoSelection.providerPortrait;
+        if (pinned && !sameProviderPortrait(pinned, portrait.state)) {
+          throw new CreativeGenerationPreparationError('The pinned portrait PNG or crop changed. Saved creatives remain available.', 409);
+        }
+        const cache = { storage, deadlineAtMs, retry: pinned?.retryAuthorized === true };
+        let assessment = await readCandidateSuitability(portrait.identity, cache);
+        if (pinned?.verified) {
+          if (assessment.status !== 'COMPLETE' || !isSuitableCandidate(assessment.assessment)
+            || assessment.assessment.sourceOverlay.status !== 'CLEAN') {
+            throw new CreativeGenerationPreparationError('The pinned portrait assessment is unavailable. No image generation is authorized.', 409);
+          }
+        } else {
+          if (!pinned) await updateCreativePortfolio(id, current => {
+            if (current.lease?.id !== token || current.lease.expiresAtMs <= Date.now()) throw new Error('Portrait lease changed.');
+            const selected = current.slots[slotIndex - 1].videoSelection;
+            if (selected?.version !== 2 || !selected.selection) throw new Error('Portrait selection changed.');
+            selected.providerPortrait = portrait.state;
+            return current;
+          }, storage);
+          if (assessment.status === 'BUSY') return { job: await updateCreativePortfolio(id,
+            current => releasePortfolioWork(current, token), storage), status: 202, retryAfterSeconds: 2 };
+          if (assessment.status === 'RETRY_REQUIRED' && !cache.retry) throw new CreativeGenerationPreparationError(
+            'Actual portrait PNG assessment requires explicit Retry; no image was generated.', 409);
+          if (assessment.status !== 'COMPLETE') {
+            const denied = await reserveWorkQuota('VIDEO_SELECTION');
+            if (denied) return denied;
+            await assertCurrentWork(); providerWorkStarted = true;
+            assessment = await assessCandidateWithCache(portrait.identity, prepared.providerBuffer, cache);
+          }
+          if (assessment.status === 'BUSY') return { job: await updateCreativePortfolio(id,
+            current => releasePortfolioWork(current, token), storage), status: 202, retryAfterSeconds: 2 };
+          if (assessment.status !== 'COMPLETE') throw new CreativeGenerationPreparationError(
+            'Actual portrait PNG assessment is uncertain. Explicit Retry is required; no image was generated.', 409);
+          if (!isSuitableCandidate(assessment.assessment) || assessment.assessment.sourceOverlay.status !== 'CLEAN') {
+            throw new CreativeGenerationPreparationError('The actual retained portrait PNG did not pass human or overlay checks. Saved creatives remain available.', 409);
+          }
+          return { job: await updateCreativePortfolio(id, current => {
+            if (current.lease?.id !== token || current.lease.expiresAtMs <= Date.now()) throw new Error('Portrait lease changed.');
+            const selected = current.slots[slotIndex - 1].videoSelection;
+            if (selected?.version !== 2 || !selected.providerPortrait || !sameProviderPortrait(selected.providerPortrait, portrait.state)) {
+              throw new Error('Pinned portrait changed before its assessment checkpoint.');
+            }
+            selected.providerPortrait.verified = true; delete selected.providerPortrait.retryAuthorized;
+            return releasePortfolioWork(current, token);
+          }, storage) };
+        }
+        // Rendering recomputes the deterministic PNG and checks these exact hashes/crop before attaching it.
+        selectedFrames = { ...selectedFrames, frames: [{ ...selectedFrames.frames[0],
+          expectedProviderPngSha256: pinned.providerPngSha256, expectedCrop: pinned.crop }] };
+      }
       const denied = await reserveWorkQuota('CREATIVE_GENERATION');
       if (denied) return denied;
       providerWorkStarted = true;

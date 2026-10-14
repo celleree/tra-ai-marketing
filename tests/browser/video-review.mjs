@@ -49,7 +49,7 @@ async function scenario(name, options, run) {
   const segments = Array.from({ length: options.statementCount ?? 1 }, (_, index) => ({ ...segment, segmentIndex: index,
     text: options.longStatements ? `Saved consultation wording ${index + 1}. ${'A detailed statement with several useful lines of text. '.repeat(6)} ${'reference_'.repeat(18)}` : segment.text }));
   let releaseSourceReads = () => {};
-  let releasePortfolioAdvance = () => {}, portfolioLoadFailure = 0;
+  let releasePortfolioAdvance = () => {}, portfolioLoadFailure = 0, caseRecovered = false;
   const portfolioAdvanceGate = options.holdPortfolioAdvance ? new Promise(resolve => { releasePortfolioAdvance = resolve; }) : null;
   const sourceReadGate = options.holdSourceReads || options.holdSourceReadPaths ? new Promise(resolve => { releaseSourceReads = resolve; }) : null;
   page.on('pageerror', error => errors.push(error.message));
@@ -141,7 +141,14 @@ async function scenario(name, options, run) {
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
-      if (options.casePortfolio) value = { job: { ...job('PENDING', 2), videoPreparation: { total: 2, completed: 2, phase: 'COMPLETE', busy: false } }, creatives: [] };
+      if (options.caseRecovery) {
+        if (request.method() === 'PATCH') { assert.equal(body.action, 'recover-bound-case-crop'); assert.equal(body.slotIndex, 2); caseRecovered = true; }
+        const savedJob = job('PENDING', 2); savedJob.slots[0].status = 'SAVED';
+        savedJob.slots[1] = { ...savedJob.slots[1], status: caseRecovered ? 'PENDING' : 'BLOCKED',
+          ...(caseRecovered ? { boundCaseCropRecovery: { version: 1, previousError: 'No suitable human frame was found.' } }
+            : { error: 'No suitable human frame was found.' }) };
+        value = { job: savedJob, creatives: [], ...(!caseRecovered ? { boundCaseCropRecoverySlot: 2 } : {}) };
+      } else if (options.casePortfolio) value = { job: { ...job('PENDING', 2), videoPreparation: { total: 2, completed: 2, phase: 'COMPLETE', busy: false } }, creatives: [] };
       else if (portfolioLoadFailure && request.method() === 'GET') { status = portfolioLoadFailure; value = { error: 'Sign in required.' }; }
       else if (options.pausedRecovery) {
         if (request.method() === 'PATCH') await portfolioAdvanceGate;
@@ -671,6 +678,26 @@ try {
     if (portfolioState === 'PENDING') { await page.getByRole('button', { name: 'Resume generation' }).click(); await page.getByText('Generation complete.').waitFor(); }
     else if (portfolioState === 'RETRY_REQUIRED') { await page.getByRole('button', { name: 'Retry creative 1', exact: true }).click(); await page.getByText('Generation complete.').waitFor(); }
     else await page.getByText('Generation complete.').waitFor();
+  });
+  await scenario('Clean-frame recovery prepares Creative 2 without generation and survives reload', { casePortfolio: true, caseRecovery: true, width: 375 }, async ({ page, calls }) => {
+    const prepare = page.getByRole('button', { name: 'Prepare clean-frame recovery for Creative 2', exact: true });
+    await prepare.click();
+    await page.getByRole('button', { name: 'Resume generation', exact: true }).waitFor();
+    assert.equal(await prepare.count(), 0);
+    await page.getByRole('button', { name: 'Reload saved progress', exact: true }).click();
+    await page.getByText('Generation is paused. Resume to continue the saved plan.', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Resume generation', exact: true }).isEnabled(), true);
+    assert.equal(await page.getByText('1 / 2', { exact: true }).count(), 1);
+    assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 1);
+  });
+  await scenario('Clean-frame recovery respects sign-in failure without generation or saved-slot changes', { casePortfolio: true, caseRecovery: true, width: 375,
+    accessDenials: { 'PATCH /api/creatives/portfolios': 401 } }, async ({ page, calls }) => {
+    const prepare = page.getByRole('button', { name: 'Prepare clean-frame recovery for Creative 2', exact: true });
+    await prepare.click();
+    await page.getByText('Generation is paused. Sign in to restore the same saved portfolio.', { exact: false }).waitFor();
+    assert.equal(await prepare.isDisabled(), true);
+    assert.equal(await page.getByText('1 / 2', { exact: true }).count(), 1);
+    assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 1);
   });
   await scenario('Saved case amendment reload releases the Resume editor hold', { casePortfolio: true, width: 375 }, async ({ page, calls }) => {
     const resume = page.getByRole('button', { name: 'Resume generation', exact: true });

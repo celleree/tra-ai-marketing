@@ -1,4 +1,4 @@
-import { recoverBoundCaseCrop } from '@/lib/creatives/portfolio-bound-case-recovery';
+import { recoverBoundCaseCrop, boundCaseCropRecoverySlot } from '@/lib/creatives/portfolio-bound-case-recovery';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -25,8 +25,10 @@ const json = (body: object, status = 200, headers: Record<string, string> = {}) 
   Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store', ...headers } });
 const result = async (saved: CreativePortfolioJob, status = 200, error?: string, retryAfterSeconds?: number, previous?: string) => {
   const job = await previewAdvanceReadback(saved, previous);
+  const recoverySlot = process.env.VERCEL_ENV === 'preview' ? boundCaseCropRecoverySlot(job) : undefined;
   return json({ job: portfolioProgress(job),
       creatives: await readPortfolioCreatives(job),
+      ...(recoverySlot !== undefined ? { boundCaseCropRecoverySlot: recoverySlot } : {}),
       ...(isApprovedPreviewPortfolio(job) ? { previewPreparationApproved: true } : {}),
       ...(isPreviewAcceptance() && job.id === PREVIEW_TEST_APPROVAL.previousPortfolioId && job.previewAcceptanceError
         ? { previewInitializationAvailable: true } : {}),
