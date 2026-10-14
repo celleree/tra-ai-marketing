@@ -97,7 +97,12 @@ async function scenario(name, options, run) {
     const currentVideo = { ...video, locator: { ...video.locator, sourceVideoMediaId: requestedId } };
     const currentMedia = { ...media, id: requestedId, originalName: requestedId === mediaId ? options.videoName ?? 'fixture.mp4' : requestedId === availableB ? 'second.mp4' : 'third.mp4' };
     let value = {}, status = 200, isPreview = false;
-    if (path === '/api/creatives/portfolios/portrait-diagnostic') {
+    if(options.logoOverlay && path.startsWith('/api/media/files/')) {await route.fulfill({status:200,contentType:'image/png',body:Buffer.from(thumbnails[0].split(',')[1],'base64')});return;}
+    if(options.logoOverlay && path===`/api/creatives/creative_${'a'.repeat(32)}/logo`) {
+      assert.equal(request.method(),'POST');submissions.push({body,key:request.headers()['idempotency-key']});
+      assert.deepEqual(body,{logoMediaId:`media_${'7'.repeat(32)}`,anchor:'top-left'});
+      value={creative:{id:`creative_${'c'.repeat(32)}`,image:{url:thumbnails[1]},identity:{parentCreativeId:`creative_${'a'.repeat(32)}`},generationProvenance:{logoOverlaySource:{mediaId:body.logoMediaId},revision:{logoOverlay:{version:1,anchor:body.anchor,outputSha256:'d'.repeat(64)}}}}};
+    } else if (path === '/api/creatives/portfolios/portrait-diagnostic') {
       assert.equal(request.method(), 'GET'); value = { slotIndex: 2, timestampMs: 21333, crop: { left: 0, top: 0, width: 600, height: 330 },
         portfolioId: `portfolio_${'4'.repeat(32)}`, frameIdentity: { caseFrameId: frame.frameId, selectedFrameId: frame.frameId, caseTimestampMs: 21333, selectedCandidateIndex: 66 },
         cropDecision: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 450, overlayDepthPermille: 400 },
@@ -212,7 +217,7 @@ async function scenario(name, options, run) {
   // Abort every external request; the harness never reaches an auth, storage or provider service.
   await page.route(/^https:\/\//, route => route.abort());
   try {
-    const target = new URL(url);
+    const target = new URL(options.logoOverlay ? '/tests/browser/logo-overlay.html' : url, url);
     if (options.linkedVideo) target.searchParams.set('videoMediaId', options.linkedVideo);
     if (options.linkedLayout) target.searchParams.set('layoutMediaId', options.linkedLayout);
     if (options.acceptancePreview) target.searchParams.set('acceptancePreview', '1');
@@ -221,7 +226,8 @@ async function scenario(name, options, run) {
     if (options.previewInitialization) target.searchParams.set('portfolio', previewSourceId);
     if (options.savedPortfolio) { target.searchParams.set('portfolio', job().id); target.searchParams.set('review', id); }
     await page.goto(target.href);
-    await page.getByRole('button', { name: options.caseAmendment ? 'Preview amendment without generating' : 'Generate creatives', exact: true }).waitFor();
+    if(options.logoOverlay) await page.getByRole('button',{name:'Add saved logo without AI',exact:true}).waitFor();
+    else await page.getByRole('button', { name: options.caseAmendment ? 'Preview amendment without generating' : 'Generate creatives', exact: true }).waitFor();
     if (!options.runWhilePending) await page.waitForFunction(() => !document.body.textContent.includes('Restoring saved videos'));
     await run({ page, calls, submissions, videoActions, response, bindings, saves, previewBatches, previewActivity, releaseSourceReads, releasePortfolioAdvance,
       denyAccess: (key, status) => { accessDenials[key] = status; },
@@ -233,6 +239,17 @@ async function scenario(name, options, run) {
 const generateButton = page => page.getByRole('button', { name: 'Generate creatives', exact: true });
 const ready = async page => { await page.locator('textarea').fill('Create four distinct concepts.'); await page.getByText('Video material ready').waitFor(); };
 try {
+  for(const denial of [false,true]) await scenario(`Original logo-only version saves without generation${denial?' after sign-in denial':''}`,{logoOverlay:true,width:375,...(denial?{accessDenials:{[`POST /api/creatives/creative_${'a'.repeat(32)}/logo`]:401}}:{})},async({page,calls,submissions})=>{
+    await page.getByRole('button',{name:'Add saved logo without AI',exact:true}).click();
+    await page.getByRole('img',{name:'Saved original TRA logo',exact:true}).waitFor();
+    await page.getByLabel('Logo position').selectOption('top-left');
+    assert.equal(submissions.length,0);await page.getByRole('button',{name:'Save logo-only version',exact:true}).click();
+    if(denial){await page.getByText('Sign in to save this logo-only version. The original is unchanged.',{exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Save logo-only version',exact:true}).isDisabled(),true);assert.equal(submissions.length,0);}
+    else{await page.getByText('Logo-only version saved. Original preserved.',{exact:true}).waitFor();await page.getByRole('img',{name:'New creative with original TRA logo',exact:true}).waitFor();assert.equal(submissions.length,1);assert.match(submissions[0].key,/^[a-f0-9-]{36}$/);}
+    assert.equal(calls.filter(([path,method])=>method==='POST'&&path.endsWith('/revise')).length,0);
+    assert.equal(calls.filter(([path])=>path==='/api/creatives/portfolios').length,0);
+    const bounds=await page.evaluate(()=>({body:document.documentElement.scrollWidth,viewport:innerWidth}));assert.ok(bounds.body<=bounds.viewport+1);
+  });
   await scenario('Compact observations retain duplicate timestamps and mixed selections after mobile reload', { compactStatements: true, frameCount: 2, width: 375 }, async ({ page, response }) => {
     const row = page.getByRole('checkbox', { name: 'Exact repeated $100 statement. 00:01, 00:02', exact: true });
     await row.waitFor(); assert.equal(await row.evaluate(input => input.indeterminate), true);

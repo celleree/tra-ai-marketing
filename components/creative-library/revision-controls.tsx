@@ -1,5 +1,6 @@
 'use client';
 
+import { LogoOverlayControl } from './logo-overlay-control';
 import { useRef, useState, type FormEvent } from 'react';
 import { createSubmissionIdentity, SUBMISSION_HEADER } from '@/lib/creatives/submission-id';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
@@ -115,6 +116,7 @@ export function RevisionControls({ creative, onSaved, showOtherOperations = true
 
   return (
     <div className={styles.revisionControls}>
+      <LogoOverlayControl creative={creative} onSaved={onSaved} />
       <button type="button" className={styles.secondaryButton} disabled={busy} aria-expanded={editOpen}
         onClick={() => { setEditOpen(current => !current); setError(''); setSaved(null); }}>
         Edit
