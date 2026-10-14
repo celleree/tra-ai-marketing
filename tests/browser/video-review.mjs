@@ -99,6 +99,9 @@ async function scenario(name, options, run) {
     let value = {}, status = 200, isPreview = false;
     if (path === '/api/creatives/portfolios/portrait-diagnostic') {
       assert.equal(request.method(), 'GET'); value = { slotIndex: 2, timestampMs: 21333, crop: { left: 0, top: 0, width: 600, height: 330 },
+        portfolioId: `portfolio_${'4'.repeat(32)}`, frameIdentity: { caseFrameId: frame.frameId, selectedFrameId: frame.frameId, caseTimestampMs: 21333, selectedCandidateIndex: 66 },
+        cropDecision: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 450, overlayDepthPermille: 400 },
+        originalDimensions: { width: 600, height: 600 }, originalPng: { dataUrl: thumbnails[0], width: 600, height: 600 }, originalPreviewError: '',
         assessmentStatus: 'COMPLETE', assessment: { eyes: 'UNCERTAIN', sourceOverlay: { version: 2, status: 'UNSAFE' }, observableReason: 'Visible mark remains.' },
         failedChecks: ['eyes', 'sourceOverlay'], png: { dataUrl: thumbnails[0], width: 600, height: 330, matchesPinned: true }, previewError: '' };
     } else if (path === '/api/creatives/portfolios/case-amendment') {
@@ -233,7 +236,11 @@ try {
     await failedCard.getByRole('button', { name: 'Show portrait diagnostic for Creative 2', exact: true }).click();
     if (denial) await page.getByText('Generation is paused. Sign in to restore the same saved portfolio.', { exact: false }).waitFor();
     else { await page.getByText('Model reason: Visible mark remains.', { exact: true }).waitFor();
-      await page.getByRole('img', { name: 'Exact assessed portrait crop for Creative 2' }).waitFor(); }
+      await page.getByRole('img', { name: 'Exact assessed portrait crop for Creative 2' }).waitFor();
+      await page.getByText('Saved case frame: 21.333 seconds. Selected candidate: 66.', { exact: true }).waitFor();
+      await page.getByText('Uncropped source PNG: 600 x 600 pixels. Crop coordinates are relative to this extracted PNG.', { exact: true }).waitFor();
+      await page.getByText('Uncropped source PNG for comparison', { exact: true }).click();
+      await page.getByRole('img', { name: 'Exact uncropped source frame for Creative 2' }).waitFor(); }
     assert.equal(await page.getByText('1 / 2', { exact: true }).count(), 1);
     assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 0);
     assert.ok(calls.filter(([path]) => path.includes('portrait-diagnostic')).every(([, method]) => method === 'GET'));

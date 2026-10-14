@@ -18,8 +18,18 @@ export async function portfolioPortraitDiagnostic(job: CreativePortfolioJob, slo
     throw new Error('A paused saved case with a pinned portrait is required.');
   }
   const state = selected.providerPortrait, selection = selected.selection, choices = caseReviewChoices(job, slotIndex);
+  const binding = selection.candidateBindings![0], caseFrame = choices!.frames![0];
+  if (!caseFrame || caseFrame.frameId !== binding.frameId || caseFrame.timestampMs !== binding.timestampMs) {
+    throw new Error('The saved portrait differs from the confirmed case frame.');
+  }
   const assessment = await readCandidateSuitability(providerPortraitIdentity(selection, state, selected.selectionModel), { storage, deadlineAtMs: Date.now() });
   const result = {
+    portfolioId: job.id, frameIdentity: { selectedFrameId: binding.frameId, selectedCandidateIndex: binding.candidateIndex,
+      caseFrameId: caseFrame.frameId, caseTimestampMs: caseFrame.timestampMs },
+    cropDecision: selection.sourceOverlays![0],
+    originalDimensions: null as null | { width: number; height: number },
+    originalPng: null as null | { dataUrl: string; width: number; height: number },
+    originalPreviewError: '',
     slotIndex, timestampMs: selection.candidateBindings![0].timestampMs, crop: state.crop,
     assessmentStatus: assessment.status,
     assessment: assessment.status === 'COMPLETE' ? assessment.assessment : null,
@@ -42,12 +52,18 @@ export async function portfolioPortraitDiagnostic(job: CreativePortfolioJob, slo
     if (extracted.frames.length !== 1 || createHash('sha256').update(frame.buffer).digest('hex') !== state.sourcePngSha256) {
       throw new Error('The original PNG differs from the pinned source.');
     }
+    const originalMetadata = await sharp(frame.buffer).metadata();
+    result.originalDimensions = { width: originalMetadata.width!, height: originalMetadata.height! };
     const [prepared] = await prepareProviderVideoFrames([{ ...frame, expectedProviderPngSha256: state.providerPngSha256, expectedCrop: state.crop }]);
     // Keep the inline response below function response limits without changing the inspected pixels.
     if (prepared.providerBuffer.length > 2_500_000) throw new Error('Pinned PNG is too large for inline preview.');
     const metadata = await sharp(prepared.providerBuffer).metadata();
     result.png = { dataUrl: `data:image/png;base64,${prepared.providerBuffer.toString('base64')}`,
       width: metadata.width!, height: metadata.height!, matchesPinned: true };
+    // Share the existing inline byte budget. Never resize/substitute either evidence image.
+    if (frame.buffer.length + prepared.providerBuffer.length <= 2_500_000) {
+      result.originalPng = { dataUrl: `data:image/png;base64,${frame.buffer.toString('base64')}`, ...result.originalDimensions };
+    } else result.originalPreviewError = 'The uncropped PNG exceeds the shared inline preview limit. Its verified dimensions are shown; no resized image was substituted.';
   } catch {
     result.previewError = 'The exact pinned PNG could not be displayed. Cached assessment and crop are shown; no pixels were substituted or reassessed.';
   }
