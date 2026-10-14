@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newCreativePortfolio, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
-const mocks = vi.hoisted(() => ({ access: vi.fn(), create: vi.fn(), initialize: vi.fn(), read: vi.fn(), update: vi.fn(), advance: vi.fn(), creatives: vi.fn() }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), create: vi.fn(), initialize: vi.fn(), read: vi.fn(), update: vi.fn(), advance: vi.fn(), creatives: vi.fn(), recover: vi.fn() }));
+vi.mock('@/lib/creatives/portfolio-bound-case-recovery', () => ({ recoverBoundCaseCrop: mocks.recover }));
 vi.mock('@/lib/creatives/preview-test-initialization', () => ({ initializeApprovedPreviewPortfolio: mocks.initialize }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.access }));
 vi.mock('@/lib/creatives/portfolio-job-storage', () => ({
@@ -31,6 +32,21 @@ beforeEach(() => {
 });
 
 describe('resumable portfolio API', () => {
+  it('prepares failed bound-frame recovery only in Preview, with authentication and no advance', async () => {
+    const body = { id: job.id, action: 'recover-bound-case-crop', slotIndex: 2 };
+    vi.stubEnv('VERCEL_ENV', 'production'); expect((await PATCH(request(body))).status).toBe(409);
+    expect(mocks.recover).not.toHaveBeenCalled();
+    vi.stubEnv('VERCEL_ENV', 'preview'); mocks.recover.mockResolvedValue(job);
+    expect((await PATCH(request(body))).status).toBe(200);
+    expect(mocks.recover).toHaveBeenCalledExactlyOnceWith(job.id, 2); expect(mocks.advance).not.toHaveBeenCalled();
+    mocks.recover.mockClear(); mocks.access.mockResolvedValue({ allowed: false, status: 401, error: 'Sign in' });
+    expect((await PATCH(request(body))).status).toBe(401); expect(mocks.recover).not.toHaveBeenCalled();
+  });
+  it('rejects hidden generation inputs on explicit crop recovery', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    expect((await PATCH(request({ id: job.id, action: 'recover-bound-case-crop', slotIndex: 2, advance: true }))).status).toBe(400);
+    expect(mocks.recover).not.toHaveBeenCalled(); expect(mocks.advance).not.toHaveBeenCalled();
+  });
   it('offers the visible initialization action only on the exact stopped Preview source without mutating it', async () => {
     vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
     job.id = previewApproval.PREVIEW_TEST_APPROVAL.previousPortfolioId;

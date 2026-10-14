@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import sharp from 'sharp';
+import { cropForSourceOverlay } from '@/lib/video/source-overlay';
 import { fetchWithProviderUsage, emitProviderReuse } from '@/lib/ai/provider-telemetry';
 import { VIDEO_SELECTION_TIMEOUT_MS } from '@/lib/video/concept-selection';
 import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY } from '@/lib/video/human-frame-selection';
@@ -23,7 +25,7 @@ export type CandidateAssessmentIdentity = {
   sourceVideoMediaId: string; sourceVideoContentHash: string; librarySha256: string; preparationSha256: string;
   representativeFrameId: string; candidateIndex: number; timestampMs: number; frameSha256: string;
   /** Absent preserves the original prompt and cache identity for existing work. */
-  assessmentContract?: 'head-and-shoulders-v1';
+  assessmentContract?: 'head-and-shoulders-v1' | 'bound-case-portrait-v1' | 'clean-portrait-v1';
 };
 type RetryReason = 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME';
 type RecordState = { version: 1; identity: CandidateAssessmentIdentity } & (
@@ -124,7 +126,7 @@ const assess = async (identity: CandidateAssessmentIdentity, image: Buffer, requ
     throw new Error('Candidate suitability image failed integrity or size admission.');
   }
   const body = JSON.stringify({ model: identity.model, store: false, reasoning: { effort: 'low' }, max_output_tokens: 2048,
-    input: [{ role: 'developer', content: [{ type: 'input_text', text: identity.assessmentContract ? headAndShouldersRules : rules }] }, { role: 'user', content: [
+    input: [{ role: 'developer', content: [{ type: 'input_text', text: identity.assessmentContract === 'clean-portrait-v1' ? `${rules}\nThese are the actual retained portrait pixels. Accept only CLEAN overlays; any remaining mark is UNSAFE. Reassess all human quality fields on these pixels.` : identity.assessmentContract ? headAndShouldersRules : rules }] }, { role: 'user', content: [
       { type: 'input_text', text: JSON.stringify({ policy: identity.policy, frameSha256: identity.frameSha256,
         candidateIndex: identity.candidateIndex, ...(identity.assessmentContract ? { assessmentContract: identity.assessmentContract } : {}) }) },
       { type: 'input_image', image_url: `data:image/jpeg;base64,${image.toString('base64')}`, detail: 'high' },
@@ -140,7 +142,30 @@ const assess = async (identity: CandidateAssessmentIdentity, image: Buffer, requ
   return parseCandidateSuitability(JSON.parse(output));
 };
 
-/** One claimed candidate and at most one visual provider call. Uncertain work never repeats automatically. */
+/** Two separately cached stages: assess crop feasibility, then the deterministic retained pixels. */
+async function assessBoundPortrait(identity: CandidateAssessmentIdentity, image: Buffer, dependencies: CandidateAssessmentDependencies) {
+  if (sha(image) !== identity.frameSha256) throw new Error('Bound portrait source pixels changed.');
+  const initial = await assessCandidateWithCache({ ...identity, assessmentContract: 'head-and-shoulders-v1' }, image, dependencies);
+  if (initial.status !== 'COMPLETE') throw new Error('Portrait crop assessment needs explicit recovery.');
+  if (!isSuitableCandidate(initial.assessment)) return initial.assessment;
+  const metadata = await sharp(image).metadata();
+  if (!metadata.width || !metadata.height) throw new Error('Portrait dimensions are unavailable.');
+  const crop = cropForSourceOverlay(initial.assessment.sourceOverlay, metadata.width, metadata.height);
+  // Never upscale an inadequate inset or ask the image provider to invent missing detail.
+  if ((crop?.width ?? metadata.width) < 256 || (crop?.height ?? metadata.height) < 256) return { ...initial.assessment,
+    observableReason: 'Retained head-and-shoulders portrait has insufficient resolution.',
+    sourceOverlay: { version: 2 as const, status: 'UNSAFE' as const } };
+  if (!crop) return initial.assessment;
+  const retained = await sharp(image).extract(crop).jpeg({ quality: 95 }).toBuffer();
+  const verified = await assessCandidateWithCache({ ...identity, frameSha256: sha(retained),
+    assessmentContract: 'clean-portrait-v1' }, retained, dependencies);
+  if (verified.status !== 'COMPLETE') throw new Error('Retained portrait assessment needs explicit recovery.');
+  return { ...verified.assessment, sourceOverlay: isSuitableCandidate(verified.assessment)
+    && verified.assessment.sourceOverlay.status === 'CLEAN' ? initial.assessment.sourceOverlay
+      : { version: 2 as const, status: 'UNSAFE' as const } };
+}
+
+/** Each stage has its own durable cache. Uncertain provider work never repeats automatically. */
 export const assessCandidateWithCache = async (identity: CandidateAssessmentIdentity, image: Buffer,
   dependencies: CandidateAssessmentDependencies): Promise<Exclude<CandidateAssessmentState, { status: 'MISSING' }>> => {
   const { read, write, now } = recordFor(identity, dependencies);
@@ -170,7 +195,8 @@ export const assessCandidateWithCache = async (identity: CandidateAssessmentIden
     return checkpoint({ version: 1, identity, status: 'RETRY_REQUIRED', reason: 'INSUFFICIENT_TIME' });
   }
   let assessment: CandidateSuitabilityAssessment;
-  try { assessment = await assess(identity, image, dependencies.request ?? fetch); }
+  try { assessment = identity.assessmentContract === 'bound-case-portrait-v1'
+    ? await assessBoundPortrait(identity, image, dependencies) : await assess(identity, image, dependencies.request ?? fetch); }
   catch { return checkpoint({ version: 1, identity, status: 'RETRY_REQUIRED', reason: 'PROVIDER_FAILED' }); }
   return checkpoint({ version: 1, identity, status: 'COMPLETE', assessment });
 };

@@ -88,6 +88,9 @@ async function advancePortfolio(
       : claimCreativePortfolio(current, Date.now(), token, isApprovedPreviewPortfolio(current)).job, storage);
   if (job.lease?.id !== token) return !job.lease && caseAssociationNeedsReview(job) ? caseAssociationHold(job) : { job };
   const approvedPreview = isApprovedPreviewPortfolio(job);
+  const frameRejectionMessage = job.videoCaseAmendment
+    ? 'The single confirmed person/frame for this case did not pass portrait or overlay checks. Other video frames were not searched. Saved creatives remain available; inspect this frame before an explicit recovery.'
+    : noSuitableHumanFrameMessage;
   const stopAfterError = (current: CreativePortfolioJob, message: string) => approvedPreview
     ? { ...current, previewAcceptanceError: current.previewAcceptanceError ?? (message.slice(0, 1000) || 'This approved Preview test is stopped.') } : current;
   const slotIndex = job.lease.slotIndex;
@@ -320,7 +323,8 @@ async function advancePortfolio(
         const attempt = resolvePortfolioVideoSelectionAttempt(job, token, proposed);
         admissionAttempt = attempt;
         const cache = { model: attempt.selectionModel, deadlineAtMs, retry: attempt.retry, ...(storage ? { storage } : {}),
-          ...(approvedPreview ? { assessmentContract: PREVIEW_TEST_APPROVAL.assessmentContract } : {}) };
+          ...(job.videoCaseAmendment ? { assessmentContract: 'bound-case-portrait-v1' as const }
+            : approvedPreview ? { assessmentContract: PREVIEW_TEST_APPROVAL.assessmentContract } : {}) };
         const preflight = await preflightPortfolioVideoFrames({ sourceAnalysis: context.sourceAnalysis,
           sources: videoSources, finalConcept: concept, selectionPolicy: attempt.selectionPolicy,
           reuseContext: attempt.reuseContext, cache, reviewChoices }).catch(error => {
@@ -333,8 +337,8 @@ async function advancePortfolio(
         }, storage) };
         if (preflight.status === 'NO_SUITABLE_HUMAN') return {
           job: await updateCreativePortfolio(id, current =>
-            blockPortfolioVideoSelection(current, token, attempt, noSuitableHumanFrameMessage), storage),
-          error: noSuitableHumanFrameMessage,
+            blockPortfolioVideoSelection(current, token, attempt, frameRejectionMessage), storage),
+          error: frameRejectionMessage,
           status: 409,
         };
         if (preflight.status === 'BUSY') return { job: await updateCreativePortfolio(id,
@@ -373,8 +377,8 @@ async function advancePortfolio(
         }
         if (selected.status === 'NO_SUITABLE_HUMAN') {
           return { job: await updateCreativePortfolio(id, current =>
-            blockPortfolioVideoSelection(current, token, attempt, noSuitableHumanFrameMessage), storage),
-            error: noSuitableHumanFrameMessage, status: 409 };
+            blockPortfolioVideoSelection(current, token, attempt, frameRejectionMessage), storage),
+            error: frameRejectionMessage, status: 409 };
         }
         return { job: await updateCreativePortfolio(id, current =>
           finishPortfolioVideoFrameSelection(current, token, selected.selection), storage) };

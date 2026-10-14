@@ -60,6 +60,7 @@ export async function createCreativePortfolio(request: ValidGenerateCreativeRequ
 /** Apply synchronous, side-effect-free state transitions against the latest stored version. */
 export async function updateCreativePortfolio(
   id: string, change: (current: CreativePortfolioJob) => CreativePortfolioJob, storage = getVideoIntelligenceStorage(),
+  options: { boundCaseCropRecoverySlot?: number } = {},
 ) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const current = await read(id, storage);
@@ -91,12 +92,24 @@ export async function updateCreativePortfolio(
     if (!preservesVideoDependencies(dependencies(current.job), dependencies(next))) {
       throw new Error('Portfolio video dependency bindings and completed references are immutable.');
     }
+    const recoveredIndex = options.boundCaseCropRecoverySlot;
+    const allowsCropRecovery = (index: number) => {
+      const previous = current.job.slots[index], target = next.slots[index];
+      if (recoveredIndex !== previous.index || !current.job.videoCaseAmendment || current.job.lease || next.lease
+        || previous.status !== 'BLOCKED' || previous.boundCaseCropRecovery || !previous.error?.startsWith('No suitable human frame was found.')
+        || previous.videoSelection?.version !== 2 || previous.videoSelection.selection || previous.videoSelection.retryAuthorization
+        || current.job.slots.some(other => other.index !== previous.index && other.status !== 'SAVED')) return false;
+      const expected = { ...previous, status: 'PENDING', boundCaseCropRecovery: { version: 1, previousError: previous.error } };
+      delete expected.error;
+      return isDeepStrictEqual(target, expected) && isDeepStrictEqual(next.planning, current.job.planning);
+    };
     if (next.id !== id || next.createdAtMs !== current.job.createdAtMs || next.updatedAtMs < current.job.updatedAtMs
       || !isDeepStrictEqual(next.request, current.job.request)
       || !isDeepStrictEqual(next.slots.map(slot => [slot.index, slot.creativeId]), current.job.slots.map(slot => [slot.index, slot.creativeId]))
       || (current.job.snapshot && !isDeepStrictEqual(next.snapshot, current.job.snapshot))
       || current.job.slots.some((slot, index) => (slot.status === 'SAVED' && next.slots[index].status !== 'SAVED')
-        || (slot.status === 'BLOCKED' && next.slots[index].status !== 'BLOCKED'
+        || (slot.boundCaseCropRecovery && !isDeepStrictEqual(slot.boundCaseCropRecovery, next.slots[index].boundCaseCropRecovery))
+        || (slot.status === 'BLOCKED' && next.slots[index].status !== 'BLOCKED' && !allowsCropRecovery(index)
           && !(slot.videoSelection && current.job.snapshot?.batchPlan.creatives[index]?.strategy.execution.subjectSource === 'non-human'
             && next.slots[index].status === 'PENDING' && !next.slots[index].videoSelection)))) {
       throw new Error('Portfolio update may not replace its request, plan, identities or completed work.');

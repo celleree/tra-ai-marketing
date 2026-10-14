@@ -57,7 +57,7 @@ describe('explicit source case amendments', () => {
     const proposed = proposeCaseAmendment(job, pairs);
     expect(job).toEqual(original);
     expect(proposed.providerOperations).toEqual({ transcription: 0, planning: 0, audit: 0,
-      maximumFrameAssessments: 2, maximumPrimaryImages: 2, fallbackImages: 0 });
+      maximumFrameAssessments: 4, maximumPrimaryImages: 2, fallbackImages: 0 });
     proposed.creatives.forEach((concept, index) => {
       expect(concept.imageCopy?.shortSupport).toBe(segments[index].text);
       expect(concept.copy.primaryText).toBe(segments[index].text);

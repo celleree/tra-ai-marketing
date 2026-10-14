@@ -1,3 +1,4 @@
+import { recoverBoundCaseCrop } from '@/lib/creatives/portfolio-bound-case-recovery';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -83,8 +84,10 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.id !== 'string' || !isPortfolioId(body.id)
-      || !['advance', 'retry'].includes(body.action)
+      || !['advance', 'retry', 'recover-bound-case-crop'].includes(body.action)
       || (body.action === 'advance' && body.slotIndex !== undefined)
+      || (body.action === 'recover-bound-case-crop' && (!Number.isInteger(body.slotIndex) || body.slotIndex < 1 || body.slotIndex > MAX_PORTFOLIO_CREATIVES
+        || Object.keys(body).some(key => !['id', 'action', 'slotIndex'].includes(key))))
       || (body.action === 'retry' && body.slotIndex !== null
         && (!Number.isInteger(body.slotIndex) || body.slotIndex < 1 || body.slotIndex > MAX_PORTFOLIO_CREATIVES))) {
       return json({ error: 'Invalid portfolio action.' }, 400);
@@ -92,6 +95,11 @@ export async function PATCH(request: Request) {
     const execute = async (nonce?: string) => {
       const job = await readCreativePortfolio(body.id);
       if (!job) return json({ error: 'Portfolio not found.' }, 404);
+      if (body.action === 'recover-bound-case-crop') {
+        if (process.env.VERCEL_ENV !== 'preview') return json({ error: 'Bound frame recovery is available only in Preview.' }, 409);
+        try { return await result(await recoverBoundCaseCrop(body.id, body.slotIndex)); }
+        catch (error) { return json({ error: error instanceof Error ? error.message : 'Bound frame recovery is unavailable.' }, 409); }
+      }
       if (body.action === 'retry') {
         if (isPreviewAcceptance() && isPreviewTestPortfolio(job)) throw new PreviewAcceptanceError('Preview acceptance does not authorize paid retries. Saved results remain available.');
         const retryable = body.slotIndex === null ? !job.snapshot && job.planningError

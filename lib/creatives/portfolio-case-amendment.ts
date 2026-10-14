@@ -78,7 +78,7 @@ export function proposeCaseAmendment(job: CreativePortfolioJob, pairs: VideoCase
     baseSnapshotSha256: reviewSourceSha256(job.snapshot), pairs }, false);
   return { amendment, attributionNotice: CASE_ATTRIBUTION_NOTICE,
     creatives: job.slots.map(slot => effectiveCaseConcept({ ...job, videoCaseAmendment: amendment }, slot.index, false)),
-    providerOperations: { transcription: 0, planning: 0, audit: 0, maximumFrameAssessments: pairs.length,
+    providerOperations: { transcription: 0, planning: 0, audit: 0, maximumFrameAssessments: pairs.length * 2,
       maximumPrimaryImages: pairs.length, fallbackImages: 0 } };
 }
 

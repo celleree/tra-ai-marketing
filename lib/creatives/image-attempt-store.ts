@@ -71,9 +71,10 @@ async function change<T>(runId: string, storage: VideoIntelligenceStorage,
 }
 
 /** An amendment must not recycle an already purchased or uncertain image intent. Read-only. */
-export async function assertNoImageAttempts(runId: string, storage = getVideoIntelligenceStorage()) {
+export async function assertNoImageAttempts(runId: string, storage = getVideoIntelligenceStorage(), operationId?: string) {
   const stored = await storage.read(key(runId));
-  if (stored && Object.keys(parse(stored.bytes).attempts).length) {
+  if (stored && Object.keys(parse(stored.bytes).attempts).some(id => !operationId
+    || id === attemptKey(operationId, 'primary') || id === attemptKey(operationId, 'fallback'))) {
     throw new Error('This portfolio has image attempts. Preserve its paid intent; a case amendment cannot replace it.');
   }
 }

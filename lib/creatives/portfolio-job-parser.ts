@@ -227,6 +227,10 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
         || !['PENDING', 'SAVED', 'RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)
         || (['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status) ? !text(slot.error) : slot.error !== undefined)
         || (slot.status === 'BLOCKED' && slot.videoSelection === undefined)
+        || (slot.boundCaseCropRecovery !== undefined && (!job.videoCaseAmendment
+          || !record(slot.boundCaseCropRecovery) || !exact(slot.boundCaseCropRecovery, ['version', 'previousError'])
+          || slot.boundCaseCropRecovery.version !== 1 || !text(slot.boundCaseCropRecovery.previousError)
+          || slot.boundCaseCropRecovery.previousError.length > 1000))
         || (slot.videoSelection !== undefined && !validSlotVideoSelection(slot.videoSelection, slot.status, job)))
       || !record(job.planning) || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planning.phase)) throw new Error();
 

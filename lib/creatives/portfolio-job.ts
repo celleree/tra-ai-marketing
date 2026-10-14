@@ -34,7 +34,7 @@ export type PortfolioVideoSelectionState = LegacyPortfolioVideoSelectionState | 
   retryAuthorization?: { version: 1 };
 };
 export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'; error?: string;
-  videoSelection?: PortfolioVideoSelectionState };
+  videoSelection?: PortfolioVideoSelectionState; boundCaseCropRecovery?: { version: 1; previousError: string } };
 export type PortfolioPlanningPhase = 'INITIAL_PLAN' | 'DIVERSITY_AUDIT' | 'TARGETED_REPAIR' | 'READY_TO_RENDER';
 export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot; plannerArgs: CreativeBatchPlannerArgs };
 export type PortfolioPlanningState =
