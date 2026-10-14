@@ -63,7 +63,7 @@ describe('bound case actual provider PNG assessment', () => {
       expectedProviderPngSha256: input.state.providerPngSha256, expectedCrop: input.state.crop }])).rejects.toThrow('pixels changed');
     expect([...storage.data.values()].map(v => JSON.parse(v.bytes.toString()).identity.assessmentContract))
       .toEqual(expect.arrayContaining([undefined, 'head-and-shoulders-v1', 'bound-case-portrait-v2', 'clean-provider-portrait-v1']));
-  });
+  }, 15_000); // Several image codecs/pixel comparisons share CPU with the full CI suite.
   it('includes exact source PNG and crop in cache identity, and refuses too-small actual attachments', async () => {
     const { prepared, input } = await actualPortrait();
     expect(input.identity).toMatchObject({ frameSha256: prepared.providerPngSha256, sourcePngSha256: sha(sourcePng), sourceCrop: prepared.crop });
