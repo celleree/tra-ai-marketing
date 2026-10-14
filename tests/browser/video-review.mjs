@@ -66,7 +66,7 @@ async function scenario(name, options, run) {
   if (options.longStatements) choices.claims = segments.map(item => ({ ...claim, startSegmentIndex: item.segmentIndex, endSegmentIndex: item.segmentIndex }));
   const previewBatches = [], previewActivity = { active: 0, peak: 0 }; let previewFailure = Boolean(options.failPreviews), brokenPreview = Boolean(options.brokenPreview);
   const saves = []; let failure = 0, loadFailure = 0, sourceFailure = 0, revisionNumber = 1;
-  let caseApplied = false;
+  let caseApplied = false, cropStage = 'failed';
   let revision = 'revision-1', phase = options.phase ?? 'COMPLETE', issue = options.issue;
   const response = () => ({ draft: { id, version: 1, artifactType: 'VIDEO_REVIEW_DRAFT', providerEligible: false,
     choices, claimSnapshots: segments.filter(item => choices.claims?.some(reference => reference.type === 'VIDEO_TRANSCRIPT' && reference.startSegmentIndex === item.segmentIndex))
@@ -103,7 +103,12 @@ async function scenario(name, options, run) {
         cropDecision: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 450, overlayDepthPermille: 400 },
         originalDimensions: { width: 600, height: 600 }, originalPng: { dataUrl: thumbnails[0], width: 600, height: 600 }, originalPreviewError: '',
         assessmentStatus: 'COMPLETE', assessment: { eyes: 'UNCERTAIN', sourceOverlay: { version: 2, status: 'UNSAFE' }, observableReason: 'Visible mark remains.' },
+        portraitPin: {sourcePngSha256:'a'.repeat(64),providerPngSha256:'b'.repeat(64)}, sourceVideoContentHash:video.locator.sourceVideoContentHash, recoveryEligible:Boolean(options.revisedCrop && cropStage==='failed'),
         failedChecks: ['eyes', 'sourceOverlay'], png: { dataUrl: thumbnails[0], width: 600, height: 330, matchesPinned: true }, previewError: '' };
+      if(options.revisedCrop && new URL(request.url()).searchParams.has('edge')) {
+        assert.equal(new URL(request.url()).searchParams.get('removePermille'),'437');
+        value.proposed={dataUrl:thumbnails[0],width:360,height:360,state:{sourcePngSha256:'a'.repeat(64),providerPngSha256:'c'.repeat(64)},overlay:{version:2,status:'EDGE_CROP',edge:'BOTTOM',removePermille:437,overlayDepthPermille:437}};
+      }
     } else if (path === '/api/creatives/portfolios/case-amendment') {
       const caseClaims = ['My debt went from $42,000 to $250. This was my individual result.', 'TRA reduced what I owed by 78%. I felt relieved about my case.'];
       const caseFrames = [frame.frameId, `video-frame:${'9'.repeat(64)}`];
@@ -153,7 +158,19 @@ async function scenario(name, options, run) {
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
-      if (options.portraitDiagnostic) {
+      if (options.revisedCrop) {
+        if(request.method()==='PATCH') {
+          submissions.push(body);assert.equal(body.slotIndex,2);assert.notEqual(body.action,'advance');assert.notEqual(body.action,'retry');
+          if(body.action==='recover-bound-case-crop') {assert.equal(cropStage,'failed');assert.equal(body.revision.timestampMs,21333);assert.equal(body.revision.frameId,frame.frameId);assert.equal(body.revision.sourceVideoContentHash,video.locator.sourceVideoContentHash);assert.equal(body.revision.previousProviderPngSha256,'b'.repeat(64));assert.equal(body.revision.revisedProviderPngSha256,'c'.repeat(64));cropStage='prepared';}
+          else if(body.action==='assess-bound-case-crop'){assert.equal(cropStage,'prepared');assert.equal(body.approved,true);cropStage='passed';}
+          else if(body.action==='generate-bound-case-crop'){assert.equal(cropStage,'passed');assert.equal(body.approved,true);cropStage='saved';}
+          else assert.fail('Unexpected recovery command');
+        }
+        const savedJob=job(cropStage==='failed'?'RETRY_REQUIRED':cropStage==='saved'?'SAVED':'PENDING',2);savedJob.slots[0].status='SAVED';
+        savedJob.slots[1].videoSelection={version:2,providerPortrait:{verified:cropStage==='passed'||cropStage==='saved'},...(cropStage==='failed'?{}:{portraitCropRevision:{assessmentAttempted:cropStage==='passed'||cropStage==='saved',imageAuthorized:cropStage==='saved'}})};
+        if(cropStage==='failed')savedJob.slots[1].error='The actual retained portrait PNG did not pass human or overlay checks. Saved creatives remain available.';
+        value={job:savedJob,creatives:[]};
+      } else if (options.portraitDiagnostic) {
         const savedJob = job('RETRY_REQUIRED', 2); savedJob.slots[0].status = 'SAVED';
         savedJob.slots[1].error = 'The actual retained portrait PNG did not pass human or overlay checks. Saved creatives remain available.';
         if (!options.noPortraitPin) savedJob.slots[1].videoSelection = { version: 2, providerPortrait: { verified: false } };
@@ -244,6 +261,34 @@ try {
     assert.equal(await page.getByText('1 / 2', { exact: true }).count(), 1);
     assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 0);
     assert.ok(calls.filter(([path]) => path.includes('portrait-diagnostic')).every(([, method]) => method === 'GET'));
+  });
+  for(const denied of [false,true]) await scenario(`Revised crop stages preserve case and never auto-generate${denied?' after authentication denial':''}`,{casePortfolio:true,revisedCrop:true,width:375},async({page,calls,submissions,response,denyAccess})=>{
+    const progress=page.getByRole('region',{name:'Saved portfolio progress'});
+    await page.getByRole('button',{name:'Show portrait diagnostic for Creative 2',exact:true}).click();
+    const recovery=page.getByRole('region',{name:'Creative 2 crop recovery'});
+    await recovery.getByLabel('Crop removal permille').fill('437');
+    assert.equal(await recovery.getByRole('button',{name:'Prepare revised crop without AI'}).count(),0);
+    await recovery.getByRole('button',{name:'Preview revised crop without AI'}).click();
+    await recovery.getByRole('img',{name:'Unapproved revised portrait for Creative 2'}).waitFor();
+    assert.equal(submissions.length,0);const prepare=recovery.getByRole('button',{name:'Prepare revised crop without AI'});assert.equal(await prepare.isDisabled(),true);
+    await recovery.getByRole('checkbox').check();await prepare.click();
+    const assess=progress.getByRole('button',{name:'Assess revised portrait for Creative 2'});await assess.waitFor();
+    assert.deepEqual(submissions.map(x=>x.action),['recover-bound-case-crop']);assert.equal(await progress.getByRole('button',{name:'Resume generation',exact:true}).count(),0);
+    assert.equal(await progress.getByRole('button',{name:'Generate Creative 2 from verified crop'}).count(),0);
+    await page.reload();await progress.getByRole('button',{name:'Assess revised portrait for Creative 2'}).waitFor();
+    assert.deepEqual(submissions.map(x=>x.action),['recover-bound-case-crop']);assert.deepEqual(response().draft.choices.claims,[claim]);
+    if(denied)denyAccess('PATCH /api/creatives/portfolios',401);
+    await progress.getByRole('button',{name:'Assess revised portrait for Creative 2'}).click();
+    if(denied){await progress.getByText('Generation is paused. Sign in to restore the same saved portfolio.',{exact:false}).waitFor();assert.equal(await assess.isDisabled(),true);assert.equal(submissions.length,1);}
+    else{
+      const generate=progress.getByRole('button',{name:'Generate Creative 2 from verified crop'});await generate.waitFor();
+      assert.deepEqual(submissions.map(x=>x.action),['recover-bound-case-crop','assess-bound-case-crop']);assert.equal(await progress.getByRole('button',{name:'Resume generation',exact:true}).count(),0);
+      await page.reload();await generate.waitFor();assert.equal(submissions.length,2);
+      await generate.click();await progress.getByText('Generation complete.',{exact:true}).waitFor();
+      assert.deepEqual(submissions.map(x=>x.action),['recover-bound-case-crop','assess-bound-case-crop','generate-bound-case-crop']);
+    }
+    assert.equal(submissions.some(x=>['advance','retry'].includes(x.action)),false);
+    assert.ok(calls.filter(([path])=>path.includes('portrait-diagnostic')).every(([,method])=>method==='GET'));
   });
   for (const guard of ['missing-pin', 'active-step']) await scenario(`Portrait diagnostic failed-card guard ${guard}`, {
     casePortfolio: true, portraitDiagnostic: true, width: 375, noPortraitPin: guard === 'missing-pin', portraitLease: guard === 'active-step' }, async ({ page, calls }) => {

@@ -1,4 +1,4 @@
-import { recoverBoundCaseCrop, boundCaseCropRecoverySlot } from '@/lib/creatives/portfolio-bound-case-recovery';
+import { recoverBoundCaseCrop, boundCaseCropRecoverySlot, reviseBoundCaseCrop, assessRevisedBoundCaseCrop, authorizeRevisedBoundCaseImage, validBoundPortraitCropRequest, BoundPortraitRecoveryError } from '@/lib/creatives/portfolio-bound-case-recovery';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -13,7 +13,7 @@ import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { parseSubmissionId, SUBMISSION_HEADER, SubmissionConflictError } from '@/lib/creatives/submission-id';
 import { ReviewSelectionError } from '@/lib/video/review-selection';
 import { isPreviewAcceptance, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
-import { isPreviewTestPortfolio } from '@/lib/creatives/preview-portfolio-scope';
+import { withNormalPreviewPortfolio, isPreviewTestPortfolio } from '@/lib/creatives/preview-portfolio-scope';
 import { isApprovedPreviewPortfolio, PREVIEW_TEST_APPROVAL } from '@/lib/creatives/preview-test-approval';
 import { initializeApprovedPreviewPortfolio } from '@/lib/creatives/preview-test-initialization';
 import { assertPreviewAdvanceResponse, isApprovedPreviewAdvanceId, previewAdvanceReadback, PREVIEW_ADVANCE_HEADER,
@@ -86,10 +86,13 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.id !== 'string' || !isPortfolioId(body.id)
-      || !['advance', 'retry', 'recover-bound-case-crop'].includes(body.action)
+      || !['advance', 'retry', 'recover-bound-case-crop', 'assess-bound-case-crop', 'generate-bound-case-crop'].includes(body.action)
       || (body.action === 'advance' && body.slotIndex !== undefined)
       || (body.action === 'recover-bound-case-crop' && (!Number.isInteger(body.slotIndex) || body.slotIndex < 1 || body.slotIndex > MAX_PORTFOLIO_CREATIVES
-        || Object.keys(body).some(key => !['id', 'action', 'slotIndex'].includes(key))))
+        || Object.keys(body).some(key => !['id', 'action', 'slotIndex', 'revision'].includes(key))
+        || (body.revision !== undefined && !validBoundPortraitCropRequest(body.revision))))
+      || (['assess-bound-case-crop','generate-bound-case-crop'].includes(body.action) && (!Number.isInteger(body.slotIndex) || body.slotIndex < 1 || body.slotIndex > MAX_PORTFOLIO_CREATIVES
+        || Object.keys(body).some(key=>!['id','action','slotIndex','approved'].includes(key)) || body.approved!==true))
       || (body.action === 'retry' && body.slotIndex !== null
         && (!Number.isInteger(body.slotIndex) || body.slotIndex < 1 || body.slotIndex > MAX_PORTFOLIO_CREATIVES))) {
       return json({ error: 'Invalid portfolio action.' }, 400);
@@ -99,10 +102,21 @@ export async function PATCH(request: Request) {
       if (!job) return json({ error: 'Portfolio not found.' }, 404);
       if (body.action === 'recover-bound-case-crop') {
         if (process.env.VERCEL_ENV !== 'preview') return json({ error: 'Bound frame recovery is available only in Preview.' }, 409);
-        try { return await result(await recoverBoundCaseCrop(body.id, body.slotIndex)); }
-        catch (error) { return json({ error: error instanceof Error ? error.message : 'Bound frame recovery is unavailable.' }, 409); }
+        try { return await result(body.revision ? await reviseBoundCaseCrop(body.id,body.slotIndex,body.revision) : await recoverBoundCaseCrop(body.id, body.slotIndex)); }
+        catch (error) { return json({error: body.revision ? (error instanceof BoundPortraitRecoveryError ? error.message : 'Revised crop preparation is unavailable; no provider call started.') : error instanceof Error ? error.message : 'Bound frame recovery is unavailable.'},409); }
+      }
+      if (['assess-bound-case-crop','generate-bound-case-crop'].includes(body.action)) {
+        if (process.env.VERCEL_ENV!=='preview') return json({error:'Bound crop testing is available only in Preview.'},409);
+        try {
+          if (body.action==='assess-bound-case-crop') return await result(await withNormalPreviewPortfolio(job,access.userId,()=>assessRevisedBoundCaseCrop(body.id,body.slotIndex,access.userId,undefined,{deadlineAtMs})));
+          await authorizeRevisedBoundCaseImage(body.id,body.slotIndex);
+          const step=await advanceCreativePortfolio(body.id,access.userId,request.url,undefined,{deadlineAtMs});
+          return await result(step.job,step.status,step.error,step.retryAfterSeconds);
+        } catch(error) { return json({error:error instanceof BoundPortraitRecoveryError ? error.message : 'Bound crop step is unavailable. Reload saved progress; no repeat call is authorized.'},409); }
       }
       if (body.action === 'retry') {
+        const target=body.slotIndex===null ? null : job.slots[body.slotIndex-1];
+        if(target?.videoSelection?.version===2 && target.videoSelection.portraitCropRevision) return json({error:'Revised portrait work does not authorize repeated paid attempts. Inspect the saved diagnostic.'},409);
         if (isPreviewAcceptance() && isPreviewTestPortfolio(job)) throw new PreviewAcceptanceError('Preview acceptance does not authorize paid retries. Saved results remain available.');
         const retryable = body.slotIndex === null ? !job.snapshot && job.planningError
           : job.snapshot && job.slots.some(slot => slot.index === body.slotIndex && slot.status === 'RETRY_REQUIRED');

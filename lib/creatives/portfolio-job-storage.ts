@@ -1,4 +1,4 @@
-import { sameProviderPortrait } from '@/lib/video/provider-portrait-contract';
+import { sameProviderPortrait, validPortraitCropRevision } from '@/lib/video/provider-portrait-contract';
 import { preservesVideoDependencies } from '@/lib/creatives/portfolio-video-dependency';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -61,7 +61,7 @@ export async function createCreativePortfolio(request: ValidGenerateCreativeRequ
 /** Apply synchronous, side-effect-free state transitions against the latest stored version. */
 export async function updateCreativePortfolio(
   id: string, change: (current: CreativePortfolioJob) => CreativePortfolioJob, storage = getVideoIntelligenceStorage(),
-  options: { boundCaseCropRecoverySlot?: number } = {},
+  options: { boundCaseCropRecoverySlot?: number; boundCaseCropRevisionSlot?: number } = {},
 ) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const current = await read(id, storage);
@@ -93,11 +93,39 @@ export async function updateCreativePortfolio(
     if (!preservesVideoDependencies(dependencies(current.job), dependencies(next))) {
       throw new Error('Portfolio video dependency bindings and completed references are immutable.');
     }
+    const allowsPortraitRevision = (index: number) => {
+      const previous = current.job.slots[index], target = next.slots[index];
+      const before = previous.videoSelection, after = target.videoSelection;
+      if (options.boundCaseCropRevisionSlot !== previous.index || !current.job.videoCaseAmendment || current.job.lease || next.lease
+        || previous.status !== 'RETRY_REQUIRED' || !previous.error?.startsWith('The actual retained portrait PNG did not pass')
+        || before?.version !== 2 || after?.version !== 2 || !before.selection || !before.providerPortrait || before.providerPortrait.verified
+        || before.portraitCropRevision || !after.providerPortrait || after.providerPortrait.verified || after.providerPortrait.retryAuthorized
+        || !validPortraitCropRevision(after.portraitCropRevision) || after.portraitCropRevision.assessmentAttempted || after.portraitCropRevision.imageAuthorized
+        || !isDeepStrictEqual(after.portraitCropRevision.previousPortrait, before.providerPortrait)
+        || !isDeepStrictEqual(after.portraitCropRevision.previousOverlay, before.selection.sourceOverlays?.[0])
+        || after.portraitCropRevision.previousError !== previous.error
+        || after.providerPortrait.sourcePngSha256 !== before.providerPortrait.sourcePngSha256
+        || current.job.slots.some(other => other.index !== previous.index && other.status !== 'SAVED')) return false;
+      const expected = structuredClone(previous); expected.status = 'PENDING'; delete expected.error;
+      const v = expected.videoSelection as Extract<NonNullable<typeof expected.videoSelection>, {version: 2}>;
+      v.providerPortrait = after.providerPortrait; v.portraitCropRevision = after.portraitCropRevision;
+      v.selection!.sourceOverlays = [after.portraitCropRevision.revisedOverlay];
+      return isDeepStrictEqual(target, expected) && isDeepStrictEqual(next.planning, current.job.planning);
+    };
     for (const [index, previous] of current.job.slots.entries()) {
       const before = previous.videoSelection?.version === 2 ? previous.videoSelection.providerPortrait : undefined;
       const after = next.slots[index].videoSelection?.version === 2 ? next.slots[index].videoSelection.providerPortrait : undefined;
-      if (before && (!after || !sameProviderPortrait(before, after) || (before.verified && !after.verified))) {
+      if (before && (!after || !sameProviderPortrait(before, after) || (before.verified && !after.verified)) && !allowsPortraitRevision(index)) {
         throw new Error('Pinned provider portrait pixels and crop are immutable.');
+      }
+      const oldRevision = previous.videoSelection?.version === 2 ? previous.videoSelection.portraitCropRevision : undefined;
+      const newRevision = next.slots[index].videoSelection?.version === 2 ? next.slots[index].videoSelection.portraitCropRevision : undefined;
+      if (!oldRevision && newRevision && !allowsPortraitRevision(index)) throw new Error('Portrait revision requires explicit bounded recovery.');
+      if (oldRevision) {
+        if (!newRevision) throw new Error('Portrait revision evidence is immutable.');
+        const {assessmentAttempted: a, imageAuthorized: i, ...oldEvidence} = oldRevision;
+        const {assessmentAttempted: b, imageAuthorized: j, ...newEvidence} = newRevision;
+        if (!isDeepStrictEqual(oldEvidence, newEvidence) || (a && !b) || (i && !j)) throw new Error('Portrait revision evidence and paid intent are immutable.');
       }
     }
     const recoveredIndex = options.boundCaseCropRecoverySlot;

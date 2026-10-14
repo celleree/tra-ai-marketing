@@ -29,6 +29,7 @@ export type PortfolioVideoSelectionState = LegacyPortfolioVideoSelectionState | 
   version: 2;
   selectionModel: string;
   selectionPolicy: AutomaticVideoSelectionPolicy;
+  portraitCropRevision?: import('@/lib/video/provider-portrait-contract').PortraitCropRevision;
   providerPortrait?: import('@/lib/video/provider-portrait-contract').ProviderPortraitState;
   reuseContext: VideoFrameReuseContext;
   selection?: GenerateVideoFrameSelection;
@@ -399,6 +400,7 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
     }
   } else {
     const slot = job.slots.find(slot => slot.index === slotIndex);
+    if (slot?.videoSelection?.version === 2 && slot.videoSelection.portraitCropRevision) throw new Error('Revised portrait work does not authorize a repeated paid attempt. Reload its diagnostic.');
     if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');
     slot.status = 'PENDING'; delete slot.error;
     if (slot.videoSelection && job.snapshot.batchPlan.creatives[slot.index - 1]?.strategy.execution.subjectSource === 'approved-tra-human'

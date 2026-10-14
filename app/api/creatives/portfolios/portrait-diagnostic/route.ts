@@ -1,3 +1,4 @@
+import { parseSourceOverlayDecision } from '@/lib/video/source-overlay-contract';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { readCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
@@ -16,6 +17,9 @@ export async function GET(request: Request) {
   try {
     const job = await readCreativePortfolio(id);
     if (!job) return json({ error: 'Saved portfolio was not found.' }, 404);
-    return json(await portfolioPortraitDiagnostic(job, slotIndex));
+    const edge=params.get('edge'), removal=params.get('removePermille');
+    const proposal=edge!==null || removal!==null ? parseSourceOverlayDecision({version:2,status:'EDGE_CROP',edge,removePermille:Number(removal),overlayDepthPermille:Number(removal)}) : undefined;
+    if ((edge!==null || removal!==null) && (!proposal || proposal.status!=='EDGE_CROP')) return json({error:'Supply one crop edge and 1 to 450 permille removal.'},400);
+    return json(await portfolioPortraitDiagnostic(job, slotIndex, undefined, proposal ?? undefined));
   } catch { return json({ error: 'Portrait diagnostic is unavailable. Reload saved progress; no generation or retry was started.' }, 409); }
 }

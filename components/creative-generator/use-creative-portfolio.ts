@@ -81,6 +81,10 @@ export function useCreativePortfolio() {
     const id = current.current.job.id;
     return execute(() => requestPortfolio({ action: 'recover-bound-case-crop', id, slotIndex }, observeAccess), false);
   };
+  const revisedCropStep = (action:'assess-bound-case-crop'|'generate-bound-case-crop',slotIndex:number) => {
+    if(accessFailures.current.size || !current.current) return;
+    return execute(()=>requestPortfolio({action,id:current.current!.job.id,slotIndex,approved:true},observeAccess),false);
+  };
   const resume = () => {
     const id = current.current?.job.id;
     if (id) return execute(async () => {
@@ -100,5 +104,5 @@ export function useCreativePortfolio() {
   };
   const stop = () => { stopRequested.current = true; setStopped(true); };
   const signInUrl = workspaceSignInUrl(typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search);
-  return { response, running, loading, stopped, authRequired, signInUrl, error, start, initializeApprovedPreview, recoverBoundCaseCrop, resume, retry, restoreSaved, stop, observeAccess };
+  return { response, running, loading, stopped, authRequired, signInUrl, error, start, initializeApprovedPreview, recoverBoundCaseCrop, resume, retry, restoreSaved, stop, observeAccess, revisedCropStep };
 }

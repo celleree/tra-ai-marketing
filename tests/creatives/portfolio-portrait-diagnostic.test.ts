@@ -7,7 +7,7 @@ import { portfolioPortraitDiagnostic } from '@/lib/creatives/portfolio-portrait-
 import { providerPortraitIdentity, providerPortraitInput } from '@/lib/video/provider-portrait';
 import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 const mocks = vi.hoisted(() => ({ read: vi.fn(), inventory: vi.fn(), extract: vi.fn() }));
-vi.mock('@/lib/video/candidate-suitability', () => ({ readCandidateSuitability: mocks.read }));
+vi.mock('@/lib/video/candidate-suitability', async original => ({...await original<typeof import('@/lib/video/candidate-suitability')>(), readCandidateSuitability: mocks.read }));
 vi.mock('@/lib/creatives/generation-sources', () => ({ hydratePlanningSourceInventory: mocks.inventory }));
 vi.mock('@/lib/creatives/portfolio-video-selection', () => ({ hydratePortfolioVideoFrameSelection: mocks.extract }));
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -71,4 +71,19 @@ it('shares the inline byte budget and never resizes an oversized uncropped compa
   expect(result.originalDimensions).toEqual({ width: 600, height: 1200 });
   expect(result.originalPreviewError).toContain('no resized image');
   expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(4_000_000);
+});
+
+it('previews one revised exact PNG without changing the failed pin or assessment',async()=>{
+ const {job,frame}=await fixture();job.slots[0].status='SAVED';job.slots[1].status='RETRY_REQUIRED';
+ mocks.read.mockResolvedValue({status:'COMPLETE',assessment:{...quality,eyes:'OPEN_OR_NOT_VISIBLE'}});
+ const original=structuredClone(job),storage={read:vi.fn(),write:vi.fn()} as never;
+ const proposal={version:2,status:'EDGE_CROP',edge:'BOTTOM',removePermille:437,overlayDepthPermille:437} as const;
+ const value=await portfolioPortraitDiagnostic(job,2,storage,proposal);const [expected]=await prepareProviderVideoFrames([{...frame,sourceOverlay:proposal} as never]);
+ expect(value.recoveryEligible).toBe(true);expect(value.proposed).toMatchObject({width:600,height:337});expect(value.proposed!.state.providerPngSha256).toBe(hash(expected.providerBuffer));
+ expect(Buffer.from(value.proposed!.dataUrl.split(',')[1],'base64')).toEqual(expected.providerBuffer);expect(job).toEqual(original);expect((storage as {write:ReturnType<typeof vi.fn>}).write).not.toHaveBeenCalled();
+});
+it('rejects an inadequate revised inset while preserving the current diagnostic pixels',async()=>{
+ const {job}=await fixture(await sharp({create:{width:360,height:640,channels:3,background:'white'}}).png().toBuffer());
+ const value=await portfolioPortraitDiagnostic(job,2,{} as never,{version:2,status:'EDGE_CROP',edge:'RIGHT',removePermille:450,overlayDepthPermille:450});
+ expect(value.proposed).toBeNull();expect(value.proposalError).toContain('insufficient resolution');expect(value.png).not.toBeNull();expect(value.previewError).toBe('');
 });

@@ -10,7 +10,8 @@ export type PortfolioResponse = { job: PortfolioProgress; creatives: GeneratedCr
   boundCaseCropRecoverySlot?: number; preflightReady?: true; previewOmitBrandLogo?: true; previewPreparationApproved?: true; previewInitializationAvailable?: true };
 type Command = { action: 'create'; request: GenerateCreativeRequest; submissionId: string } | { action: 'load' | 'advance'; id: string }
   | { action: 'retry'; id: string; slotIndex: number | null }
-  | { action: 'recover-bound-case-crop'; id: string; slotIndex: number }
+  | { action: 'recover-bound-case-crop'; id: string; slotIndex: number; revision?: import('@/lib/creatives/portfolio-bound-case-recovery').BoundPortraitCropRequest }
+  | {action:'assess-bound-case-crop'|'generate-bound-case-crop';id:string;slotIndex:number;approved:true}
   | { action: 'initialize-approved-preview'; sourcePortfolioId: string };
 const endpoint = '/api/creatives/portfolios';
 const continuationKey = 'tra-preview-advance:' + PREVIEW_TEST_APPROVAL.id;
@@ -107,7 +108,8 @@ async function requestPortfolioStep(command: Command, observeAccess?: WorkspaceA
     ...(error ? { error } : {}), ...(retryAfterMs ? { retryAfterMs } : {}) };
 }
 export const portfolioCanAdvance = (job: PortfolioProgress, approvedPreview = false) =>
-  !job.previewAcceptanceError && !(approvedPreview && job.slots.some(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)))
+  !job.slots.some(slot=>slot.videoSelection?.version===2 && slot.videoSelection.portraitCropRevision && !slot.videoSelection.portraitCropRevision.imageAuthorized)
+  && !job.previewAcceptanceError && !(approvedPreview && job.slots.some(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)))
   && (Boolean(job.lease) || (job.planReady ? job.slots.some(slot => slot.status === 'PENDING')
     : (!job.planningError || job.previewPreparationResume === true) && job.videoPreparation?.phase !== 'FAILED'));
 

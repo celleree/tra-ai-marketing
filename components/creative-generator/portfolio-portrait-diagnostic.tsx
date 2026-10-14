@@ -1,11 +1,12 @@
 'use client';
 
+import { PortfolioCropRecovery } from './portfolio-crop-recovery';
 import { useEffect, useState } from 'react';
 import type { portfolioPortraitDiagnostic } from '@/lib/creatives/portfolio-portrait-diagnostic';
 import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 type Diagnostic = Awaited<ReturnType<typeof portfolioPortraitDiagnostic>>;
 
-export function PortfolioPortraitDiagnostic({ id, slotIndex, observeAccess }: { id: string; slotIndex: number; observeAccess: WorkspaceAccessObserver }) {
+export function PortfolioPortraitDiagnostic({ id, slotIndex, observeAccess, disabled=false, onStateChanged }: { id: string; slotIndex: number; observeAccess: WorkspaceAccessObserver; disabled?:boolean; onStateChanged?:()=>void }) {
   const [value, setValue] = useState<Diagnostic | null>(null), [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
@@ -41,6 +42,7 @@ export function PortfolioPortraitDiagnostic({ id, slotIndex, observeAccess }: { 
       {value.png ? <figure><img src={value.png.dataUrl} alt={`Exact assessed portrait crop for Creative ${slotIndex}`} style={{ maxWidth: '100%', height: 'auto' }} />
         <figcaption>Exact pinned PNG: {value.png.width} × {value.png.height} pixels. Model observations require human inspection.</figcaption></figure>
         : <p role="status">{value.previewError}</p>}
+      <PortfolioCropRecovery value={value} disabled={disabled} observeAccess={observeAccess} onStateChanged={onStateChanged} />
       {value.originalPng ? <details><summary>Uncropped source PNG for comparison</summary>
         <img src={value.originalPng.dataUrl} alt={`Exact uncropped source frame for Creative ${slotIndex}`} style={{ maxWidth: '100%', height: 'auto' }} />
         <p>Original source pixels for inspection only. This image is not approved for generation.</p>
@@ -54,6 +56,6 @@ export function PortfolioPortraitDiagnosticAction({ disabled, ...props }: Parame
   const [open, setOpen] = useState(false);
   return <>
     <button type="button" disabled={disabled} onClick={() => setOpen(true)}>Show portrait diagnostic for Creative {props.slotIndex}</button>
-    {open ? <PortfolioPortraitDiagnostic {...props} /> : null}
+    {open ? <PortfolioPortraitDiagnostic {...props} disabled={disabled} /> : null}
   </>;
 }

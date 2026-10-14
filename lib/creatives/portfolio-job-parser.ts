@@ -1,4 +1,4 @@
-import { validProviderPortraitState } from '@/lib/video/provider-portrait-contract';
+import { validProviderPortraitState, validPortraitCropRevision } from '@/lib/video/provider-portrait-contract';
 import { parsePortfolioVideoDependencies, UnsupportedVideoPreparationVersionError } from '@/lib/creatives/portfolio-video-dependency';
 import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
 import { isDeepStrictEqual } from 'node:util';
@@ -63,15 +63,26 @@ const validSlotVideoSelection = (value: unknown, slotStatus: string, job: Creati
     || value.selectionModel.trim().length < 1 || value.selectionModel.length > MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH
     || job.videoPreparationVersion !== 1 || job.planning.phase !== 'READY_TO_RENDER' || !job.snapshot
     || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO')) return false;
-  const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value, hasPortrait = 'providerPortrait' in value;
+  const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value, hasPortrait = 'providerPortrait' in value, hasRevision = 'portraitCropRevision' in value;
   const versionedKeys = value.version === 2 ? ['selectionPolicy', 'reuseContext'] : [];
-  if (!exact(value, ['version', 'selectionModel', ...versionedKeys, ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : []), ...(hasPortrait ? ['providerPortrait'] : [])])
+  if (!exact(value, ['version', 'selectionModel', ...versionedKeys, ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : []), ...(hasPortrait ? ['providerPortrait'] : []), ...(hasRevision ? ['portraitCropRevision'] : [])])
     || (hasPortrait && (value.version !== 2 || !job.videoCaseAmendment || !hasSelection
       || !validProviderPortraitState(value.providerPortrait)
       || (slotStatus === 'SAVED' && !value.providerPortrait.verified)
       || (value.providerPortrait.retryAuthorized && slotStatus !== 'PENDING')))
+    || (hasRevision && (value.version !== 2 || !hasPortrait || !hasSelection || !validPortraitCropRevision(value.portraitCropRevision)
+      || value.portraitCropRevision.previousPortrait.sourcePngSha256 !== (value.providerPortrait as import('@/lib/video/provider-portrait-contract').ProviderPortraitState).sourcePngSha256
+      || (value.portraitCropRevision.imageAuthorized && !(value.providerPortrait as import('@/lib/video/provider-portrait-contract').ProviderPortraitState).verified)))
     || (hasSelection && !parseGenerateVideoFrameSelection(value.selection)) || (hasSelection && hasRetry)
     || (slotStatus === 'SAVED' && !hasSelection) || (slotStatus === 'BLOCKED' && (hasSelection || hasRetry))) return false;
+  if (hasRevision) {
+    const revision = value.portraitCropRevision as import('@/lib/video/provider-portrait-contract').PortraitCropRevision;
+    const selection = parseGenerateVideoFrameSelection(value.selection);
+    if (selection?.version !== 3 || selection.candidateBindings?.length !== 1
+      || selection.sourceVideoContentHash !== revision.sourceVideoContentHash
+      || selection.candidateBindings[0].frameId !== revision.frameId || selection.candidateBindings[0].timestampMs !== revision.timestampMs
+      || !isDeepStrictEqual(selection.sourceOverlays, [revision.revisedOverlay])) return false;
+  }
   if (value.version === 2) {
     if (typeof value.selectionPolicy !== 'string' || !automaticVideoSelectionPolicies.has(value.selectionPolicy)) return false;
     try {

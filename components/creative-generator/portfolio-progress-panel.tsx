@@ -22,11 +22,13 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
 
   const savedCount = job.slots.filter(slot => slot.status === 'SAVED').length;
   const failed = job.slots.filter(slot => slot.status === 'RETRY_REQUIRED');
+  const ordinaryFailed = failed.filter(slot=>slot.videoSelection?.version!==2 || !slot.videoSelection.portraitCropRevision);
   const blocked = job.slots.filter(slot => slot.status === 'BLOCKED');
   const complete = savedCount === job.requestedCount;
+  const revisedHold = job.slots.some(slot => slot.videoSelection?.version === 2 && slot.videoSelection.portraitCropRevision && !slot.videoSelection.portraitCropRevision.imageAuthorized);
   const videoFailed = job.videoPreparation?.phase === 'FAILED';
   const hasFailure = Boolean(job.previewAcceptanceError || (job.planningError && !job.previewPreparationResume)) || failed.length > 0 || blocked.length > 0 || videoFailed;
-  const retryFailure = Boolean(job.planningError) || failed.length > 0;
+  const retryFailure = Boolean(job.planningError) || ordinaryFailed.length > 0;
   const preparingVideo = Boolean(job.videoPreparation && activeVideoPhases.has(job.videoPreparation.phase));
   const initializationAvailable = portfolio.response?.previewInitializationAvailable === true;
   const boundedPreview = portfolio.response?.previewPreparationApproved || initializationAvailable;
@@ -44,6 +46,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
           : job.planReady ? 'Generating creatives…' : `Planning ${job.requestedCount} creatives…`
         : hasFailure ? 'Generation needs attention.'
           : job.lease ? 'A saved step is in progress. Reload saved progress to check its status.'
+            : revisedHold ? 'Revised portrait is paused for its separate assessment and image approval.'
             : job.planReady ? 'Generation is paused. Resume to continue the saved plan.' : `Planning is paused. Resume to continue the saved ${job.requestedCount}-creative portfolio.`;
 
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
@@ -95,6 +98,21 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
     {portfolio.response?.boundCaseCropRecoverySlot !== undefined || job.slots.some(slot => slot.boundCaseCropRecovery && slot.status !== 'SAVED')
       ? <p role="status">Preparing clean-frame recovery preserves saved creatives and starts no AI calls. Use Resume separately to assess the frame and continue the saved creative.</p> : null}
 
+    {job.slots.filter(slot=>slot.videoSelection?.version===2 && slot.videoSelection.portraitCropRevision && slot.status!=='SAVED').map(slot=>{
+      const v=slot.videoSelection as Extract<NonNullable<typeof slot.videoSelection>,{version:2}>;
+      const busy=portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease && job.lease.expiresAtMs > Date.now());
+      return <div key={slot.creativeId}>
+        <p>Creative {slot.index}: revised crop keeps the saved case/frame and prior evidence. Assessment and image generation are separate.</p>
+        {!v.portraitCropRevision!.assessmentAttempted ? <>
+          <p>Assess only: one standard GPT-6 Luna call, up to 2,048 output tokens; conservative published-rate bound $0.60 before tax. No retries or image generation.</p>
+          <button type="button" disabled={busy} onClick={()=>void portfolio.revisedCropStep('assess-bound-case-crop',slot.index)}>Assess revised portrait for Creative {slot.index}</button>
+        </> : v.providerPortrait?.verified && !v.portraitCropRevision!.imageAuthorized ? <>
+          <p>Exact revised PNG passed. Image generation requires a separate approval; existing paid-attempt safeguards apply.</p>
+          <button type="button" disabled={busy} onClick={()=>void portfolio.revisedCropStep('generate-bound-case-crop',slot.index)}>Generate Creative {slot.index} from verified crop</button>
+        </> : <><p>No repeated assessment or image attempt is authorized. A saved completed assessment can be reconciled without another model call.</p>
+          {!v.portraitCropRevision!.imageAuthorized ? <button type="button" disabled={busy} onClick={()=>void portfolio.revisedCropStep('assess-bound-case-crop',slot.index)}>Reconcile saved portrait assessment for Creative {slot.index}</button> : null}</>}
+      </div>;
+    })}
     {caseEditorOpen ? <PortfolioCaseAmendment key={job.id} id={job.id} observeAccess={portfolio.observeAccess}
       onClose={() => setCaseEditorOpen(false)} onSaved={() => { setCaseEditorOpen(false); void portfolio.restoreSaved(); }} /> : null}
 
@@ -102,14 +120,14 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
       <p>Retrying failed work may make another paid call.</p>
       {job.planningError ? <p>{job.planningError} <button type="button" className="button button-secondary" disabled={portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease) || !canAdvance()}
         onClick={() => { if (canAdvance()) void portfolio.retry(null); }}>Retry planning</button></p> : null}
-      {failed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}{' '}
+      {ordinaryFailed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}{' '}
         <button type="button" className="button button-secondary" disabled={portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease) || !canAdvance()}
           onClick={() => { if (canAdvance()) void portfolio.retry(slot.index); }}>Retry creative {slot.index}</button></p>)}
     </div> : null}
     {boundedPreview && hasFailure ? <div role="alert" className={styles.failures}>
       {job.previewAcceptanceError ? <p>{job.previewAcceptanceError}</p> : null}
       {job.planningError ? <p>{job.planningError}</p> : null}
-      {failed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}</p>)}
+      {ordinaryFailed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}</p>)}
     </div> : null}
     {blocked.length ? <div className={styles.failures} aria-live="polite">
       {blocked.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error}</p>)}

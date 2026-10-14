@@ -40,7 +40,7 @@ export type CandidateAssessmentState = { status: 'MISSING' } | { status: 'BUSY' 
   | { status: 'COMPLETE'; assessment: CandidateSuitabilityAssessment };
 export type CandidateAssessmentDependencies = { storage?: VideoIntelligenceStorage; now?: () => number;
   newLeaseId?: () => string; request?: typeof fetch; deadlineAtMs: number; retry?: boolean;
-  assessmentContract?: CandidateAssessmentIdentity['assessmentContract'] };
+  assessmentContract?: CandidateAssessmentIdentity['assessmentContract']; standardTier?: boolean };
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const enumSchema = (items: readonly string[]) => ({ type: 'string', enum: items });
 const schema = { type: 'object', additionalProperties: false, properties: {
@@ -121,13 +121,13 @@ export const readCandidateSuitability = async (identity: CandidateAssessmentIden
   return current;
 };
 
-const assess = async (identity: CandidateAssessmentIdentity, image: Buffer, request: typeof fetch) => {
+const assess = async (identity: CandidateAssessmentIdentity, image: Buffer, request: typeof fetch, standardTier = false) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured for candidate suitability.');
   if (image.length > MAX_IMAGE_BYTES || sha(image) !== identity.frameSha256) {
     throw new Error('Candidate suitability image failed integrity or size admission.');
   }
-  const body = JSON.stringify({ model: identity.model, store: false, reasoning: { effort: 'low' }, max_output_tokens: 2048,
+  const body = JSON.stringify({ model: identity.model, store: false, ...(standardTier ? {service_tier:'default'} : {}), reasoning: { effort: 'low' }, max_output_tokens: 2048,
     input: [{ role: 'developer', content: [{ type: 'input_text', text: ['clean-portrait-v1', 'clean-provider-portrait-v1'].includes(identity.assessmentContract ?? '') ? `${rules}\nThese are the actual retained portrait pixels. Accept only CLEAN overlays; any remaining mark is UNSAFE. Reassess all human quality fields on these pixels.` : identity.assessmentContract ? headAndShouldersRules : rules }] }, { role: 'user', content: [
       { type: 'input_text', text: JSON.stringify({ policy: identity.policy, frameSha256: identity.frameSha256,
         candidateIndex: identity.candidateIndex, ...(identity.assessmentContract ? { assessmentContract: identity.assessmentContract } : {}) }) },
@@ -191,7 +191,7 @@ export const assessCandidateWithCache = async (identity: CandidateAssessmentIden
   }
   let assessment: CandidateSuitabilityAssessment;
   try { assessment = identity.assessmentContract === 'bound-case-portrait-v2'
-    ? await assessBoundPortrait(identity, image, dependencies) : await assess(identity, image, dependencies.request ?? fetch); }
+    ? await assessBoundPortrait(identity, image, dependencies) : await assess(identity, image, dependencies.request ?? fetch, dependencies.standardTier); }
   catch { return checkpoint({ version: 1, identity, status: 'RETRY_REQUIRED', reason: 'PROVIDER_FAILED' }); }
   return checkpoint({ version: 1, identity, status: 'COMPLETE', assessment });
 };

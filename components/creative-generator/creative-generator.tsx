@@ -355,7 +355,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
                 const slot = savedPortfolio.slots.find(slot => slot.index === index);
                 return slot && ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status) && slot.videoSelection?.version === 2 && slot.videoSelection.providerPortrait
                   ? <PortfolioPortraitDiagnosticAction key={`${savedPortfolio.id}:${index}`} id={savedPortfolio.id} slotIndex={index}
-                    disabled={generating || portfolio.authRequired || Boolean(savedPortfolio.lease)} observeAccess={portfolio.observeAccess} /> : null;
+                    disabled={generating || portfolio.authRequired || Boolean(savedPortfolio.lease)} observeAccess={portfolio.observeAccess} onStateChanged={()=>void portfolio.restoreSaved()} /> : null;
               } : undefined}
             />
           </div>

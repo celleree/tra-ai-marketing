@@ -79,6 +79,8 @@ async function advancePortfolio(
 ): Promise<PortfolioStepResult> {
   const deadlineAtMs = options.deadlineAtMs ?? Date.now() + 290_000;
   const beforeWork = await readCreativePortfolio(id, storage);
+  const revisionHold = beforeWork?.slots.find(slot => slot.videoSelection?.version === 2 && slot.videoSelection.portraitCropRevision && !slot.videoSelection.portraitCropRevision.imageAuthorized);
+  if (beforeWork && revisionHold) return {job:beforeWork,status:409,error:'Revised crop requires its separate assessment, then explicit image generation. Ordinary Resume starts neither.'};
   if (beforeWork && !beforeWork.lease && caseAssociationNeedsReview(beforeWork)) return caseAssociationHold(beforeWork);
   if (isPreviewAcceptanceOperation()) await updateCreativePortfolio(id, current => {
     const now = Date.now();
