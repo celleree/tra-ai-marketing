@@ -152,7 +152,9 @@ async function scenario(name, options, run) {
       const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
       if (options.portraitDiagnostic) {
         const savedJob = job('RETRY_REQUIRED', 2); savedJob.slots[0].status = 'SAVED';
-        savedJob.slots[1].videoSelection = { version: 2, providerPortrait: { verified: false } };
+        savedJob.slots[1].error = 'The actual retained portrait PNG did not pass human or overlay checks. Saved creatives remain available.';
+        if (!options.noPortraitPin) savedJob.slots[1].videoSelection = { version: 2, providerPortrait: { verified: false } };
+        if (options.portraitLease) savedJob.lease = { slotIndex: 2, expiresAtMs: Date.now() + 60_000 };
         value = { job: savedJob, creatives: [] };
       } else if (options.caseRecovery) {
         if (request.method() === 'PATCH') { assert.equal(body.action, 'recover-bound-case-crop'); assert.equal(body.slotIndex, 2); caseRecovered = true; }
@@ -225,13 +227,25 @@ try {
   for (const denial of [false, true]) await scenario(`Portrait diagnostic reads saved fields without generation${denial ? ' after sign-in failure' : ''}`, {
     casePortfolio: true, portraitDiagnostic: true, width: 375,
     ...(denial ? { accessDenials: { 'GET /api/creatives/portfolios/portrait-diagnostic': 401 } } : {}) }, async ({ page, calls }) => {
-    await page.getByRole('button', { name: 'Show portrait diagnostic for Creative 2', exact: true }).click();
+    const failedCard = page.locator('article').filter({ hasText: 'Creative 2 could not be completed.' });
+    await failedCard.getByText('The actual retained portrait PNG did not pass human or overlay checks. Saved creatives remain available.', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('region', { name: 'Saved portfolio progress' }).getByRole('button', { name: 'Show portrait diagnostic for Creative 2', exact: true }).count(), 0);
+    await failedCard.getByRole('button', { name: 'Show portrait diagnostic for Creative 2', exact: true }).click();
     if (denial) await page.getByText('Generation is paused. Sign in to restore the same saved portfolio.', { exact: false }).waitFor();
     else { await page.getByText('Model reason: Visible mark remains.', { exact: true }).waitFor();
       await page.getByRole('img', { name: 'Exact assessed portrait crop for Creative 2' }).waitFor(); }
     assert.equal(await page.getByText('1 / 2', { exact: true }).count(), 1);
     assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 0);
     assert.ok(calls.filter(([path]) => path.includes('portrait-diagnostic')).every(([, method]) => method === 'GET'));
+  });
+  for (const guard of ['missing-pin', 'active-step']) await scenario(`Portrait diagnostic failed-card guard ${guard}`, {
+    casePortfolio: true, portraitDiagnostic: true, width: 375, noPortraitPin: guard === 'missing-pin', portraitLease: guard === 'active-step' }, async ({ page, calls }) => {
+    const card = page.locator('article').filter({ hasText: 'Creative 2 could not be completed.' }); await card.waitFor();
+    const action = card.getByRole('button', { name: 'Show portrait diagnostic for Creative 2', exact: true });
+    if (guard === 'missing-pin') assert.equal(await action.count(), 0);
+    else assert.equal(await action.isDisabled(), true);
+    assert.equal(calls.some(([path]) => path.includes('portrait-diagnostic')), false);
+    assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 0);
   });
   for (const width of [375, 390, 430, 1280]) await scenario(`Mobile layout recovery keeps long video names and saved statements within ${width}px`,
     { width, inventory: [mediaId, availableB], videoName: 'media_989a125a5f274761a27ff9115f1bae19.mp4', frameCount: 15, selectedFrameCount: 11,

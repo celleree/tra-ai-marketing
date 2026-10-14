@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { PortfolioPortraitDiagnostic } from './portfolio-portrait-diagnostic';
 import { PortfolioCaseAmendment } from './portfolio-case-amendment';
 
 import { portfolioCanAdvance } from '@/lib/creatives/portfolio-client';
@@ -16,7 +15,6 @@ const activeVideoPhases = new Set(['PREPARING', 'TRANSCRIBING', 'OBSERVING', 'FI
 
 export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: { portfolio: ReturnType<typeof useCreativePortfolio>; canAdvance?: () => boolean }) {
   const [caseEditorOpen, setCaseEditorOpen] = useState(false);
-  const [diagnosticSlot, setDiagnosticSlot] = useState<number | null>(null);
   const job = portfolio.response?.job;
   const signInNotice = portfolio.authRequired ? <p role="alert">Generation is paused. Sign in to restore the same saved portfolio.
     {' '}<a href={portfolio.signInUrl}>Sign in to restore saved progress</a></p> : null;
@@ -96,11 +94,6 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
 
     {portfolio.response?.boundCaseCropRecoverySlot !== undefined || job.slots.some(slot => slot.boundCaseCropRecovery && slot.status !== 'SAVED')
       ? <p role="status">Preparing clean-frame recovery preserves saved creatives and starts no AI calls. Use Resume separately to assess the frame and continue the saved creative.</p> : null}
-
-    {job.slots.filter(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status) && slot.videoSelection?.version === 2 && slot.videoSelection.providerPortrait)
-      .map(slot => <button key={slot.creativeId} type="button" disabled={portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease)}
-        onClick={() => setDiagnosticSlot(slot.index)}>Show portrait diagnostic for Creative {slot.index}</button>)}
-    {diagnosticSlot !== null ? <PortfolioPortraitDiagnostic key={`${job.id}:${diagnosticSlot}`} id={job.id} slotIndex={diagnosticSlot} observeAccess={portfolio.observeAccess} /> : null}
 
     {caseEditorOpen ? <PortfolioCaseAmendment key={job.id} id={job.id} observeAccess={portfolio.observeAccess}
       onClose={() => setCaseEditorOpen(false)} onSaved={() => { setCaseEditorOpen(false); void portfolio.restoreSaved(); }} /> : null}

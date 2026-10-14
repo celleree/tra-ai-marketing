@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
@@ -18,6 +18,7 @@ interface CreativeResultsProps {
   requestedCount?: number;
   generationComplete?: boolean;
   generationFailures?: Record<number, string>;
+  renderFailureDetails?: (index: number) => ReactNode;
 }
 
 interface MetaItem {
@@ -89,6 +90,7 @@ export function CreativeResults({
   requestedCount = 0,
   generationComplete = true,
   generationFailures = {},
+  renderFailureDetails,
 }: CreativeResultsProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -427,6 +429,7 @@ export function CreativeResults({
                   <div className={styles.body}>
                     <p className={styles.failedLabel}>Creative {index} could not be completed.</p>
                     <p>{failure}</p>
+                    {renderFailureDetails?.(index)}
                   </div>
                 </article>
               );

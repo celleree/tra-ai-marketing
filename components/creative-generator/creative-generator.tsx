@@ -8,6 +8,7 @@ import { CreativeComposer } from '@/components/creative-generator/creative-compo
 import { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
 import { useSavedVideoSources } from '@/components/creative-generator/use-saved-video-sources';
 import { useVideoReviewDraft } from '@/components/creative-generator/use-video-review-draft';
+import { PortfolioPortraitDiagnosticAction } from '@/components/creative-generator/portfolio-portrait-diagnostic';
 import { PortfolioProgressPanel } from '@/components/creative-generator/portfolio-progress-panel';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
@@ -350,6 +351,12 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
                 creationMode !== 'generate' || generationComplete
               }
               generationFailures={creationMode === 'generate' ? generationFailures : {}}
+              renderFailureDetails={creationMode === 'generate' && savedPortfolio ? index => {
+                const slot = savedPortfolio.slots.find(slot => slot.index === index);
+                return slot && ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status) && slot.videoSelection?.version === 2 && slot.videoSelection.providerPortrait
+                  ? <PortfolioPortraitDiagnosticAction key={`${savedPortfolio.id}:${index}`} id={savedPortfolio.id} slotIndex={index}
+                    disabled={generating || portfolio.authRequired || Boolean(savedPortfolio.lease)} observeAccess={portfolio.observeAccess} /> : null;
+              } : undefined}
             />
           </div>
         ) : activeSection === 'tra-creatives' ? (

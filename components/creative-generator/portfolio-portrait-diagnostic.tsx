@@ -36,3 +36,12 @@ export function PortfolioPortraitDiagnostic({ id, slotIndex, observeAccess }: { 
     </>}
   </section>;
 }
+
+/** Explicit read-only control beside its failed output; no request until clicked. */
+export function PortfolioPortraitDiagnosticAction({ disabled, ...props }: Parameters<typeof PortfolioPortraitDiagnostic>[0] & { disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  return <>
+    <button type="button" disabled={disabled} onClick={() => setOpen(true)}>Show portrait diagnostic for Creative {props.slotIndex}</button>
+    {open ? <PortfolioPortraitDiagnostic {...props} /> : null}
+  </>;
+}
