@@ -108,6 +108,15 @@ it('discovers/saves first, advances one child unit, reloads and reuses real fina
   expect(s.deps.transcription).toHaveBeenCalledTimes(1); expect(fetch).not.toHaveBeenCalled();
 });
 
+it('rejects an incomplete Preview library without creating child work or invoking a provider', async () => {
+  const s = await setup(); vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+  const before = JSON.stringify([...s.storage.data]);
+  await expect(s.advance()).rejects.toThrow('existing completed video library');
+  expect(s.owner.onProviderOperationStart).not.toHaveBeenCalled();
+  expect(s.deps.preparation).not.toHaveBeenCalled();
+  expect(JSON.stringify([...s.storage.data])).toBe(before);
+});
+
 it('status is read-only; busy leases, changed identities, quota denial and lost ownership cannot start work', async () => {
   const s = await setup(), before = JSON.stringify([...s.storage.data]);
   await stepPortfolioVideoDependency({ mediaId, action: 'STATUS' }, s.deps);

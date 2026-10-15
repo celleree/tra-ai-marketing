@@ -18,6 +18,7 @@ import {
   type CreativeLifecycle,
 } from '@/lib/creatives/human-review';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { assertDraftVideoAssertionCopy } from '@/lib/creatives/draft-video-assertion';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { parseCreativeProofProvenance } from '@/lib/proof/provenance';
 import {
@@ -104,6 +105,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const source = record.source === undefined ? 'generated' : record.source;
   const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
   const planning = parseCreativePlanning(record.planning);
+  try { if (copyContract) assertDraftVideoAssertionCopy(planning?.draftSourceAssertion, copyContract); } catch { return null; }
   const generationProvenance = parseCreativeGenerationProvenance(record.generationProvenance);
   const proofProvenance = parseCreativeProofProvenance(record.proofProvenance);
   const identity = parseCreativeIdentity(record.identity, id);

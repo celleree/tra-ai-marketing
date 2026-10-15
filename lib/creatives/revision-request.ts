@@ -5,7 +5,7 @@ type CompanyContext = { companyProfile?: RuntimeCompanyProfileSnapshot };
 
 // The selected parent ID comes from the route, never from caller-supplied identity metadata.
 export type CreativeRevisionRequest = CompanyContext & (
-  | { operation: 'EDIT' | 'VARIATION'; instruction: string }
+  | { operation: 'EDIT' | 'VARIATION'; instruction: string; removeVideoSource?: boolean; removeLayoutReference?: boolean }
   | { operation: 'REGENERATE' }
   | { operation: 'PLACEMENT'; placement: CreativePlacement }
 );
@@ -22,7 +22,7 @@ export function validateCreativeRevisionRequest(input: unknown):
   if (operation !== 'EDIT' && operation !== 'VARIATION' && operation !== 'REGENERATE' && operation !== 'PLACEMENT') {
     return invalid('Choose edit, variation, regeneration, or a placement variant.');
   }
-  const keys = ['operation', 'companyProfile', ...(operation === 'PLACEMENT' ? ['placement'] : operation === 'REGENERATE' ? [] : ['instruction'])];
+  const keys = ['operation', 'companyProfile', ...(operation === 'PLACEMENT' ? ['placement'] : operation === 'REGENERATE' ? [] : ['instruction', 'removeVideoSource', 'removeLayoutReference'])];
   if (Object.keys(body).some((key) => !keys.includes(key))) {
     return invalid('Revision request contains fields that do not apply to this operation.');
   }
@@ -40,5 +40,10 @@ export function validateCreativeRevisionRequest(input: unknown):
   if (!instruction || instruction.length > 4000) {
     return invalid('Describe the requested change in 1 to 4000 characters.');
   }
-  return { success: true, data: { operation, instruction, ...context } };
+  if ([body.removeVideoSource, body.removeLayoutReference].some(value => value !== undefined && typeof value !== 'boolean')) {
+    return invalid('Source removal choices must be explicit booleans.');
+  }
+  return { success: true, data: { operation, instruction, ...context,
+    ...(body.removeVideoSource === true ? { removeVideoSource: true } : {}),
+    ...(body.removeLayoutReference === true ? { removeLayoutReference: true } : {}) } };
 }

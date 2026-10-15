@@ -1,4 +1,5 @@
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
 import type { VideoReviewHandoff, VideoReviewReference } from '@/lib/creatives/review-handoff';
 import {
   CREATIVE_CATEGORIES,
@@ -27,6 +28,8 @@ export type GenerateCreativeRequest = {
   videoReview?: VideoReviewReference;
   sourceAssets?: CreativeSourceSelection[];
   brandLogoMediaId?: string;
+  /** Explicit operator choice for the bounded Preview test only. */
+  previewOmitBrandLogo?: true;
   brandColors?: string[];
   brandFontNames?: string[];
   companyProfile?: RuntimeCompanyProfileSnapshot;
@@ -130,6 +133,10 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
     typeof body.brandLogoMediaId === 'string'
       ? body.brandLogoMediaId.trim()
       : '';
+  if (body.previewOmitBrandLogo !== undefined && (body.previewOmitBrandLogo !== true
+    || maximumCount !== MAX_PORTFOLIO_CREATIVES || !isPreviewAcceptance() || body.brandLogoMediaId !== undefined)) {
+    return { success: false, error: 'Logo omission requires the explicit Preview acceptance portfolio choice with no brandLogoMediaId.' };
+  }
   const brandColors = stringArray(body.brandColors, 6);
   const brandFontNames = stringArray(body.brandFontNames, 6).map((name) =>
     name.slice(0, 500)
@@ -233,6 +240,7 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
       sourceAssets,
       placement,
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
+      ...(body.previewOmitBrandLogo === true ? { previewOmitBrandLogo: true } : {}),
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),
       ...(companyProfile ? { companyProfile } : {}),

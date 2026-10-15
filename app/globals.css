@@ -246,6 +246,7 @@ button:disabled {
 
 .generator-main {
   display: grid;
+  min-width: 0;
   gap: 20px;
 }
 
@@ -542,7 +543,7 @@ button:disabled {
   }
 
   .generator-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .generator-controls-column {

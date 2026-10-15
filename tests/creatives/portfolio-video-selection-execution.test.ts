@@ -3,10 +3,15 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
+import { proposeCaseAmendment, selectedCaseAssertion } from '@/lib/creatives/portfolio-case-amendment';
+import { applyCaseAmendment } from '@/lib/creatives/portfolio-case-amendment-storage';
 import { claimCreativePortfolio, finishPortfolioPlan, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
 import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, VideoHumanSelectionAdmissionError } from '@/lib/video/human-frame-selection';
+import { videoCasePortfolio } from '../fixtures/video-case-portfolio';
+import { caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
+import { prepareProviderVideoFrames } from '@/lib/video/source-overlay';
 import { portfolioSnapshot, MemoryPortfolioStorage, portfolioRequest } from '../fixtures/creative-portfolio';
 
 const mocks = vi.hoisted(() => ({
@@ -38,7 +43,7 @@ const sourceHash = createHash('sha256').update(Buffer.from('video')).digest('hex
 const libraryId = `video-library:${'c'.repeat(64)}`;
 const candidateFrameSha256 = 'e'.repeat(64), librarySha256 = 'f'.repeat(64), timestampMs = 1200;
 const frameId = videoCandidateFrameId(sourceHash, timestampMs, candidateFrameSha256);
-const framePng = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#9a7550' } }).png().toBuffer();
+const framePng = await sharp({ create: { width: 600, height: 900, channels: 3, background: '#9a7550' } }).png().toBuffer();
 const framePngHash = createHash('sha256').update(framePng).digest('hex');
 const selection = { version: 3 as const, libraryId, sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash,
   librarySha256, frameIds: [frameId], candidateBindings: [{ frameId, representativeFrameId: frameId,
@@ -74,7 +79,7 @@ const contextFor = (job: Awaited<ReturnType<typeof ready>>, overrides: Record<st
 }) as any;
 
 beforeEach(() => {
-  vi.resetAllMocks(); vi.unstubAllEnvs();
+  vi.resetAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals();
   vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'selector-model-a');
   mocks.list.mockResolvedValue([]); mocks.quota.mockResolvedValue({ allowed: true });
   mocks.inventory.mockResolvedValue([{ source: videoSource }]);
@@ -369,7 +374,7 @@ describe('durable portfolio B3 selection activation', () => {
     const job = await ready(storage, automaticRequest({ videoFrameSelection: selection }));
     const frame = { ...selectedFrames.frames[0], sourceOverlay: { version: 2 as const, status: 'EDGE_CROP' as const,
       edge: 'BOTTOM' as const, removePermille: 400, overlayDepthPermille: 390 },
-      expectedCrop: { left: 0, top: 0, width: 100, height: 60 } };
+      expectedCrop: { left: 0, top: 0, width: 600, height: 540 } };
     mocks.restore.mockResolvedValue(contextFor(job, { videoFrameSet: { ...selectedFrames, frames: [frame] } }));
     const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
     expect(result.job.slots[0].status).toBe('SAVED');
@@ -425,4 +430,175 @@ it.each([null, []])('keeps automatic rendering available with empty manual pool 
   await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
   expect(mocks.select).toHaveBeenCalledOnce(); expect(mocks.render).toHaveBeenCalledOnce();
   expect(mocks.render.mock.calls[0][2].preflightHumanVideo).toBeUndefined();
+});
+
+async function readyTwoCases(storage: MemoryPortfolioStorage) {
+  const secondFrame = { frameId: videoCandidateFrameId(sourceHash, 5000, '9'.repeat(64)),
+    representativeFrameId: videoCandidateFrameId(sourceHash, 5000, '9'.repeat(64)), candidateIndex: 1,
+    timestampMs: 5000, frameSha256: '9'.repeat(64) };
+  const request = manualRequest([...selection.candidateBindings, secondFrame]);
+  const loaded = await mocks.reviewDraft();
+  const segments = [{ segmentIndex: 0, startMs: 0, endMs: 2000, text: 'My debt went from $42,000 to $250. This was my case.' },
+    { segmentIndex: 1, startMs: 4000, endMs: 7000, text: 'TRA reduced what I owed by 78%. This was my experience.' }];
+  const claimSnapshots = segments.map(segment => ({ reference: { type: 'VIDEO_TRANSCRIPT', startSegmentIndex: segment.segmentIndex,
+    endSegmentIndex: segment.segmentIndex }, wording: segment.text, context: { type: 'VIDEO_TRANSCRIPT', segments: [segment] } }));
+  loaded.draft.claimSnapshots = claimSnapshots; loaded.draft.choices.claims = claimSnapshots.map(claim => claim.reference);
+  loaded.selectedFrameContexts = loaded.selectedFrameContexts.map((context: object, index: number) => ({ ...context,
+    observationIsExactFrame: true, observation: { sceneType: 'PERSON', summary: index ? 'Bearded person outdoors' : 'Bald person indoors',
+      visibleText: [], composition: 'Portrait', topics: ['person'], uncertainties: [] } }));
+  mocks.reviewDraft.mockResolvedValue(loaded);
+  return { job: await ready(storage, request), secondFrame, segments };
+}
+
+it('holds an unbound manual source account before leases, assessment or quota, leaving amendment available', async () => {
+  const storage = new MemoryPortfolioStorage(), { job } = await readyTwoCases(storage);
+  // Represent a historical paid plan, without changing its later immutable saved snapshot.
+  const stored = (await storage.read(`creative-portfolios/v1/${job.id}.json`))!;
+  job.snapshot!.batchPlan.creatives[0].draftSourceAssertion = selectedCaseAssertion(job.request.reviewHandoff, 0);
+  job.snapshot!.batchPlan.creatives[0].imageCopy!.shortSupport = job.snapshot!.batchPlan.creatives[0].draftSourceAssertion.exactText;
+  job.snapshot!.batchPlan.creatives[0].adCopy!.primaryText = job.snapshot!.batchPlan.creatives[0].draftSourceAssertion.exactText;
+  await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), stored.etag);
+  const before = (await storage.read(`creative-portfolios/v1/${job.id}.json`))!.bytes;
+  const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(result.status).toBe(409); expect(result.error).toContain('confirmed person pairing');
+  expect(result.job.slots[0].status).toBe('PENDING'); expect(result.job.lease).toBeNull();
+  expect((await storage.read(`creative-portfolios/v1/${job.id}.json`))!.bytes).toEqual(before);
+  expect(mocks.restore).not.toHaveBeenCalled(); expect(mocks.select).not.toHaveBeenCalled(); expect(quotaGroups()).toEqual([]);
+});
+
+it('sends each amended case’s exact one-frame pool to selection, hydration and renderer, and rejects wrong-person completion', async () => {
+  const storage = new MemoryPortfolioStorage(), { job, secondFrame, segments } = await readyTwoCases(storage);
+  const pairs = [selection.candidateBindings[0], secondFrame].map((frame, index) => ({ slotIndex: index + 1,
+    claimIndex: index, frameId: frame.frameId, attributionConfirmed: true }));
+  const amended = await applyCaseAmendment(job.id, proposeCaseAmendment(job, pairs).amendment, storage);
+  mocks.restore.mockResolvedValue(contextFor(amended));
+  vi.stubEnv('OPENAI_API_KEY', 'offline-fixture');
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+    humanPresence: 'CLEAR', facialDetail: 'SUFFICIENT', eyes: 'OPEN_OR_NOT_VISIBLE', blur: 'CLEAR', occlusion: 'NONE_OR_MINOR',
+    expressionUsability: 'NATURAL_OR_NEUTRAL', framing: 'USABLE', observableReason: 'Synthetic fixture.', sourceOverlay: { version: 2, status: 'CLEAN' },
+  }) }] }] })));
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.preflight.mock.calls[0][0].reviewChoices.frames).toEqual([selection.candidateBindings[0]]);
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.hydrate.mock.calls[0][0].reviewChoices.frames).toEqual([selection.candidateBindings[0]]);
+  expect(mocks.render).not.toHaveBeenCalled();
+  await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.render.mock.calls[0][0].imageCopy.shortSupport).toBe(segments[0].text);
+  const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(mocks.select.mock.calls[1][0].reviewChoices.frames).toEqual([secondFrame]);
+  expect(mocks.select.mock.calls[1][0].finalConcept.imageCopy.shortSupport).toBe(segments[1].text);
+  expect(failed.job.slots[1].status).toBe('RETRY_REQUIRED'); expect(mocks.render).toHaveBeenCalledOnce();
+  expect(failed.job.slots[1].error).toContain('closed-pool');
+});
+
+it('holds attribution inside the atomic claim when concurrent planning finishes after the initial read', async () => {
+  const storage = new MemoryPortfolioStorage(), { job } = await readyTwoCases(storage);
+  const concept = job.snapshot!.batchPlan.creatives[0];
+  concept.draftSourceAssertion = selectedCaseAssertion(job.request.reviewHandoff, 0);
+  concept.imageCopy!.shortSupport = concept.draftSourceAssertion.exactText;
+  concept.adCopy!.primaryText = concept.draftSourceAssertion.exactText;
+  concept.copy.primaryText = concept.draftSourceAssertion.exactText;
+  const initial = { ...structuredClone(job), snapshot: null, planning: { phase: 'INITIAL_PLAN' as const, preparation: { quotaReserved: false } } };
+  const key = `creative-portfolios/v1/${job.id}.json`, prior = (await storage.read(key))!;
+  await storage.write(key, Buffer.from(JSON.stringify(initial)), prior.etag);
+  const read = storage.read.bind(storage); let first = true;
+  storage.read = async path => {
+    const state = await read(path);
+    if (first && path === key) {
+      first = false;
+      // Another worker commits its valid final planning checkpoint while this caller still sees INITIAL_PLAN.
+      await storage.write(key, Buffer.from(JSON.stringify(job)), state!.etag);
+    }
+    return state;
+  };
+  const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(result.status).toBe(409); expect(result.error).toContain('confirmed person pairing');
+  expect(result.job.slots.every(slot => slot.status === 'PENDING' && !slot.videoSelection)).toBe(true);
+  expect(result.job.lease).toBeNull();
+  expect(mocks.restore).not.toHaveBeenCalled(); expect(mocks.select).not.toHaveBeenCalled(); expect(quotaGroups()).toEqual([]);
+  expect(JSON.parse((await read(key))!.bytes.toString())).toEqual(job);
+});
+
+
+describe('bound case exact provider PNG admission', () => {
+  async function setupBound() {
+    const { job, pairs } = videoCasePortfolio(); job.videoCaseAmendment = proposeCaseAmendment(job, pairs).amendment;
+    job.slots[0].status = 'SAVED';
+    const choices = caseReviewChoices(job, 2)!, binding = choices.frames![0], video = choices.video!;
+    const png = await sharp({ create: { width: 600, height: 900, channels: 3, background: '#a57755' } }).png().toBuffer();
+    const hash = createHash('sha256').update(png).digest('hex');
+    const selected = { version: 3 as const, libraryId: video.libraryId, librarySha256: video.librarySha256,
+      sourceVideoMediaId: video.locator.sourceVideoMediaId, sourceVideoContentHash: video.locator.sourceVideoContentHash,
+      frameIds: [binding.frameId], candidateBindings: [binding], sourceOverlays: [{ version: 2 as const, status: 'EDGE_CROP' as const,
+        edge: 'BOTTOM' as const, removePermille: 350, overlayDepthPermille: 340 }] };
+    job.slots[1].videoSelection = { version: 2, selectionModel: 'gpt-6-luna', selectionPolicy: CANDIDATE_HUMAN_FRAME_SELECTION_POLICY,
+      reuseContext: { version: 1, frames: [] }, selection: selected };
+    const storage = new MemoryPortfolioStorage();
+    await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
+    mocks.restore.mockResolvedValue(contextFor(job));
+    mocks.hydrate.mockImplementation(async () => ({ ...selectedFrames, sourceVideoContentHash: video.locator.sourceVideoContentHash,
+      source: { ...videoSource, media: { ...videoSource.media, id: video.locator.sourceVideoMediaId } },
+      frames: [{ ...selectedFrames.frames[0], timestampMs: binding.timestampMs, buffer: Buffer.from(png), frameSha256: hash,
+        byteLength: png.length, sourceVideoMediaId: video.locator.sourceVideoMediaId,
+        sourceVideoContentHash: video.locator.sourceVideoContentHash, sourceOverlay: selected.sourceOverlays[0] }],
+      selectionProvenance: [{ ...provenance[0], libraryFrameId: binding.frameId, representativeFrameId: binding.representativeFrameId,
+        candidateIndex: binding.candidateIndex, timestampMs: binding.timestampMs, candidateFrameSha256: binding.frameSha256, approvedPngSha256: hash }] }));
+    vi.stubEnv('OPENAI_API_KEY', 'offline-fixture');
+    return { job, storage };
+  }
+  const assessment = (extra = {}) => ({ humanPresence: 'CLEAR', facialDetail: 'SUFFICIENT', eyes: 'OPEN_OR_NOT_VISIBLE',
+    blur: 'CLEAR', occlusion: 'NONE_OR_MINOR', expressionUsability: 'NATURAL_OR_NEUTRAL', framing: 'USABLE',
+    observableReason: 'Synthetic fixture.', sourceOverlay: { version: 2, status: 'CLEAN' }, ...extra });
+  const complete = (a: object) => Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(a) }] }] });
+  it('checkpoints assessment before image admission and attaches the exact verified PNG on continuation', async () => {
+    const { job, storage } = await setupBound(), assessed: Buffer[] = [];
+    const request = vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body); expect(body.input[1].content[1].image_url).toMatch(/^data:image\/png;base64,/);
+      assessed.push(Buffer.from(body.input[1].content[1].image_url.split(',')[1], 'base64')); return complete(assessment());
+    }); vi.stubGlobal('fetch', request);
+    const prepared = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(prepared.job.slots[0]).toEqual(job.slots[0]); expect(prepared.job.slots[1].videoSelection)
+      .toMatchObject({ providerPortrait: { verified: true } });
+    expect(quotaGroups()).toEqual(['VIDEO_SELECTION']); expect(mocks.render).not.toHaveBeenCalled();
+    mocks.render.mockImplementation(async (_concept, context, options) => {
+      const [attached] = await prepareProviderVideoFrames(context.videoFrameSet.frames);
+      expect(attached.providerBuffer).toEqual(assessed[0]); return { id: options.creativeId };
+    });
+    const rendered = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(rendered.job.slots[1].status).toBe('SAVED'); expect(rendered.job.slots[0]).toEqual(job.slots[0]);
+    expect(request).toHaveBeenCalledOnce(); expect(quotaGroups()).toEqual(['VIDEO_SELECTION', 'CREATIVE_GENERATION']);
+  });
+  it('rejects PNG drift after the checkpoint before another assessment or image quota', async () => {
+    const { job, storage } = await setupBound(), request = vi.fn(async () => complete(assessment())); vi.stubGlobal('fetch', request);
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    const originalHydrate = mocks.hydrate.getMockImplementation()!;
+    mocks.hydrate.mockImplementation(async (...args) => {
+      const value = await originalHydrate(...args), changed = await sharp(value.frames[0].buffer).negate().png().toBuffer();
+      value.frames[0] = { ...value.frames[0], buffer: changed, frameSha256: createHash('sha256').update(changed).digest('hex'), byteLength: changed.length };
+      return value;
+    });
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.error).toContain('pinned portrait PNG or crop changed'); expect(mocks.render).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledOnce(); expect(quotaGroups()).toEqual(['VIDEO_SELECTION']);
+  });
+  it('rejects actual residual marks without image admission and never automatically re-assesses them', async () => {
+    const { job, storage } = await setupBound(), request = vi.fn(async () => complete(assessment({ sourceOverlay: { version: 2, status: 'UNSAFE' } })));
+    vi.stubGlobal('fetch', request);
+    const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(failed.error).toContain('actual retained portrait PNG'); expect(mocks.render).not.toHaveBeenCalled();
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(request).toHaveBeenCalledOnce(); expect(quotaGroups()).toEqual(['VIDEO_SELECTION']);
+  });
+  it('requires explicit Retry for an uncertain PNG assessment and preserves its pinned input', async () => {
+    const { job, storage } = await setupBound(), request = vi.fn().mockRejectedValueOnce(new Error('uncertain'))
+      .mockResolvedValue(complete(assessment())); vi.stubGlobal('fetch', request);
+    const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(failed.job.slots[1].status).toBe('RETRY_REQUIRED'); const before = failed.job.slots[1].videoSelection;
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage); expect(request).toHaveBeenCalledOnce();
+    await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, 2), storage);
+    const passed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(passed.job.slots[1].videoSelection).toMatchObject({ providerPortrait: { verified: true } });
+    expect((passed.job.slots[1].videoSelection as any).providerPortrait.sourcePngSha256).toBe((before as any).providerPortrait.sourcePngSha256);
+    expect(mocks.render).not.toHaveBeenCalled(); expect(request).toHaveBeenCalledTimes(2);
+  });
 });

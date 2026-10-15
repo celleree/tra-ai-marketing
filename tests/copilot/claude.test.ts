@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CLAUDE_COPILOT_MODEL, ClaudeCopilotError, requestClaudeCopilot } from '@/lib/copilot/claude';
 
 const context = () => ({ company: { reference: 'approved:v1', approvedText: 'Approved services and guardrails' }, creatives: [], performance: 'unknown' });
@@ -10,8 +10,21 @@ const setup = (value: unknown = envelope()) => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(value)));
   return { fetchMock, options: { apiKey: 'test-key-never-live', allowPaidRequest: true, maxOutputTokens: 1024, fetch: fetchMock } };
 };
+afterEach(() => vi.unstubAllEnvs());
 
 describe('bounded Claude creative copilot adapter (offline)', () => {
+  it('blocks direct adapter dispatch in acceptance Preview even with existing approval and credentials', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    const { fetchMock, options } = setup();
+    await expect(requestClaudeCopilot(context(), options)).rejects.toMatchObject({ code: 'unavailable', status: 409 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each([['production', 'staging-smoke'], ['preview', 'diagnostic']])('retains direct adapter behavior for %s / %s', async (environment, purpose) => {
+    vi.stubEnv('VERCEL_ENV', environment); vi.stubEnv('TRA_IMAGE_PURPOSE', purpose);
+    const { fetchMock, options } = setup();
+    await expect(requestClaudeCopilot(context(), options)).resolves.toHaveProperty('action', 'DO_NOTHING');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it('sends one capped Messages request with supplied context, no tools and authoritative model/context', async () => {
     const { fetchMock, options } = setup(); const supplied = context();
     const result = await requestClaudeCopilot(supplied, options);

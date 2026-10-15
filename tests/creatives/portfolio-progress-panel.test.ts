@@ -13,18 +13,36 @@ const renderPanel = ({
   count = 12,
   statuses,
   running = false,
+  loading = false,
+  authRequired = false,
   stopped = false,
   planningError = null,
   planReady = false,
   videoPreparation,
+  preflightReady = false,
+  previewOmitBrandLogo = false,
+  previewPreparationApproved = false,
+  previewPreparationResume = false,
+  previewInitializationAvailable = false,
+  previewAcceptanceError,
+  boundCaseCropRecoverySlot,
 }: {
   count?: number;
   statuses?: Array<'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'>;
   running?: boolean;
+  loading?: boolean;
+  authRequired?: boolean;
   stopped?: boolean;
   planningError?: string | null;
   planReady?: boolean;
   videoPreparation?: PortfolioProgress['videoPreparation'];
+  preflightReady?: boolean;
+  previewOmitBrandLogo?: boolean;
+  previewPreparationApproved?: boolean;
+  previewPreparationResume?: boolean;
+  previewInitializationAvailable?: boolean;
+  previewAcceptanceError?: string;
+  boundCaseCropRecoverySlot?: number;
 } = {}) => {
   const base = portfolioProgress(newCreativePortfolio(portfolioRequest(count)));
   const job = {
@@ -32,6 +50,8 @@ const renderPanel = ({
     planReady,
     planningPhase: planReady ? 'READY_TO_RENDER' as const : base.planningPhase,
     planningError,
+    ...(previewAcceptanceError ? { previewAcceptanceError } : {}),
+    ...(previewPreparationResume ? { previewPreparationResume: true } : {}),
     ...(videoPreparation ? { videoPreparation } : {}),
     ...(statuses ? {
       slots: base.slots.map((slot, index) => ({
@@ -46,11 +66,18 @@ const renderPanel = ({
   const resume = vi.fn();
   const retry = vi.fn();
   const portfolio = {
-    response: { job, creatives: [] },
+    response: { job, creatives: [], ...(boundCaseCropRecoverySlot !== undefined ? { boundCaseCropRecoverySlot } : {}), ...(preflightReady ? { preflightReady: true } : {}),
+      ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
+      ...(previewPreparationApproved ? { previewPreparationApproved: true } : {}),
+      ...(previewInitializationAvailable ? { previewInitializationAvailable: true } : {}) },
     running,
+    loading,
+    authRequired,
+    signInUrl: '/sign-in?redirect_url=%2F%3Fportfolio%3Dsaved%26review%3Dreview',
     stopped,
     error: '',
     start: vi.fn(),
+    initializeApprovedPreview: vi.fn(),
     resume,
     retry,
     restoreSaved: vi.fn(),
@@ -61,6 +88,67 @@ const renderPanel = ({
 };
 
 describe('portfolio progress panel', () => {
+  it('distinguishes a read-only refresh and an idle saved plan from active generation', () => {
+    const idle = renderPanel({ count: 2, planReady: true }).html;
+    expect(idle).toContain('Generation is paused. Resume to continue the saved plan.');
+    expect(idle).toContain('returning does not restart generation');
+    expect(idle).toContain('Reload saved progress');
+    const loading = renderPanel({ count: 2, planReady: true, loading: true }).html;
+    expect(loading).toContain('Loading saved progress. This check does not start generation.');
+    expect(loading).not.toContain('Generating creatives.');
+    expect(loading).toMatch(/disabled=""[^>]*>Resume generation/);
+  });
+  it('offers saved-context sign-in recovery and prevents paid actions while signed out', () => {
+    const html = renderPanel({ count: 2, planReady: true, authRequired: true }).html;
+    expect(html).toContain('Sign in to restore saved progress');
+    expect(html).toContain('Sign in required. Saved progress is preserved. Reload after signing in.');
+    expect(html).not.toContain('Generation is paused. Resume to continue the saved plan.');
+    expect(html).toContain('portfolio%3Dsaved%26review%3Dreview');
+    expect(html).toMatch(/disabled=""[^>]*>Resume generation/);
+  });
+  it('shows an explicit nonpaid initialization button on the eligible stopped run and disables it while busy', () => {
+    const args = { count: 2, planningError: 'Prior assessment failed', previewAcceptanceError: 'Old run stopped', previewInitializationAvailable: true };
+    const { html } = renderPanel(args);
+    expect(html).toContain('Prepare approved reassessment'); expect(html).toContain('This starts no AI calls');
+    expect(html).toContain('Old run stopped'); expect(html).not.toContain('Retry planning'); expect(html).not.toContain('Resume generation');
+    const busy = renderPanel({ ...args, running: true }).html;
+    expect(busy).toMatch(/disabled=""[^>]*>Prepare approved reassessment/);
+    expect(busy).toContain('No AI calls are started');
+    expect(renderPanel().html).not.toContain('Prepare approved reassessment');
+  });
+  it.each(['RETRY_REQUIRED', 'SAVED'] as const)('retains the approved stop after slot recovery=%s and hides Resume/Retry', status => {
+    const { html } = renderPanel({ count: 2, planReady: true, previewPreparationApproved: true,
+      statuses: [status, 'PENDING'], previewAcceptanceError: 'Approved test stopped after an unknown image outcome.' });
+    expect(html).toContain('unknown image outcome'); expect(html).toContain('role="alert"');
+    expect(html).not.toContain('Resume generation'); expect(html).not.toContain('Retry creative');
+  });
+  it('offers Resume for the new approved run, labels the estimated budget and hides Retry', () => {
+    const { html } = renderPanel({ count: 2,
+      previewPreparationApproved: true, previewOmitBrandLogo: true });
+    expect(html).toContain('two new selected-frame assessments once each');
+    expect(html).toContain('Both frames must pass before planning');
+    expect(html).toContain('estimate, with no guaranteed dollar ceiling');
+    expect(html).toContain('Resume generation'); expect(html).not.toContain('Retry planning');
+    const checkpoint = renderPanel({ count: 2, previewPreparationApproved: true, preflightReady: true }).html;
+    expect(checkpoint).toContain('Approved preparation is complete. Planning and images have not started.');
+    expect(checkpoint).not.toContain('Cached-input preflight passed');
+    const failure = renderPanel({ count: 2, previewPreparationApproved: true, planningError: 'Provider outcome is unknown.' }).html;
+    expect(failure).toContain('Provider outcome is unknown.'); expect(failure).toContain('role="alert"');
+    expect(failure).not.toContain('Resume generation'); expect(failure).not.toContain('Retry planning');
+  });
+  it('marks the frozen no-logo scope separately from cached preflight or image completion', () => {
+    const { html } = renderPanel({ count: 2, preflightReady: true, previewOmitBrandLogo: true });
+    expect(html).toContain('Logo omitted for this Preview test. Logo fidelity is not being evaluated.');
+    expect(html).toContain('No paid planning or images have started');
+    expect(html).toContain('Resume generation');
+  });
+  it('shows the nonpaid cached checkpoint and bounded Resume scope', () => {
+    const { html } = renderPanel({ count: 2, preflightReady: true });
+    expect(html).toContain('Cached-input preflight passed');
+    expect(html).toContain('No paid planning or images have started');
+    expect(html).toContain('one initial planner, one audit and two Sunburst images');
+    expect(html).toContain('Resume generation');
+  });
   it('shows requested planning count and zero saved progress without inventing a planning percentage', () => {
     const { html } = renderPanel({ count: 12, running: true });
     expect(html).toContain('Planning 12 creatives…');
@@ -161,4 +249,16 @@ describe('portfolio progress panel', () => {
     expect(html).not.toContain('Generation complete.');
     expect(html).toContain('Resume generation');
   });
+});
+
+it('offers only the server-advertised non-paid recovery and preserves authentication/loading guards', () => {
+  for (const guard of [{}, { authRequired: true }, { loading: true }, { running: true }]) {
+    const { html: markup } = renderPanel({ count: 2, statuses: ['SAVED', 'BLOCKED'], planReady: true, boundCaseCropRecoverySlot: 2, ...guard });
+    expect(markup).toContain('Prepare clean-frame recovery for Creative 2');
+    expect(markup).toContain('starts no AI calls');
+    const button = markup.match(/<button[^>]*>Prepare clean-frame recovery for Creative 2<\/button>/)?.[0];
+    expect(button).toBeDefined(); expect(button?.includes('disabled')).toBe(Object.keys(guard).length > 0);
+  }
+  expect(renderPanel({ count: 2, statuses: ['SAVED', 'BLOCKED'], planReady: true }).html)
+    .not.toContain('Prepare clean-frame recovery');
 });

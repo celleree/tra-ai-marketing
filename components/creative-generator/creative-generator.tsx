@@ -8,6 +8,7 @@ import { CreativeComposer } from '@/components/creative-generator/creative-compo
 import { useCreativePortfolio } from '@/components/creative-generator/use-creative-portfolio';
 import { useSavedVideoSources } from '@/components/creative-generator/use-saved-video-sources';
 import { useVideoReviewDraft } from '@/components/creative-generator/use-video-review-draft';
+import { PortfolioPortraitDiagnosticAction } from '@/components/creative-generator/portfolio-portrait-diagnostic';
 import { PortfolioProgressPanel } from '@/components/creative-generator/portfolio-progress-panel';
 import type { CreativePlacement } from '@/lib/creatives/placements';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
@@ -85,22 +86,23 @@ function WorkspaceSectionHeader({ section }: { section: WorkspaceSection }) {
   );
 }
 
-export function CreativeGenerator() {
+export function CreativeGenerator({ acceptancePreview = false }: { acceptancePreview?: boolean } = {}) {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
   const [creationMode, setCreationMode] = useState<CreationMode>('generate');
   const [sourceAssets, setSourceAssets] = useState<CreativeSourceAsset[]>([]);
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
   const [placement, setPlacement] = useState<CreativePlacement>('SQUARE_1_1');
+  const [omitTestLogo, setOmitTestLogo] = useState(false);
   const [uploadedCreatives, setCreatives] = useState<GeneratedCreative[]>([]);
   const [generationError, setGenerationError] = useState('');
   const [handoffGenerate, setHandoffGenerate] = useState(false);
   const handoffConsumedRef = useRef(false);
   const handoffGenerationStartedRef = useRef(false);
   const portfolio = useCreativePortfolio();
-  const videoReview = useVideoReviewDraft();
-  const videos = useSavedVideoSources(sourceAssets, setSourceAssets, videoReview);
-  const generating = portfolio.running;
+  const videoReview = useVideoReviewDraft(portfolio.observeAccess);
+  const videos = useSavedVideoSources(sourceAssets, setSourceAssets, videoReview, portfolio.observeAccess);
+  const generating = portfolio.running || portfolio.loading;
   const savedPortfolio = portfolio.response?.job;
   const creatives = creationMode === 'generate' ? portfolio.response?.creatives ?? [] : uploadedCreatives;
   const generationComplete = !savedPortfolio || savedPortfolio.slots.every(slot => slot.status === 'SAVED');
@@ -109,7 +111,7 @@ export function CreativeGenerator() {
     .map(slot => [slot.index, slot.error || 'Could not be completed.']));
   const displayGenerationError = creationMode === 'generate' ? portfolio.error || generationError : generationError;
 
-  const ready = Boolean(context.trim()) && !videos.pending && !videos.error && videoReview.canGenerate();
+  const ready = Boolean(context.trim()) && !portfolio.authRequired && !videos.pending && !videos.error && videoReview.canGenerate();
 
   useEffect(() => {
     if (handoffConsumedRef.current) return;
@@ -175,15 +177,25 @@ export function CreativeGenerator() {
     setGenerationError('');
   };
 
+  const switchWorkspaceSection = (nextSection: WorkspaceSection) => {
+    if (nextSection === activeSection) return;
+    if (activeSection === 'upload') portfolio.stop();
+    setActiveSection(nextSection);
+    if (nextSection === 'upload') void portfolio.restoreSaved();
+  };
+
   const generate = async () => {
     if (!ready || generating || !videoReview.canGenerate()) return;
     setGenerationError('');
     try {
-      const brand = readStoredBrandGuidance();
+      const previewOmitBrandLogo = acceptancePreview && omitTestLogo;
+      const brand = readStoredBrandGuidance({ omitLogo: previewOmitBrandLogo });
+      if (!brand.logo && !previewOmitBrandLogo) throw new Error('The approved TRA logo is missing for this site. Restore the original logo in Company > Brand Guidelines before generating.');
       const companyProfile = readStoredRuntimeCompanyProfile();
       const reviewReference = videoReview.generationReference();
       await portfolio.start({
         ...(reviewReference ? { videoReview: reviewReference } : {}),
+        ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
         sourceAssets: sourceAssets.map(source => ({ mediaId: source.media.id, role: source.role })),
         ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
         ...(brand.colors.length ? { brandColors: brand.colors } : {}),
@@ -227,7 +239,7 @@ export function CreativeGenerator() {
               className={`workspace-nav-item ${
                 activeSection === item.id ? 'workspace-nav-item-active' : ''
               }`}
-              onClick={() => setActiveSection(item.id)}
+              onClick={() => switchWorkspaceSection(item.id)}
             >
               <span className="workspace-nav-icon" aria-hidden="true">
                 {item.icon}
@@ -274,6 +286,12 @@ export function CreativeGenerator() {
                   </button>
                 </div>
 
+                {creationMode === 'generate' && acceptancePreview ? <div className="panel">
+                  <p>Generate may run paid source preparation, planning, and image generation using your connected API account. Operation quotas do not guarantee a dollar ceiling.</p>
+                  <label><input type="checkbox" checked={omitTestLogo} disabled={generating}
+                    onChange={event => setOmitTestLogo(event.target.checked)} /> Run this Preview test without a logo</label>
+                  {omitTestLogo ? <p>The images will be requested without logos. Logo fidelity is not being evaluated.</p> : null}
+                </div> : null}
                 {creationMode === 'generate' ? (
                   <CreativeComposer
                     value={context}
@@ -308,19 +326,19 @@ export function CreativeGenerator() {
                     <button type="button" disabled={generating || videoReview.state.pending > 0} onClick={() => void videoReview.useCurrentProfile()}>Use current Company Profile</button>
                   </div> : null}
                   <SavedVideoReviewSummary draft={videoReview} />
-                  <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} />
+                  <VideoReviewPanel videos={sourceAssets.filter(source => source.role === 'TRA_VIDEO').map(source => ({ id: source.media.id, name: source.media.originalName }))} draft={videoReview} disabled={generating} authRequired={portfolio.authRequired} observeAccess={portfolio.observeAccess} />
                   <PortfolioProgressPanel portfolio={portfolio} />
                 </> : null}
                 {videoReview.state.error || videoReview.state.saved?.issues.length || (displayGenerationError && videoReview.state.saved) ? (
-                  <div role="alert" className="error-message">
-                    <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ') || displayGenerationError}</p>
+                  <div role={videoReview.state.error || videoReview.state.saved?.issues.length ? 'alert' : undefined} className="error-message">
+                    {videoReview.state.error || videoReview.state.saved?.issues.length ? <p>{videoReview.state.error || videoReview.state.saved?.issues.map(issue => issue.message).join(' ')}</p> : null}
                     <button type="button" disabled={videoReview.state.pending > 0} onClick={() => void videoReview.reload()}>Reload saved review</button>
                     {videoReview.state.saved?.issues.length ? <button type="button" disabled={generating || videoReview.state.pending > 0 || Boolean(videoReview.state.error)}
                       onClick={() => void videoReview.clearUnavailable()}>Remove unavailable material</button> : null}
                   </div>
                 ) : null}
                 {displayGenerationError ? (
-                  <p className="error-message generation-error">{displayGenerationError}</p>
+                  <p role="alert" className="error-message generation-error">{displayGenerationError}</p>
                 ) : null}
               </div>
             </div>
@@ -333,6 +351,12 @@ export function CreativeGenerator() {
                 creationMode !== 'generate' || generationComplete
               }
               generationFailures={creationMode === 'generate' ? generationFailures : {}}
+              renderFailureDetails={creationMode === 'generate' && savedPortfolio ? index => {
+                const slot = savedPortfolio.slots.find(slot => slot.index === index);
+                return slot && ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status) && slot.videoSelection?.version === 2 && slot.videoSelection.providerPortrait
+                  ? <PortfolioPortraitDiagnosticAction key={`${savedPortfolio.id}:${index}`} id={savedPortfolio.id} slotIndex={index}
+                    disabled={generating || portfolio.authRequired || Boolean(savedPortfolio.lease)} observeAccess={portfolio.observeAccess} onStateChanged={()=>void portfolio.restoreSaved()} /> : null;
+              } : undefined}
             />
           </div>
         ) : activeSection === 'tra-creatives' ? (

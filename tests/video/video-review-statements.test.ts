@@ -7,7 +7,7 @@ vi.mock('react', async original => ({ ...await original<typeof import('react')>(
   useState: (value: unknown) => { const index = hooks.cursor++; if (!(index in hooks.values)) hooks.values[index] = value;
     return [hooks.values[index], (next: unknown) => { hooks.values[index] = next; }]; }, useEffect: (effect: () => () => void) => { hooks.effects.push(effect); } }));
 vi.mock('@/lib/company/creative-context', async original => ({ ...await original<object>(), readStoredRuntimeCompanyProfile: () => hooks.profile }));
-import { VideoReviewStatements, toggleReviewClaim } from '@/components/creative-generator/video-review-statements';
+import { VideoReviewStatements, toggleReviewClaim, compactStatementRows, toggleStatementRow } from '@/components/creative-generator/video-review-statements';
 import { discoverReviewStatements } from '@/lib/video/review-statement-discovery';
 import type { ReviewSource } from '@/components/creative-generator/video-review-panel';
 import type { useVideoReviewDraft } from '@/components/creative-generator/use-video-review-draft';
@@ -45,7 +45,7 @@ describe('exact source statements and progressive context', () => {
   });
   it('renders all five families with exact wording, timestamps, qualifications and collapsed context/transcript', async () => {
     await load(); const html = renderToStaticMarkup(render());
-    for (const text of ['We cut our electric bill by about 40%.', '00:12–00:16', 'Video transcript', 'On-screen offer.', 'On-screen video text',
+    for (const text of ['We cut our electric bill by about 40%.', '00:12–00:16', 'Video transcript', 'On-screen offer.', '00:04',
       'Best decision we made for the house.', 'Customer Review', 'Case Study · Smith Residence', 'Installation was completed in two weeks.',
       'Battery backup included.', 'Company Profile', 'Results vary.', 'Residential only.', 'View context', 'Transcript']) expect(html).toContain(text);
     expect(html).not.toContain('<details open'); expect(request).toHaveBeenCalledTimes(1);
@@ -77,4 +77,28 @@ describe('exact source statements and progressive context', () => {
     expect(checks.map(check => check.props.checked)).toEqual([false, false, false, true, true, true]);
     expect(renderToStaticMarkup(render())).toContain('3 selected');
   });
+});
+
+it('compacts exact on-screen repeats with all timestamps and preserves mixed selection and source references', async () => {
+  await load();
+  const original = review.onScreenStatements[0];
+  const duplicate = { ...original, reference: { ...original.reference, frame: { ...original.reference.frame, timestampMs: 8000, frameId: 'second' } } } as typeof original;
+  const different = { ...duplicate, wording: 'Different exact amount $100.', reference: { ...duplicate.reference, statementIndex: 1 } } as typeof original;
+  const expanded = { ...review, onScreenStatements: [original, duplicate, different] };
+  draft.state.choices!.claims = [duplicate.reference];
+  const draw = () => { hooks.cursor = 0; return VideoReviewStatements({ review: expanded, draft, disabled: false }); };
+  const html = renderToStaticMarkup(draw());
+  expect(html).toContain('00:04, 00:08'); expect(html).not.toContain('On-screen video text'); expect(html).not.toContain('Small print unclear.');
+  const row = nodes(draw()).filter(node => node.type === 'input')[2];
+  expect(row.props['aria-checked']).toBe('mixed'); expect(row.props.checked).toBe(false);
+  const input = { indeterminate: false }; (row.props.ref as (input: unknown) => void)(input); expect(input.indeterminate).toBe(true);
+  expect(draft.state.choices!.claims).toEqual([duplicate.reference]);
+  (row.props.onChange as () => void)();
+  expect(draft.state.choices!.claims).toEqual([duplicate.reference, original.reference]);
+  expect(nodes(draw()).filter(node => node.type === 'input')[2].props.checked).toBe(true);
+  (nodes(draw()).filter(node => node.type === 'input')[2].props.onChange as () => void)();
+  expect(draft.state.choices!.claims).toEqual([]);
+  expect(compactStatementRows([original, duplicate, different])).toEqual([[original, duplicate], [different]]);
+  const capped = Array.from({ length: 49 }, (_, index) => ({ type: 'VIDEO_TRANSCRIPT' as const, startSegmentIndex: index, endSegmentIndex: index }));
+  expect(toggleStatementRow(capped, [original, duplicate])).toBe(capped);
 });

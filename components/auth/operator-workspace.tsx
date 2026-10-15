@@ -2,10 +2,12 @@ import { UserButton } from '@clerk/nextjs';
 import { redirect } from 'next/navigation';
 import { connection } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
+import { workspaceSignInUrl } from '@/lib/auth/return-path';
 
 export async function OperatorWorkspace({
   children,
-}: Readonly<{ children: React.ReactNode }>) {
+  returnTo = '/',
+}: Readonly<{ children: React.ReactNode; returnTo?: string }>) {
   await connection();
   const access = await getOperatorAccess();
 
@@ -13,7 +15,7 @@ export async function OperatorWorkspace({
     return <><header className="studio-account"><UserButton /></header>{children}</>;
   }
 
-  if (access.status === 401) redirect('/sign-in');
+  if (access.status === 401) redirect(workspaceSignInUrl(returnTo));
 
   if (access.status === 403) {
     return (

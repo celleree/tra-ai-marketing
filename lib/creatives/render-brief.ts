@@ -5,6 +5,7 @@ import type { LayoutBlueprint } from '@/lib/layouts/blueprint';
 import type { CreativeConceptDetails, CreativeStrategy } from '@/lib/creatives/strategy';
 import { selectedLayout, type ReferencePlanningCandidate } from '@/lib/references/planning';
 import type { CreativeProofProvenance } from '@/lib/proof/provenance';
+import type { DraftVideoSourceAssertion } from '@/lib/creatives/draft-video-assertion';
 
 type LegacyCreativeRenderCopy = {
   headline: string;
@@ -28,10 +29,11 @@ export type CreativeRenderBrief = {
     testimonialsStatisticsRules: string; industryComplianceRules: string;
   };
   proof?: CreativeProofProvenance;
+  draftSourceAssertion?: Pick<DraftVideoSourceAssertion, 'sourceMediaId' | 'sourceSha256' | 'startMs' | 'endMs' | 'verification' | 'permission'>;
 };
 
 export function buildCreativeRenderBrief(args: {
-  concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'imageCopy' | 'strategy'>;
+  concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'imageCopy' | 'strategy' | 'draftSourceAssertion'>;
   companyProfile?: RuntimeCompanyProfileSnapshot;
   brandColors?: readonly string[];
   brandFontNames?: readonly string[];
@@ -74,6 +76,11 @@ export function buildCreativeRenderBrief(args: {
       industryComplianceRules: company.industryComplianceRules,
     },
     ...(args.proofProvenance ? { proof: args.proofProvenance } : {}),
+    ...(args.concept.draftSourceAssertion ? { draftSourceAssertion: {
+      sourceMediaId: args.concept.draftSourceAssertion.sourceMediaId, sourceSha256: args.concept.draftSourceAssertion.sourceSha256,
+      startMs: args.concept.draftSourceAssertion.startMs, endMs: args.concept.draftSourceAssertion.endMs,
+      verification: args.concept.draftSourceAssertion.verification, permission: args.concept.draftSourceAssertion.permission,
+    } } : {}),
   };
 }
 
@@ -115,6 +122,7 @@ Execute this planned concept; do not invent another angle, outcome, offer or mes
 ${copyInstruction}
 ${brief.proof ? 'proof is authoritative evidence/compliance context for the planned claim. It is NOT additional image copy: render only exactCopy fields, never render proof.selectedText, proof attribution, restrictions or disclaimer unless that exact text is already present in exactCopy. Preserve any exactCopy disclosure verbatim.' : 'No Proof is selected. Do not invent or infer testimonials, evidence, attribution or Proof.'}
 Planned copy is not advertising approval. Do not add factual claims or treat source pixels as proof.
+${brief.draftSourceAssertion ? 'draftSourceAssertion binds an exact source statement already inserted in exactCopy for this DRAFT. Render that planned statement verbatim, preserving amounts, outcomes and qualifications. It is unverified source content, not Proof, a verified result or permission to publish/reuse. Do not add attribution or any further claim; do not render provenance IDs, review flags or source context as extra image text.' : ''}
 ${layoutInstruction || 'Keep the selected medium, composition and visual direction. Include only the planned subjects and props; do not add decorative objects or extra visual systems.'}
 ${layoutInstruction ? 'Within the blueprint scaffold, include only the planned subjects and props; do not add decorative objects or extra visual systems.' : ''}
 ${brief.execution.subjectSource === 'non-human' ? 'This planned concept is explicitly non-human. Do not depict people even when approved TRA source pixels are attached.' : ''}

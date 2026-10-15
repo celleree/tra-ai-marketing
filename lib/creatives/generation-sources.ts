@@ -12,7 +12,7 @@ import { extractVideoSelectionFrames, loadVideoSelectionContext } from '@/lib/vi
 import { getApprovedTraVideoFrames } from '@/lib/video/tra-video-frames';
 import type { ApprovedTraVideoFrameSet } from '@/lib/video/types';
 
-type SourceRequest = Pick<ValidGenerateCreativeRequest, 'sourceAssets' | 'videoFrameSelection' | 'brandLogoMediaId'>;
+type SourceRequest = Pick<ValidGenerateCreativeRequest, 'sourceAssets' | 'videoFrameSelection' | 'brandLogoMediaId' | 'reviewHandoff'>;
 export class CreativeGenerationPreparationError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
@@ -39,14 +39,18 @@ export async function hydrateGenerationSources(request: SourceRequest) {
   assertGenerationAvailable(request);
   const storage = getMediaStorage();
   const sourceAssets = await hydrateCreativeSourceSelections(storage, request.sourceAssets);
-  const generationSourceAsset = sourceAssets.find(source => source.role === 'LAYOUT_REFERENCE' && source.media.mediaType === 'IMAGE')
+  const selectedVideoId = request.videoFrameSelection?.version === 3 ? request.videoFrameSelection.sourceVideoMediaId
+    : request.reviewHandoff?.choices.video?.locator.sourceVideoMediaId;
+  const traVideoSource = sourceAssets.find(asset => asset.role === 'TRA_VIDEO'
+    && (!selectedVideoId || asset.media.id === selectedVideoId)) as HydratedTraVideoSource | undefined;
+  if (selectedVideoId && !traVideoSource) throw new CreativeGenerationPreparationError('The selected video is missing from this request. Select it again.', 409);
+  const generationSourceAsset = traVideoSource ? undefined : sourceAssets.find(source => source.role === 'LAYOUT_REFERENCE' && source.media.mediaType === 'IMAGE')
     || sourceAssets.find(source => source.media.mediaType === 'IMAGE');
   const requestedSources: CreativeGenerationProvenance['requestedSources'] = sourceAssets.map(asset => ({
     role: asset.role, mediaId: asset.media.id, sha256: sha256(asset.stored.buffer),
   }));
   const source = generationSourceAsset?.stored.mediaType === 'IMAGE' ? generationSourceAsset.stored : null;
-  const providerImageSource = findEligibleProviderImageSource(sourceAssets);
-  const traVideoSource = sourceAssets.find(asset => asset.role === 'TRA_VIDEO') as HydratedTraVideoSource | undefined;
+  const providerImageSource = traVideoSource ? undefined : findEligibleProviderImageSource(sourceAssets);
   let videoFrameSet: ApprovedTraVideoFrameSet | null = null;
   let generatedVideoFrameSelection: GeneratedVideoFrameSelection | undefined;
   if (request.videoFrameSelection && traVideoSource) {

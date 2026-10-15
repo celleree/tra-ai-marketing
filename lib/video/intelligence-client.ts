@@ -2,10 +2,11 @@ import type { VideoFrameLibrary } from '@/lib/video/frame-library';
 import type { CompactVideoIntelligenceJobStatus, ExecuteVideoIntelligenceStepInput,
   readVideoIntelligenceSource, VideoIntelligenceJobLocator } from '@/lib/video/intelligence-service';
 import type { selectVideoFramesWithCache } from '@/lib/video/selection-cache';
+import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
 type SourceState = Awaited<ReturnType<typeof readVideoIntelligenceSource>>;
 export type CachedVideoSelectionResult = Awaited<ReturnType<typeof selectVideoFramesWithCache>>;
-export interface VideoIntelligenceClientOptions { signal: AbortSignal; request?: typeof fetch }
+export interface VideoIntelligenceClientOptions { signal: AbortSignal; request?: typeof fetch; observeAccess?: WorkspaceAccessObserver }
 const endpoint = '/api/video/intelligence';
 
 const json = async <T>(url: string, body: unknown | undefined, options: VideoIntelligenceClientOptions): Promise<T> => {
@@ -14,6 +15,7 @@ const json = async <T>(url: string, body: unknown | undefined, options: VideoInt
     signal: options.signal, cache: 'no-store',
     ...(body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   });
+  if (!options.signal.aborted) options.observeAccess?.('video-preparation', response.status);
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { error?: string };
     throw new Error(error.error || `Video request failed (HTTP ${response.status}).`);

@@ -80,12 +80,12 @@ export const parseReviewSelectionChoices = (value: unknown): ReviewSelectionChoi
   if (!record(value) || !exact(value, ['video', 'frames', 'claims', 'companyProfile']) || (value.video !== null && !video(value.video))
     || (value.companyProfile !== null && !profile(value.companyProfile))) throw new ReviewSelectionError('Review selection sources are invalid.', 400);
   const sourceHash = (value.video as ReviewVideoReference | null)?.locator.sourceVideoContentHash ?? '';
-  if ((value.frames !== null && (!Array.isArray(value.frames) || value.frames.length > 3 || value.frames.some(item => !frame(item, sourceHash))
+  if ((value.frames !== null && (!Array.isArray(value.frames) || value.frames.some(item => !frame(item, sourceHash))
     || new Set(value.frames.map(item => item.frameId)).size !== value.frames.length))
     || (value.claims !== null && (!Array.isArray(value.claims) || value.claims.length > 50 || value.claims.some(item => !claim(item, sourceHash))
       || new Set(value.claims.map(reviewSourceSha256)).size !== value.claims.length))
     || (!value.video && ((value.frames as unknown[] | null)?.length || (value.claims as ReviewClaimReference[] | null)?.some(item => item.type.startsWith('VIDEO_'))))) {
-    throw new ReviewSelectionError('Select at most three distinct frames and fifty distinct source claims.', 400);
+    throw new ReviewSelectionError('Select distinct valid source frames and at most fifty distinct source claims.', 400);
   }
   return structuredClone(value) as ReviewSelectionChoices;
 };

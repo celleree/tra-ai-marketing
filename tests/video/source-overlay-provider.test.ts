@@ -22,6 +22,26 @@ const output = () => Response.json({ data: [{ b64_json: original.toString('base6
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('provider-bound source-overlay decision', () => {
+  it('preserves every retained source pixel when a portrait is cropped square for a separate 4:5 ad canvas', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'fixture-only');
+    const portrait = await sharp({ create: { width: 120, height: 200, channels: 3, background: '#ad6644' } })
+      .composite([{ input: await sharp({ create: { width: 120, height: 80, channels: 3, background: '#0739af' } }).png().toBuffer(),
+        left: 0, top: 120 }]).png().toBuffer();
+    const source = { ...frame(crop), buffer: portrait, frameSha256: sha(portrait), byteLength: portrait.length };
+    const dispatch = vi.fn(async (_url: string, init: RequestInit) => {
+      const form = init.body as FormData;
+      expect(form.get('size')).toBe('1024x1280');
+      const sent = Buffer.from(await (form.getAll('image[]')[0] as File).arrayBuffer());
+      const metadata = await sharp(sent).metadata(); expect([metadata.width, metadata.height]).toEqual([120, 120]);
+      expect(await sharp(sent).raw().toBuffer()).toEqual(await sharp(portrait)
+        .extract({ left: 0, top: 0, width: 120, height: 120 }).raw().toBuffer());
+      return output();
+    });
+    vi.stubGlobal('fetch', dispatch);
+    await generateApprovedTraVideoFrameCreativeImage({ frames: [source], placement: 'PORTRAIT_4_5',
+      primaryFormat: 'direct-response', context: 'Synthetic source inset', copy: { headline: 'Talk with TRA' } });
+    expect(dispatch).toHaveBeenCalledOnce(); expect(source.buffer).toEqual(portrait);
+  });
   it('keeps a clean approved PNG byte-identical and leaves its original untouched', async () => {
     const source = frame({ version: 2, status: 'CLEAN' });
     const [prepared] = await prepareProviderVideoFrames([source]);

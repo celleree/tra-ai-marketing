@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { claimCreativePortfolio, finishPortfolioAuditForRepair, finishPortfolioRepair, finishPortfolioInitialPlan, finishPortfolioPlan, finishPortfolioPreparation, finishPortfolioSlot,
   newCreativePortfolio, retryPortfolioWork, PORTFOLIO_LEASE_MS, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
@@ -7,8 +7,25 @@ import { portfolioAudit } from '../fixtures/portfolio-audit';
 import { MemoryPortfolioStorage as MemoryStorage, portfolioRequest as request, portfolioSnapshot as snapshot } from '../fixtures/creative-portfolio';
 
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value));
+afterEach(() => vi.unstubAllEnvs());
 
 describe('durable creative portfolio storage', () => {
+  it('persists an approved terminal stop and refuses to clear or replace it', async () => {
+    const storage = new MemoryStorage(), job = await createCreativePortfolio(request(), storage);
+    const stopped = await updateCreativePortfolio(job.id, current => ({ ...current, previewAcceptanceError: 'Approved test stopped.' }), storage);
+    expect(await readCreativePortfolio(job.id, storage)).toEqual(stopped);
+    for (const previewAcceptanceError of [undefined, 'Replace stop']) await expect(updateCreativePortfolio(job.id,
+      current => ({ ...current, previewAcceptanceError }), storage)).rejects.toThrow('terminal stop is immutable');
+    expect(() => retryPortfolioWork(stopped, null)).toThrow('test is stopped');
+  });
+  it('retains the explicit no-logo Preview choice through durable readback', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    const data = { ...request(2), previewOmitBrandLogo: true as true | undefined };
+    const storage = new MemoryStorage(), job = await createCreativePortfolio(data, storage, 1000);
+    data.previewOmitBrandLogo = undefined;
+    const loaded = await readCreativePortfolio(job.id, storage);
+    expect(loaded?.request.previewOmitBrandLogo).toBe(true); expect(loaded?.request).not.toHaveProperty('brandLogoMediaId');
+  });
   it('creates a composed portfolio while retaining explicit saved versions', async () => {
     const storage = new MemoryStorage(), job = await createCreativePortfolio(request(), storage, 1000);
     expect(job.sourceCompositionVersion).toBe(2);

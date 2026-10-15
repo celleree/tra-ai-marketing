@@ -121,6 +121,20 @@ describe('serialized conditional review writes', () => {
     expect(client.getState()).toMatchObject({ choices: selected(), error: '', conflict: false });
     await client.save(selected()); expect(JSON.parse(request.mock.calls.at(-1)![1]!.body as string).expectedRevision).toBe('concurrent-revision');
   });
+  it.each([401, 403, 409, 503])('retains HTTP %s cause across queued taps, then restores saved choices for explicit retry', async status => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(saved()))
+      .mockResolvedValueOnce(new Response('Not JSON', { status }));
+    const client = createReviewDraftClient({ request }); await client.load(id);
+    await Promise.allSettled([client.save(selected()), client.save({ ...selected(), frames: [] })]);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(client.getState().error).toContain(`HTTP ${status}`);
+    expect(client.getState().error).toContain(status === 401 ? 'Sign in again' : status === 403 ? 'approved TRA operator' : status === 409 ? 'newer saved revision' : 'could not be confirmed');
+    expect(client.getState().saved).toEqual(saved());
+    request.mockResolvedValueOnce(Response.json(saved())); await client.load(id);
+    expect(client.getState()).toMatchObject({ error: '', conflict: false, choices: selected() });
+    request.mockResolvedValueOnce(Response.json(saved(selected(), 'revision-2'))); await client.save(selected());
+    expect(JSON.parse(request.mock.calls.at(-1)![1]!.body as string).expectedRevision).toBe('revision-1');
+  });
   it('stops after a lost connection rather than replaying an uncertain write', async () => {
     const request = vi.fn<typeof fetch>().mockRejectedValue(new Error('Connection lost')); const client = createReviewDraftClient({ request });
     await expect(client.save(selected())).rejects.toThrow('Connection lost');

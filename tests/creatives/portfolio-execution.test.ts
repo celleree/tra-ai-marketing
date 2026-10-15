@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as previewAcceptance from '@/lib/creatives/preview-acceptance';
+import * as previewApproval from '@/lib/creatives/preview-test-approval';
+import * as operatorQuota from '@/lib/quotas/operator-quota';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
 import { createCreativePortfolio, readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
 import { newCreativePortfolio, retryPortfolioWork } from '@/lib/creatives/portfolio-job';
@@ -43,6 +46,7 @@ vi.mock('@/lib/creatives/portfolio-snapshot', async original => ({
   ...await original<typeof import('@/lib/creatives/portfolio-snapshot')>(), restoreCreativePortfolio: mocks.restore,
 }));
 let records: CreativeRecord[] = [];
+afterEach(() => vi.restoreAllMocks());
 const analysis = { summary: 'Planning source summary', visibleText: [], visualStructure: 'Clear hierarchy', hookOrAngle: 'Clarity',
   offerOrCta: 'Talk with TRA', styleNotes: 'Calm', preserve: [], avoid: [], unknowns: [], dominantCategory: 'customer-problems' as const };
 const unAuditedPlan = (request: ReturnType<typeof portfolioRequest>) => {
@@ -104,6 +108,31 @@ beforeEach(() => {
   });
 });
 
+it('runs changed-prompt ordinary Preview preparation under normal controls without inheriting QA cache/call constraints', async () => {
+  vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+  const storage = new MemoryPortfolioStorage();
+  const job = await createCreativePortfolio({ ...portfolioRequest(3), context: 'User supplied a changed ordinary prompt.' }, storage);
+  const dispatch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ status: 'completed' }));
+  mocks.prepareStep.mockImplementationOnce(async (request, _url, state, start, _composition, preflight) => {
+    expect(preflight).toBe(false); expect(request.context).toBe(job.request.context);
+    start(); await fetchWithProviderUsage('source-reference-analysis', 'gpt-6-luna', 'https://api.openai.com/v1/responses',
+      { method: 'POST', body: JSON.stringify({ model: 'gpt-6-luna', store: false, input: request.context }) }, dispatch);
+    return { state: { ...state, analysis } };
+  });
+  try {
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage); // Existing planning quota first.
+    const prepared = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(prepared.error).toBeUndefined(); expect(prepared.job.request.context).toBe(job.request.context);
+    expect(prepared.job.planning).toMatchObject({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis } });
+    expect(prepared.job).not.toHaveProperty('previewAcceptanceError'); expect(dispatch).toHaveBeenCalledOnce();
+    expect([...storage.data.keys()].some(key => key.startsWith('preview-test-calls/'))).toBe(false);
+    const quota = vi.spyOn(operatorQuota, 'reserveOperatorQuota').mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 60 });
+    const other = await createCreativePortfolio(portfolioRequest(3), storage);
+    expect((await advanceCreativePortfolio(other.id, 'operator', 'http://localhost', storage)).status).toBe(429);
+    expect(quota).toHaveBeenCalledOnce(); expect(dispatch).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllEnvs(); }
+});
+
 const readyPortfolio = async (
   storage: MemoryPortfolioStorage,
   request: Parameters<typeof createCreativePortfolio>[0] = portfolioRequest(),
@@ -116,6 +145,61 @@ const readyPortfolio = async (
     ...current, snapshot, planning: { phase: 'READY_TO_RENDER' as const }, lease: null,
   }), storage);
 };
+
+it.each([false, true])('stops the approved test after an unknown image outcome, including saved recovery=%s', async savedRecovery => {
+  // Exact request admission is tested separately; exercise the approved execution state transition.
+  vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
+  const storage = new MemoryPortfolioStorage(), job = await readyPortfolio(storage);
+  const finalize = mocks.render.getMockImplementation()!;
+  mocks.render.mockImplementationOnce(async (...args) => {
+    if (savedRecovery) await finalize(...args);
+    throw new Error('Image outcome unknown');
+  });
+  const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(failed.job.previewAcceptanceError).toBeTruthy(); expect(failed.job.slots[0].status).toBe('RETRY_REQUIRED');
+  const reopened = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(reopened.job.previewAcceptanceError).toBe(failed.job.previewAcceptanceError);
+  expect(reopened.job.slots.map(slot => slot.status)).toEqual([savedRecovery ? 'SAVED' : 'RETRY_REQUIRED', 'PENDING']);
+  expect((await readCreativePortfolio(job.id, storage))?.previewAcceptanceError).toBe(failed.job.previewAcceptanceError);
+  expect(reopened.job.request).toEqual(job.request); expect(reopened.job.lease).toBeNull(); expect(mocks.render).toHaveBeenCalledOnce();
+});
+
+it.each(['hydration', 'quota-storage'])('persists an approved-test stop after a pre-provider %s error', async failure => {
+  vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
+  const storage = new MemoryPortfolioStorage();
+  const job = failure === 'hydration' ? await readyPortfolio(storage) : await createCreativePortfolio(portfolioRequest(), storage);
+  if (failure === 'hydration') mocks.restore.mockRejectedValueOnce(new Error('Media temporarily unavailable'));
+  else vi.spyOn(operatorQuota, 'reserveOperatorQuota').mockRejectedValueOnce(new operatorQuota.OperatorQuotaUnavailableError());
+  const failed = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(failed.job.previewAcceptanceError).toBeTruthy();
+  expect((await readCreativePortfolio(job.id, storage))?.previewAcceptanceError).toBe(failed.job.previewAcceptanceError);
+  expect((await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage)).job).toEqual(failed.job);
+  expect(mocks.render).not.toHaveBeenCalled(); expect(mocks.prepareStep).not.toHaveBeenCalled();
+});
+
+it.each(['planning', 'image'])('makes an approved-test %s quota denial terminal across reload', async phase => {
+  vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
+  const storage = new MemoryPortfolioStorage();
+  const job = phase === 'image' ? await readyPortfolio(storage) : await createCreativePortfolio(portfolioRequest(), storage);
+  const quota = vi.spyOn(operatorQuota, 'reserveOperatorQuota').mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 60 });
+  const denied = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(denied.status).toBe(429); expect(denied.job.previewAcceptanceError).toContain('quota reached');
+  expect((await readCreativePortfolio(job.id, storage))?.previewAcceptanceError).toBe(denied.job.previewAcceptanceError);
+  expect((await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage)).job).toEqual(denied.job);
+  expect(quota).toHaveBeenCalledOnce(); expect(mocks.render).not.toHaveBeenCalled(); expect(mocks.prepareStep).not.toHaveBeenCalled();
+});
+
+it('records an approved expired-lease stop before recovering a saved image', async () => {
+  vi.spyOn(previewApproval, 'isApprovedPreviewPortfolio').mockReturnValue(true);
+    vi.spyOn(previewAcceptance, 'isPreviewAcceptanceOperation').mockReturnValue(true);
+  const storage = new MemoryPortfolioStorage(), job = await readyPortfolio(storage);
+  await mocks.render(job.snapshot!.batchPlan.creatives[0], job.snapshot, { creativeId: job.slots[0].creativeId, assertCurrentWork: async () => {} });
+  await updateCreativePortfolio(job.id, current => ({ ...current, lease: { id: 'lost-worker', slotIndex: 1, expiresAtMs: Date.now() - 1 } }), storage);
+  const recovered = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+  expect(recovered.job.previewAcceptanceError).toContain('outcome may be uncertain');
+  expect(recovered.job.slots.map(slot => slot.status)).toEqual(['SAVED', 'PENDING']);
+  expect(recovered.job.lease).toBeNull(); expect(mocks.render).toHaveBeenCalledOnce();
+});
 
 it('retries portfolio finalization from saved purchased bytes without another image call', async () => {
   const storage = new MemoryPortfolioStorage(); const job = await readyPortfolio(storage);
@@ -170,6 +254,23 @@ const reachDiversityAudit = async (storage: MemoryPortfolioStorage) => {
   await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
   return job;
 };
+
+it('stops a failed initial Preview audit without entering repair, re-audit or rendering', async () => {
+  const storage = new MemoryPortfolioStorage(), job = await reachDiversityAudit(storage);
+  vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+  // Request admission is tested separately; isolate the reachable initial-audit transition here.
+  const admission = vi.spyOn(previewAcceptance, 'assertPreviewAcceptanceJob').mockImplementation(() => {});
+  const mode = vi.spyOn(previewAcceptance, 'isPreviewAcceptanceOperation').mockReturnValue(true);
+  try {
+    mocks.audit.mockResolvedValueOnce(repeatedAudit());
+    const result = await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(result.status).toBe(409); expect(result.error).toContain('repair and re-audit are not authorized');
+    expect(result.job.planning.phase).toBe('DIVERSITY_AUDIT'); expect(result.job.planningError).toBeTruthy();
+    await advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+    expect(mocks.plan).toHaveBeenCalledOnce(); expect(mocks.audit).toHaveBeenCalledOnce();
+    expect(mocks.render).not.toHaveBeenCalled();
+  } finally { admission.mockRestore(); mode.mockRestore(); vi.unstubAllEnvs(); }
+});
 
 const reachTerminalSecondAudit = async (storage: MemoryPortfolioStorage) => {
   const job = await reachDiversityAudit(storage);

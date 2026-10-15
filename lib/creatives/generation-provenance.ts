@@ -10,6 +10,7 @@ import {
   type CreativeImageRouting,
 } from '@/lib/creatives/image-routing';
 import { parseSourceOverlayDecision, type SourceCrop, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
+import { isCreativeLogoAnchor, type CreativeLogoAnchor } from '@/lib/creatives/logo-placement';
 import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
 
 const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
@@ -58,6 +59,7 @@ export type CreativeGenerationProvenance = {
     canvasMediaId: string;
     canvasSha256: string;
     instruction?: string;
+    logoOverlay?: { version: 1; anchor: CreativeLogoAnchor; outputSha256: string };
   };
 };
 
@@ -259,12 +261,15 @@ export const parseCreativeGenerationProvenance = (
   let revision: CreativeGenerationProvenance['revision'];
   if ('revision' in value) {
     const source = value.revision;
-    if (!isRecord(source) || !hasExactKeys(source, ['parentCreativeId', 'canvasMediaId', 'canvasSha256', ...('instruction' in source ? ['instruction'] : [])]) ||
+    if (!isRecord(source) || !hasExactKeys(source, ['parentCreativeId', 'canvasMediaId', 'canvasSha256', ...('instruction' in source ? ['instruction'] : []), ...('logoOverlay' in source ? ['logoOverlay'] : [])]) ||
       typeof source.parentCreativeId !== 'string' || !/^creative_[a-f0-9]{32}$/.test(source.parentCreativeId) ||
       !isMediaId(source.canvasMediaId) || !isHash(source.canvasSha256) ||
       ('instruction' in source && (typeof source.instruction !== 'string' || !source.instruction.trim() || source.instruction.length > 4000))) return null;
+    if ('logoOverlay' in source && (!isRecord(source.logoOverlay) || !hasExactKeys(source.logoOverlay, ['version', 'anchor', 'outputSha256'])
+      || source.logoOverlay.version !== 1 || !isCreativeLogoAnchor(source.logoOverlay.anchor) || !isHash(source.logoOverlay.outputSha256) || !logoOverlaySource)) return null;
     revision = { parentCreativeId: source.parentCreativeId, canvasMediaId: source.canvasMediaId, canvasSha256: source.canvasSha256,
-      ...(typeof source.instruction === 'string' ? { instruction: source.instruction } : {}) };
+      ...(typeof source.instruction === 'string' ? { instruction: source.instruction } : {}),
+      ...(source.logoOverlay ? { logoOverlay: source.logoOverlay as NonNullable<CreativeGenerationProvenance['revision']>['logoOverlay'] } : {}) };
   }
 
   return {

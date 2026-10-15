@@ -1,4 +1,5 @@
 import { parseCopilotContextSnapshot, parseCopilotRecommendation, type CopilotRecommendationRecord } from '@/lib/copilot/records';
+import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
 
 export const CLAUDE_COPILOT_MODEL = 'claude-sonnet-5-5';
 export const COPILOT_INPUT_BYTE_LIMIT = 64000;
@@ -23,6 +24,7 @@ For PROPOSE_CREATIVE_TEST, include at least one inference and replace recommenda
 
 /** Server caller supplies approval, credentials and an explicit output-token cap. One attempt only. */
 export async function requestClaudeCopilot(suppliedContext: unknown, options: ClaudeCopilotOptions): Promise<CopilotRecommendationRecord> {
+  if (isPreviewAcceptance()) throw new ClaudeCopilotError('unavailable', 409);
   if (typeof window !== 'undefined' || options.allowPaidRequest !== true || !options.apiKey?.trim()) {
     throw new ClaudeCopilotError('unavailable');
   }
