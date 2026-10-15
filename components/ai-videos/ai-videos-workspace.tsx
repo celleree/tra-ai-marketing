@@ -63,7 +63,7 @@ export function AIVideosWorkspace() {
     });
   }
   const chosen = jobs.find(job => job.id === selected);
-  return <section aria-labelledby="wan-title" style={{ padding: 24, color: '#e2e8f0', maxWidth: 1100, minWidth: 0, overflowWrap: 'anywhere', margin: '0 auto' }}>
+  return <section aria-labelledby="wan-title" style={{ padding: 24, color: '#e2e8f0', background: '#101827', borderRadius: 16, maxWidth: 1100, minWidth: 0, overflowWrap: 'anywhere', margin: '0 auto' }}>
     <h1 id="wan-title">AI Videos</h1>
     <p>Wan Animate transfers movement from a source video to a character image. Move animates your character; Replace substitutes the subject in the source scene.</p>
     <p style={{ color: '#94a3b8' }}>Fal Wan 2.2 · Images may be center-cropped · Audio preservation and voice cloning are not guaranteed or provided.</p>
