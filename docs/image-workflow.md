@@ -16,9 +16,13 @@ Do not reopen or restore older architecture merely because it still appears in a
 
 Current Stage 1 scope: static-image creative generation and editing. Do not implement Claude ad-account management, autonomous Meta decisions, budget optimization, automatic pause/scale behavior, performance dashboards, or autonomous publishing unless explicitly reactivated.
 
+The [Create integration plan](tra-create-integration-plan.md) records newer target decisions: automatic Video Intelligence and Proof use from Create, the full selected human pool, and separate image/Meta copy. These supersede the earlier deferred/separate-step/three-frame target direction, not the description of current runtime behavior. Its A1 source packet is a type-only contract; integration and final staging verification remain pending.
+
 The active target creative pipeline is:
 
-`User/Kinetiq inputs -> GPT-6 Astra (medium reasoning) creative planning/prompting -> GPT Image 2 generation -> user review/select -> save to TRA Creatives`
+`User/Kinetiq inputs -> GPT-6 Astra (medium reasoning) creative planning/prompting -> GPT Image 2.5 Sunburst generation/editing -> user review/select -> save to TRA Creatives`
+
+GPT Image 2.5 Sunburst is the only user-facing image model and is preferred for every image-generation and revision operation. GPT Image 2.5 Flare is a hidden, single-attempt fallback only for compatible transient provider failures; successful fallback use must be recorded in provenance and surfaced to the user.
 
 GPT-6 Astra is the current creative-planning/prompting model decision. When this path is wired through the OpenAI Responses API, use model `gpt-6-astra` with `reasoning.effort: medium`. Narrow preprocessing/analyzer tasks may continue to use cheaper models when they reliably satisfy their structured contract.
 
@@ -46,6 +50,14 @@ Third-party/external ad used only as a design blueprint. It may influence layout
 
 It must never supply the external advertiser's person/model, logo, branding, copy, claims, or trademarks to final generation.
 
+### Seeded tax-document references
+
+User-provided tax-document exemplars are a separate document-structure source, not a Layout Reference, approved human source or factual evidence. Originals live in server-packaged `assets/tax-documents/`; their versioned IDs, SHA-256 hashes, original filenames, source and approved use live in `lib/references/tax-documents.ts`.
+
+Astra selects `execution.taxDocumentReference` for notices or tax-mail envelopes only when needed by the concept. Generation and revisions automatically attach that seed with conditional document instructions; no repeat upload is needed. Existing saved plans without this field remain supported. Saved planning retains the ID and the actual render prompt retains its version/hash.
+
+Use paper/envelope structure and physical construction only. Do not reproduce seals/logos, personal information, balances, SSNs, signatures, identifiers, source claims or pseudo-text. Sensitive fields stay blank; document wording must be explicitly planned. Document references do not grant human eligibility or advertising approval.
+
 ## Human-source invariant
 
 When a generated creative contains a human:
@@ -57,6 +69,18 @@ When a generated creative contains a human:
 - retain source provenance to the approved TRA source.
 
 This is a hard product requirement.
+
+### Manual six-image render-test exception
+
+The six-image Sunburst behavior-discovery experiment documented in `docs/image-gen-improvement.md` is a narrow manual test outside the app runtime. For that experiment only:
+
+- when no approved TRA human source is supplied, Sunburst may generate an entirely fictional adult that does not copy or resemble a specific reference person;
+- the assigned external layout-reference image may be attached directly to Sunburst as layout/structure inspiration only;
+- third-party people/identity, branding, logos, exact copy, claims, prices, statistics, testimonials, and proof must not transfer into the TRA output;
+- test output is not automatically approved for advertising use;
+- these exceptions do not change current application/runtime source-role or human-source requirements.
+
+Any production/runtime adoption of either exception requires a separate implementation change and verification after the manual experiment is reviewed.
 
 ## Reference preprocessing
 
@@ -86,6 +110,8 @@ Current implemented flow:
 
 `TRA_VIDEO -> validation/hydration -> candidate extraction -> technical grouping + transcript + visual observations -> source-bound frame library -> user selects 1-3 known representative frames -> fresh approved PNG extraction from original video -> Astra/image generation -> provenance saved with creative`
 
+The three-frame bound and separate Video Intelligence step above describe current implementation. The integration plan's B/C steps own automatic reuse and full-pool selection; A1 does not remove those limits or change paid-work retry behavior. Source readiness never approves evidence or human identity use.
+
 Current invariants:
 
 - raw video is not itself an approved image-provider input;
@@ -96,6 +122,14 @@ Current invariants:
 - legacy prototype endpoints and local filesystem fallback remain development-only; Preview uses validated private persisted jobs and artifacts, with explicit retry after uncertain paid work;
 - unchanged source analysis should be cached/reused rather than repeating provider work.
 
+Automatic human-frame selection uses policy `human-frame-visual-quality-v2`. A cold decision sends every admitted, source-bound representative JPEG from the validated preparation bundle at `detail: high`; the 280px library thumbnail is not used as facial-quality evidence. The selector must assess every candidate, and application code rejects closed/blinking eyes, severe blur/occlusion, awkward expression geometry, insufficient facial detail, unusable framing, and source marks that cannot be removed by a bounded edge crop before ranking. Same-portfolio reuse is only a tiebreak among comparably suitable frames. The analysis JPEGs remain provider-ineligible and never become final generation inputs; selected IDs still require fresh approved-PNG extraction.
+
+The image-provider boundary attaches the original extracted PNG only for an assessed clean frame. A removable edge overlay produces a pixel-only crop while retaining the original PNG and its hash; saved provenance records the crop and hash of the actual provider attachment separately. Unsafe or older unassessed human selections cannot reach image editing. The visual assessment can miss marks or misjudge a crop, so this safeguard does not certify every output as free of extra branding.
+
+B1 video observations are search and planning evidence only; empty OCR/topics never authorize provider pixels. Explicit generation requires a v2 selection carrying visual-policy source-overlay decisions for the exact ordered frame IDs. Newly curated humans persist that decision in a v2 record; historical v1 records remain readable but require reassessment and reapproval before provider use. Previewing an original frame grants no such authorization.
+
+The Responses API currently documents a 1,500-image and 512 MB request limit, with image tokens also counting against model context and TPM ([OpenAI image-input requirements](https://developers.openai.com/api/docs/guides/images-vision#image-input-requirements)). The application never truncates the candidate pool: it rejects the whole decision with an actionable error above those provider limits or above its 240,000 estimated high-detail image-token cold-call budget. That guard estimates image input only; frame metadata, schema, instructions, and other input also count, and total input can change the applicable pricing tier. Reasoning and output costs are additional. One cold automatic decision remains one provider call; exact-policy warm cache reuse remains zero calls. Model overrides may have different pricing and must be measured separately.
+
 The layout and video preprocessing systems remain separate:
 
 - `TRA_VIDEO -> approved human/reference frames`;
@@ -104,6 +138,12 @@ The layout and video preprocessing systems remain separate:
 GPT-6 Astra combines approved TRA context, approved TRA source pixels, layout instructions, user direction, and variation requirements. The layout analyzer is not a second creative planner.
 
 ## Company and brand grounding
+
+### Astra-to-renderer boundary
+
+Astra receives broad approved company knowledge, user direction, source analysis and batch context. Initial generation and revisions render from the versioned one-ad contract in `lib/creatives/render-brief.ts`: exact planned copy/CTA, visual direction and execution, relevant brand styling, hard compliance rules and required disclaimers. A selected cached layout blueprint may supply geometry. Company summaries, service/proof catalogs, personas, batch selection reasons and raw user requests stay with planning.
+
+Document rules remain conditional on a selected tax-document attachment. Human realism guidance applies only to approved-human photographic/documentary concepts. Edits carry their concrete visual instructions through Astra's revised `visualDirection`. Provider adapters retain placement, safe-zone, approved-source and deterministic-logo instructions; the saved actual prompt retains the complete rendered brief. This boundary does not itself approve copy or image quality for advertising.
 
 GPT-6 Astra must receive relevant approved TRA context automatically rather than relying only on logo/colors/fonts.
 
@@ -215,6 +255,10 @@ The current image workflow is ready when these work end-to-end:
 - creatives can be edited while previous versions remain traceable.
 
 ## Current remaining roadmap for Astra
+
+The approved [image productionization checkpoint](image-gen-improvement.md) defines the proposition-first planner, independent angle/layout, portfolio diversity, approved-human library and resumable generation. Prefer approved TRA humans when strategically useful, without fixed human/graphic quotas; fictional adults remain a later product decision. Use tax documents only when they materially help the concept. Historical manual-test exceptions do not change these implementation boundaries.
+
+The separately owned Proof Library of exact customer reviews and verified case studies extends Company proof/customer-insight context. Stable proof-record selection stays separate from angle/layout and asset provenance. The [Create integration plan](tra-create-integration-plan.md) now owns planner/render integration, with detailed human/Proof requirements in [PR #222](https://github.com/celleree/tra-ai-marketing/pull/222). Proof use-approval semantics and runtime integration remain pending under D; record readiness or ACTIVE status alone is not advertising-use approval.
 
 This is the active Stage 1 implementation order. Astra must verify current `staging` and relevant code/tests before treating any item as incomplete.
 

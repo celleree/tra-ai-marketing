@@ -12,6 +12,7 @@ import type {
   ReferenceLibraryItem,
   ReferenceLibraryType,
 } from '@/lib/references/types';
+import { REFERENCE_NOTES_LIMIT, REFERENCE_TAG_COUNT, REFERENCE_TAG_LIMIT } from '@/lib/references/types';
 import styles from './reference-library.module.css';
 
 interface UploadPlan {
@@ -62,6 +63,40 @@ function ImageIcon() {
       <path d="m5.5 17 4.25-4 2.75 2.5 2.25-2 3.75 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
+}
+
+function ReferenceMetadataEditor({ item, onSaved }: { item: ReferenceLibraryItem; onSaved: (items: ReferenceLibraryItem[]) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [tags, setTags] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    setSaving(true); setError('');
+    try {
+      const response = await fetch('/api/references', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, notes, tags: tags.split(',').map(tag => tag.trim()).filter(Boolean) }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Could not save notes and tags.');
+      onSaved(payload.items); setEditing(false);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save notes and tags.'); }
+    finally { setSaving(false); }
+  };
+  return <div className={styles.metadata}>
+    {editing ? <form onSubmit={event => { event.preventDefault(); void save(); }}>
+      <label>Notes<textarea aria-label="Notes" value={notes} maxLength={REFERENCE_NOTES_LIMIT} disabled={saving} onChange={event => setNotes(event.target.value)} /></label>
+      <label>Tags (comma-separated)<input aria-label="Tags (comma-separated)" value={tags} maxLength={REFERENCE_TAG_COUNT * (REFERENCE_TAG_LIMIT + 2)} disabled={saving} onChange={event => setTags(event.target.value)} /></label>
+      <small>Up to {REFERENCE_TAG_COUNT} tags, {REFERENCE_TAG_LIMIT} characters each. Editorial guidance, not evidence or identity approval.</small>
+      {error ? <p role="alert">{error}</p> : null}
+      <div><button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save notes and tags'}</button>
+        <button type="button" disabled={saving} onClick={() => { setNotes(''); setTags(''); }}>Clear fields</button>
+        <button type="button" disabled={saving} onClick={() => setEditing(false)}>Cancel</button></div>
+    </form> : <>
+      {item.notes ? <p>{item.notes}</p> : null}
+      {item.tags?.length ? <p>{item.tags.join(', ')}</p> : null}
+      <button type="button" onClick={() => { setNotes(item.notes ?? ''); setTags(item.tags?.join(', ') ?? ''); setError(''); setEditing(true); }}>Edit notes and tags</button>
+    </>}
+  </div>;
 }
 
 export function ReferenceLibrary() {
@@ -522,6 +557,7 @@ export function ReferenceLibrary() {
                       ) : (
                         <span className={styles.assetLabel}>TRA source asset</span>
                       )}
+                      <ReferenceMetadataEditor item={item} onSaved={setItems} />
                     </div>
                   </article>
                 );

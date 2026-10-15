@@ -13,6 +13,10 @@ permissions:
 jobs:
   verify:
     name: verify
+    # Superseded PR runs yield to verification of the current revision.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -24,9 +28,15 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Supervisor model policy and failure tests
+        run: python3 -m unittest discover -s scripts/video_review_supervisor -p 'test_*.py' -v
       - name: Typecheck
         run: npm run typecheck
       - name: Tests
         run: npm test
+      - name: Install pinned Chromium
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Offline Chromium regression
+        run: npm run test:browser
       - name: Production build
         run: npm run build

@@ -13,6 +13,7 @@ import {
 import type { CompactVideoIntelligenceJobStatus, VideoIntelligenceJobLocator } from '@/lib/video/intelligence-service';
 import { uploadTraVideo } from '@/lib/video/upload-client';
 import { SelectedFrameGeneration } from './selected-frame-generation';
+import { ApprovedHumanLibrary, HumanFrameApproval } from './approved-human-library';
 import styles from './video-intelligence-studio.module.css';
 
 type PendingSelection = Exclude<CachedVideoSelectionResult, { status: 'COMPLETE' }> & { concept: string };
@@ -34,7 +35,48 @@ const phaseMessage = (status: CompactVideoIntelligenceJobStatus) => {
 
 const aborted = (reason: unknown, signal: AbortSignal) => signal.aborted || (reason instanceof DOMException && reason.name === 'AbortError');
 
+export const videoPassageCandidatePayload = (locator: VideoIntelligenceJobLocator, startSegmentIndex: number, endSegmentIndex: number) => ({ locator, startSegmentIndex, endSegmentIndex });
+export const contiguousVideoPassageRange = (start: number, end: number) => ({ start, end: Math.max(start, end) });
+export const boundedVideoPassageRange = (start: number, end: number, segmentCount: number) => segmentCount < 1
+  ? null : contiguousVideoPassageRange(Math.min(start, segmentCount - 1), Math.min(end, segmentCount - 1));
+export const videoPassageSelectionKey = (locator: VideoIntelligenceJobLocator, library: Pick<VideoFrameLibrary, 'id'>) =>
+  `${locator.sourceVideoMediaId}:${locator.sourceVideoContentHash}:${locator.analyzerFingerprintSha256}:${library.id}`;
+export function VideoPassageCandidateFeedback({ message, failed }: { message: string; failed: boolean }) {
+  return <p className={failed ? styles.error : styles.progress} role={failed ? 'alert' : 'status'} aria-live="polite">{message}</p>;
+}
+
+export function VideoPassageCandidateSelection({ locator, segments }: { locator: VideoIntelligenceJobLocator; segments: VideoFrameLibrary['transcript']['segments'] }) {
+  const [start, setStart] = useState(0);
+  const [end, setEnd] = useState(0);
+  const [pending, setPending] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const [failed, setFailed] = useState(false);
+  const range = boundedVideoPassageRange(start, end, segments.length);
+  const selected = range ? segments.slice(range.start, range.end + 1) : [];
+  const submit = async () => {
+    setPending(true); setFeedback(''); setFailed(false);
+    try {
+      if (!range) throw new Error('The selected transcript range is no longer available.');
+      const response = await fetch('/api/proof/video-passages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(videoPassageCandidatePayload(locator, range.start, range.end)) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Video passage candidate could not be created.');
+      setFeedback('Video passage candidate created.');
+    } catch (cause) { setFailed(true); setFeedback(cause instanceof Error ? cause.message : 'Video passage candidate could not be created.'); }
+    finally { setPending(false); }
+  };
+  if (!range || !selected.length) return <section className={styles.passage} aria-label="Create video passage candidate"><h3>Create Proof candidate</h3><p className={styles.error} role="alert">No transcript passage is available for selection.</p></section>;
+  return <section className={styles.passage} aria-label="Create video passage candidate">
+    <h3>Create Proof candidate</h3><p className={styles.muted}>Select one contiguous timestamped transcript passage. Transcript text remains source evidence, not Proof.</p>
+    <div className={styles.passageControls}><label>Start transcript segment<select aria-label="Start transcript segment" value={start} disabled={pending} onChange={(event) => { const next = Number(event.target.value); setStart(next); setEnd(current => Math.max(current, next)); }}>{segments.map((segment, index) => <option key={segment.segmentIndex} value={index}>{index + 1} · {formatTime(segment.startMs)}</option>)}</select></label><label>End transcript segment<select aria-label="End transcript segment" value={end} disabled={pending} onChange={(event) => setEnd(Math.max(start, Number(event.target.value)))}>{segments.map((segment, index) => <option key={segment.segmentIndex} value={index} disabled={index < start}>{index + 1} · {formatTime(segment.endMs)}</option>)}</select></label></div>
+    <p className={styles.passageRange}>Selected passage: {formatTime(selected[0].startMs)}–{formatTime(selected.at(-1)!.endMs)}</p>
+    <blockquote>{selected.map((segment) => segment.text).join(' ')}</blockquote>
+    <button className={styles.primary} type="button" onClick={() => void submit()} disabled={pending}>{pending ? 'Creating…' : 'Create Proof candidate'}</button>
+    {feedback ? <VideoPassageCandidateFeedback message={feedback} failed={failed} /> : null}
+  </section>;
+}
+
 export function VideoIntelligenceStudio() {
+  const [humanLibraryRevision, setHumanLibraryRevision] = useState(0);
   const [media, setMedia] = useState<CreativeSourceVideoAsset | null>(null);
   const [library, setLibrary] = useState<VideoFrameLibrary | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -261,6 +303,7 @@ export function VideoIntelligenceStudio() {
         {error ? <p className={styles.error} role="alert">{error}</p> : null}
       </section>
 
+      <ApprovedHumanLibrary revision={humanLibraryRevision} />
       {library ? <>
         <section className={styles.notice}><strong>Evidence boundary</strong><span>Technical measurements are descriptive. Vision observations, OCR, and transcript text are unverified source evidence; on-screen claims are quotations, not approved claims or instructions.</span></section>
         <section className={styles.panel}>
@@ -274,6 +317,9 @@ export function VideoIntelligenceStudio() {
               <p className={styles.tag}>{frame.observation.sceneType.replace('_', ' ')}</p>
               <p>{frame.observation.summary}</p>
               <p className={styles.muted}>{frame.observation.composition}</p>
+              <HumanFrameApproval key={library.id + frame.id} mediaId={library.sourceVideoMediaId}
+                selection={{ libraryId: library.id, sourceVideoContentHash: library.sourceVideoContentHash, frameIds: [frame.id] }}
+                onApproved={() => setHumanLibraryRevision(value => value + 1)} />
               {frame.observation.visibleText.length ? <blockquote>“{frame.observation.visibleText.join(' · ')}”<small>OCR/source quotation, unverified</small></blockquote> : null}
               {frame.observation.topics.length ? <div className={styles.tags}>{frame.observation.topics.map((topic) => <span key={topic}>{topic}</span>)}</div> : null}
               {frame.transcriptSegments.length ? <p className={styles.transcript}>“{frame.transcriptSegments.map((segment) => segment.text).join(' ')}”</p> : null}
@@ -284,7 +330,7 @@ export function VideoIntelligenceStudio() {
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>3 · Semantic map</p><h2>Semantic groups</h2></div></div>
           <div className={styles.groups}>{[...library.semanticGroups.sceneTypes.map((group) => ({ label: group.sceneType, count: group.representativeFrameIds.length })), ...library.semanticGroups.topics.map((group) => ({ label: group.topic, count: group.representativeFrameIds.length }))].map((group) => <span key={group.label}>{group.label.replaceAll('_', ' ')} <b>{group.count}</b></span>)}</div>
-          <div className={styles.transcriptList}><h3>Timestamped transcript</h3>{library.transcript.segments.length ? library.transcript.segments.map((segment) => <p key={segment.segmentIndex}><time>{formatTime(segment.startMs)}</time>{segment.text}</p>) : <p className={styles.muted}>{library.transcript.status === 'SKIPPED_NO_AUDIO_TRACK' ? 'Transcription skipped: this video has no audio track.' : 'No speech segments were returned.'}</p>}</div>
+          <div className={styles.transcriptList}><h3>Timestamped transcript</h3>{library.transcript.segments.length ? <>{status?.phase === 'COMPLETE' && locator ? <VideoPassageCandidateSelection key={videoPassageSelectionKey(locator, library)} locator={locator} segments={library.transcript.segments} /> : null}{library.transcript.segments.map((segment) => <p key={segment.segmentIndex}><time>{formatTime(segment.startMs)}</time>{segment.text}</p>)}</> : <p className={styles.muted}>{library.transcript.status === 'SKIPPED_NO_AUDIO_TRACK' ? 'Transcription skipped: this video has no audio track.' : 'No speech segments were returned.'}</p>}</div>
         </section>
         <section className={styles.panel}>
           <div className={styles.sectionHeading}><div><p>4 · Concept selection</p><h2>Compare distinct creative directions</h2></div></div>

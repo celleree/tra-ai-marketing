@@ -19,9 +19,10 @@ import {
   listAllReferenceLibrary,
   removeFromReferenceLibrary,
   updateReferenceAngle,
+  updateReferenceMetadata,
   type ReferenceLibraryAddition,
 } from '@/lib/references/storage';
-import type { ReferenceLibraryType } from '@/lib/references/types';
+import { parseReferenceCuratedMetadata, type ReferenceCuratedMetadata, type ReferenceLibraryType } from '@/lib/references/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -192,6 +193,17 @@ export async function PATCH(request: Request) {
 
     if (!isSafeMediaId(id)) {
       return NextResponse.json({ error: 'Invalid reference image.' }, { status: 400 });
+    }
+
+    if ('notes' in body || 'tags' in body) {
+      if ('angle' in body || !parseReferenceCuratedMetadata(body)) {
+        return NextResponse.json({ error: 'Use notes up to 2000 characters and up to 10 tags of 40 characters each.' }, { status: 400 });
+      }
+      const patch: ReferenceCuratedMetadata = {
+        ...('notes' in body ? { notes: body.notes as string } : {}),
+        ...('tags' in body ? { tags: body.tags as string[] } : {}),
+      };
+      return NextResponse.json({ items: await updateReferenceMetadata(id, patch) });
     }
 
     if (!isCreativeCategory(angle)) {

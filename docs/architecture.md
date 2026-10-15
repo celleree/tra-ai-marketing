@@ -6,9 +6,16 @@ TRA AI Marketing is a Next.js + TypeScript application for creating and evaluati
 
 - The application UI and API routes live in this repository and deploy on Vercel.
 - Production media and reference-library assets are stored in Cloudflare R2; local development can use local storage.
+- Authenticated media delivery must not proxy production or Preview media bytes through Vercel Functions. Vercel may authorize and validate the request, then issue a short-lived signed redirect; Cloudflare R2 serves the actual media bytes.
 - OpenAI provides creative analysis, copy generation, and image generation through server-side API calls.
 - Meta integration is server-side and may create new advertising objects only within the safety behavior implemented in code. Runtime behavior is authoritative in `lib/meta/` and the relevant API routes.
 - Generated creatives have persistent internal/media identity so later Meta delivery and external revenue data can be joined back to the exact creative.
+
+## Video model boundary
+
+WAN 2.2 is the selected next video model family; deployment/provider and variant remain unresolved. Keep provider-specific transport and job receipts separate from the reusable video brief, source permissions, private media and creative identity contracts. A provider switch must preserve existing intents and accepted job identities; recovery must never submit an old Higgsfield job to WAN.
+
+The reviewed Higgsfield/Kling transport and job store remain available for a future swap. Their preservation does not imply an enabled application flow or verified live output. New video execution and output ingestion remain separately gated by access, cost/compute authorization and human review.
 
 ## Delivery boundary
 

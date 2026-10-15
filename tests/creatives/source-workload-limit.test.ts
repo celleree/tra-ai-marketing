@@ -1,3 +1,4 @@
+import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import { getCreativeSourceCountError, MAX_CREATIVE_SOURCE_ASSETS } from '@/lib/media/source-limits';
@@ -18,7 +19,7 @@ const sources = (count: number) => Array.from({ length: count }, (_, index) => (
   role: CREATIVE_SOURCE_ROLES[index % CREATIVE_SOURCE_ROLES.length],
 }));
 const request = (sourceAssets: unknown) => new Request('http://localhost/api/creatives/generate', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
   body: JSON.stringify({ ...base, sourceAssets }),
 });
 
@@ -71,10 +72,11 @@ describe('creative source workload limit', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('admits the exact boundary to quota enforcement without live provider work', async () => {
-    expect((await POST(request(sources(MAX_CREATIVE_SOURCE_ASSETS)))).status).toBe(429);
-    expect(mocks.requireOperatorQuota).toHaveBeenCalledExactlyOnceWith('operator', 'CREATIVE_GENERATION', 2);
-    expect(mocks.getMediaStorage).not.toHaveBeenCalled();
+  it('admits the exact boundary to local hydration without live provider work', async () => {
+    mocks.getMediaStorage.mockReturnValue({ readMediaById: vi.fn().mockResolvedValue(null) });
+    expect((await POST(request(sources(MAX_CREATIVE_SOURCE_ASSETS)))).status).toBe(404);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+    expect(mocks.getMediaStorage).toHaveBeenCalledOnce();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -85,3 +87,7 @@ describe('creative source workload limit', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => offlineExecutionStorage }));
+let offlineExecutionStorage = new MemoryPortfolioStorage();
+beforeEach(() => { offlineExecutionStorage = new MemoryPortfolioStorage(); });

@@ -1,3 +1,5 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
+import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
 import {
   CREATIVE_CATEGORIES,
   CREATIVE_CATEGORY_LABELS,
@@ -5,8 +7,15 @@ import {
 import { CREATIVE_FORMAT_LABELS, type CreativeFormatId } from '@/lib/creative-formats';
 import type { CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
+import {
+  creativeImageHttpError,
+  creativeImageMissingOutputError,
+  fetchCreativeImage,
+  runCreativeImageModelRoute,
+} from '@/lib/creatives/image-models';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
-import type { CreativeCopy } from '@/lib/creatives/generated';
+import type { CreativeLogoGeometry } from '@/lib/creatives/logo-placement';
+import type { CreativeImageCopy } from '@/lib/creatives/generated';
 import {
   CREATIVE_PLACEMENT_SPECS,
   type CreativePlacement,
@@ -20,6 +29,7 @@ import {
   MAX_REPRESENTATIVE_VIDEO_FRAMES,
   type ApprovedTraVideoFrame,
 } from '@/lib/video/types';
+import { prepareProviderVideoFrames, type ProviderVideoFrame } from '@/lib/video/source-overlay';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
@@ -107,7 +117,7 @@ export async function analyzeApprovedTraVideoFrames(args: {
       detail: 'high',
     })),
   ];
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('video-source-analysis', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -139,38 +149,56 @@ export async function analyzeApprovedTraVideoFrames(args: {
 }
 
 export interface VideoImageGenerationResult extends ImageGenerationResult {
-  providerFrames: ApprovedTraVideoFrame[];
+  providerFrames: ProviderVideoFrame[];
 }
 
+const formatImageCopy = (copy: CreativeImageCopy) => [
+  `Headline: ${copy.headline}`,
+  copy.shortSupport ? `Short support: ${copy.shortSupport}` : '',
+  copy.proofAttribution ? `Proof attribution: ${copy.proofAttribution}` : '',
+  copy.cta ? `CTA: ${copy.cta}` : '',
+  copy.disclosure ? `Disclosure: ${copy.disclosure}` : '',
+].filter(Boolean).join('\n');
+
 export async function generateApprovedTraVideoFrameCreativeImage(args: {
+  taxDocumentReference?: import('@/lib/references/tax-documents').TaxDocumentSelection;
   frames: ApprovedTraVideoFrame[];
   primaryFormat: CreativeFormatId;
   placement?: CreativePlacement;
   context: string;
-  copy: CreativeCopy;
-  reserveLogoArea?: boolean;
+  copy: CreativeImageCopy;
+  logoGeometry?: CreativeLogoGeometry;
 }): Promise<VideoImageGenerationResult> {
-  const frames = selectProviderVideoFrames(args.frames);
+  const frames = await prepareProviderVideoFrames(selectProviderVideoFrames(args.frames));
+  const document = await prepareTaxDocumentReference(args.taxDocumentReference);
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'];
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst';
-  const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attached images are server-extracted still frames from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels, external reference-library pixels, third-party people, or unrelated images are attached. Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. User direction: ${args.context}. Headline: ${args.copy.headline}. Primary text: ${args.copy.primaryText}. Description: ${args.copy.description}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.reserveLogoArea ? formatCreativeLogoReservation(args.placement ?? 'SQUARE_1_1') : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(args.placement ?? 'SQUARE_1_1')}`;
-  const formData = new FormData();
-  formData.set('model', model);
-  formData.set('prompt', prompt);
-  formData.set('size', placement.providerSize);
-  formData.set('quality', 'high');
-  formData.set('output_format', 'png');
-  for (const frame of frames) {
-    formData.append('image[]', new Blob([new Uint8Array(frame.buffer)], { type: 'image/png' }), `approved-tra-video-${frame.sourceVideoMediaId}-${frame.timestampMs}ms.png`);
-  }
-  const response = await fetch(`${OPENAI_BASE_URL}/images/edits`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${getApiKey()}` },
-    body: formData,
+  const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, image copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attachments named approved-tra-video-* are server-extracted still frames or pixel-only edge crops from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels or third-party people are attached. ${document?.prompt ?? ''} Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. One-ad render brief: ${args.context}. Use only this planned image copy when rendering text inside the creative: ${formatImageCopy(args.copy)}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(args.placement ?? 'SQUARE_1_1')}`;
+  const routed = await runCreativeImageModelRoute({
+    operationType: 'TRA_VIDEO_FRAME_GENERATION',
+    generate: async (model) => {
+      const formData = new FormData();
+      formData.set('model', model);
+      formData.set('prompt', prompt);
+      formData.set('size', placement.providerSize);
+      formData.set('quality', 'high');
+      formData.set('output_format', 'png');
+      for (const frame of frames) {
+        formData.append('image[]', new Blob([new Uint8Array(frame.providerBuffer)], { type: 'image/png' }), `approved-tra-video-${frame.sourceVideoMediaId}-${frame.timestampMs}ms.png`);
+      }
+      document?.appendTo(formData);
+      const response = await fetchCreativeImage(`${OPENAI_BASE_URL}/images/edits`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getApiKey()}` },
+        body: formData,
+      });
+      if (!response.ok) {
+        throw creativeImageHttpError(response.status, await getErrorMessage(response));
+      }
+      const payload = (await response.json()) as { data?: Array<{ b64_json?: string }> };
+      const base64 = payload.data?.[0]?.b64_json;
+      if (!base64) throw creativeImageMissingOutputError();
+      return Buffer.from(base64, 'base64');
+    },
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response));
-  const payload = (await response.json()) as { data?: Array<{ b64_json?: string }> };
-  const base64 = payload.data?.[0]?.b64_json;
-  if (!base64) throw new Error('OpenAI returned no generated image.');
-  return { buffer: Buffer.from(base64, 'base64'), prompt, model, providerFrames: frames };
+  return { buffer: routed.value, prompt, model: routed.routing.actualModel, routing: routed.routing, providerFrames: frames };
 }

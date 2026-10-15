@@ -6,6 +6,7 @@ import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-pr
 import type { MediaAsset } from '@/lib/media/types';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { CreativeIdentity } from '@/lib/creatives/identity';
+import type { CreativeProofProvenance } from '@/lib/proof/provenance';
 import type {
   CreativeHumanReview,
   CreativeLifecycle,
@@ -15,6 +16,20 @@ export interface CreativeCopy {
   primaryText: string;
   headline: string;
   description: string;
+}
+
+export interface CreativeAdCopy {
+  primaryText: string;
+  headline: string;
+  description: string;
+}
+
+export interface CreativeImageCopy {
+  headline: string;
+  shortSupport?: string;
+  proofAttribution?: string;
+  cta?: string;
+  disclosure?: string;
 }
 
 export type CreativeSource = 'generated' | 'uploaded';
@@ -28,6 +43,8 @@ export interface GeneratedCreative {
   placement?: CreativePlacement;
   image: MediaAsset;
   copy: CreativeCopy;
+  adCopy?: CreativeAdCopy;
+  imageCopy?: CreativeImageCopy;
   source?: CreativeSource;
   referenceImageId?: string;
   referenceImageUrl?: string;
@@ -36,6 +53,7 @@ export interface GeneratedCreative {
   videoFrameSelection?: GeneratedVideoFrameSelection;
   planning?: CreativePlanningMetadata;
   generationProvenance?: CreativeGenerationProvenance;
+  proofProvenance?: CreativeProofProvenance;
   identity?: CreativeIdentity;
   humanReview?: CreativeHumanReview;
   lifecycle?: CreativeLifecycle;
@@ -47,6 +65,8 @@ export interface CreativeRecord {
   image: MediaAsset;
   category: CreativeCategoryId;
   copy: CreativeCopy;
+  adCopy?: CreativeAdCopy;
+  imageCopy?: CreativeImageCopy;
   source?: CreativeSource;
   format?: CreativeFormatId;
   placement?: CreativePlacement;
@@ -54,6 +74,7 @@ export interface CreativeRecord {
   videoFrameSelection?: GeneratedVideoFrameSelection;
   planning?: CreativePlanningMetadata;
   generationProvenance?: CreativeGenerationProvenance;
+  proofProvenance?: CreativeProofProvenance;
   identity?: CreativeIdentity;
   humanReview?: CreativeHumanReview;
   lifecycle?: CreativeLifecycle;

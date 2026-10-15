@@ -1,10 +1,12 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   NoSuchKey,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   getMediaTypeForMimeType,
@@ -37,9 +39,39 @@ const isMissingObjectError = (error: unknown) =>
   error instanceof NoSuchKey ||
   (typeof error === 'object' &&
     error !== null &&
-    (('name' in error && error.name === 'NoSuchKey') ||
+    (('name' in error &&
+      (error.name === 'NoSuchKey' || error.name === 'NotFound')) ||
       ('Code' in error && error.Code === 'NoSuchKey') ||
-      ('code' in error && error.code === 'NoSuchKey')));
+      ('code' in error && error.code === 'NoSuchKey') ||
+      ('$metadata' in error &&
+        typeof error.$metadata === 'object' &&
+        error.$metadata !== null &&
+        'httpStatusCode' in error.$metadata &&
+        error.$metadata.httpStatusCode === 404)));
+
+const validateContentLength = (
+  fileName: string,
+  mimeType: ReturnType<typeof getStoredMediaMimeType>,
+  contentLength: number | undefined
+) => {
+  if (!mimeType) return;
+  if (
+    !Number.isFinite(contentLength) ||
+    contentLength === undefined ||
+    contentLength < 0 ||
+    !Number.isInteger(contentLength)
+  ) {
+    throw new MediaValidationError(
+      `R2 returned an invalid content length for media object ${fileName}.`
+    );
+  }
+
+  if (contentLength > getMaxUploadBytes(mimeType)) {
+    throw new MediaValidationError(
+      `The ${getMediaTypeForMimeType(mimeType) === 'VIDEO' ? 'video' : 'image'} is larger than the upload limit.`
+    );
+  }
+};
 
 const discardUnreadBody = async (body: unknown) => {
   if (!body || typeof body !== 'object') return;
@@ -96,6 +128,27 @@ export class R2MediaStorage implements MediaStorage {
     return media;
   }
 
+  async getMediaDeliveryUrl(fileName: string): Promise<string | null> {
+    const mimeType = getStoredMediaMimeType(fileName);
+    if (!mimeType) return null;
+
+    try {
+      const metadata = await this.client.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: fileName })
+      );
+      validateContentLength(fileName, mimeType, metadata.ContentLength);
+
+      return getSignedUrl(
+        this.client,
+        new GetObjectCommand({ Bucket: this.bucketName, Key: fileName }),
+        { expiresIn: 60 }
+      );
+    } catch (error) {
+      if (isMissingObjectError(error)) return null;
+      throw error;
+    }
+  }
+
   async readMedia(
     fileName: string
   ): Promise<StoredCreativeSourceMediaFile | null> {
@@ -110,24 +163,11 @@ export class R2MediaStorage implements MediaStorage {
         throw new Error(`R2 returned an empty body for media object ${fileName}.`);
       }
 
-      const contentLength = response.ContentLength;
-      if (
-        !Number.isFinite(contentLength) ||
-        contentLength === undefined ||
-        contentLength < 0 ||
-        !Number.isInteger(contentLength)
-      ) {
+      try {
+        validateContentLength(fileName, mimeType, response.ContentLength);
+      } catch (error) {
         await discardUnreadBody(response.Body);
-        throw new MediaValidationError(
-          `R2 returned an invalid content length for media object ${fileName}.`
-        );
-      }
-
-      if (contentLength > getMaxUploadBytes(mimeType)) {
-        await discardUnreadBody(response.Body);
-        throw new MediaValidationError(
-          `The ${getMediaTypeForMimeType(mimeType) === 'VIDEO' ? 'video' : 'image'} is larger than the upload limit.`
-        );
+        throw error;
       }
 
       return {

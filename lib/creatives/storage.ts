@@ -10,6 +10,7 @@ import {
 import { isCreativeCategory } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
+import { parseCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import {
   parseCreativeHumanReview,
   parseCreativeLifecycle,
@@ -18,6 +19,7 @@ import {
 } from '@/lib/creatives/human-review';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import { parseCreativeProofProvenance } from '@/lib/proof/provenance';
 import {
   parseCreativeIdentity,
   validateCreativeIdentityTransition,
@@ -87,10 +89,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     record.image && typeof record.image === 'object'
       ? (record.image as Record<string, unknown>)
       : null;
-  const copy =
-    record.copy && typeof record.copy === 'object'
-      ? (record.copy as Record<string, unknown>)
-      : null;
+  const copyContract = parseCreativeCopyContract(record);
 
   const id = typeof record.id === 'string' ? record.id : '';
   const createdAt = typeof record.createdAt === 'string' ? record.createdAt : '';
@@ -102,15 +101,11 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
   const mimeType = typeof image?.mimeType === 'string' ? image.mimeType : '';
   const size = typeof image?.size === 'number' ? image.size : Number(image?.size);
   const url = typeof image?.url === 'string' ? image.url : '';
-  const primaryText =
-    typeof copy?.primaryText === 'string' ? copy.primaryText : '';
-  const headline = typeof copy?.headline === 'string' ? copy.headline : '';
-  const description =
-    typeof copy?.description === 'string' ? copy.description : '';
   const source = record.source === undefined ? 'generated' : record.source;
   const videoFrameSelection = parseGeneratedVideoFrameSelection(record.videoFrameSelection);
   const planning = parseCreativePlanning(record.planning);
   const generationProvenance = parseCreativeGenerationProvenance(record.generationProvenance);
+  const proofProvenance = parseCreativeProofProvenance(record.proofProvenance);
   const identity = parseCreativeIdentity(record.identity, id);
   const humanReview = parseCreativeHumanReview(record.humanReview);
   const lifecycle = parseCreativeLifecycle(record.lifecycle);
@@ -138,8 +133,9 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     !Number.isFinite(size) ||
     size <= 0 ||
     !url ||
-    !primaryText ||
-    !headline ||
+    !copyContract ||
+    !copyContract.copy.primaryText ||
+    !copyContract.copy.headline ||
     (source !== 'generated' && source !== 'uploaded') ||
     (record.format !== undefined && !format) ||
     (record.placement !== undefined && !placement) ||
@@ -147,6 +143,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     || (record.videoFrameSelection !== undefined && !videoFrameSelection)
     || (record.planning !== undefined && !planning)
     || (record.generationProvenance !== undefined && !generationProvenance)
+    || (record.proofProvenance !== undefined && !proofProvenance)
     || (record.identity !== undefined && !identity)
     || (record.humanReview !== undefined && !humanReview)
     || (record.lifecycle !== undefined && !lifecycle)
@@ -166,7 +163,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
       url: getPrivateMediaUrl(fileName),
     },
     category,
-    copy: { primaryText, headline, description },
+    ...copyContract,
     source,
     ...(format ? { format } : {}),
     ...(placement ? { placement } : {}),
@@ -174,6 +171,7 @@ const normalizeRecord = (value: unknown): CreativeRecord | null => {
     ...(videoFrameSelection ? { videoFrameSelection } : {}),
     ...(planning ? { planning } : {}),
     ...(generationProvenance ? { generationProvenance } : {}),
+    ...(proofProvenance ? { proofProvenance } : {}),
     ...(identity ? { identity } : {}),
     ...(humanReview ? { humanReview } : {}),
     ...(lifecycle ? { lifecycle } : {}),

@@ -53,7 +53,7 @@ export function MomentumLanding() {
       variationCount,
       generateOnOpen: true,
     });
-    router.push('/studio');
+    router.push('/');
   };
 
   return (

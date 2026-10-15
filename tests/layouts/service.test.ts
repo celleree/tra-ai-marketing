@@ -136,3 +136,93 @@ describe('layout blueprint analysis cache', () => {
     expect(analyze).toHaveBeenCalledTimes(2);
   });
 });
+
+describe.each(['local', 'r2'])('semantic cache in existing %s backend', backend => {
+  it('isolates semantic identity, handles corrupt metadata, and preserves blueprint objects', async () => {
+    const { mkdtemp, readFile, writeFile, readdir, rm } = await import('fs/promises');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const dir = await mkdtemp(join(tmpdir(), 'a31-cache-'));
+    const objects = new Map<string, string>();
+    const spy = vi.spyOn(S3Client.prototype, 'send').mockImplementation((async (command: any) => {
+      const key = command.input.Key;
+      if (command instanceof GetObjectCommand) {
+        if (!objects.has(key)) throw Object.assign(new Error('missing'), { name: 'NoSuchKey' });
+        return { Body: { transformToString: async () => objects.get(key)! } };
+      }
+      objects.set(key, command.input.Body);
+      return {};
+    }) as any);
+    vi.stubEnv('NODE_ENV', backend === 'r2' ? 'production' : 'test');
+    vi.stubEnv('LAYOUT_BLUEPRINT_CACHE_DIR', dir);
+    for (const name of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME']) vi.stubEnv(name, 'test');
+    vi.resetModules();
+    try {
+      const { getLayoutBlueprintCache, getOrAnalyzeLayoutBlueprint: resolveBlueprint } = await import('@/lib/layouts/service');
+      const cache = getLayoutBlueprintCache();
+      const hash = createHash('sha256').update(source().buffer).digest('hex');
+      const angle = { version: 1 as const, sourceSha256: hash, analyzerModel: 'semantic-model', angleSummary: 'A clear next step.' };
+      const keys = async () => backend === 'r2' ? [...objects.keys()] : readdir(dir);
+      const read = async (key: string) => backend === 'r2' ? objects.get(key)! : readFile(join(dir, key), 'utf8');
+      const write = async (key: string, raw: string) => {
+        if (backend === 'r2') objects.set(key, raw); else await writeFile(join(dir, key), raw);
+      };
+      await cache.write(hash, 'layout-model', blueprint());
+      const blueprintKey = (await keys())[0];
+      const original = JSON.stringify({ ...JSON.parse(await read(blueprintKey)), unrelated: { keep: true } });
+      await write(blueprintKey, original);
+      expect(await cache.readAngle(hash, angle.analyzerModel)).toBeNull();
+      await cache.writeAngle(angle);
+      expect(await cache.readAngle(hash, angle.analyzerModel)).toEqual(angle);
+      expect(await cache.readAngle(hash, angle.analyzerModel)).toEqual(angle);
+      expect(await cache.readAngle('b'.repeat(64), angle.analyzerModel)).toBeNull();
+      expect(await cache.readAngle(hash, 'new-model')).toBeNull();
+      const angleKey = (await keys()).find(key => key.includes('angle-v1-'))!;
+      for (const corrupt of ['{', 'null', JSON.stringify({ ...angle, version: 2 }),
+        JSON.stringify({ ...angle, sourceSha256: 'b'.repeat(64) }), JSON.stringify({ ...angle, analyzerModel: 'other' }),
+        JSON.stringify({ ...angle, angleSummary: '' })]) {
+        await write(angleKey, corrupt);
+        expect(await cache.readAngle(hash, angle.analyzerModel)).toBeNull();
+      }
+      await write(angleKey.replace('angle-v1-', 'angle-v2-'), JSON.stringify(angle));
+      expect(await cache.readAngle(hash, angle.analyzerModel)).toBeNull();
+      await expect(cache.writeAngle({ ...angle, angleSummary: '' })).rejects.toThrow('Invalid');
+      await cache.writeAngle(angle);
+      const analyze = vi.fn();
+      expect((await resolveBlueprint(source(), { cache, analyzerModel: 'layout-model', analyze })).cacheHit).toBe(true);
+      expect(analyze).not.toHaveBeenCalled();
+      expect(await read(blueprintKey)).toBe(original);
+      const angleRaw = await read(angleKey);
+      const contextHash = 'c'.repeat(64);
+      await cache.writeContextualAngle(hash, contextHash, 'context-model', '');
+      expect(await cache.readContextualAngle(hash, contextHash, 'context-model')).toBe('');
+      expect(await cache.readContextualAngle(hash, 'd'.repeat(64), 'context-model')).toBeNull();
+      expect(await cache.readContextualAngle(hash, contextHash, 'other-model')).toBeNull();
+      expect(await cache.readContextualAngle('b'.repeat(64), contextHash, 'context-model')).toBeNull();
+      const contextualKey = (await keys()).find(key => key.includes('contextual-v1-'))!;
+      const valid = JSON.parse(await read(contextualKey));
+      for (const corrupt of ['{', 'null', ...[
+        { version: 2 }, { sourceSha256: 'b'.repeat(64) }, { contextSha256: 'd'.repeat(64) },
+        { analyzerModel: 'other' }, { hook: 12 }, { hook: 'x'.repeat(2001) },
+      ].map(change => JSON.stringify({ ...valid, ...change }))]) {
+        await write(contextualKey, corrupt);
+        expect(await cache.readContextualAngle(hash, contextHash, 'context-model')).toBeNull();
+      }
+      await expect(cache.writeContextualAngle(hash, contextHash, 'context-model', 'x'.repeat(2001))).rejects.toThrow('Invalid');
+      await cache.writeContextualAngle(hash, contextHash, 'context-model', 'Contextual hook');
+      expect(await cache.readContextualAngle(hash, contextHash, 'context-model')).toBe('Contextual hook');
+      expect(await read(angleKey)).toBe(angleRaw);
+      expect(await read(blueprintKey)).toBe(original);
+
+      await cache.write(hash, 'other-layout-model', blueprint());
+      expect(await read(angleKey)).toBe(angleRaw);
+      expect(await read(blueprintKey)).toBe(original);
+    } finally {
+      spy.mockRestore();
+      vi.unstubAllEnvs();
+      vi.resetModules();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

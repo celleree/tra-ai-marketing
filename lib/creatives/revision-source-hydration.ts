@@ -15,8 +15,10 @@ import {
 import { isCreativeFormat } from '@/lib/creative-formats';
 import { validateStoredMedia, type MediaStorage } from '@/lib/media/storage';
 import type { AllowedImageMimeType } from '@/lib/media/types';
+import { parseApprovedHumanSourceId } from '@/lib/video/approved-human';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 import { resolveRevisionVideoFrames } from '@/lib/video/revision-frames';
+import { requireActiveHumanSelection } from '@/lib/video/approved-human-service';
 
 const sha256 = (buffer: Buffer) =>
   createHash('sha256').update(buffer).digest('hex');
@@ -142,6 +144,14 @@ export async function hydrateSavedCreativeRevisionContext(
     reject('Saved creative identity does not match its planning strategy.');
   }
   const canvasStored = await reloadImage(storage, parent.image.id, parent.image);
+  const humanRecordId = planning.strategy.humanSourceId
+    ? parseApprovedHumanSourceId(planning.strategy.humanSourceId)
+    : planning.strategy.approvedHumanId ?? null;
+  if (planning.strategy.humanSourceId && !humanRecordId) reject('Saved creative planning contains an unsupported human source.');
+  if (humanRecordId) {
+    try { await requireActiveHumanSelection(humanRecordId, parent.videoFrameSelection); }
+    catch (error) { return mapHydrationError(error); }
+  }
   const originalApprovedSource = await hydrateAttachedSource(parent, storage, provenance);
   if (!parseCreativeStrategy(planning.strategy, originalApprovedSource !== null)) {
     reject('Saved creative planning requires an approved TRA source that is unavailable.');

@@ -37,6 +37,12 @@ Do not spend personal API money merely to prove behavior that can be tested manu
 
 This is the active build until creative quality, persistent identity/metadata, and QA are reliable.
 
+## Video generation direction
+
+The user-selected next video model family is WAN 2.2. Hosting/provider, exact variant and first output mode must be resolved before implementing its live execution path. This separately authorized video work preserves the static creative system and does not advance performance or autonomous advertising stages.
+
+Retain the reviewed Kling 2.6 Motion Control Standard / Higgsfield transport and its source-bound job store for a future optional integration. Further Kling setup and live acceptance are deferred. Existing provider-neutral briefs remain reusable; the current job store has a Higgsfield-specific provider receipt contract and must not silently accept WAN jobs. Video execution still requires approved source rights, verified cost/compute limits, private output storage and human review.
+
 ## 1A. Company intelligence and model grounding
 
 Create one durable company-profile system that both Claude and GPT-5.6 Sol can use.

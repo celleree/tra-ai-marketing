@@ -1,14 +1,17 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
+import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
+import type { VideoCandidateFrameBinding } from '@/lib/video/generation-selection-contract';
 import { validateVideoIntelligencePreparationManifest, type VideoIntelligencePreparationManifest } from '@/lib/video/intelligence-preparation';
 import { videoSourceHash } from '@/lib/video/library-service';
 import { assertDurableVideoIntelligenceAvailable } from '@/lib/video/preview-availability';
-import { extractPng, selectedRepresentatives, type ApprovedSelectedTraVideoFrameSet, type SelectedTraVideoFrameProvenance } from '@/lib/video/selected-frames';
+import { extractPng, selectedCandidateBindings, selectedRepresentatives,
+  type ApprovedSelectedTraVideoFrameSet, type SelectedTraVideoFrameProvenance } from '@/lib/video/selected-frames';
 import type { ApprovedTraVideoFrame } from '@/lib/video/types';
 
 export interface PreparedSelectedTraVideoFrameDependencies { temporaryRoot?: string }
@@ -17,7 +20,8 @@ const reanalyze = (reason: string): never => {
 };
 
 const assertPreparedBoundary = (source: HydratedTraVideoSource, library: VideoFrameLibrary,
-  manifest: VideoIntelligencePreparationManifest, selections: ReturnType<typeof selectedRepresentatives>) => {
+  manifest: VideoIntelligencePreparationManifest, selections: ReturnType<typeof selectedRepresentatives>,
+  representativeOnly: boolean) => {
   validateVideoIntelligencePreparationManifest(manifest);
   if (source.role !== 'TRA_VIDEO' || source.media.mediaType !== 'VIDEO' || source.media.mimeType !== 'video/mp4'
     || source.stored.mediaType !== 'VIDEO' || source.stored.mimeType !== 'video/mp4') {
@@ -35,7 +39,9 @@ const assertPreparedBoundary = (source: HydratedTraVideoSource, library: VideoFr
   }
   return selections.map((selection) => {
     const prepared = manifest.candidates[selection.candidate.candidateIndex];
-    if (!prepared || !manifest.representativeBundle.entries.some(({ candidateIndex }) => candidateIndex === prepared.candidateIndex)
+    if (!prepared || (representativeOnly && !manifest.representativeBundle.entries.some(({ candidateIndex }) => candidateIndex === prepared.candidateIndex))
+      || !manifest.groups.some((group) => group.representativeIndex === selection.representative.candidateIndex
+        && group.candidateIndexes.includes(selection.candidate.candidateIndex))
       || prepared.candidateIndex !== selection.candidate.candidateIndex || prepared.timestampMs !== selection.candidate.timestampMs
       || prepared.frameSha256 !== selection.candidate.frameSha256
       || !isDeepStrictEqual(prepared.extractionReasons, selection.candidate.extractionReasons)) {
@@ -48,10 +54,51 @@ const assertPreparedBoundary = (source: HydratedTraVideoSource, library: VideoFr
 /** Accept only the validated `.manifest` returned by `loadVideoIntelligencePreparation`.
  * The loader owns artifact/JPEG integrity; this boundary extracts fresh PNGs from the hydrated source. */
 export const getApprovedPreparedSelectedTraVideoFrames = async (source: HydratedTraVideoSource,
-  library: VideoFrameLibrary, frameIds: readonly string[], manifest: VideoIntelligencePreparationManifest,
+  library: VideoFrameLibrary, frameIds: readonly string[] | readonly VideoCandidateFrameBinding[], manifest: VideoIntelligencePreparationManifest,
   dependencies: PreparedSelectedTraVideoFrameDependencies = {}): Promise<ApprovedSelectedTraVideoFrameSet> => {
   assertDurableVideoIntelligenceAvailable();
-  const selections = assertPreparedBoundary(source, library, manifest, selectedRepresentatives(source, library, frameIds));
+  const candidateAddressed = frameIds.length > 0 && typeof frameIds[0] !== 'string';
+  const selections = assertPreparedBoundary(source, library, manifest, candidateAddressed
+    ? selectedCandidateBindings(source, library, frameIds as readonly VideoCandidateFrameBinding[])
+    : selectedRepresentatives(source, library, frameIds as readonly string[]), !candidateAddressed);
+  const buildResult = (buffers: Buffer[]): ApprovedSelectedTraVideoFrameSet => {
+    const frames: ApprovedTraVideoFrame[] = [];
+    const selectionProvenance: SelectedTraVideoFrameProvenance[] = [];
+    for (const [frameIndex, selection] of selections.entries()) {
+      const buffer = buffers[frameIndex];
+      const approvedPngSha256 = createHash('sha256').update(buffer).digest('hex');
+      frames.push({ frameIndex, timestampMs: selection.prepared.timestampMs, mimeType: 'image/png', buffer,
+        frameSha256: approvedPngSha256, byteLength: buffer.length, sourceRole: 'TRA_VIDEO',
+        sourceVideoMediaId: source.media.id, sourceVideoFileName: source.media.fileName,
+        sourceVideoContentHash: manifest.sourceVideoContentHash, approvedHumanSource: true, cacheKey: null });
+      selectionProvenance.push({ frameIndex, libraryFrameId: selection.frameId,
+        candidateFrameSha256: selection.prepared.frameSha256, timestampMs: selection.prepared.timestampMs,
+        approvedPngSha256,
+        ...(candidateAddressed ? { candidateIndex: selection.prepared.candidateIndex,
+          representativeFrameId: selection.representative.id } : {}) });
+    }
+    return { source, sourceVideoContentHash: manifest.sourceVideoContentHash, durationMs: manifest.durationMs,
+      frames, reused: false, selectionProvenance };
+  };
+  if (candidateAddressed) {
+    return withTemporaryTraVideoFrameCandidates(source, async (set) => {
+      if (set.sourceVideoContentHash !== manifest.sourceVideoContentHash || set.durationMs !== manifest.durationMs) {
+        reanalyze('the regenerated candidate set has drifted from the frozen preparation.');
+      }
+      const buffers: Buffer[] = [];
+      for (const selection of selections) {
+        const regenerated = set.candidates[selection.prepared.candidateIndex];
+        if (!regenerated || regenerated.timestampMs !== selection.prepared.timestampMs
+          || regenerated.frameSha256 !== selection.prepared.frameSha256
+          || createHash('sha256').update(await readFile(regenerated.temporaryPath)).digest('hex') !== selection.prepared.frameSha256) {
+          reanalyze(`candidate frame ${selection.frameId} has drifted from the frozen preparation.`);
+        }
+        buffers.push(await extractPng(set.temporarySourceVideoPath, regenerated,
+          manifest.effectiveIntervalFps, manifest.analyzerFingerprint.candidatePolicy.maxWidth));
+      }
+      return buildResult(buffers);
+    }, {}, manifest.analyzerFingerprint.candidatePolicy);
+  }
   const directory = await mkdtemp(path.join(dependencies.temporaryRoot ?? tmpdir(), 'tra-prepared-selected-'));
   const sourcePath = path.join(directory, 'source.mp4');
   try {
@@ -64,21 +111,7 @@ export const getApprovedPreparedSelectedTraVideoFrames = async (source: Hydrated
       if (result.status === 'rejected') throw result.reason;
       return result.value;
     });
-    const frames: ApprovedTraVideoFrame[] = [];
-    const selectionProvenance: SelectedTraVideoFrameProvenance[] = [];
-    for (const [frameIndex, selection] of selections.entries()) {
-      const buffer = buffers[frameIndex];
-      const approvedPngSha256 = createHash('sha256').update(buffer).digest('hex');
-      frames.push({ frameIndex, timestampMs: selection.prepared.timestampMs, mimeType: 'image/png', buffer,
-        frameSha256: approvedPngSha256, byteLength: buffer.length, sourceRole: 'TRA_VIDEO',
-        sourceVideoMediaId: source.media.id, sourceVideoFileName: source.media.fileName,
-        sourceVideoContentHash: manifest.sourceVideoContentHash, approvedHumanSource: true, cacheKey: null });
-      selectionProvenance.push({ frameIndex, libraryFrameId: selection.frameId,
-        candidateFrameSha256: selection.prepared.frameSha256, timestampMs: selection.prepared.timestampMs,
-        approvedPngSha256 });
-    }
-    return { source, sourceVideoContentHash: manifest.sourceVideoContentHash, durationMs: manifest.durationMs,
-      frames, reused: false, selectionProvenance };
+    return buildResult(buffers);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

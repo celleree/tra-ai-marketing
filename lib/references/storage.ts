@@ -1,3 +1,4 @@
+import { parseReferenceCuratedMetadata, type ReferenceCuratedMetadata } from '@/lib/references/types';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { resolve } from 'path';
 import {
@@ -100,6 +101,7 @@ const normalizeItem = (value: unknown): ReferenceLibraryItem | null => {
     referenceType,
     angle,
     angleSource,
+    ...(parseReferenceCuratedMetadata(item) ?? {}),
   };
 };
 
@@ -281,3 +283,16 @@ export const removeFromReferenceLibrary = async (
   await writeIndex({ version: 3, items });
   return { items, removed };
 };
+
+export async function updateReferenceMetadata(id: string, patch: ReferenceCuratedMetadata): Promise<ReferenceLibraryItem[]> {
+  if (!parseReferenceCuratedMetadata(patch)) throw new Error('Invalid reference notes or tags.');
+  const index = await readIndex();
+  if (!index.items.some(item => item.id === id)) throw new Error('Reference image was not found.');
+  const items = index.items.map(item => {
+    if (item.id !== id) return item;
+    const { notes: _notes, tags: _tags, ...unchanged } = item;
+    return { ...unchanged, ...parseReferenceCuratedMetadata({ ...item, ...patch })! };
+  });
+  await writeIndex({ version: 3, items });
+  return items;
+}

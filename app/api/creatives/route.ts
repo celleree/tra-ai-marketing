@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { isCreativeCategory } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import type { CreativeRecord } from '@/lib/creatives/generated';
+import { parseCreativeCopyContract } from '@/lib/creatives/copy-contract';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 import { parseCreativeIdentity } from '@/lib/creatives/identity';
@@ -76,18 +77,24 @@ const normalizeCreative = (
 ): CreativeRecord | null => {
   if (!value || typeof value !== 'object') return null;
   const input = value as Record<string, unknown>;
-  const copy =
-    input.copy && typeof input.copy === 'object'
-      ? (input.copy as Record<string, unknown>)
-      : null;
+  const copyContract = parseCreativeCopyContract(input);
   const id = typeof input.id === 'string' ? input.id : '';
   const category = typeof input.category === 'string' ? input.category : '';
   const image = normalizeMediaAsset(input.image);
-  const primaryText =
-    typeof copy?.primaryText === 'string' ? copy.primaryText.trim() : '';
-  const headline = typeof copy?.headline === 'string' ? copy.headline.trim() : '';
-  const description =
-    typeof copy?.description === 'string' ? copy.description.trim() : '';
+  const copy = copyContract
+    ? {
+        primaryText: copyContract.copy.primaryText.trim(),
+        headline: copyContract.copy.headline.trim(),
+        description: copyContract.copy.description.trim(),
+      }
+    : null;
+  const adCopy = copyContract?.adCopy
+    ? {
+        primaryText: copyContract.adCopy.primaryText.trim(),
+        headline: copyContract.adCopy.headline.trim(),
+        description: copyContract.adCopy.description.trim(),
+      }
+    : undefined;
   const source = input.source === undefined ? 'generated' : input.source;
   const videoFrameSelection = parseGeneratedVideoFrameSelection(input.videoFrameSelection);
   const planning = parseCreativePlanning(input.planning);
@@ -109,8 +116,9 @@ const normalizeCreative = (
     !isSafeCreativeId(id) ||
     !image ||
     !isCreativeCategory(category) ||
-    !primaryText ||
-    !headline ||
+    !copy ||
+    !copy.primaryText ||
+    !copy.headline ||
     (source !== 'generated' && source !== 'uploaded') ||
     (input.format !== undefined && !format) ||
     (input.placement !== undefined && !placement) ||
@@ -128,7 +136,9 @@ const normalizeCreative = (
     createdAt,
     image,
     category,
-    copy: { primaryText, headline, description },
+    copy,
+    ...(adCopy ? { adCopy } : {}),
+    ...(copyContract?.imageCopy ? { imageCopy: copyContract.imageCopy } : {}),
     source,
     ...(format ? { format } : {}),
     ...(placement ? { placement } : {}),

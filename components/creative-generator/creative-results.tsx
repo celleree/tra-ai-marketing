@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
+import { CreativeImageFallbackNotice, RevisionControls } from '@/components/creative-library/revision-controls';
 import type {
   MetaPublishBatchResult,
   MetaPublishCreativeResult,
@@ -483,6 +484,10 @@ export function CreativeResults({
                   <p className={styles.description}>{creative.copy.description}</p>
                 ) : null}
                 <p className={styles.creativeId}>ID: {creative.id}</p>
+                <CreativeImageFallbackNotice creative={creative} />
+                {creative.source !== 'uploaded' ? (
+                  <RevisionControls creative={creative} onSaved={() => {}} showOtherOperations={false} />
+                ) : null}
                 {state ? (
                   <div
                     className={`${styles.publishStatus} ${

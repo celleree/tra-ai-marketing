@@ -118,7 +118,7 @@ beforeEach(() => {
       input: Array<{ content: Array<{ type: string; text?: string }> }>;
     };
     const requestedCount = Number(
-      body.input[1].content[0]?.text?.match(/Choose exactly (\d+)/)?.[1]
+      body.input[1].content[0]?.text?.match(/Shortlist (\d+)/)?.[1]
     );
     const referenceIds = body.input[1].content
       .filter(

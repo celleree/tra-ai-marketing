@@ -102,7 +102,7 @@ let revokeObjectUrl: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   imageDimensions = [
-    [1000, 500],
+    [1024, 1024],
     [1000, 500],
   ];
   decode.mockReset();
@@ -130,6 +130,18 @@ afterEach(() => {
 });
 
 describe('applyBrandLogoToCreatives', () => {
+  it('does not composite or upload an image already branded by the server', async () => {
+    const branded = { ...creative, generationProvenance: { version: 1 as const,
+      imageGeneration: { prompt: 'prompt', model: 'gpt-image-2.5-sunburst', routing: { operationType: 'PROMPT_GENERATION' as const,
+        preferredModel: 'gpt-image-2.5-sunburst' as const, actualModel: 'gpt-image-2.5-sunburst' as const,
+        fallbackUsed: false as const, fallbackFromModel: null, fallbackReason: null } },
+      requestedSources: [], attachedSource: null, analysisSources: [],
+      logoOverlaySource: { mediaId: mediaId('b'), sha256: 'a'.repeat(64) } } };
+    expect(await applyBrandLogoToCreatives([branded], `/api/media/files/${logoFileName}`)).toEqual([branded]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(canvas.context.drawImage).not.toHaveBeenCalled();
+  });
+
   it('uses same-origin media, browser decoding, current panel geometry, and high-quality smoothing', async () => {
     fetchMock
       .mockResolvedValueOnce(imageResponse())
@@ -152,13 +164,13 @@ describe('applyBrandLogoToCreatives', () => {
     ]);
     expect(decode).toHaveBeenCalledTimes(2);
     expect(createImageBitmap).not.toHaveBeenCalled();
-    expect(canvas.context.roundRect).toHaveBeenCalledWith(30, 30, 113, 55, 12);
+    expect(canvas.context.roundRect).toHaveBeenCalledWith(31, 31, 202, 111, 12);
     expect(canvas.context.drawImage).toHaveBeenLastCalledWith(
       expect.any(FakeImage),
-      44,
-      36,
-      85,
-      43
+      45,
+      43,
+      174,
+      87
     );
     expect(canvas.context.imageSmoothingEnabled).toBe(true);
     expect(canvas.context.imageSmoothingQuality).toBe('high');
@@ -290,7 +302,7 @@ describe('applyBrandLogoToCreatives', () => {
 
   it('rejects a dimensionless decoded image and revokes its object URL', async () => {
     imageDimensions = [
-      [1000, 500],
+      [1024, 1024],
       [0, 0],
     ];
     fetchMock
