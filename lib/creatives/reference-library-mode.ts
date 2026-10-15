@@ -23,5 +23,5 @@ export async function selectRequiredLibraryReferences<T>(enabled: boolean | unde
 }
 
 export function requireReferenceLibrarySelection(enabled: boolean | undefined, count: number) {
-  if (enabled && count < 1) throw new BatchControlsError('Use reference library is On, but no eligible layout references were selected. Add a reference and explicitly Retry, or start a new portfolio with the control Off.');
+  if (enabled && count < 1) throw new BatchControlsError('Use reference library is On, but no eligible layout references were selected. Add a reference and start a new portfolio with the control On, or start one with the control Off.');
 }
