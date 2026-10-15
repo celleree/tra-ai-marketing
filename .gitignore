@@ -35,6 +35,7 @@ output/
 tmp/
 temp/
 *.log
+next-env.d.ts
 
 # Local AI/tool settings
 .claude/settings.local.json
