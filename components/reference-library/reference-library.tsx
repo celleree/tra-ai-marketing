@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import {
+  readSelectedCompanyReferenceIds,
+  setSelectedCompanyReferenceIds,
+} from '@/lib/company/reference-selection';
+import {
   CREATIVE_CATEGORIES,
   CREATIVE_CATEGORY_LABELS,
   type CreativeCategoryId,
@@ -107,6 +111,7 @@ export function ReferenceLibrary() {
   const [selectedAngle, setSelectedAngle] =
     useState<CreativeCategoryId>('customer-problems');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [companyReferenceIds, setCompanyReferenceIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [movingId, setMovingId] = useState('');
@@ -116,6 +121,7 @@ export function ReferenceLibrary() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    setCompanyReferenceIds(readSelectedCompanyReferenceIds());
     const load = async () => {
       try {
         const response = await fetch('/api/references');
@@ -234,6 +240,16 @@ export function ReferenceLibrary() {
         setItems(nextItems);
         setSelectedIds([]);
         if (activeLibrary === 'layout') {
+          const uploadedIds = new Set(uploaded.map((asset) => asset.id));
+          const newlySavedLayoutIds = nextItems
+            .filter((item) => item.referenceType === 'layout' && uploadedIds.has(item.id))
+            .map((item) => item.id);
+          if (newlySavedLayoutIds.length) {
+            const currentIds = readSelectedCompanyReferenceIds();
+            const nextCompanyReferenceIds = [...new Set([...newlySavedLayoutIds, ...currentIds])];
+            setSelectedCompanyReferenceIds(nextCompanyReferenceIds);
+            setCompanyReferenceIds(readSelectedCompanyReferenceIds());
+          }
           const newestLayout = nextItems.find((item) => item.referenceType === 'layout');
           if (newestLayout?.angle) setSelectedAngle(newestLayout.angle);
         }
@@ -269,6 +285,15 @@ export function ReferenceLibrary() {
     }
   };
 
+  const toggleCompanyReference = (id: string) => {
+    const currentIds = readSelectedCompanyReferenceIds();
+    const nextIds = currentIds.includes(id)
+      ? currentIds.filter((selectedId) => selectedId !== id)
+      : [...currentIds, id];
+    setSelectedCompanyReferenceIds(nextIds);
+    setCompanyReferenceIds(readSelectedCompanyReferenceIds());
+  };
+
   const toggleSelection = (id: string) => {
     setSelectedIds((current) =>
       current.includes(id)
@@ -302,6 +327,12 @@ export function ReferenceLibrary() {
 
       setItems((payload.items || []) as ReferenceLibraryItem[]);
       setSelectedIds([]);
+      const deletedIds = new Set(selectedIds);
+      const nextCompanyReferenceIds = readSelectedCompanyReferenceIds().filter(
+        (id) => !deletedIds.has(id)
+      );
+      setSelectedCompanyReferenceIds(nextCompanyReferenceIds);
+      setCompanyReferenceIds(readSelectedCompanyReferenceIds());
     } catch (deleteError) {
       setError(
         deleteError instanceof Error
@@ -370,6 +401,10 @@ export function ReferenceLibrary() {
         <p>
           Keep external layout inspiration separate from company-owned source imagery used for
           people, scenes, and existing creative assets.
+        </p>
+        <p>
+          Select layout references to use for this company. This selection is browser-local
+          in a shared workspace and is not company access control.
         </p>
       </div>
 
@@ -538,22 +573,35 @@ export function ReferenceLibrary() {
                         {item.originalName}
                       </div>
                       {activeLibrary === 'layout' ? (
-                        <label className={styles.angleControl}>
-                          <span>Angle</span>
-                          <select
-                            value={item.angle}
-                            disabled={movingId === item.id}
-                            onChange={(event) =>
-                              void moveReference(item.id, event.target.value as CreativeCategoryId)
-                            }
+                        <>
+                          <label
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0' }}
                           >
-                            {CREATIVE_CATEGORIES.map((angle) => (
-                              <option key={angle} value={angle}>
-                                {CREATIVE_CATEGORY_LABELS[angle]}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                            <input
+                              type="checkbox"
+                              checked={companyReferenceIds.includes(item.id)}
+                              aria-label={`Use ${item.originalName} for this company`}
+                              onChange={() => toggleCompanyReference(item.id)}
+                            />
+                            <span>Use for this company</span>
+                          </label>
+                          <label className={styles.angleControl}>
+                            <span>Angle</span>
+                            <select
+                              value={item.angle}
+                              disabled={movingId === item.id}
+                              onChange={(event) =>
+                                void moveReference(item.id, event.target.value as CreativeCategoryId)
+                              }
+                            >
+                              {CREATIVE_CATEGORIES.map((angle) => (
+                                <option key={angle} value={angle}>
+                                  {CREATIVE_CATEGORY_LABELS[angle]}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </>
                       ) : (
                         <span className={styles.assetLabel}>Company source asset</span>
                       )}
