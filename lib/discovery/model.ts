@@ -1,3 +1,4 @@
+import { DiscoveryError } from './errors';
 import { createHash } from 'node:crypto';
 export type Search = { query: string; limit: number; preferTax: boolean };
 export type Candidate = {
@@ -11,7 +12,7 @@ export type Candidate = {
 export function parseSearch(value: Record<string, unknown>): Search {
   const query = typeof value.query === 'string' ? value.query.trim() : '';
   const limit = value.limit === undefined ? 10 : value.limit;
-  if (!query || query.length > 160 || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 100) throw new Error('Enter a search up to 160 characters and a result count from 1 to 100.');
+  if (!query || query.length > 160 || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 100) throw new DiscoveryError('Enter a search up to 160 characters and a result count from 1 to 100.');
   return { query, limit: Number(limit), preferTax: value.preferTax !== false };
 }
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -20,11 +21,11 @@ const words = (text: string) => new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?
 const date = (value: unknown) => string(value) && Number.isFinite(Date.parse(string(value))) ? new Date(string(value)).toISOString() : null;
 export function allowedImageUrl(value: string): URL {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || url.username || url.password || url.port || !/(^|\.)fbcdn\.net$/.test(url.hostname)) throw new Error('Unsupported media host. Upload the image manually instead.');
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || !/(^|\.)fbcdn\.net$/.test(url.hostname)) throw new DiscoveryError('Unsupported media host. Upload the image manually instead.');
   return url;
 }
 export function extractCandidates(rows: unknown, runId: string, provider: Candidate['provider'], observedAt: string): Candidate[] {
-  if (!Array.isArray(rows)) throw new Error('Provider dataset must be an array.');
+  if (!Array.isArray(rows)) throw new DiscoveryError('Provider dataset must be an array.');
   return rows.slice(0, 100).flatMap(value => {
     const row = record(value), snapshot = record(row.snapshot), adId = string(row.adArchiveID || row.adArchiveId);
     if (!/^\d{1,40}$/.test(adId)) return [];

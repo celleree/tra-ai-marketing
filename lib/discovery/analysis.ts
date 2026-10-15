@@ -1,3 +1,4 @@
+import { DiscoveryError } from './errors';
 import { createHash } from 'node:crypto';
 import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { getLayoutAnalysisModel } from '@/lib/ai/layout-analyzer';
@@ -16,11 +17,11 @@ export type VisualEvidence = {
 export const visualAnalysisAvailable = () => process.env.DISCOVERY_VISUAL_ANALYSIS_ENABLED === 'true'
   && process.env.DISCOVERY_ANALYSIS_TRANSFER_APPROVED === 'true' && Boolean(process.env.OPENAI_API_KEY?.trim());
 export function assertVisualAnalysisAvailable() {
-  if (!visualAnalysisAvailable()) throw new Error('Visual analysis is disabled. Analysis activation, image-transfer approval, and the existing OpenAI configuration are required.');
+  if (!visualAnalysisAvailable()) throw new DiscoveryError('Visual analysis is disabled. Analysis activation, image-transfer approval, and the existing OpenAI configuration are required.');
 }
 export function parseVisualPattern(value: unknown): Pick<VisualEvidence, 'layout' | 'humanPresence' | 'angle' | 'offer'> {
   const data = value as Record<string, unknown>;
-  if (!data || !LAYOUTS.includes(data.layout as never) || !HUMANS.includes(data.humanPresence as never) || !ANGLES.includes(data.angle as never) || !OFFERS.includes(data.offer as never)) throw new Error('Visual analysis did not return a supported pattern.');
+  if (!data || !LAYOUTS.includes(data.layout as never) || !HUMANS.includes(data.humanPresence as never) || !ANGLES.includes(data.angle as never) || !OFFERS.includes(data.offer as never)) throw new DiscoveryError('Visual analysis did not return a supported pattern.');
   return { layout: data.layout as VisualEvidence['layout'], humanPresence: data.humanPresence as VisualEvidence['humanPresence'], angle: data.angle as VisualEvidence['angle'], offer: data.offer as VisualEvidence['offer'] };
 }
 export async function analyzeVisualPattern(source: StoredMediaFile): Promise<VisualEvidence> {
@@ -34,10 +35,10 @@ export async function analyzeVisualPattern(source: StoredMediaFile): Promise<Vis
       text: { format: { type: 'json_schema', name: 'discovery_visual_pattern_v1', strict: true, schema: { type: 'object', additionalProperties: false, required: ['layout', 'humanPresence', 'angle', 'offer'], properties: { layout: { type: 'string', enum: LAYOUTS }, humanPresence: { type: 'string', enum: HUMANS }, angle: { type: 'string', enum: ANGLES }, offer: { type: 'string', enum: OFFERS } } } } },
     }),
   });
-  if (!response.ok) throw new Error(`Visual analysis provider returned ${response.status}. No automatic retry was made.`);
+  if (!response.ok) throw new DiscoveryError(`Visual analysis provider returned ${response.status}. No automatic retry was made.`);
   const payload = await response.json() as { status?: string; output?: { content?: { type?: string; text?: string }[] }[] };
-  if (payload.status && payload.status !== 'completed') throw new Error('Visual analysis is incomplete; outcome may be unknown.');
+  if (payload.status && payload.status !== 'completed') throw new DiscoveryError('Visual analysis is incomplete; outcome may be unknown.');
   const text = payload.output?.flatMap(item => item.content ?? []).find(item => item.type === 'output_text')?.text;
-  if (!text) throw new Error('Visual analysis returned no pattern.');
+  if (!text) throw new DiscoveryError('Visual analysis returned no pattern.');
   return { ...parseVisualPattern(JSON.parse(text)), basis: 'model-inference', model, analyzedAt: new Date().toISOString(), imageSha256: createHash('sha256').update(source.buffer).digest('hex') };
 }

@@ -1,3 +1,4 @@
+import { DiscoveryError } from './errors';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { assertDeploymentRuntimeConsistent } from '@/lib/runtime/deployment';
@@ -23,23 +24,23 @@ export function discoveryStorage(): VideoIntelligenceStorage {
   assertDeploymentRuntimeConsistent();
   if (process.env.NODE_ENV !== 'production') return new LocalVideoIntelligenceStorage(path.resolve(process.cwd(), '.runtime', 'discovery'));
   const environment = process.env.VERCEL_ENV;
-  if (environment !== 'preview' && environment !== 'production') throw new Error('Discovery requires a known deployment environment.');
-  for (const key of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME']) if (!process.env[key]?.trim()) throw new Error('Discovery storage is not configured.');
+  if (environment !== 'preview' && environment !== 'production') throw new DiscoveryError('Discovery requires a known deployment environment.');
+  for (const key of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME']) if (!process.env[key]?.trim()) throw new DiscoveryError('Discovery storage is not configured.');
   return new R2VideoIntelligenceStorage({ environment, accountId: process.env.R2_ACCOUNT_ID!, accessKeyId: process.env.R2_ACCESS_KEY_ID!, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!, bucketName: process.env.R2_BUCKET_NAME! });
 }
 export function sessionKey(userId: string, id: string) {
-  if (!/^[a-f0-9]{32}$/.test(id)) throw new Error('Invalid discovery session.');
+  if (!/^[a-f0-9]{32}$/.test(id)) throw new DiscoveryError('Invalid discovery session.');
   return `discovery/v1/operators/${createHash('sha256').update(userId).digest('hex')}/sessions/${id}.json`;
 }
 export async function loadSession(userId: string, id: string) {
   const store = discoveryStorage(), key = sessionKey(userId, id), snapshot = await store.read(key);
-  if (!snapshot) throw new Error('Discovery session was not found for this operator.');
+  if (!snapshot) throw new DiscoveryError('Discovery session was not found for this operator.');
   const session = JSON.parse(snapshot.bytes.toString()) as DiscoverySession;
-  if (session.version !== 1 || session.id !== id) throw new Error('Unsupported discovery session.');
+  if (session.version !== 1 || session.id !== id) throw new DiscoveryError('Unsupported discovery session.');
   return { session, etag: snapshot.etag, key, store };
 }
 export async function saveSession(userId: string, session: DiscoverySession, expectedEtag: string | null) {
-  if (!await discoveryStorage().write(sessionKey(userId, session.id), Buffer.from(JSON.stringify(session)), expectedEtag)) throw new Error('Discovery changed in another request. Refresh and retry.');
+  if (!await discoveryStorage().write(sessionKey(userId, session.id), Buffer.from(JSON.stringify(session)), expectedEtag)) throw new DiscoveryError('Discovery changed in another request. Refresh and retry.');
 }
 export async function updateSession(userId: string, id: string, update: (session: DiscoverySession) => void) {
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -47,5 +48,5 @@ export async function updateSession(userId: string, id: string, update: (session
     try { await saveSession(userId, snapshot.session, snapshot.etag); return snapshot.session; }
     catch (error) { if (!(error instanceof Error) || !error.message.startsWith('Discovery changed')) throw error; }
   }
-  throw new Error('Discovery changed in another request. Refresh and retry.');
+  throw new DiscoveryError('Discovery changed in another request. Refresh and retry.');
 }

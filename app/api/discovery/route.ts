@@ -1,3 +1,4 @@
+import { DiscoveryError } from '@/lib/discovery/errors';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { getOperatorAccess } from '@/lib/auth/server-access';
@@ -15,7 +16,7 @@ import { requireOperatorQuota } from '@/lib/quotas/require-quota';
 import { fingerprintImage } from '@/lib/discovery/fingerprint';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
-const response = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
+const response = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { 'Cache-Control': 'private, no-store' } });
 const summary = (session: DiscoverySession) => ({ session, performance: 'Unavailable: TRA account performance has not been imported or authoritatively linked.', analysis: 'Copy heuristics are unverified. Optional visual analysis is model inference, never identity approval or performance evidence.' });
 export async function GET(request: Request) {
   const access = await getOperatorAccess(); if (!access.allowed) return operatorAccessDeniedResponse(access);
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
     }
     return response({ error: 'Unknown discovery action.' }, 400);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Discovery request failed.';
+    const message = error instanceof DiscoveryError ? error.message : 'Discovery could not complete this operation. Refresh the saved session before retrying. If a paid submission was interrupted, check the provider console first.';
     // Never expose provider response bodies or credentials.
     return response({ error: message }, message.includes('disabled') ? 503 : 400);
   }

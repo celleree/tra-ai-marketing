@@ -1,5 +1,5 @@
 import { readCopilotBody } from '@/lib/copilot/request-body';
-import { getAnthropicCredential, getProviderSecretStatus, providerSecretsReady } from '@/lib/provider-secrets/anthropic';
+import { getAnthropicCredential, getProviderSecretStatus, providerSecretsReady, ProviderSecretError } from '@/lib/provider-secrets/anthropic';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
 import { buildSavedCopilotContext, CopilotContextError } from '@/lib/copilot/context';
@@ -52,6 +52,13 @@ export async function POST(request: Request) {
         : error.code === 'creative_unavailable' ? 'A saved creative with a valid identity is required.' : 'Invalid creative or company context.' }, status);
     }
     if (error instanceof ClaudeCopilotError && error.code === 'invalid_input') return reply({ error: 'The supplied context exceeds the provider input limits.' }, 400);
-    return reply({ error: 'Claude Copilot could not complete the recommendation. Try again later.' }, 503);
+    if (error instanceof ProviderSecretError) return reply({ error: 'Copilot key storage is unavailable. Ask the administrator to check the private store and master-key configuration.' }, 503);
+    if (error instanceof ClaudeCopilotError && error.code === 'provider_error') {
+      if (error.status === 401) return reply({ error: 'Anthropic rejected your API key. Replace it in Copilot settings before trying again.' }, 409);
+      if (error.status === 403) return reply({ error: 'Your Anthropic account cannot access the configured model. Check its model permissions and account status.' }, 409);
+      if (error.status === 404) return reply({ error: 'The configured Anthropic model is unavailable. Ask the administrator to check the model configuration.' }, 503);
+      if (error.status === 429) return reply({ error: 'Anthropic rate-limited this request. Check your account limits and retry later; no automatic retry was made.' }, 503);
+    }
+    return reply({ error: 'Claude Copilot could not complete the recommendation. Try again later; no automatic retry was made.' }, 503);
   }
 }

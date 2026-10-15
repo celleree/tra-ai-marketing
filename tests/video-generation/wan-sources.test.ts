@@ -39,3 +39,13 @@ describe('Wan physical source probe and protected delivery', () => {
     expect(createVideoResponse(bytes, new Request('https://app/output', { headers: { Range: 'bytes=100-' } })).status).toBe(416);
   });
 });
+
+it('marks successful, denied and failed Wan API responses private/no-store', async () => {
+  const { getOperatorAccess } = await import('@/lib/auth/server-access');
+  vi.mocked(getOperatorAccess).mockResolvedValue({ allowed: true, userId: 'clerk-operator' });
+  for (const operation of [async () => Response.json({ jobs: [] }), async () => { throw new Error('private failure'); }]) {
+    expect((await wanRoute(operation)).headers.get('Cache-Control')).toBe('private, no-store');
+  }
+  vi.mocked(getOperatorAccess).mockResolvedValue({ allowed: false, status: 401, error: 'Sign in required.' });
+  expect((await wanRoute(async () => Response.json({}))).headers.get('Cache-Control')).toBe('private, no-store');
+});

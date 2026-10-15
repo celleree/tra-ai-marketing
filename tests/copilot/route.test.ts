@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 const mocks = vi.hoisted(() => ({ getOperatorAccess: vi.fn(), listCreatives: vi.fn(), requireOperatorQuota: vi.fn(), requestClaudeCopilot: vi.fn(), getAnthropicCredential: vi.fn(), getProviderSecretStatus: vi.fn(), providerSecretsReady: vi.fn() }));
-vi.mock('@/lib/provider-secrets/anthropic', () => ({ getAnthropicCredential: mocks.getAnthropicCredential, getProviderSecretStatus: mocks.getProviderSecretStatus, providerSecretsReady: mocks.providerSecretsReady }));
+vi.mock('@/lib/provider-secrets/anthropic', () => ({ ProviderSecretError: class extends Error { constructor(public code: string) { super(code); } }, getAnthropicCredential: mocks.getAnthropicCredential, getProviderSecretStatus: mocks.getProviderSecretStatus, providerSecretsReady: mocks.providerSecretsReady }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.getOperatorAccess }));
 vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.requireOperatorQuota }));
 vi.mock('@/lib/creatives/storage', async original => ({ ...await original<typeof import('@/lib/creatives/storage')>(), listCreatives: mocks.listCreatives }));
 vi.mock('@/lib/copilot/claude', async original => ({ ...await original<typeof import('@/lib/copilot/claude')>(), requestClaudeCopilot: mocks.requestClaudeCopilot }));
 import { CLAUDE_COPILOT_MODEL, ClaudeCopilotError } from '@/lib/copilot/claude';
+import { ProviderSecretError } from '@/lib/provider-secrets/anthropic';
 import { GET, POST } from '@/app/api/copilot/recommendations/route';
 
 const id = `creative_${'a'.repeat(32)}`;
@@ -71,7 +72,7 @@ describe('operator-only Claude recommendation route (offline)', () => {
     expect(body.error).toContain('Approve the effective company context');
     expect(mocks.listCreatives).not.toHaveBeenCalled(); expect(mocks.requireOperatorQuota).not.toHaveBeenCalled(); expect(mocks.requestClaudeCopilot).not.toHaveBeenCalled();
   });
-  it.each(['not json', 'x'.repeat(256 * 1024 + 1), JSON.stringify({ ...input(), companyProfile: { knowledgeBase: { companySummary: '界'.repeat(100000) } } })])('bounds raw body bytes and rejects malformed JSON', async body => {
+  it.each(['not json', 'x'.repeat(256 * 1024 + 1), JSON.stringify({ ...input(), companyProfile: { knowledgeBase: { companySummary: 'ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€¦Ã¢â‚¬â„¢'.repeat(100000) } } })])('bounds raw body bytes and rejects malformed JSON', async body => {
     await response(await POST(new Request('http://localhost/api/copilot/recommendations', { method: 'POST', body })), 400);
     expect(mocks.listCreatives).not.toHaveBeenCalled(); expect(mocks.requestClaudeCopilot).not.toHaveBeenCalled();
   });
@@ -102,7 +103,7 @@ describe('operator-only Claude recommendation route (offline)', () => {
     expect(options).toEqual({ apiKey: 'offline-key', allowPaidRequest: true, maxOutputTokens: 4096, signal: req.signal });
     expect(mocks.requireOperatorQuota.mock.invocationCallOrder[0]).toBeLessThan(mocks.requestClaudeCopilot.mock.invocationCallOrder[0]);
   });
-  it.each([new ClaudeCopilotError('provider_error', 429), new ClaudeCopilotError('invalid_response'), new Error('secret offline-key provider body')])('redacts provider failures and never retries', async error => {
+  it.each([new ClaudeCopilotError('invalid_response'), new Error('secret offline-key provider body')])('redacts provider failures and never retries', async error => {
     mocks.requestClaudeCopilot.mockRejectedValue(error);
     const body = await response(await POST(request()), 503);
     expect(JSON.stringify(body)).not.toMatch(/offline-key|secret|429|provider body/); expect(mocks.requestClaudeCopilot).toHaveBeenCalledTimes(1);
@@ -115,4 +116,16 @@ describe('operator-only Claude recommendation route (offline)', () => {
     mocks.requestClaudeCopilot.mockRejectedValueOnce(new ClaudeCopilotError('invalid_input'));
     await response(await POST(request()), 400); expect(mocks.requestClaudeCopilot).toHaveBeenCalledTimes(1);
   });
+});
+
+it.each([[401, 409, 'Replace it'], [403, 409, 'permissions'], [404, 503, 'administrator'], [429, 503, 'rate-limited'], [529, 503, 'no automatic retry']] as const)('provides redacted actionable provider failure %s', async (providerStatus, status, message) => {
+  mocks.requestClaudeCopilot.mockRejectedValue(new ClaudeCopilotError('provider_error', providerStatus));
+  const body = await response(await POST(request()), status); expect(body.error).toContain(message);
+  expect(JSON.stringify(body)).not.toMatch(/offline-key|provider body/); expect(mocks.requestClaudeCopilot).toHaveBeenCalledTimes(1);
+});
+
+it('redacts key-store failures before quota/provider and gives an administrator action', async () => {
+  mocks.getAnthropicCredential.mockRejectedValue(new ProviderSecretError('unavailable'));
+  const body = await response(await POST(request()), 503); expect(body.error).toContain('administrator');
+  expect(mocks.requireOperatorQuota).not.toHaveBeenCalled(); expect(mocks.requestClaudeCopilot).not.toHaveBeenCalled();
 });

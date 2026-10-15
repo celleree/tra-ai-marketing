@@ -1,3 +1,4 @@
+import { DiscoveryError } from './errors';
 import { createHash } from 'node:crypto';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { prepareMediaImage, type MediaStorage } from '@/lib/media/storage';
@@ -14,7 +15,7 @@ async function catalog(artifacts: VideoIntelligenceStorage, operator: string, me
     if (entries.some(entry => entry.mediaId === mediaId)) return similar;
     if (await artifacts.write(key, Buffer.from(JSON.stringify([...entries.slice(-499), { mediaId, fingerprint }])), current?.etag ?? null)) return similar;
   }
-  throw new Error('Visual fingerprint catalog changed. Retry the saved import.');
+  throw new DiscoveryError('Visual fingerprint catalog changed. Retry the saved import.');
 }
 export async function storeSelectedImage(userId: string, file: File, dependencies: { artifacts?: VideoIntelligenceStorage; media?: MediaStorage } = {}) {
   const artifacts = dependencies.artifacts ?? discoveryStorage(), media = dependencies.media ?? getMediaStorage();
@@ -32,7 +33,7 @@ export async function storeSelectedImage(userId: string, file: File, dependencie
   // A confirmed conflict means our receipt was not committed. Keep the winner's media.
   const winner = await artifacts.read(key);
   await media.deleteImage(saved.fileName);
-  if (!winner) throw new Error('Image deduplication changed. Refresh and retry.');
+  if (!winner) throw new DiscoveryError('Image deduplication changed. Refresh and retry.');
   const existing = JSON.parse(winner.bytes.toString()) as { media: MediaAsset };
   return complete(existing.media, true);
 }

@@ -74,3 +74,10 @@ describe('authenticated review and explicit import', () => {
     session.sample = true; expect((await preview(new Request(`http://localhost/api/discovery/preview?session=${session.id}&candidate=${session.candidates[0].id}`))).status).toBe(404);
   });
 });
+
+it('redacts unexpected storage/network messages at the public boundary', async () => {
+  mocks.load.mockRejectedValueOnce(new Error('secret-token https://cdn.example/?signature=private'));
+  const result = await POST(request({ action: 'import', sessionId: session.id, candidateId: session.candidates[0].id, confirmRights: true }));
+  expect(result.status).toBe(400); expect(result.headers.get('Cache-Control')).toBe('private, no-store');
+  const text = await result.text(); expect(text).not.toMatch(/secret-token|signature|cdn.example/); expect(text).toContain('saved session');
+});
