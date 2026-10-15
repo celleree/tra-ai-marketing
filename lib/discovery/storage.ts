@@ -17,6 +17,7 @@ export type DiscoverySession = {
   visualEvidence?: Record<string, VisualEvidence>;
   analysisAttempts?: Record<string, 'reserved' | 'unknown' | 'succeeded'>;
   analysisTokens?: Record<string, string>;
+  analysisHistory?: Record<string, { attempt: 'reserved' | 'unknown' | 'succeeded'; token?: string; evidence?: VisualEvidence }>;
   fingerprints?: Record<string, ImageFingerprint>;
   similarImports?: Record<string, { mediaId: string; kind: 'identical-pixels' | 'possible-visual-variant'; distance: number }[]>;
 };

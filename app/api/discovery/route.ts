@@ -18,6 +18,11 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 const response = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { 'Cache-Control': 'private, no-store' } });
 const summary = (session: DiscoverySession) => ({ session, performance: 'Unavailable: TRA account performance has not been imported or authoritatively linked.', analysis: 'Copy heuristics are unverified. Optional visual analysis is model inference, never identity approval or performance evidence.' });
+function archiveAnalysis(session: DiscoverySession, id: string) {
+  const hash = session.visualEvidence?.[id]?.imageSha256 ?? session.fingerprints?.[id]?.byteSha256 ?? session.acquisitions?.[id]?.imageSha256;
+  const attempt = session.analysisAttempts?.[id];
+  if (hash && attempt) session.analysisHistory = { ...session.analysisHistory, [`${id}:${hash}`]: { attempt, token: session.analysisTokens?.[id], evidence: session.visualEvidence?.[id] } };
+}
 export async function GET(request: Request) {
   const access = await getOperatorAccess(); if (!access.allowed) return operatorAccessDeniedResponse(access);
   const id = new URL(request.url).searchParams.get('session');
@@ -69,7 +74,7 @@ export async function POST(request: Request) {
       assertVisualAnalysisAvailable();
       const cached = session.visualEvidence?.[candidate.id];
       if (cached && cached.imageSha256 === session.fingerprints?.[candidate.id]?.byteSha256) return response(summary(session));
-      if (cached) { delete session.visualEvidence?.[candidate.id]; delete session.analysisAttempts?.[candidate.id]; delete session.analysisTokens?.[candidate.id]; }
+      if (cached) { archiveAnalysis(session, candidate.id); delete session.visualEvidence?.[candidate.id]; delete session.analysisAttempts?.[candidate.id]; delete session.analysisTokens?.[candidate.id]; }
       if (session.analysisAttempts?.[candidate.id]) return response({ error: 'An analysis attempt already exists. Check its outcome before any further paid request.' }, 409);
       const quotaDenied = await requireOperatorQuota(access.userId, 'REFERENCE_CLASSIFICATION', 1); if (quotaDenied) return quotaDenied;
       const uploadedMedia = session.imports[candidate.id];
@@ -78,6 +83,16 @@ export async function POST(request: Request) {
       })();
       if (!source) return response({ error: 'Selected image is no longer available.' }, 400);
       const fingerprint = await fingerprintImage(source.buffer), attempt = randomUUID();
+      const historyKey = `${candidate.id}:${fingerprint.byteSha256}`, previous = session.analysisHistory?.[historyKey];
+      if (previous) {
+        if (previous.attempt !== 'succeeded' || previous.evidence?.imageSha256 !== fingerprint.byteSha256) return response({ error: 'This image already has an analysis attempt. Check its saved outcome before any further paid request.' }, 409);
+        session.fingerprints = { ...session.fingerprints, [candidate.id]: fingerprint };
+        session.visualEvidence = { ...session.visualEvidence, [candidate.id]: previous.evidence };
+        session.analysisAttempts = { ...session.analysisAttempts, [candidate.id]: previous.attempt };
+        session.analysisTokens = { ...session.analysisTokens, ...(previous.token ? { [candidate.id]: previous.token } : {}) };
+        await saveSession(access.userId, session, etag); return response(summary(session));
+      }
+      session.analysisHistory = { ...session.analysisHistory, [historyKey]: { attempt: 'reserved', token: attempt } };
       session.fingerprints = { ...session.fingerprints, [candidate.id]: fingerprint };
       session.analysisTokens = { ...session.analysisTokens, [candidate.id]: attempt };
       session.analysisAttempts = { ...session.analysisAttempts, [candidate.id]: 'reserved' };
@@ -86,12 +101,14 @@ export async function POST(request: Request) {
         const evidence = await analyzeVisualPattern(source);
         if (evidence.imageSha256 !== fingerprint.byteSha256) throw new DiscoveryError('Analysis did not match its source image.');
         const saved = await updateSession(access.userId, session.id, current => {
+          if (current.analysisHistory?.[historyKey]?.token === attempt) current.analysisHistory[historyKey] = { attempt: 'succeeded', token: attempt, evidence };
           if (current.analysisTokens?.[candidate.id] !== attempt || current.fingerprints?.[candidate.id]?.byteSha256 !== fingerprint.byteSha256) return;
           current.visualEvidence = { ...current.visualEvidence, [candidate.id]: evidence };
           current.analysisAttempts = { ...current.analysisAttempts, [candidate.id]: 'succeeded' };
         }); Object.assign(session, saved);
       } catch {
         await updateSession(access.userId, session.id, current => {
+          if (current.analysisHistory?.[historyKey]?.token === attempt && current.analysisHistory[historyKey].attempt !== 'succeeded') current.analysisHistory[historyKey].attempt = 'unknown';
           if (current.analysisTokens?.[candidate.id] === attempt && current.fingerprints?.[candidate.id]?.byteSha256 === fingerprint.byteSha256 && !current.visualEvidence?.[candidate.id]) current.analysisAttempts = { ...current.analysisAttempts, [candidate.id]: 'unknown' };
         }).catch(() => {});
         return response({ error: 'Analysis outcome is unknown or its receipt could not be saved. No automatic retry is allowed; review the provider console.', sessionId: session.id }, 502);
@@ -116,6 +133,7 @@ export async function POST(request: Request) {
         const stored = await storeSelectedImage(access.userId, file); media = stored.media;
         const priorHash = session.fingerprints?.[candidate.id]?.byteSha256 ?? session.acquisitions?.[candidate.id]?.imageSha256;
         if (priorHash !== stored.imageSha256 || (session.visualEvidence?.[candidate.id] && session.visualEvidence[candidate.id].imageSha256 !== stored.imageSha256)) {
+          archiveAnalysis(session, candidate.id);
           delete session.visualEvidence?.[candidate.id]; delete session.analysisAttempts?.[candidate.id]; delete session.analysisTokens?.[candidate.id];
         }
         session.fingerprints = { ...session.fingerprints, [candidate.id]: stored.fingerprint };

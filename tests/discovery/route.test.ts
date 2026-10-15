@@ -131,6 +131,7 @@ it.each(['success', 'failure'])('discards old in-flight analysis %s after image 
   session = JSON.parse(JSON.stringify(session)); mocks.load.mockResolvedValue({ session, etag: 'new-etag' });
   if (outcome === 'success') finish(visualEvidence('a'.repeat(64))); else fail(new Error('old provider request failed'));
   await analysis; expect(session.visualEvidence?.[id]).toBeUndefined(); expect(session.analysisAttempts?.[id]).toBeUndefined(); expect(session.analysisTokens?.[id]).toBeUndefined();
+  expect(session.analysisHistory[`${id}:${'a'.repeat(64)}`].attempt).toBe(outcome === 'success' ? 'succeeded' : 'unknown');
   expect(mocks.analyze).toHaveBeenCalledTimes(1);
 });
 it('reacquiring identical image bytes retains valid visual evidence and cached analysis', async () => {
@@ -140,4 +141,22 @@ it('reacquiring identical image bytes retains valid visual evidence and cached a
   expect((await POST(request({ action: 'import', sessionId: session.id, candidateId: id, confirmRights: true }))).status).toBe(200);
   expect(session.visualEvidence[id].imageSha256).toBe(hash);
   expect((await POST(request({ action: 'analyze', sessionId: session.id, candidateId: id, approveTransfer: true }))).status).toBe(200); expect(mocks.analyze).not.toHaveBeenCalled();
+});
+
+it('retains unknown source attempts across replacement and refuses to repurchase the old image', async () => {
+  const id = session.candidates[0].id, hash = 'a'.repeat(64); session.imports[id] = media;
+  session.fingerprints = { [id]: { byteSha256: hash } }; session.analysisAttempts = { [id]: 'unknown' }; session.analysisTokens = { [id]: 'uncertain-old' };
+  mocks.storeImage.mockResolvedValueOnce({ media, imageSha256: 'b'.repeat(64), fingerprint: { byteSha256: 'b'.repeat(64) }, reused: false });
+  expect((await POST(manualImport(id))).status).toBe(200);
+  expect(session.analysisHistory[`${id}:${hash}`]).toMatchObject({ attempt: 'unknown', token: 'uncertain-old' });
+  mocks.storeImage.mockResolvedValueOnce({ media, imageSha256: hash, fingerprint: { byteSha256: hash }, reused: false });
+  expect((await POST(manualImport(id))).status).toBe(200);
+  expect((await POST(request({ action: 'analyze', sessionId: session.id, candidateId: id, approveTransfer: true }))).status).toBe(409);
+  expect(mocks.analyze).not.toHaveBeenCalled();
+});
+it('reuses successful source history after returning to a previously analyzed image', async () => {
+  const id = session.candidates[0].id, hash = 'a'.repeat(64); session.imports[id] = media;
+  session.analysisHistory = { [`${id}:${hash}`]: { attempt: 'succeeded', token: 'old', evidence: visualEvidence(hash) } };
+  expect((await POST(request({ action: 'analyze', sessionId: session.id, candidateId: id, approveTransfer: true }))).status).toBe(200);
+  expect(session.visualEvidence[id].imageSha256).toBe(hash); expect(mocks.analyze).not.toHaveBeenCalled();
 });
