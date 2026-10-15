@@ -32,7 +32,7 @@ export function CreativeLibrary() {
         const response = await fetch('/api/creatives', { cache: 'no-store' });
         const payload = await response.json();
         if (!response.ok) {
-          throw new Error(payload.error || 'TRA creatives could not be loaded.');
+          throw new Error(payload.error || 'Company creatives could not be loaded.');
         }
         if (active) setItems((payload.items || []) as CreativeLibraryItem[]);
       } catch (loadError) {
@@ -40,7 +40,7 @@ export function CreativeLibrary() {
           setError(
             loadError instanceof Error
               ? loadError.message
-              : 'TRA creatives could not be loaded.'
+              : 'Company creatives could not be loaded.'
           );
         }
       } finally {
@@ -58,8 +58,8 @@ export function CreativeLibrary() {
     <section className={styles.section} aria-busy={loading}>
       <div className={styles.heading}>
         <div>
-          <p className="eyebrow">TRA creative library</p>
-          <h2>TRA Creatives</h2>
+          <p className="eyebrow">Company creative library</p>
+          <h2>Company Creatives</h2>
         </div>
         <span className="muted">
           {loading ? 'Loading…' : `${items.length} creative${items.length === 1 ? '' : 's'}`}
@@ -79,7 +79,7 @@ export function CreativeLibrary() {
               <img
                 className={styles.image}
                 src={creative.image.url}
-                alt={`TRA creative ${creative.id}`}
+                alt={`Company creative ${creative.id}`}
               />
               <div className={styles.body}>
                 <h3>{creative.copy.headline}</h3>

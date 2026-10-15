@@ -39,13 +39,13 @@ export function LogoOverlayControl({ creative, onSaved }: { creative: Pick<Creat
     {open ? <>
       <p>Save a separate copy with the original logo. The image, person and claim text stay unchanged outside the logo panel. No AI call is made.</p>
       {!logo ? <p role="alert">The saved original logo is missing. Restore it in Company &gt; Brand Guidelines.</p> : <>
-        <img src={logo.url} alt="Saved original TRA logo" style={{ maxWidth: 180, height: 'auto' }} />
+        <img src={logo.url} alt="Saved company logo" style={{ maxWidth: 180, height: 'auto' }} />
         <label>Logo position <select value={anchor} disabled={busy || authRequired || Boolean(saved)} onChange={event => setAnchor(event.target.value as CreativeLogoAnchor)}>
           {CREATIVE_LOGO_ANCHORS.map(value => <option key={value} value={value}>{value.replace('-', ' ')}</option>)}</select></label>
         <button type="button" disabled={busy || authRequired || Boolean(saved)} onClick={() => void save()}>{busy ? 'Saving logo-only version.' : 'Save logo-only version'}</button>
       </>}
       {error ? <p role="alert">{error}</p> : null}
-      {saved ? <div role="status"><p>Logo-only version saved. Original preserved.</p><img src={saved.image.url} alt="New creative with original TRA logo" style={{ maxWidth: '100%', height: 'auto' }} /></div> : null}
+      {saved ? <div role="status"><p>Logo-only version saved. Original preserved.</p><img src={saved.image.url} alt="New creative with company logo" style={{ maxWidth: '100%', height: 'auto' }} /></div> : null}
     </> : null}
   </section>;
 }

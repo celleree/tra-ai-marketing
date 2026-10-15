@@ -357,18 +357,18 @@ export function ReferenceLibrary() {
       : traItems;
 
   const uploadTitle =
-    activeLibrary === 'layout' ? 'Add layout reference images' : 'Add TRA reference images';
+    activeLibrary === 'layout' ? 'Add layout reference images' : 'Add company reference images';
   const uploadDescription =
     activeLibrary === 'layout'
       ? 'Upload one image or a whole batch. AI will place them into angle folders.'
-      : 'Upload TRA-owned video frames, static ads, people, or other source imagery.';
+      : 'Upload company-owned video frames, static ads, people, or other source imagery.';
 
   return (
     <div className={styles.page}>
       <div className={styles.intro}>
         <h2>Reference library</h2>
         <p>
-          Keep external layout inspiration separate from TRA-owned source imagery used for
+          Keep external layout inspiration separate from company-owned source imagery used for
           people, scenes, and existing creative assets.
         </p>
       </div>
@@ -391,7 +391,7 @@ export function ReferenceLibrary() {
           className={`${styles.libraryTab} ${activeLibrary === 'tra' ? styles.libraryTabActive : ''}`}
           onClick={() => changeLibrary('tra')}
         >
-          TRA References
+          Company References
           <span>{traItems.length}</span>
         </button>
       </div>
@@ -447,7 +447,7 @@ export function ReferenceLibrary() {
         <span>
           {selectedIds.length
             ? `${selectedIds.length} selected`
-            : `Select ${activeLibrary === 'layout' ? 'layout' : 'TRA'} references to manage them`}
+            : `Select ${activeLibrary === 'layout' ? 'layout' : 'Company'} references to manage them`}
         </span>
         <button
           className={styles.deleteButton}
@@ -500,12 +500,12 @@ export function ReferenceLibrary() {
           <div className={styles.libraryHeader}>
             <div>
               <span className={styles.libraryEyebrow}>
-                {activeLibrary === 'layout' ? 'Angle folder' : 'TRA-owned assets'}
+                {activeLibrary === 'layout' ? 'Angle folder' : 'Company-owned assets'}
               </span>
               <h3>
                 {activeLibrary === 'layout'
                   ? CREATIVE_CATEGORY_LABELS[selectedAngle]
-                  : 'TRA References'}
+                  : 'Company References'}
               </h3>
             </div>
             <span>{visibleItems.length} {visibleItems.length === 1 ? 'reference' : 'references'}</span>
@@ -555,7 +555,7 @@ export function ReferenceLibrary() {
                           </select>
                         </label>
                       ) : (
-                        <span className={styles.assetLabel}>TRA source asset</span>
+                        <span className={styles.assetLabel}>Company source asset</span>
                       )}
                       <ReferenceMetadataEditor item={item} onSaved={setItems} />
                     </div>
@@ -571,12 +571,12 @@ export function ReferenceLibrary() {
               <strong>
                 {activeLibrary === 'layout'
                   ? 'No references in this angle yet'
-                  : 'No TRA references yet'}
+                  : 'No company references yet'}
               </strong>
               <span>
                 {activeLibrary === 'layout'
                   ? 'Upload layout references above and AI will sort them automatically.'
-                  : 'Upload TRA video frames, existing static ads, people, or other owned source imagery above.'}
+                  : 'Upload company video frames, existing static ads, people, or other owned source imagery above.'}
               </span>
             </div>
           )}

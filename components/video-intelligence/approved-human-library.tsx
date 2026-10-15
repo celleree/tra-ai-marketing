@@ -61,10 +61,10 @@ export function HumanFrameApproval({ mediaId, selection, onApproved }: {
   }
 
   return <details className={styles.selectedGeneration}>
-    <summary>Approve a TRA human for reuse</summary>
-    <p>Approve only a clearly visible TRA person. This does not approve claims, credentials, quotes or testimonials.</p>
+    <summary>Approve a company person for reuse</summary>
+    <p>Approve only a clearly visible person from company video. This does not approve claims, credentials, quotes or testimonials.</p>
     <button type="button" className={styles.secondary} disabled={busy} onClick={() => void act(false)}>Preview exact frame</button>
-    {preview ? <img src={preview.url} alt="Exact TRA frame for human approval" onLoad={() => setLoaded(true)} onError={() => { setLoaded(false); setError('The frame preview could not be displayed.'); }} /> : null}
+    {preview ? <img src={preview.url} alt="Exact frame for human approval" onLoad={() => setLoaded(true)} onError={() => { setLoaded(false); setError('The frame preview could not be displayed.'); }} /> : null}
     <label htmlFor={notesId}>Appearance, pose and useful framing</label>
     <textarea className={styles.approvalNotes} id={notesId} value={notes} maxLength={500} disabled={busy || approved} onChange={event => setNotes(event.target.value)} />
     <button type="button" className={styles.primary} disabled={busy || !loaded || !notes.trim() || approved} onClick={() => void act(true)}>
@@ -72,7 +72,7 @@ export function HumanFrameApproval({ mediaId, selection, onApproved }: {
         ? 'Retry assessment and approve (uses API)' : 'Assess and approve this human frame (uses API)'}
     </button>
     {error ? <p role="alert" className={styles.error}>{error}</p> : null}
-    {approved ? <p role="status">Saved to the approved TRA human library.</p> : null}
+    {approved ? <p role="status">Saved to the approved human library.</p> : null}
   </details>;
 }
 
@@ -100,11 +100,11 @@ export function ApprovedHumanLibrary({ revision }: { revision: number }) {
     finally { setBusy(null); }
   }
   return <section className={styles.panel}>
-    <div className={styles.sectionHeading}><h2>Approved TRA humans</h2>
+    <div className={styles.sectionHeading}><h2>Approved company people</h2>
       <button type="button" className={styles.secondary} disabled={!!busy} onClick={() => setRefresh(value => value + 1)}>Refresh human library</button></div>
-    <p className={styles.muted}>Reusable frames of real TRA people. Deactivated frames retain their source history.</p>
+    <p className={styles.muted}>Reusable frames of real people from company videos. Deactivated frames retain their source history.</p>
     {error ? <p role="alert" className={styles.error}>{error}</p> : null}
-    {!records.length && !error ? <p>Load an analyzed TRA video and approve a clearly visible person from a frame below.</p> : null}
+    {!records.length && !error ? <p>Load an analyzed company video and approve a clearly visible person from a frame below.</p> : null}
     <div className={styles.frameGrid}>{records.map(record => <article key={record.id} className={styles.frame}>
       <img loading="lazy" src={`${endpoint}?preview=${encodeURIComponent(record.id)}`} alt={record.description} />
       <strong>{record.sourceName}</strong>

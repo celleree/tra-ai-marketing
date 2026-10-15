@@ -49,7 +49,7 @@ function FontPreview({ asset }: { asset: BrandFontAsset }) {
 
   return (
     <div className={styles.fontPreview} style={family ? { fontFamily: `"${family}"` } : undefined}>
-      Tax Relief Advocates
+      Your company name
     </div>
   );
 }

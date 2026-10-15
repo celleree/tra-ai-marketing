@@ -272,14 +272,14 @@ export function SelectedFrameGeneration({
       {generating ? 'Assessing source and generating…' : assessmentRetry
         ? 'Retry source assessment and generate (uses API)' : 'Assess checked frames and generate 2 creatives (uses API)'}
     </button>
-    {savedCount ? <p className={styles.progress} role="status">Saved {savedCount} {savedCount === 1 ? 'creative' : 'creatives'} to the TRA creative library.</p> : null}
+    {savedCount ? <p className={styles.progress} role="status">Saved {savedCount} {savedCount === 1 ? 'creative' : 'creatives'} to the creative library.</p> : null}
     {error ? <p className={styles.error} role="alert">{error}</p> : null}
     {creatives.length || generating || Object.keys(failures).length ? <section className={styles.generatedResults} aria-live="polite">
       {[1, 2].map((index) => {
         const creative = creatives.find((item) => item.index === index);
         if (creative) return <article className={styles.generatedCreative} key={creative.id}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}<img className={styles.generatedCreativeImage} src={creative.image.url} alt={`Generated TRA creative ${index}`} />
-          <div><p className={styles.generatedLabel}>Creative {index} · saved to library</p><h3>{creative.copy.headline}</h3><p>{creative.copy.primaryText}</p>{creative.copy.description ? <p>{creative.copy.description}</p> : null}<p className={styles.generatedSource}>Source frames: {creative.videoFrameSelection?.frames.map((frame) => `${(frame.timestampMs / 1000).toFixed(3)}s`).join(', ') || 'selected TRA video frames'}</p></div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}<img className={styles.generatedCreativeImage} src={creative.image.url} alt={`Generated creative ${index}`} />
+          <div><p className={styles.generatedLabel}>Creative {index} · saved to library</p><h3>{creative.copy.headline}</h3><p>{creative.copy.primaryText}</p>{creative.copy.description ? <p>{creative.copy.description}</p> : null}<p className={styles.generatedSource}>Source frames: {creative.videoFrameSelection?.frames.map((frame) => `${(frame.timestampMs / 1000).toFixed(3)}s`).join(', ') || 'selected company video frames'}</p></div>
         </article>;
         if (failures[index]) return <article className={styles.generatedFailure} key={index}><strong>Creative {index} could not be completed.</strong><p>{failures[index]}</p></article>;
         return generating ? <article className={styles.generatedPending} key={index}>Generating creative {index}…</article> : null;
