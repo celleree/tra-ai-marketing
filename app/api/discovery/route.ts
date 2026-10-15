@@ -101,9 +101,10 @@ export async function POST(request: Request) {
       if (session.sample) return response({ error: 'Fictional samples cannot be imported.' }, 400);
       if (body.confirmRights !== true && body.confirmRights !== 'true') return response({ error: 'Confirm you may store and use this image as a layout reference.' }, 400);
       // Only a server-stored candidate URL may be fetched; callers cannot submit URLs.
-      let media = session.imports[candidate.id];
+      const uploaded = form?.get('image');
+      let media: DiscoverySession['imports'][string] | undefined = session.imports[candidate.id];
+      if (media && ((uploaded instanceof File && uploaded.size) || !await getMediaStorage().readImage(media.fileName))) media = undefined;
       if (!media) {
-        const uploaded = form?.get('image');
         const file = uploaded instanceof File && uploaded.size ? uploaded : await (async () => { assertProviderAvailable(); return downloadSelectedImage(candidate.imageUrl); })();
         if (file.size > getMaxUploadBytes()) return response({ error: 'Image is too large.' }, 413);
         const stored = await storeSelectedImage(access.userId, file); media = stored.media;

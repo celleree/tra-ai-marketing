@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ access: vi.fn(), load: vi.fn(), save: vi.fn(), saveImage: vi.fn(), remove: vi.fn(), register: vi.fn(), download: vi.fn(), start: vi.fn(), storeImage: vi.fn(), analyze: vi.fn(), quota: vi.fn() }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), load: vi.fn(), save: vi.fn(), saveImage: vi.fn(), readImage: vi.fn(), remove: vi.fn(), register: vi.fn(), download: vi.fn(), start: vi.fn(), storeImage: vi.fn(), analyze: vi.fn(), quota: vi.fn() }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.access }));
 vi.mock('@/lib/discovery/storage', () => ({ loadSession: mocks.load, saveSession: mocks.save, updateSession: async (_user: string, _id: string, update: (value: unknown) => void) => { const { session } = await mocks.load(); update(session); await mocks.save(); return session; } }));
 vi.mock('@/lib/discovery/provider', () => ({ providerAvailable: () => false, assertProviderAvailable: vi.fn(), startSearch: mocks.start, readRun: vi.fn(), readDataset: vi.fn() }));
 vi.mock('@/lib/discovery/media', () => ({ downloadSelectedImage: mocks.download }));
-vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({ saveImage: mocks.saveImage, deleteImage: mocks.remove }) }));
+vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({ saveImage: mocks.saveImage, readImage: mocks.readImage, deleteImage: mocks.remove }) }));
 vi.mock('@/lib/references/storage', () => ({ addToReferenceLibrary: mocks.register }));
 vi.mock('@/lib/discovery/import', () => ({ storeSelectedImage: mocks.storeImage }));
 vi.mock('@/lib/discovery/analysis', () => ({ analyzeVisualPattern: mocks.analyze, visualAnalysisAvailable: () => false, assertVisualAnalysisAvailable: vi.fn() }));
@@ -19,6 +19,7 @@ let session: Record<string, any>;
 beforeEach(() => {
   vi.clearAllMocks(); mocks.access.mockResolvedValue({ allowed: true, userId: 'operator-A' });
   session = { version: 1, id: 'a'.repeat(32), sample: false, search: { query: 'consultation', limit: 10, preferTax: true }, candidates: extractCandidates(sampleRows, 'runABC', 'apify/facebook-ads-scraper', '2026-10-15T00:00:00Z'), imports: {}, feedback: {} };
+  mocks.readImage.mockResolvedValue({ fileName: media.fileName, buffer: Buffer.from('fixture') });
   mocks.load.mockResolvedValue({ session, etag: 'etag' }); mocks.save.mockResolvedValue(undefined); mocks.saveImage.mockResolvedValue(media); mocks.download.mockResolvedValue(new File(['fixture'], 'ref.png', { type: 'image/png' })); mocks.register.mockResolvedValue([]);
   mocks.storeImage.mockResolvedValue({ media, imageSha256: 'hash', reused: false }); mocks.quota.mockResolvedValue(null);
 });
@@ -80,4 +81,24 @@ it('redacts unexpected storage/network messages at the public boundary', async (
   const result = await POST(request({ action: 'import', sessionId: session.id, candidateId: session.candidates[0].id, confirmRights: true }));
   expect(result.status).toBe(400); expect(result.headers.get('Cache-Control')).toBe('private, no-store');
   const text = await result.text(); expect(text).not.toMatch(/secret-token|signature|cdn.example/); expect(text).toContain('saved session');
+});
+
+it('reacquires after ordinary reference deletion instead of registering a dangling receipt', async () => {
+  const payload = { action: 'import', sessionId: session.id, candidateId: session.candidates[0].id, confirmRights: true };
+  expect((await POST(request(payload))).status).toBe(200);
+  mocks.readImage.mockResolvedValueOnce(null); const replacement = { ...media, id: 'media_reacquired', fileName: 'media_reacquired.png' };
+  mocks.storeImage.mockResolvedValueOnce({ media: replacement, imageSha256: 'new-hash', reused: false });
+  expect((await POST(request(payload))).status).toBe(200);
+  expect(mocks.readImage).toHaveBeenCalledWith(media.fileName); expect(mocks.download).toHaveBeenCalledTimes(2);
+  expect(mocks.register.mock.calls[1][0][0].media).toEqual(replacement); expect(session.imports[payload.candidateId]).toEqual(replacement);
+});
+it('fails honestly if deleted import cannot be reacquired and honors a manual replacement', async () => {
+  const candidateId = session.candidates[0].id; session.imports[candidateId] = media;
+  mocks.readImage.mockResolvedValue(null); mocks.download.mockRejectedValueOnce(new Error('gone'));
+  expect((await POST(request({ action: 'import', sessionId: session.id, candidateId, confirmRights: true }))).status).toBe(400);
+  expect(mocks.register).not.toHaveBeenCalled();
+  const form = new FormData(); for (const [key, value] of Object.entries({ action: 'import', sessionId: session.id, candidateId, confirmRights: 'true' })) form.set(key, value);
+  form.set('image', new File(['manual'], 'manual.png', { type: 'image/png' }));
+  expect((await POST(new Request('http://localhost/api/discovery', { method: 'POST', body: form }))).status).toBe(200);
+  expect(mocks.download).toHaveBeenCalledTimes(1); expect(session.acquisitions[candidateId].method).toBe('operator-upload');
 });
