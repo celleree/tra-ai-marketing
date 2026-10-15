@@ -75,6 +75,8 @@ export function buildContentSecurityPolicy({
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // This dedicated emergency build is immutable read-only; normal releases omit it.
+  env: { TRA_RECOVERY_READ_ONLY: 'true' },
   async headers() {
     return [{
       source: '/:path*',

@@ -1,3 +1,4 @@
+import { assertRecoveryWritable, recoveryDisplayRecord } from '@/lib/recovery/read-only';
 import { parseGeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { resolve } from 'path';
@@ -82,7 +83,7 @@ export const isSafeCreativeId = (creativeId: string) =>
 
 const normalizeRecord = (value: unknown): CreativeRecord | null => {
   if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
+  const record = recoveryDisplayRecord(value) as Record<string, unknown>;
   const image =
     record.image && typeof record.image === 'object'
       ? (record.image as Record<string, unknown>)
@@ -443,6 +444,7 @@ export const listCreatives = async (): Promise<CreativeRecord[]> => {
 export const saveCreativeBatch = async (
   records: CreativeRecord[]
 ): Promise<CreativeRecord[]> => {
+  assertRecoveryWritable();
   const normalized = records.map(normalizeRecord);
   if (normalized.some((record) => !record)) {
     throw new Error('One or more creative records are invalid.');
@@ -472,6 +474,7 @@ export const updateCreativeReviewState = async (
   creativeId: string,
   update: CreativeReviewStateUpdate
 ): Promise<CreativeRecord | null> => {
+  assertRecoveryWritable();
   if (!isSafeCreativeId(creativeId)) {
     throw new Error('Creative ID is invalid.');
   }
