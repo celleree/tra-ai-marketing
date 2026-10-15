@@ -12,6 +12,7 @@ import { executeVideoIntelligenceStep, readVideoIntelligenceSource, resolveVideo
   type CompactVideoIntelligenceJobStatus, type VideoIntelligenceServiceDependencies } from '@/lib/video/intelligence-service';
 import { reserveOperatorQuota } from '@/lib/quotas/operator-quota';
 import { VideoRetryStateChangedError } from '@/lib/video/intelligence-job-store';
+import { isPreviewAcceptanceOperation, PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
 
 type Owner = {
   operatorId: string;
@@ -78,6 +79,9 @@ export async function stepPortfolioVideoDependency(
     return checkpoint(dependency);
   };
   if (current.status?.phase === 'COMPLETE') return { dependency: await complete(), status: current.status };
+  if (isPreviewAcceptanceOperation() && input.action !== 'STATUS') {
+    throw new PreviewAcceptanceError('Preview acceptance requires an existing completed video library. No new video preparation or analysis was started.');
+  }
   // Discovery must be saved before any later child operation. STATUS never saves anything.
   if (!saved) return { dependency: await checkpoint(dependency), status: current.status };
   if (input.action === 'STATUS') return { dependency, status: current.status,

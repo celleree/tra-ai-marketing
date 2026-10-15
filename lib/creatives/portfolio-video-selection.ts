@@ -13,6 +13,7 @@ import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, M
   type AutomaticVideoSelectionPolicy, type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 
 import { assertReviewedFrameSelection, type VideoReviewHandoff } from '@/lib/creatives/review-handoff';
+import { PreviewAcceptanceError } from '@/lib/creatives/preview-acceptance';
 
 const MAX_CONCEPT_EXCERPT = 160;
 const normalizeText = (value: unknown) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
@@ -107,6 +108,49 @@ const humanBindings = (restored: readonly Restored[]) => restored.map(({ context
   }
   return { library: context.library, librarySha256, representativeImages: context.representativeImages };
 });
+
+/** Read every closed-pool member before the first planner; later least-used choices cannot buy assessments. */
+export async function prepareApprovedManualPortfolioFrame(input: {
+  sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
+  reviewChoices: VideoReviewHandoff['choices']; cache: VideoSelectionCacheDependencies;
+  onProviderOperationStart: () => void;
+}): Promise<boolean> {
+  const [source] = await restorePool(input.sources, input.sourceAnalysis, input.reviewChoices);
+  for (const frame of input.reviewChoices.frames ?? []) {
+    const plan = await planManualCandidateHumanSelection(source, [frame], createVideoFrameReuseContext([]), input.cache.model, input.cache);
+    if (plan.status === 'READY') {
+      input.onProviderOperationStart();
+      const result = await advanceCandidateHumanSelection(plan, input.cache);
+      if (!['COMPLETE', 'CONTINUE', 'NO_SUITABLE_HUMAN'].includes(result.status)) {
+        throw new PreviewAcceptanceError('Approved frame preparation did not complete. No retry or replacement frame is authorized.');
+      }
+      return true;
+    }
+    if (!['COMPLETE', 'NO_SUITABLE_HUMAN'].includes(plan.status)) {
+      throw new PreviewAcceptanceError('Approved frame preparation is unavailable. No retry or replacement frame is authorized.');
+    }
+  }
+  return false;
+}
+
+export async function assertCachedManualPortfolioFrames(input: {
+  sourceAnalysis: PlanningSourceAnalysisState; sources: readonly HydratedTraVideoSource[];
+  reviewChoices: VideoReviewHandoff['choices']; cache: VideoSelectionCacheDependencies;
+}) {
+  const frames = input.reviewChoices.frames;
+  if (!frames?.length) throw new PreviewAcceptanceError('Preview acceptance requires a saved selected frame pool.');
+  const [source] = await restorePool(input.sources, input.sourceAnalysis, input.reviewChoices);
+  const results = await Promise.all(frames.map(frame => planManualCandidateHumanSelection(source, [frame],
+    createVideoFrameReuseContext([]), input.cache.model, input.cache)));
+  const missing = results.flatMap((result, index) => ['COMPLETE', 'NO_SUITABLE_HUMAN'].includes(result.status) ? []
+    : [`${frames[index].frameId} (${result.status === 'READY' ? 'MISSING' : result.status})`]);
+  if (missing.length) {
+    throw new PreviewAcceptanceError(`Preview acceptance requires completed cached suitability for every selected frame. ${missing.length} unavailable: ${missing.slice(0, 2).join(', ')}. No assessment was purchased.`);
+  }
+  if (results.some(result => result.status !== 'COMPLETE')) {
+    throw new PreviewAcceptanceError('Both selected frames must pass human and source-overlay suitability. At least one frame failed. No planner or image was purchased.');
+  }
+}
 
 const generationSelection = (outcome: Extract<import('@/lib/video/human-frame-selection').VideoHumanFrameSelectionOutcome, { status: 'SELECTED' }>) => {
   const selection = outcome.selection;

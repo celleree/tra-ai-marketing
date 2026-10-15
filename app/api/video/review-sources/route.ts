@@ -5,6 +5,7 @@ import { record, ReviewSelectionError } from '@/lib/video/review-selection';
 import { discoverReviewStatements } from '@/lib/video/review-statement-discovery';
 import { VideoIntelligenceServiceError } from '@/lib/video/intelligence-service';
 import { CreativeSourceHydrationError } from '@/lib/media/source-hydration';
+import { MAX_REVIEW_PREVIEW_BATCH } from '@/lib/video/review-preview-policy';
 import { discoverVideoReviewSource } from '@/lib/video/review-source-discovery';
 
 export const runtime = 'nodejs';
@@ -28,9 +29,14 @@ export async function GET(request: Request) {
   try {
     assertDurableVideoIntelligenceAvailable();
     const query = new URL(request.url).searchParams;
-    const candidate = query.get('candidateIndex');
-    if (candidate !== null && !/^\d+$/.test(candidate)) throw new ReviewSelectionError('Preview candidate index is invalid.', 400);
-    const result = await discoverVideoReviewSource(query.get('mediaId') ?? '', candidate === null ? undefined : Number(candidate));
+    const candidate = query.get('candidateIndex'), batch = query.get('candidateIndexes');
+    const values = batch === null ? [] : batch.split(',');
+    if ((candidate !== null && (batch !== null || !/^\d+$/.test(candidate)))
+      || (batch !== null && (values.length > MAX_REVIEW_PREVIEW_BATCH || values.some(value => !/^\d+$/.test(value))))) {
+      throw new ReviewSelectionError('Preview candidate batch is invalid.', 400);
+    }
+    const result = await discoverVideoReviewSource(query.get('mediaId') ?? '',
+      batch !== null ? values.map(Number) : candidate === null ? undefined : Number(candidate));
     // Completed libraries can exceed the platform's buffered response limit.
     const bytes = new TextEncoder().encode(JSON.stringify(result));
     let offset = 0;

@@ -33,7 +33,7 @@ const DIRECTIONS: Record<RevisionOperation, string> = {
 export async function generateCreativeRevisionImage(args: {
   sources: RevisionSources;
   operation: RevisionOperation;
-  concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'adCopy' | 'imageCopy' | 'strategy'>;
+  concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'adCopy' | 'imageCopy' | 'strategy' | 'draftSourceAssertion'>;
   placement: CreativePlacement;
   companyProfile?: RuntimeCompanyProfileSnapshot;
   referenceCatalog?: ReferencePlanningCandidate[];

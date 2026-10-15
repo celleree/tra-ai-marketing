@@ -4,6 +4,9 @@ import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { renderPlannedCreative } from '@/lib/creatives/render-planned';
 import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
+import { referenceCandidate } from '../fixtures/reference-catalog';
+import { composeDraftVideoAssertion } from '@/lib/creatives/draft-video-assertion';
+import { draftVideoGuidance, draftVideoPassage } from '../fixtures/draft-video-source';
 
 const mocks = vi.hoisted(() => ({ generate: vi.fn(), promptOnly: vi.fn(), saveBatch: vi.fn(), validate: vi.fn(), resolveHuman: vi.fn() }));
 vi.mock('@/lib/ai/video-frame-generation', () => ({ generateApprovedTraVideoFrameCreativeImage: mocks.generate }));
@@ -40,23 +43,34 @@ beforeEach(() => {
 const storage = { saveImage: vi.fn().mockResolvedValue({ id: `media_${'1'.repeat(32)}`, fileName: 'creative.png', originalName: 'creative.png',
   mimeType: 'image/png', size: 5, url: '/creative.png' }) } as any;
 
-async function render(explicit = false, human = true, selected: typeof selection = selection, reviewed = false) {
-  const request = { ...portfolioRequest(), sourceAssets: [{ role: 'TRA_VIDEO', mediaId }],
+async function render(explicit = false, human = true, selected: typeof selection = selection, reviewed = false,
+  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState, layout?: 'SELECTED' | 'IGNORED', draft = false, omitLogo = false) {
+  const referenceCatalog = layout ? [referenceCandidate('4')] : [];
+  const request = { ...portfolioRequest(), sourceAssets: [{ role: 'TRA_VIDEO', mediaId },
+    ...(layout ? [{ role: 'LAYOUT_REFERENCE', mediaId: referenceCatalog[0].referenceId }] : [])],
     ...(explicit ? { videoFrameSelection: { libraryId: selected.libraryId, sourceVideoContentHash: sourceHash,
       frameIds: [selected.frames[0].libraryFrameId] } } : {}) } as any;
+  if (omitLogo) { request.previewOmitBrandLogo = true; delete request.brandLogoMediaId; }
   if (reviewed) request.reviewHandoff = { choices: { video: { libraryId: selected.libraryId,
     librarySha256: '1'.repeat(64), locator: { sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash } },
     frames: [{ frameId: videoCandidateFrameId(sourceHash, 1200, 'd'.repeat(64)), representativeFrameId: frameId,
       candidateIndex: 7, timestampMs: 1200, frameSha256: 'd'.repeat(64) }] } };
   const snapshot = portfolioSnapshot(newCreativePortfolio(request));
   const item = snapshot.batchPlan.creatives[0];
+  if (draft) {
+    request.reviewHandoff = { choices: { frames: null }, operatorSelectedSourceGuidance: draftVideoGuidance };
+    const passage = draftVideoPassage();
+    const composed = composeDraftVideoAssertion({ passageId: passage.passageId, imageField: 'shortSupport' }, [passage], item.adCopy!, item.imageCopy!);
+    Object.assign(item, composed, { copy: composed.adCopy });
+  }
   if (human) item.strategy.execution.subjectSource = 'approved-tra-human';
   if (reviewed) item.strategy.humanSourceId = approvedHumanSourceId(humanId);
+  if (layout === 'SELECTED') item.strategy.referenceSelection = { angleSource: null, layoutSource: referenceCatalog[0].referenceId, referenceRelationship: 'mixed' };
   return renderPlannedCreative(item, {
-    request, batchPlan: snapshot.batchPlan, referenceCatalog: [], selectedReferences: [],
+    request, batchPlan: snapshot.batchPlan, referenceCatalog, selectedReferences: [],
     requestedSources: [{ role: 'TRA_VIDEO', mediaId, sha256: sourceHash }], analysisSources: [],
     reserveLogoArea: false, brandLogo: null, providerImageSource: undefined,
-    videoFrameSet: frameSet, generatedVideoFrameSelection: selected, storage,
+    videoFrameSet: frameSet, generatedVideoFrameSelection: selected, storage, sourceAnalysis,
   }, { creativeId: `creative_${'2'.repeat(32)}` });
 }
 
@@ -80,13 +94,59 @@ async function renderCatalogHuman(legacy = false) {
 }
 
 describe('render planned video provenance', () => {
-  it.each([false, true])('omits discarded request-wide video frames and selection from a non-human creative (explicit=%s)', async explicit => {
-    const creative = await render(explicit, false);
-    expect(mocks.generate).not.toHaveBeenCalled();
-    expect(mocks.promptOnly).toHaveBeenCalledOnce();
-    expect(creative.generationProvenance!.attachedSource).toBeNull();
-    expect(creative.videoFrameSelection).toBeUndefined();
+  it('requests the explicit no-logo test without logo geometry or saved overlay provenance', async () => {
+    const creative = await render(false, true, selection, false, undefined, undefined, false, true);
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+    const args = mocks.generate.mock.calls[0][0];
+    expect(args.logoGeometry).toBeUndefined(); expect(args.context).toContain('Do not render, invent or redraw any logo');
+    expect(creative.generationProvenance).not.toHaveProperty('logoOverlaySource');
+    expect(creative.planning).not.toHaveProperty('logoAnchor');
+    expect(args.frames).toEqual([frame]);
+  });
+  it('attaches selected source pixels with exact source case wording and saves the draft binding', async () => {
+    const creative = await render(false, true, selection, false, undefined, undefined, true);
+    const passage = draftVideoPassage();
+    expect(mocks.generate.mock.calls[0][0].copy.shortSupport).toBe(passage.exactText);
+    expect(mocks.generate.mock.calls[0][0].frames).toEqual([frame]);
+    expect(creative.planning?.draftSourceAssertion).toMatchObject({ exactText: passage.exactText, sourceMediaId: mediaId, verification: 'UNVERIFIED_SOURCE_ASSERTION', permission: 'REQUIRES_REVIEW' });
+    expect(mocks.saveBatch.mock.calls[0][0][0].planning.draftSourceAssertion).toEqual(creative.planning?.draftSourceAssertion);
+  });
+  it('carries selected-video evidence alongside exact human frames into provider context and saved prompt', async () => {
+    const sourceAnalysis = { version: 1, entries: [{ source: { role: 'TRA_VIDEO', mediaId, sha256: sourceHash },
+      analyzer: { kind: 'REPRESENTATIVE_VIDEO_FRAMES', model: 'fixture', schemaVersion: 1, contextSha256: 'a'.repeat(64) },
+      evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'REPRESENTATIVE_VIDEO_FRAMES',
+        analyzedFrames: [{ timestampMs: frame.timestampMs, frameSha256: frame.frameSha256 }],
+        analysis: { summary: 'REFERENCE VIDEO CONSULTATION SCENE', visibleText: [], visualStructure: 'Person beside a desk',
+          hookOrAngle: 'Explain the consultation', offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [],
+          dominantCategory: 'customer-problems' } } }] } as const;
+    mocks.generate.mockImplementationOnce(async args => ({ buffer: Buffer.from('image'), prompt: args.context,
+      model: 'gpt-image-2.5-sunburst', routing, providerFrames: [{ ...frame, ...attachedFrames[0] }] }));
+    const creative = await render(false, true, selection, false, sourceAnalysis as any);
+    expect(mocks.generate.mock.calls[0][0].frames[0].sourceVideoMediaId).toBe(mediaId);
+    expect(creative.generationProvenance!.imageGeneration.prompt).toContain('REFERENCE VIDEO CONSULTATION SCENE');
+    expect(creative.generationProvenance!.imageGeneration.prompt).toContain(mediaId);
     expect(creative.generationProvenance!.requestedSources).toEqual([{ role: 'TRA_VIDEO', mediaId, sha256: sourceHash }]);
+    expect(creative.videoFrameSelection!.sourceVideoMediaId).toBe(mediaId);
+  });
+  it.each([false, true])('blocks non-human video rendering without primary evidence (explicit=%s)', async explicit => {
+    await expect(render(explicit, false)).rejects.toThrow(explicit ? 'explicitly selected TRA video frames' : 'selected video cannot be replaced');
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.promptOnly).not.toHaveBeenCalled();
+  });
+
+  it('blocks a frozen graphic plan that ignores manual reviewed frames before provider work', async () => {
+    await expect(render(false, false, selection, true)).rejects.toThrow('explicitly selected TRA video frames');
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.promptOnly).not.toHaveBeenCalled();
+    expect(mocks.saveBatch).not.toHaveBeenCalled();
+  });
+
+  it('requires the supplied layout while attaching exact selected video human pixels', async () => {
+    await expect(render(true, true, selection, false, undefined, 'IGNORED')).rejects.toThrow('supplied video layout reference');
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.promptOnly).not.toHaveBeenCalled();
+    await render(true, true, selection, false, undefined, 'SELECTED');
+    expect(mocks.generate.mock.calls[0][0].frames).toEqual([frame]);
+    expect(mocks.generate.mock.calls[0][0].context).toContain('CENTERED_STACK');
+    expect(mocks.saveBatch.mock.calls[0][0][0].planning.strategy.referenceSelection.layoutSource).toBe(referenceCandidate('4').referenceId);
   });
 
   it('saves automatic B3 provenance with exact selected-frame evidence', async () => {

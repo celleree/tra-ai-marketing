@@ -5,9 +5,10 @@ import { createReviewDraftClient, EMPTY_REVIEW_CLIENT_STATE, rememberReviewDraft
   reviewDraftIdForReopen } from '@/lib/video/review-selection-client';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import type { ReviewSelectionChoices, ReviewVideoReference } from '@/lib/video/review-selection';
+import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
 /** Owned by Create, above the future panel: hiding/unmounting that panel cannot clear saved choices. */
-export function useVideoReviewDraft() {
+export function useVideoReviewDraft(observeAccess?: WorkspaceAccessObserver) {
   const [state, setState] = useState(EMPTY_REVIEW_CLIENT_STATE);
   const mounted = useRef(false);
   const lastId = useRef<string | null>(null);
@@ -23,6 +24,7 @@ export function useVideoReviewDraft() {
     window.history.replaceState(null, '', url);
   };
   if (!client.current) client.current = createReviewDraftClient({
+    observeAccess,
     onChange: next => { if (mounted.current) setState(next); }, onCreated: persistId, onSaved: persistId,
   });
   const restore = async (id: string) => {

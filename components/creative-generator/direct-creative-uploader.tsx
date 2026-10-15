@@ -4,6 +4,13 @@ import { useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import type { CreativeRecord, GeneratedCreative } from '@/lib/creatives/generated';
 import type { MediaAsset } from '@/lib/media/types';
+import {
+  CreativeUploadError,
+  creativeUploadFailureMessage,
+  readCreativeUploadResponse,
+  requestCreativeUpload,
+  type CreativeUploadStage,
+} from '@/lib/media/creative-upload-error';
 import styles from './creative-create-mode.module.css';
 
 interface DirectCreativeUploaderProps {
@@ -35,6 +42,7 @@ export function DirectCreativeUploader({
   const [progress, setProgress] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState('');
+  const [failures, setFailures] = useState<string[]>([]);
 
   const validateFiles = (incoming: File[]) => {
     if (!incoming.length) return [];
@@ -62,7 +70,10 @@ export function DirectCreativeUploader({
   const acceptFiles = (incoming: File[]) => {
     if (uploading) return;
     const valid = validateFiles(incoming);
-    if (valid.length) setFiles(valid);
+    if (valid.length) {
+      setFiles(valid);
+      setFailures([]);
+    }
   };
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -79,14 +90,12 @@ export function DirectCreativeUploader({
   const uploadThroughServer = async (sourceFile: File) => {
     const formData = new FormData();
     formData.append('file', sourceFile);
-    const response = await fetch('/api/media/upload', { method: 'POST', body: formData });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Upload failed.');
-    return payload as MediaAsset;
+    const response = await requestCreativeUpload('transfer', '/api/media/upload', { method: 'POST', body: formData });
+    return readCreativeUploadResponse<MediaAsset>('transfer', response);
   };
 
   const uploadFile = async (sourceFile: File) => {
-    const planResponse = await fetch('/api/media/upload-url', {
+    const planResponse = await requestCreativeUpload('prepare', '/api/media/upload-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -95,32 +104,26 @@ export function DirectCreativeUploader({
         size: sourceFile.size,
       }),
     });
-    const plan = (await planResponse.json()) as UploadPlan;
-    if (!planResponse.ok) {
-      throw new Error(plan.error || 'Upload could not be prepared.');
-    }
+    const plan = await readCreativeUploadResponse<UploadPlan>('prepare', planResponse);
+    if (typeof plan.direct !== 'boolean') throw new CreativeUploadError('prepare', 'response');
 
     if (!plan.direct) return uploadThroughServer(sourceFile);
     if (!plan.uploadUrl || !plan.media) {
-      throw new Error('Upload could not be prepared.');
+      throw new CreativeUploadError('prepare', 'response');
     }
 
-    const putResponse = await fetch(plan.uploadUrl, {
+    await requestCreativeUpload('transfer', plan.uploadUrl, {
       method: 'PUT',
       headers: { 'Content-Type': sourceFile.type },
       body: sourceFile,
     });
-    if (!putResponse.ok) throw new Error('Direct image upload failed.');
 
-    const confirmResponse = await fetch('/api/media/confirm', {
+    const confirmResponse = await requestCreativeUpload('confirm', '/api/media/confirm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mediaId: plan.media.id }),
     });
-    const confirmation = await confirmResponse.json();
-    if (!confirmResponse.ok) {
-      throw new Error(confirmation.error || 'Uploaded image could not be validated.');
-    }
+    await readCreativeUploadResponse('confirm', confirmResponse);
 
     return plan.media;
   };
@@ -129,7 +132,7 @@ export function DirectCreativeUploader({
     image: MediaAsset,
     copy: GeneratedCreative['copy']
   ) => {
-    const response = await fetch('/api/creatives', {
+    const response = await requestCreativeUpload('save', '/api/creatives', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -143,18 +146,17 @@ export function DirectCreativeUploader({
         }],
       }),
     });
-    const payload = (await response.json()) as {
+    const payload = await readCreativeUploadResponse<{
       error?: string;
       items?: CreativeRecord[];
-    };
+    }>('save', response);
     const saved = payload.items?.[0];
     if (
-      !response.ok ||
       !saved ||
       saved.source !== 'uploaded' ||
       saved.format !== 'direct-response'
     ) {
-      throw new Error(payload.error || 'Uploaded creative could not be saved.');
+      throw new CreativeUploadError('save', 'response');
     }
     return saved as CreativeRecord & {
       source: 'uploaded';
@@ -171,17 +173,21 @@ export function DirectCreativeUploader({
 
     setUploading(true);
     setError('');
+    setFailures([]);
     setProgress('Preparing uploads…');
     onUploadStart();
 
     const successful: GeneratedCreative[] = [];
     const failed: File[] = [];
+    const nextFailures: string[] = [];
 
     for (let index = 0; index < files.length; index += 1) {
       const sourceFile = files[index];
       setProgress(`Uploading ${index + 1} of ${files.length}…`);
+      let stage: CreativeUploadStage = 'prepare';
       try {
         const image = await uploadFile(sourceFile);
+        stage = 'save';
         setProgress(`Saving ${index + 1} of ${files.length}…`);
         const saved = await saveUploadedCreative(image, {
           primaryText: primaryText.trim(),
@@ -189,8 +195,9 @@ export function DirectCreativeUploader({
           description: description.trim(),
         });
         successful.push({ ...saved, index: index + 1 });
-      } catch {
+      } catch (uploadError) {
         failed.push(sourceFile);
+        nextFailures.push(creativeUploadFailureMessage(uploadError, stage));
       }
     }
 
@@ -199,6 +206,7 @@ export function DirectCreativeUploader({
     }
 
     setFiles(failed);
+    setFailures(nextFailures);
     setUploading(false);
     setProgress('');
 
@@ -300,6 +308,11 @@ export function DirectCreativeUploader({
         <div>
           {progress ? <span className={styles.progress}>{progress}</span> : null}
           {error ? <span className={styles.uploadError}>{error}</span> : null}
+          {failures.length ? (
+            <ul className={styles.uploadError} aria-label="Upload failures">
+              {failures.map((failure, index) => <li key={index}>Image {index + 1}: {failure}</li>)}
+            </ul>
+          ) : null}
         </div>
         <button
           type="button"

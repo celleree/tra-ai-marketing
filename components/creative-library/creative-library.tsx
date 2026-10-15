@@ -5,6 +5,7 @@ import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import { CreativeImageFallbackNotice, RevisionControls } from '@/components/creative-library/revision-controls';
 import { HumanReviewControls } from '@/components/creative-library/human-review-controls';
+import { DraftVideoSourceNotice } from '@/components/creative-library/draft-video-source-notice';
 import { CreativeCopilotPanel } from '@/components/copilot/creative-copilot-panel';
 import styles from '@/components/creative-generator/creative-results.module.css';
 
@@ -97,6 +98,7 @@ export function CreativeLibrary() {
                   Created {new Date(creative.createdAt).toLocaleString()}
                 </p>
                 <CreativeImageFallbackNotice creative={creative} />
+                <DraftVideoSourceNotice planning={creative.planning} />
                 {creative.identity ? (
                   <details style={{ overflowWrap: 'anywhere' }}>
                     <summary>Version history</summary>

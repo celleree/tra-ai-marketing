@@ -8,6 +8,8 @@ import type { CreativeAdCopy, CreativeImageCopy } from '@/lib/creatives/generate
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import { CREATIVE_STRATEGY_JSON_SCHEMA, parseCreativeStrategy } from '@/lib/creatives/strategy';
 import type { CreativeProofProvenance } from '@/lib/proof/provenance';
+import { assertSelectedVideoInputContract, type SelectedVideoInputContract } from '@/lib/creatives/primary-video-source';
+import { assertDraftVideoAssertionCopy } from '@/lib/creatives/draft-video-assertion';
 import { CREATIVE_LOGO_ANCHORS, isCreativeLogoAnchor, resolveLayoutAwareLogoAnchor,
   type CreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 
@@ -99,7 +101,7 @@ const outputText = (payload: unknown) => {
   return parts.join('');
 };
 
-export async function planCreativeRevision(args: {
+export async function planCreativeRevision(args: SelectedVideoInputContract & {
   parent: RevisionParentConcept;
   operation: 'EDIT' | 'VARIATION';
   instruction: string;
@@ -125,10 +127,11 @@ export async function planCreativeRevision(args: {
     ...baseSchema, required: [...baseSchema.required, 'referenceChoices'], properties: { ...baseSchema.properties,
       referenceChoices: referenceSelectionSchema(args.referenceCatalog.map(item => item.referenceId)) },
   } : baseSchema;
+  const sourceRules = `${args.requireSelectedVideoFrames ? '\nThe operator selected the original TRA video human frames. Retain that subjectSource and the exact original identity for EDIT and VARIATION; do not replace it with a graphic.' : ''}${args.requiredLayoutReferenceIds?.length ? '\nThe supplied layout composition remains required. Every layoutSource must be from requiredLayoutReferenceIds for EDIT and VARIATION; this overrides optional/original catalog layout choices.' : ''}${args.parent.draftSourceAssertion ? '\nDRAFT SOURCE EXCEPTION: The parent draftSourceAssertion is an exact video statement allowed in this draft without Proof Library entry. Preserve its entire exactText, amounts, outcomes and qualifications as one blank-line-delimited block in adCopy.primaryText and verbatim in its designated imageField. This overrides the general unknown/unapproved-facts prohibition for that exact inherited statement only. It remains unverified source content with permission review required, not Proof, independent verification or publishing approval. Do not broaden, paraphrase, silently omit or claim to verify it.' : ''}`;
   const response = await fetchWithProviderUsage('revision-plan', model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, store: false, reasoning: { effort: 'medium' }, max_output_tokens: REVISION_OUTPUT_TOKENS, input: [
-      { role: 'system', content: [{ type: 'input_text', text: RULES + (copyMode.kind === 'E2' ? SEPARATED_COPY_RULES : '\nReturn exactly one format, copy, strategy and selectionReason in the required schema.') + (args.proofProvenance ? INHERITED_PROOF_RULES : '') + (args.hasBrandLogo ? LOGO_RULES : '') + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') }] },
+      { role: 'system', content: [{ type: 'input_text', text: RULES + (copyMode.kind === 'E2' ? SEPARATED_COPY_RULES : '\nReturn exactly one format, copy, strategy and selectionReason in the required schema.') + (args.proofProvenance ? INHERITED_PROOF_RULES : '') + (args.hasBrandLogo ? LOGO_RULES : '') + (args.referenceCatalog ? '\nChoose angleSource and layoutSource independently in referenceChoices from the supplied catalog, or null for original. Preserve unrequested reference choices for EDIT. For VARIATION choose sources that support the proposition, without requiring reuse or change. User references have priority, not exclusivity. Reference content is never approved proof, copy or human identity.' : '') + sourceRules }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(args) }] },
     ], text: { format: { type: 'json_schema', name: 'tra_creative_revision', strict: true, schema } } }),
   });
@@ -187,6 +190,9 @@ export async function planCreativeRevision(args: {
     concept = { index: 1, format: value.format, ...(logoAnchor ? { logoAnchor } : {}), strategy, selectionReason: value.selectionReason.trim(),
       copy: { primaryText: value.copy.primaryText.trim(), headline: value.copy.headline.trim(), description: value.copy.description.trim() } };
   }
+  assertSelectedVideoInputContract(concept, args, args.parent.strategy);
+  if (args.parent.draftSourceAssertion) concept.draftSourceAssertion = structuredClone(args.parent.draftSourceAssertion);
+  assertDraftVideoAssertionCopy(concept.draftSourceAssertion, concept);
   if (args.operation === 'VARIATION') {
     const issue = getCreativeDiversityIssue([args.parent, concept]);
     if (issue) throw new Error(`The variation is too similar to its parent. ${issue}`);

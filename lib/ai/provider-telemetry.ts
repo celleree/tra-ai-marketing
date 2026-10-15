@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { providerUsageEvent, type ProviderAttemptMetadata, type ProviderUsageContext } from '@/lib/ai/provider-usage';
 import { imageProviderFailure } from '@/lib/creatives/image-provider-failure';
 import { imageRenderPurpose } from '@/lib/creatives/image-render-request';
+import { assertPreviewAcceptanceProvider, isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
+import { reserveApprovedPreviewResponse } from '@/lib/creatives/preview-test-approval';
+import { assertPreviewAdvanceDispatch } from '@/lib/creatives/preview-advance-fence';
 
 type Context = ProviderUsageContext & { operationType?: string };
 const contexts = new AsyncLocalStorage<Context>();
@@ -23,6 +26,8 @@ export function emitProviderReuse(stage: string, model?: string, context: Provid
 
 /** A start and terminal event share one attempt ID; aggregate by ID, never by log line. */
 export async function observeProviderAttempt(meta: ProviderAttemptMetadata, dispatch: () => Promise<Response>): Promise<Response> {
+  assertPreviewAcceptanceProvider(meta);
+  await assertPreviewAdvanceDispatch(meta);
   emitProviderUsage(meta, { status: 'started' });
   let response: Response;
   try { response = await dispatch(); }
@@ -45,7 +50,7 @@ export async function observeProviderAttempt(meta: ProviderAttemptMetadata, disp
 }
 
 /** Preserve the exact fetch arguments and dependency injection; never inspect prompt content. */
-export function fetchWithProviderUsage(stage: string, model: string, url: string, init: RequestInit, request: typeof fetch = fetch) {
+export async function fetchWithProviderUsage(stage: string, model: string, url: string, init: RequestInit, request: typeof fetch = fetch) {
   const endpoint = url === 'https://api.openai.com/v1/responses' ? 'responses'
     : url === 'https://api.openai.com/v1/audio/transcriptions' ? 'transcription' : null;
   if (!endpoint) throw new Error('Unsupported provider usage endpoint.');
@@ -55,6 +60,9 @@ export function fetchWithProviderUsage(stage: string, model: string, url: string
     // Image-only configuration errors must not block other provider operations.
     purpose = process.env.VERCEL_ENV === 'production' && process.env.NODE_ENV === 'production' ? 'production' : 'diagnostic';
   }
-  return observeProviderAttempt({ ...providerUsageContext(), attemptId: randomUUID(), stage, endpoint,
-    model, purpose, retryIndex: 0 }, () => request(url, init));
+  const meta: ProviderAttemptMetadata = { ...providerUsageContext(), attemptId: randomUUID(), stage, endpoint, model, purpose, retryIndex: 0 };
+  assertPreviewAcceptanceProvider(meta);
+  if (!isPreviewAcceptance()) return observeProviderAttempt(meta, () => request(url, init));
+  const admitted = await reserveApprovedPreviewResponse(meta, init);
+  return observeProviderAttempt(meta, () => request(url, admitted));
 }

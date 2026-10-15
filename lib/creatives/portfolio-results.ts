@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
+import { effectiveCaseConcept, caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
+import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { listCreatives } from '@/lib/creatives/storage';
 import { updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
@@ -12,9 +14,11 @@ export function portfolioSavedCreatives(job: CreativePortfolioJob, records: Crea
   return job.slots.flatMap(slot => {
     const record = records.find(record => record.id === slot.creativeId);
     if (!record) return [];
-    const concept = job.snapshot!.batchPlan.creatives[slot.index - 1];
+    const concept = effectiveCaseConcept(job, slot.index);
+    if (job.videoCaseAmendment) assertReviewedFrameSelection(caseReviewChoices(job, slot.index), record.videoFrameSelection);
     const identity = buildCreativeIdentity({ creativeId: slot.creativeId, operation: 'GENERATE', strategy: concept.strategy });
     if (!isDeepStrictEqual(record.identity, identity) || !isDeepStrictEqual(record.copy, concept.copy)
+      || !isDeepStrictEqual(record.planning?.draftSourceAssertion, concept.draftSourceAssertion)
       || record.format !== concept.format || record.placement !== job.request.placement) {
       throw new Error('Saved creative does not match its reserved portfolio concept.');
     }

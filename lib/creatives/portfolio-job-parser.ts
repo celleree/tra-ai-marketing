@@ -1,5 +1,9 @@
+import { validProviderPortraitState, validPortraitCropRevision } from '@/lib/video/provider-portrait-contract';
 import { parsePortfolioVideoDependencies, UnsupportedVideoPreparationVersionError } from '@/lib/creatives/portfolio-video-dependency';
+import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
 import { isDeepStrictEqual } from 'node:util';
+import { validateCaseAmendment, caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
+import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
 import { CREATIVE_CATEGORIES } from '@/lib/creative-categories';
 import { isCreativeFormat } from '@/lib/creative-formats';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -18,6 +22,7 @@ import { parseGenerateVideoFrameSelection } from '@/lib/video/generation-selecti
 import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, LEGACY_HUMAN_FRAME_SELECTION_POLICY, METADATA_FRAME_SELECTION_POLICY,
   canonicalizeVideoFrameReuseContext } from '@/lib/video/human-frame-selection';
 import { isSelectedPlanningProof } from '@/lib/proof/planning-selection';
+import { assertDraftVideoAssertionCopy } from '@/lib/creatives/draft-video-assertion';
 import { isCreativeLogoPlacementContext } from '@/lib/creatives/logo-placement';
 import { validateStoredReviewHandoff } from '@/lib/creatives/review-handoff';
 
@@ -58,11 +63,26 @@ const validSlotVideoSelection = (value: unknown, slotStatus: string, job: Creati
     || value.selectionModel.trim().length < 1 || value.selectionModel.length > MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH
     || job.videoPreparationVersion !== 1 || job.planning.phase !== 'READY_TO_RENDER' || !job.snapshot
     || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO')) return false;
-  const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value;
+  const hasSelection = 'selection' in value, hasRetry = 'retryAuthorization' in value, hasPortrait = 'providerPortrait' in value, hasRevision = 'portraitCropRevision' in value;
   const versionedKeys = value.version === 2 ? ['selectionPolicy', 'reuseContext'] : [];
-  if (!exact(value, ['version', 'selectionModel', ...versionedKeys, ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : [])])
+  if (!exact(value, ['version', 'selectionModel', ...versionedKeys, ...(hasSelection ? ['selection'] : []), ...(hasRetry ? ['retryAuthorization'] : []), ...(hasPortrait ? ['providerPortrait'] : []), ...(hasRevision ? ['portraitCropRevision'] : [])])
+    || (hasPortrait && (value.version !== 2 || !job.videoCaseAmendment || !hasSelection
+      || !validProviderPortraitState(value.providerPortrait)
+      || (slotStatus === 'SAVED' && !value.providerPortrait.verified)
+      || (value.providerPortrait.retryAuthorized && slotStatus !== 'PENDING')))
+    || (hasRevision && (value.version !== 2 || !hasPortrait || !hasSelection || !validPortraitCropRevision(value.portraitCropRevision)
+      || value.portraitCropRevision.previousPortrait.sourcePngSha256 !== (value.providerPortrait as import('@/lib/video/provider-portrait-contract').ProviderPortraitState).sourcePngSha256
+      || (value.portraitCropRevision.imageAuthorized && !(value.providerPortrait as import('@/lib/video/provider-portrait-contract').ProviderPortraitState).verified)))
     || (hasSelection && !parseGenerateVideoFrameSelection(value.selection)) || (hasSelection && hasRetry)
     || (slotStatus === 'SAVED' && !hasSelection) || (slotStatus === 'BLOCKED' && (hasSelection || hasRetry))) return false;
+  if (hasRevision) {
+    const revision = value.portraitCropRevision as import('@/lib/video/provider-portrait-contract').PortraitCropRevision;
+    const selection = parseGenerateVideoFrameSelection(value.selection);
+    if (selection?.version !== 3 || selection.candidateBindings?.length !== 1
+      || selection.sourceVideoContentHash !== revision.sourceVideoContentHash
+      || selection.candidateBindings[0].frameId !== revision.frameId || selection.candidateBindings[0].timestampMs !== revision.timestampMs
+      || !isDeepStrictEqual(selection.sourceOverlays, [revision.revisedOverlay])) return false;
+  }
   if (value.version === 2) {
     if (typeof value.selectionPolicy !== 'string' || !automaticVideoSelectionPolicies.has(value.selectionPolicy)) return false;
     try {
@@ -99,6 +119,9 @@ const validSelectedReferences = (value: unknown) => Array.isArray(value) && valu
 
 const validPreparation = (value: unknown, job: CreativePortfolioJob): value is PortfolioPreparationState => {
   if (!record(value) || typeof value.quotaReserved !== 'boolean') return false;
+  if (value.previewPreflightReady !== undefined && value.previewPreflightReady !== true) return false;
+  if (value.previewPreparedFrameCount !== undefined && (!Number.isInteger(value.previewPreparedFrameCount)
+    || Number(value.previewPreparedFrameCount) < 0 || Number(value.previewPreparedFrameCount) > 2)) return false;
   if (value.videoDependencies !== undefined) {
     if (job.videoPreparationVersion !== 1) return false;
     const dependencies = parsePortfolioVideoDependencies(value.videoDependencies, job.request.sourceAssets);
@@ -151,6 +174,7 @@ const validSnapshot = (
       if (!validVideoSelectorBindings(snapshot.sourceAnalysis, job.request.context)) return false;
     }
     const plan = snapshot.batchPlan;
+    if (Array.isArray(plan?.creatives)) plan.creatives.forEach(concept => assertDraftVideoAssertionCopy(concept.draftSourceAssertion, concept));
     const audit = plan.portfolioAudit === undefined ? undefined : parsePortfolioAudit(plan.portfolioAudit);
     if (snapshot.version !== 1 || !isDeepStrictEqual(snapshot.request, job.request)
       || !Array.isArray(snapshot.referenceCatalog) || !validSelectedReferences(snapshot.selectedReferences)
@@ -163,6 +187,7 @@ const validSnapshot = (
         || (concept.selectedProof !== undefined && concept.selectedProof !== null && !isSelectedPlanningProof(concept.selectedProof))
         || ![concept.copy.headline, concept.copy.primaryText].every(text) || typeof concept.copy.description !== 'string'
         || !parseCreativePlanning({ strategy: concept.strategy, selectionReason: concept.selectionReason,
+          ...(concept.draftSourceAssertion ? { draftSourceAssertion: concept.draftSourceAssertion } : {}),
           ...(concept.logoAnchor ? { logoAnchor: concept.logoAnchor } : {}),
           model: plan.plannerModel, reasoningEffort: plan.reasoningEffort,
           referenceCatalog: snapshot.referenceCatalog, ...(audit ? { portfolioAudit: audit } : {}) }))) return false;
@@ -176,6 +201,8 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
   const checkpoint = value as unknown as PortfolioPlanningCheckpoint, args = checkpoint.plannerArgs;
   if (args.count !== job.slots.length || !text(args.context) || args.proofRetrievalQuery !== job.request.proofRetrievalQuery || !validAnalysis(args.analysis)
     || !isDeepStrictEqual(args.operatorSelectedSourceGuidance, job.request.reviewHandoff?.operatorSelectedSourceGuidance)
+    || (args.requestedVideoCases !== undefined && !isDeepStrictEqual(args.requestedVideoCases,
+      requestedVideoCases(job.request.context, job.request.reviewHandoff)))
     || typeof args.hasApprovedHumanSource !== 'boolean'
     || (args.hasBrandLogo !== undefined && typeof args.hasBrandLogo !== 'boolean')
     || (args.hasBrandLogo !== undefined && args.hasBrandLogo !== Boolean(job.request.brandLogoMediaId))
@@ -216,6 +243,10 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
         || !['PENDING', 'SAVED', 'RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)
         || (['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status) ? !text(slot.error) : slot.error !== undefined)
         || (slot.status === 'BLOCKED' && slot.videoSelection === undefined)
+        || (slot.boundCaseCropRecovery !== undefined && (!job.videoCaseAmendment
+          || !record(slot.boundCaseCropRecovery) || !exact(slot.boundCaseCropRecovery, ['version', 'previousError'])
+          || slot.boundCaseCropRecovery.version !== 1 || !text(slot.boundCaseCropRecovery.previousError)
+          || slot.boundCaseCropRecovery.previousError.length > 1000))
         || (slot.videoSelection !== undefined && !validSlotVideoSelection(slot.videoSelection, slot.status, job)))
       || !record(job.planning) || !['INITIAL_PLAN', 'DIVERSITY_AUDIT', 'TARGETED_REPAIR', 'READY_TO_RENDER'].includes(job.planning.phase)) throw new Error();
 
@@ -250,9 +281,16 @@ export function parseCreativePortfolioJob(bytes: Buffer, expectedId: string): Cr
       }
     }
     if (job.planningError !== undefined && (!text(job.planningError) || job.snapshot || job.lease)) throw new Error();
+    if (job.previewAcceptanceError !== undefined && (!text(job.previewAcceptanceError) || job.previewAcceptanceError.length > 1000)) throw new Error();
     if (job.lease !== null && (!text(job.lease.id) || !time(job.lease.expiresAtMs)
       || (job.lease.slotIndex === null ? job.snapshot !== null
         : !job.snapshot || job.slots.find(slot => slot.index === job.lease!.slotIndex)?.status !== 'PENDING'))) throw new Error();
+    if (job.videoCaseAmendment !== undefined) {
+      validateCaseAmendment(job, job.videoCaseAmendment);
+      for (const slot of job.slots) if (slot.videoSelection?.selection) {
+        assertReviewedFrameSelection(caseReviewChoices(job, slot.index), slot.videoSelection.selection);
+      }
+    }
     return job;
   } catch (error) {
     if (error instanceof UnsupportedSourceCompositionVersionError || error instanceof UnsupportedVideoPreparationVersionError) throw error;

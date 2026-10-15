@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
+import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
 import { isDeepStrictEqual } from 'node:util';
 import type { CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
 import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
@@ -27,12 +29,14 @@ export type PortfolioVideoSelectionState = LegacyPortfolioVideoSelectionState | 
   version: 2;
   selectionModel: string;
   selectionPolicy: AutomaticVideoSelectionPolicy;
+  portraitCropRevision?: import('@/lib/video/provider-portrait-contract').PortraitCropRevision;
+  providerPortrait?: import('@/lib/video/provider-portrait-contract').ProviderPortraitState;
   reuseContext: VideoFrameReuseContext;
   selection?: GenerateVideoFrameSelection;
   retryAuthorization?: { version: 1 };
 };
 export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'; error?: string;
-  videoSelection?: PortfolioVideoSelectionState };
+  videoSelection?: PortfolioVideoSelectionState; boundCaseCropRecovery?: { version: 1; previousError: string } };
 export type PortfolioPlanningPhase = 'INITIAL_PLAN' | 'DIVERSITY_AUDIT' | 'TARGETED_REPAIR' | 'READY_TO_RENDER';
 export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot; plannerArgs: CreativeBatchPlannerArgs };
 export type PortfolioPlanningState =
@@ -47,7 +51,11 @@ export type CreativePortfolioJob = {
   // Present only on durable portfolios created with a video; absence preserves existing behavior.
   readonly videoPreparationVersion?: 1;
   request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
+  // Explicit operator overlay; the original snapshot remains immutable.
+  videoCaseAmendment?: import('@/lib/creatives/portfolio-case-amendment').VideoCaseAmendment;
   planning: PortfolioPlanningState; planningError?: string;
+  // A terminal approved-Preview stop survives individual saved-slot reconciliation.
+  previewAcceptanceError?: string;
   lease: { id: string; slotIndex: number | null; expiresAtMs: number } | null;
 };
 export type PortfolioClaim = { status: 'WORK' | 'BUSY' | 'COMPLETE' | 'RETRY_REQUIRED' | 'BLOCKED'; job: CreativePortfolioJob };
@@ -90,24 +98,34 @@ const failed = (job: CreativePortfolioJob, message: string) => {
   else {
     const slot = next.slots.find(slot => slot.index === next.lease!.slotIndex)!;
     slot.status = 'RETRY_REQUIRED'; slot.error = message;
-    if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;
+    if (slot.videoSelection) {
+      delete slot.videoSelection.retryAuthorization;
+      if (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait) delete slot.videoSelection.providerPortrait.retryAuthorized;
+    }
   }
   next.lease = null;
   return next;
 };
 
 /** Expired work may have incurred provider cost. Never silently claim it again. */
-export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date.now(), leaseId: string = randomUUID()): PortfolioClaim {
+export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date.now(), leaseId: string = randomUUID(), stopOnFailure = false): PortfolioClaim {
   const job = structuredClone(current);
+  if (job.previewAcceptanceError) return { status: 'BLOCKED', job };
+  const priorError = job.planningError ?? job.slots.find(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status))?.error;
+  if (stopOnFailure && !job.lease && (priorError || job.slots.some(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)))) {
+    return { status: 'BLOCKED', job: { ...job, previewAcceptanceError: priorError?.slice(0, 1000) || 'This approved Preview test is stopped.', updatedAtMs: now } };
+  }
   if (job.lease) {
     if (job.lease.expiresAtMs > now) return { status: 'BUSY', job };
-    return { status: 'RETRY_REQUIRED', job: { ...failed(job, 'Previous work was interrupted; its provider outcome may be uncertain. Explicit retry is required.'), updatedAtMs: now } };
+    const message = stopOnFailure ? 'Previous work was interrupted; its provider outcome may be uncertain. This approved Preview test is stopped.'
+      : 'Previous work was interrupted; its provider outcome may be uncertain. Explicit retry is required.';
+    return { status: 'RETRY_REQUIRED', job: { ...failed(job, message), ...(stopOnFailure ? { previewAcceptanceError: message } : {}), updatedAtMs: now } };
   }
   // Older portfolios may have blocked a graphic concept during unnecessary human-frame selection.
   // No image provider work occurred for a blocked slot, so it can proceed with its frozen plan.
   if (job.snapshot) for (const slot of job.slots) {
     const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
-    if (slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy?.execution?.subjectSource === 'non-human') {
+    if (!job.videoCaseAmendment && slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy?.execution?.subjectSource === 'non-human') {
       slot.status = 'PENDING'; delete slot.error; delete slot.videoSelection;
     }
   }
@@ -297,6 +315,7 @@ export function finishPortfolioVideoFrameSelection(
   }
   const parsed = parseGenerateVideoFrameSelection(selection);
   if (!parsed) throw new Error('Completed video frame selection is invalid.');
+  if (current.videoCaseAmendment) assertReviewedFrameSelection(caseReviewChoices(current, currentSlot.index), parsed);
   const job = structuredClone(current);
   const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
   slot.videoSelection = currentSlot.videoSelection.version === 1
@@ -314,8 +333,10 @@ export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: stri
   const slot = job.slots.find(slot => slot.index === lease.slotIndex);
   if (!job.snapshot || !slot || slot.creativeId !== creativeId || slot.status !== 'PENDING') throw new Error('Portfolio result does not match the reserved creative.');
   const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
-  if (concept?.strategy?.execution?.subjectSource === 'non-human') delete slot.videoSelection;
+  if (!job.videoCaseAmendment && concept?.strategy?.execution?.subjectSource === 'non-human') delete slot.videoSelection;
   if (slot.videoSelection && (!slot.videoSelection.selection || slot.videoSelection.retryAuthorization
+    || (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait
+      && (!slot.videoSelection.providerPortrait.verified || slot.videoSelection.providerPortrait.retryAuthorized))
     || !parseGenerateVideoFrameSelection(slot.videoSelection.selection))) {
     throw new Error('Completed video frame selection is required before saving this creative.');
   }
@@ -346,6 +367,7 @@ export function continuePortfolioVideoFrameSelection(current: CreativePortfolioJ
 
 /** An explicit operator action; successful slots and the completed plan are never reset. */
 export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: number | null, now = Date.now()) {
+  if (current.previewAcceptanceError) throw new Error('This approved Preview test is stopped; further work is not authorized.');
   if (current.lease) throw new Error('Portfolio work is still leased.');
   const job = structuredClone(current);
   if (slotIndex === null) {
@@ -378,6 +400,7 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
     }
   } else {
     const slot = job.slots.find(slot => slot.index === slotIndex);
+    if (slot?.videoSelection?.version === 2 && slot.videoSelection.portraitCropRevision) throw new Error('Revised portrait work does not authorize a repeated paid attempt. Reload its diagnostic.');
     if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');
     slot.status = 'PENDING'; delete slot.error;
     if (slot.videoSelection && job.snapshot.batchPlan.creatives[slot.index - 1]?.strategy.execution.subjectSource === 'approved-tra-human'
@@ -386,7 +409,12 @@ export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: num
         || slot.videoSelection.selectionPolicy === 'human-frame-visual-quality-v1')) {
       delete slot.videoSelection;
     } else if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
-    else if (slot.videoSelection) delete slot.videoSelection.retryAuthorization;
+    else if (slot.videoSelection) {
+      delete slot.videoSelection.retryAuthorization;
+      if (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait && !slot.videoSelection.providerPortrait.verified) {
+        slot.videoSelection.providerPortrait.retryAuthorized = true;
+      }
+    }
   }
   job.updatedAtMs = now;
   return job;

@@ -131,9 +131,10 @@ export async function analyzeApprovedTraVideoFrames(args: {
       text: { format: { type: 'json_schema', name: 'tra_video_frame_analysis', strict: true, schema: {
         type: 'object',
         properties: {
+          visibleHuman: { type: 'boolean', description: 'Whether at least one attached representative frame visibly contains a person. This is an observation, not identity or advertising approval.' },
           summary: { type: 'string' }, visibleText: { type: 'array', items: { type: 'string' } }, visualStructure: { type: 'string' }, hookOrAngle: { type: 'string' }, offerOrCta: { type: 'string' }, styleNotes: { type: 'string' }, preserve: { type: 'array', items: { type: 'string' } }, avoid: { type: 'array', items: { type: 'string' } }, unknowns: { type: 'array', items: { type: 'string' } }, dominantCategory: { type: 'string', enum: [...CREATIVE_CATEGORIES] },
         },
-        required: ['summary','visibleText','visualStructure','hookOrAngle','offerOrCta','styleNotes','preserve','avoid','unknowns','dominantCategory'],
+        required: ['visibleHuman','summary','visibleText','visualStructure','hookOrAngle','offerOrCta','styleNotes','preserve','avoid','unknowns','dominantCategory'],
         additionalProperties: false,
       } } },
     }),
@@ -145,7 +146,9 @@ export async function analyzeApprovedTraVideoFrames(args: {
   }
   const text = extractOutputText(payload);
   if (!text) throw new Error('OpenAI returned no TRA video-frame analysis.');
-  return JSON.parse(text) as CreativeReferenceAnalysis;
+  const analysis = JSON.parse(text) as CreativeReferenceAnalysis;
+  if (typeof analysis.visibleHuman !== 'boolean') throw new Error('TRA video-frame analysis did not assess visible human content.');
+  return analysis;
 }
 
 export interface VideoImageGenerationResult extends ImageGenerationResult {

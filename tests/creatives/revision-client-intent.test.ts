@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { RevisionControls } from '@/components/creative-library/revision-controls';
 
 // Exercise the real component's current event handlers without a browser dependency.
-const hooks = vi.hoisted(() => ({ cursor: 0, values: [] as any[] }));
+const hooks = vi.hoisted(() => ({ cursor: 0, values: [] as any[], provenance: {} as any }));
 vi.mock('react', () => ({
   useState(initial: any) {
     const index = hooks.cursor++; if (!(index in hooks.values)) hooks.values[index] = initial;
@@ -13,24 +13,38 @@ vi.mock('react', () => ({
     return hooks.values[index];
   },
 }));
-vi.mock('react/jsx-runtime', () => ({ jsx: (type: any, props: any) => ({ type, props }), jsxs: (type: any, props: any) => ({ type, props }) }));
+vi.mock('react/jsx-runtime', () => ({ Fragment: 'fragment', jsx: (type: any, props: any) => ({ type, props }), jsxs: (type: any, props: any) => ({ type, props }) }));
 vi.mock('@/lib/company/creative-context', () => ({ readStoredRuntimeCompanyProfile: () => undefined }));
 const render = () => {
   hooks.cursor = 0;
   const tree = RevisionControls({ creative: { id: `creative_${'a'.repeat(32)}`, identity: {}, planning: {},
-    generationProvenance: {}, placement: 'SQUARE_1_1', format: 'direct-response' } as any, onSaved: vi.fn() });
+    generationProvenance: hooks.provenance, placement: 'SQUARE_1_1', format: 'direct-response' } as any, onSaved: vi.fn() });
   const nodes: any[] = [];
   const visit = (value: any) => { if (Array.isArray(value)) value.forEach(visit); else if (value?.props) { nodes.push(value); visit(value.props.children); } };
   visit(tree); return nodes;
 };
 const find = (type: string, test: (props: any) => boolean = () => true) => render().find(node => node.type === type && test(node.props))!;
 beforeEach(() => {
-  hooks.values = []; hooks.cursor = 0;
+  hooks.values = []; hooks.cursor = 0; hooks.provenance = {};
   const values = new Map<string, string>();
   vi.stubGlobal('window', { sessionStorage: { getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } } });
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+it('keeps selected inputs by default and submits removal only after an operator changes the controls', async () => {
+  hooks.provenance = { requestedSources: [{ role: 'TRA_VIDEO', mediaId: 'video' }, { role: 'LAYOUT_REFERENCE', mediaId: 'layout' }],
+    attachedSource: { type: 'TRA_VIDEO_FRAMES', selectionMode: 'USER_SELECTED' } };
+  const sent: any[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => { sent.push(JSON.parse(init.body)); throw new Error('Lost response'); }));
+  find('button', props => props.children === 'Edit').props.onClick();
+  find('textarea').props.onChange({ target: { value: 'Make the headline blue' } });
+  find('form').props.onSubmit({ preventDefault() {} }); await vi.waitFor(() => expect(find('p', props => props.role === 'alert')).toBeDefined());
+  expect(sent[0]).not.toHaveProperty('removeVideoSource'); expect(sent[0]).not.toHaveProperty('removeLayoutReference');
+  render().filter(node => node.type === 'input' && node.props.type === 'checkbox').forEach(node => node.props.onChange({ target: { checked: true } }));
+  find('form').props.onSubmit({ preventDefault() {} }); await vi.waitFor(() => expect(sent).toHaveLength(2));
+  expect(sent[1]).toMatchObject({ removeVideoSource: true, removeLayoutReference: true });
+});
 
 it.each(['EDIT', 'VARIATION', 'PLACEMENT'] as const)('fresh %s uses displayed A and preserves unresolved B through refresh', async operation => {
   const sent: Array<{ body: any; key: string }> = [];

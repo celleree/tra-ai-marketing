@@ -5,6 +5,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import { parseCreativePlanning } from '@/lib/creatives/planning-metadata';
+import { draftVideoAssertion } from '../fixtures/draft-video-source';
 
 const { mkdirMock, readFileMock, sendMock, writeFileMock } = vi.hoisted(() => ({
   mkdirMock: vi.fn(),
@@ -149,6 +150,20 @@ afterEach(() => {
 });
 
 describe('TRA creative storage', () => {
+  it('round-trips unverified video assertions and exact qualified copy after refresh', async () => {
+    const assertion = draftVideoAssertion();
+    const adCopy = { primaryText: `Source-specific case.\n\n${assertion.exactText}`, headline: 'A specific case', description: '' };
+    const creative = { ...record('b', '2026-08-25T12:00:00.000Z'), copy: adCopy, adCopy,
+      imageCopy: { headline: 'A specific case', shortSupport: assertion.exactText }, planning: { ...planning, draftSourceAssertion: assertion } };
+    readFileMock.mockResolvedValueOnce(JSON.stringify({ version: 1, items: [] }));
+    await saveCreativeBatch([creative]);
+    const encoded = writeFileMock.mock.calls[0][1] as string;
+    readFileMock.mockResolvedValueOnce(encoded);
+    const [restored] = await listCreatives();
+    expect(restored.planning?.draftSourceAssertion).toEqual(assertion);
+    expect(restored.imageCopy?.shortSupport).toBe(assertion.exactText);
+    expect(restored.humanReview).toEqual({ status: 'PENDING' }); expect(restored.proofProvenance).toBeUndefined();
+  });
   it('normalizes legacy absolute image URLs to the authenticated media route on read', async () => {
     const original = record('a', '2026-08-20T12:00:00.000Z');
     const legacy = {

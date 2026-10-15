@@ -39,6 +39,7 @@ export type CachedVideoHumanSelectionResult = { status: 'BUSY' }
   | { status: 'RETRY_REQUIRED'; reason: RetryReason }
   | { status: 'COMPLETE'; outcome: VideoHumanFrameSelectionOutcome };
 export interface VideoSelectionCacheDependencies {
+  assessmentContract?: import('@/lib/video/candidate-suitability').CandidateAssessmentIdentity['assessmentContract'];
   model: string;
   deadlineAtMs: number;
   retry?: boolean;

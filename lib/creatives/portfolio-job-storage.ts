@@ -1,3 +1,4 @@
+import { sameProviderPortrait, validPortraitCropRevision } from '@/lib/video/provider-portrait-contract';
 import { preservesVideoDependencies } from '@/lib/creatives/portfolio-video-dependency';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -60,17 +61,29 @@ export async function createCreativePortfolio(request: ValidGenerateCreativeRequ
 /** Apply synchronous, side-effect-free state transitions against the latest stored version. */
 export async function updateCreativePortfolio(
   id: string, change: (current: CreativePortfolioJob) => CreativePortfolioJob, storage = getVideoIntelligenceStorage(),
+  options: { boundCaseCropRecoverySlot?: number; boundCaseCropRevisionSlot?: number } = {},
 ) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const current = await read(id, storage);
     if (!current) throw new Error('Creative portfolio was not found.');
     const next = change(structuredClone(current.job));
+    if (current.job.videoCaseAmendment && !isDeepStrictEqual(next.videoCaseAmendment, current.job.videoCaseAmendment)) {
+      throw new Error('Applied case amendment is immutable.');
+    }
+    if (!current.job.videoCaseAmendment && next.videoCaseAmendment && (!current.job.lease || next.lease || current.job.previewAcceptanceError
+      || current.job.slots.some(slot => slot.status !== 'PENDING' || slot.videoSelection || slot.error)
+      || !isDeepStrictEqual(current.job.slots, next.slots))) {
+      throw new Error('Case amendment may not replace active, attempted or completed work.');
+    }
     // Preserve the stored marker exactly, including its absence on historical portfolios.
     if (next.sourceCompositionVersion !== current.job.sourceCompositionVersion) {
       throw new Error('Portfolio source composition version is immutable.');
     }
     if (next.videoPreparationVersion !== current.job.videoPreparationVersion) {
       throw new Error('Portfolio video preparation version is immutable.');
+    }
+    if (current.job.previewAcceptanceError !== undefined && next.previewAcceptanceError !== current.job.previewAcceptanceError) {
+      throw new Error('Approved Preview terminal stop is immutable.');
     }
     const dependencies = (job: CreativePortfolioJob) => job.planning.phase === 'INITIAL_PLAN'
       ? job.planning.preparation.videoDependencies ?? []
@@ -80,13 +93,60 @@ export async function updateCreativePortfolio(
     if (!preservesVideoDependencies(dependencies(current.job), dependencies(next))) {
       throw new Error('Portfolio video dependency bindings and completed references are immutable.');
     }
+    const allowsPortraitRevision = (index: number) => {
+      const previous = current.job.slots[index], target = next.slots[index];
+      const before = previous.videoSelection, after = target.videoSelection;
+      if (options.boundCaseCropRevisionSlot !== previous.index || !current.job.videoCaseAmendment || current.job.lease || next.lease
+        || previous.status !== 'RETRY_REQUIRED' || !previous.error?.startsWith('The actual retained portrait PNG did not pass')
+        || before?.version !== 2 || after?.version !== 2 || !before.selection || !before.providerPortrait || before.providerPortrait.verified
+        || before.portraitCropRevision || !after.providerPortrait || after.providerPortrait.verified || after.providerPortrait.retryAuthorized
+        || !validPortraitCropRevision(after.portraitCropRevision) || after.portraitCropRevision.assessmentAttempted || after.portraitCropRevision.imageAuthorized
+        || !isDeepStrictEqual(after.portraitCropRevision.previousPortrait, before.providerPortrait)
+        || !isDeepStrictEqual(after.portraitCropRevision.previousOverlay, before.selection.sourceOverlays?.[0])
+        || after.portraitCropRevision.previousError !== previous.error
+        || after.providerPortrait.sourcePngSha256 !== before.providerPortrait.sourcePngSha256
+        || current.job.slots.some(other => other.index !== previous.index && other.status !== 'SAVED')) return false;
+      const expected = structuredClone(previous); expected.status = 'PENDING'; delete expected.error;
+      const v = expected.videoSelection as Extract<NonNullable<typeof expected.videoSelection>, {version: 2}>;
+      v.providerPortrait = after.providerPortrait; v.portraitCropRevision = after.portraitCropRevision;
+      v.selection!.sourceOverlays = [after.portraitCropRevision.revisedOverlay];
+      return isDeepStrictEqual(target, expected) && isDeepStrictEqual(next.planning, current.job.planning);
+    };
+    for (const [index, previous] of current.job.slots.entries()) {
+      const before = previous.videoSelection?.version === 2 ? previous.videoSelection.providerPortrait : undefined;
+      const after = next.slots[index].videoSelection?.version === 2 ? next.slots[index].videoSelection.providerPortrait : undefined;
+      if (before && (!after || !sameProviderPortrait(before, after) || (before.verified && !after.verified)) && !allowsPortraitRevision(index)) {
+        throw new Error('Pinned provider portrait pixels and crop are immutable.');
+      }
+      const oldRevision = previous.videoSelection?.version === 2 ? previous.videoSelection.portraitCropRevision : undefined;
+      const newRevision = next.slots[index].videoSelection?.version === 2 ? next.slots[index].videoSelection.portraitCropRevision : undefined;
+      if (!oldRevision && newRevision && !allowsPortraitRevision(index)) throw new Error('Portrait revision requires explicit bounded recovery.');
+      if (oldRevision) {
+        if (!newRevision) throw new Error('Portrait revision evidence is immutable.');
+        const {assessmentAttempted: a, imageAuthorized: i, ...oldEvidence} = oldRevision;
+        const {assessmentAttempted: b, imageAuthorized: j, ...newEvidence} = newRevision;
+        if (!isDeepStrictEqual(oldEvidence, newEvidence) || (a && !b) || (i && !j)) throw new Error('Portrait revision evidence and paid intent are immutable.');
+      }
+    }
+    const recoveredIndex = options.boundCaseCropRecoverySlot;
+    const allowsCropRecovery = (index: number) => {
+      const previous = current.job.slots[index], target = next.slots[index];
+      if (recoveredIndex !== previous.index || !current.job.videoCaseAmendment || current.job.lease || next.lease
+        || previous.status !== 'BLOCKED' || previous.boundCaseCropRecovery || !previous.error?.startsWith('No suitable human frame was found.')
+        || previous.videoSelection?.version !== 2 || previous.videoSelection.selection || previous.videoSelection.retryAuthorization
+        || current.job.slots.some(other => other.index !== previous.index && other.status !== 'SAVED')) return false;
+      const expected = { ...previous, status: 'PENDING', boundCaseCropRecovery: { version: 1, previousError: previous.error } };
+      delete expected.error;
+      return isDeepStrictEqual(target, expected) && isDeepStrictEqual(next.planning, current.job.planning);
+    };
     if (next.id !== id || next.createdAtMs !== current.job.createdAtMs || next.updatedAtMs < current.job.updatedAtMs
       || !isDeepStrictEqual(next.request, current.job.request)
       || !isDeepStrictEqual(next.slots.map(slot => [slot.index, slot.creativeId]), current.job.slots.map(slot => [slot.index, slot.creativeId]))
       || (current.job.snapshot && !isDeepStrictEqual(next.snapshot, current.job.snapshot))
       || current.job.slots.some((slot, index) => (slot.status === 'SAVED' && next.slots[index].status !== 'SAVED')
-        || (slot.status === 'BLOCKED' && next.slots[index].status !== 'BLOCKED'
-          && !(slot.videoSelection && current.job.snapshot?.batchPlan.creatives[index]?.strategy.execution.subjectSource === 'non-human'
+        || (slot.boundCaseCropRecovery && !isDeepStrictEqual(slot.boundCaseCropRecovery, next.slots[index].boundCaseCropRecovery))
+        || (slot.status === 'BLOCKED' && next.slots[index].status !== 'BLOCKED' && !allowsCropRecovery(index)
+          && !(!current.job.videoCaseAmendment && slot.videoSelection && current.job.snapshot?.batchPlan.creatives[index]?.strategy.execution.subjectSource === 'non-human'
             && next.slots[index].status === 'PENDING' && !next.slots[index].videoSelection)))) {
       throw new Error('Portfolio update may not replace its request, plan, identities or completed work.');
     }

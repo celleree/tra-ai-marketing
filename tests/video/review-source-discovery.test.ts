@@ -1,15 +1,27 @@
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
+import { access, readFile } from 'node:fs/promises';
+import { FfmpegIntervalCandidateExtractor, FfmpegSceneCandidateMaterializer } from '@/lib/video/candidate-extractor';
+import { FfmpegSceneChangeDetector } from '@/lib/video/scene-change-detector';
+import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-lifecycle';
+import { createVideoIntelligenceAnalyzerFingerprint } from '@/lib/video/intelligence-preparation';
+import { DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY } from '@/lib/video/candidate-policy';
+import * as ffmpeg from '@/lib/video/ffmpeg';
+import * as cleanup from '@/lib/video/candidate-cleanup';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
 
 const mocks = vi.hoisted(() => ({ current: vi.fn(), resolve: vi.fn(), library: vi.fn(), preparation: vi.fn(),
-  image: vi.fn(), access: vi.fn(), execute: vi.fn() }));
+  image: vi.fn(), actualImages: undefined as unknown as typeof import('@/lib/video/selection-context').withVideoCandidateAnalysisImages, access: vi.fn(), execute: vi.fn() }));
 vi.mock('@/lib/video/intelligence-service', async original => ({ ...await original<typeof import('@/lib/video/intelligence-service')>(),
   readVideoIntelligenceSource: mocks.current, resolveExistingVideoIntelligenceJob: mocks.resolve, executeVideoIntelligenceStep: mocks.execute }));
 vi.mock('@/lib/video/intelligence-finalization-runner', () => ({ loadVideoIntelligenceLibrary: mocks.library }));
 vi.mock('@/lib/video/intelligence-preparation-loader', () => ({ loadVideoIntelligencePreparation: mocks.preparation }));
-vi.mock('@/lib/video/selection-context', () => ({ loadVideoCandidateAnalysisImage: mocks.image }));
+vi.mock('@/lib/video/selection-context', async original => {
+  const actual = await original<typeof import('@/lib/video/selection-context')>();
+  mocks.actualImages = actual.withVideoCandidateAnalysisImages;
+  return { ...actual, withVideoCandidateAnalysisImages: mocks.image };
+});
 vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess: mocks.access }));
 import { discoverVideoReviewSource } from '@/lib/video/review-source-discovery';
 import { GET } from '@/app/api/video/review-sources/route';
@@ -34,8 +46,8 @@ const manifest = { candidates, groups: [{ representativeIndex: 0, candidateIndex
 const identity = { sourceVideoMediaId: locator.sourceVideoMediaId, sourceVideoContentHash: locator.sourceVideoContentHash,
   analyzerFingerprint: { sha256: locator.analyzerFingerprintSha256 } };
 const source = { media: { id: locator.sourceVideoMediaId }, stored: { buffer: Buffer.from('original') } };
-const hydrateSource = vi.fn(async () => source as never);
-const read = (candidateIndex?: number) => discoverVideoReviewSource(locator.sourceVideoMediaId, candidateIndex, { hydrateSource });
+const hydrateSource = vi.fn<(id: string) => Promise<import('@/lib/video/candidate-extractor').HydratedTraVideoSource>>(async () => source as never);
+const read = (candidateIndex?: number | readonly number[]) => discoverVideoReviewSource(locator.sourceVideoMediaId, candidateIndex, { hydrateSource });
 const request = (query = '') => new Request(`http://localhost/api/video/review-sources?mediaId=${locator.sourceVideoMediaId}${query}`);
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv('NODE_ENV', 'test'); vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Provider calls forbidden'); }));
@@ -43,7 +55,9 @@ beforeEach(() => {
   mocks.resolve.mockResolvedValue({ identity, job: { phase: 'COMPLETE', result: { sha256: 'e'.repeat(64) },
     preparation: { manifestKey: 'manifest', manifestSha256: 'f'.repeat(64) } } });
   mocks.library.mockResolvedValue(structuredClone(library)); mocks.preparation.mockResolvedValue({ manifest });
-  mocks.image.mockResolvedValue({ ...binding(1), bytes: jpg }); mocks.access.mockResolvedValue(null);
+  mocks.image.mockImplementation(async (_source, _context, indexes, consume) => {
+    const results = []; for (const index of indexes) results.push(await consume({ ...binding(index), bytes: jpg })); return results;
+  }); mocks.access.mockResolvedValue(null);
   hydrateSource.mockResolvedValue(source as never);
 });
 afterEach(() => { expect(fetch).not.toHaveBeenCalled(); expect(mocks.execute).not.toHaveBeenCalled();
@@ -72,7 +86,7 @@ describe('completed video review source discovery', () => {
     expect(preview).toMatchObject({ binding: binding(1), providerEligible: false });
     expect(preview.thumbnailDataUrl).toMatch(/^data:image\/jpeg;base64,/);
     expect(hydrateSource).toHaveBeenCalledWith(locator.sourceVideoMediaId); expect(mocks.image).toHaveBeenCalledTimes(1);
-    expect(mocks.image.mock.calls[0][2]).toBe(1);
+    expect(mocks.image.mock.calls[0][2]).toEqual([1]);
   });
   it.each([null, { phase: 'OBSERVING' }, { phase: 'RETRY_REQUIRED' }])('reads incomplete work without starting or resuming it', async status => {
     mocks.current.mockResolvedValue({ source: {}, locator, status });
@@ -83,16 +97,24 @@ describe('completed video review source discovery', () => {
     await expect(read(9)).rejects.toMatchObject({ status: 404 });
     mocks.library.mockResolvedValue({ ...library, candidates: [{ ...candidates[0], timestampMs: 99 }] });
     await expect(read()).rejects.toMatchObject({ status: 409 });
-    mocks.library.mockResolvedValue(library); mocks.image.mockResolvedValue({ bytes: Buffer.from('changed') });
+    mocks.library.mockResolvedValue(library); mocks.image.mockImplementation(async (_source, _context, _indexes, consume) => [await consume({ candidateIndex: 1, bytes: Buffer.from('changed') })]);
     await expect(read(1)).rejects.toThrow('analysis-only TRA candidate');
   });
   it.each(['library', 'preparation'] as const)('surfaces %s integrity failure', async name => {
     mocks[name].mockRejectedValue(new Error('Artifact digest mismatch'));
     expect((await GET(request())).status).toBe(409);
   });
+  it.each(['&candidateIndexes=', '&candidateIndexes=1,x', '&candidateIndexes=1,1', '&candidateIndexes=1&candidateIndex=0',
+    '&candidateIndexes=' + Array.from({ length: 25 }, (_, index) => index).join(',')])('rejects invalid batches before extraction: %s', async query => {
+    expect((await GET(request(query))).status).toBe(400); expect(mocks.image).not.toHaveBeenCalled();
+  });
+  it('rejects an unavailable member before hydrating or extracting the source', async () => {
+    await expect(read([1, 99])).rejects.toMatchObject({ status: 404 });
+    expect(hydrateSource).not.toHaveBeenCalled(); expect(mocks.image).not.toHaveBeenCalled();
+  });
   it('requires access, validates preview input and streams large private responses in bounded chunks', async () => {
     mocks.access.mockResolvedValue(new Response('Denied', { status: 401 }));
-    expect((await GET(request())).status).toBe(401); expect(mocks.current).not.toHaveBeenCalled();
+    expect((await GET(request('&candidateIndexes=1'))).status).toBe(401); expect(mocks.current).not.toHaveBeenCalled();
     mocks.access.mockResolvedValue(null);
     expect((await GET(request('&candidateIndex=-1'))).status).toBe(400);
     mocks.library.mockResolvedValue({ ...library, padding: 'x'.repeat(5 * 1024 * 1024) });
@@ -103,3 +125,65 @@ describe('completed video review source discovery', () => {
     expect(JSON.parse(Buffer.concat(chunks).toString()).review.video.locator).toEqual(locator);
   });
 });
+
+// Mock only persisted artifacts; run discovery, validation, lifecycle, FFmpeg and thumbnail generation for real.
+it('restores 20 exact neighboring previews with one preprocessing pass and releases temporary ownership', async () => {
+  // Eight-second fixture: loop video-candidate-scene.ts's 4-second MP4 once with local FFmpeg -stream_loop 1 -c copy -movflags +faststart.
+  // Store the fixture because production's deliberately small FFmpeg build decodes MP4 but does not mux it.
+  const buffer = await readFile(new URL('../fixtures/video-review-preview-pool.mp4', import.meta.url));
+  const input = { role: 'TRA_VIDEO', media: { id: locator.sourceVideoMediaId, fileName: 'fixture.mp4',
+    mimeType: 'video/mp4', mediaType: 'VIDEO', size: buffer.length, url: '/fixture.mp4' },
+    stored: { buffer, fileName: 'fixture.mp4', mimeType: 'video/mp4', mediaType: 'VIDEO' } } as import('@/lib/video/candidate-extractor').HydratedTraVideoSource;
+  const policy = DEFAULT_VIDEO_FRAME_CANDIDATE_POLICY;
+  const frozen = await withTemporaryTraVideoFrameCandidates(input, async set => {
+    const candidates = set.candidates.map(({ temporaryPath, lifecycle, ...candidate }) => candidate);
+    const representative = candidates[0], frameId = videoCandidateFrameId(set.sourceVideoContentHash, representative.timestampMs, representative.frameSha256);
+    const groups = [{ representativeIndex: 0, candidateIndexes: candidates.map(candidate => candidate.candidateIndex) }];
+    return { manifest: { ...set, candidates, groups, analyzerFingerprint: createVideoIntelligenceAnalyzerFingerprint(policy, 'fixture') },
+      library: { ...library, sourceVideoContentHash: set.sourceVideoContentHash, candidates,
+        representativeFrames: [{ ...library.representativeFrames[0], id: frameId, frameSha256: representative.frameSha256,
+          timestampMs: representative.timestampMs, candidateIndexes: groups[0].candidateIndexes }] } };
+  }, {}, policy);
+  mocks.current.mockResolvedValue({ source: input.media, locator: { ...locator, sourceVideoContentHash: frozen.library.sourceVideoContentHash }, status: { phase: 'COMPLETE' } });
+  mocks.library.mockResolvedValue(frozen.library); mocks.preparation.mockResolvedValue({ manifest: frozen.manifest });
+  hydrateSource.mockResolvedValue(input); mocks.image.mockImplementation(mocks.actualImages);
+  const interval = vi.spyOn(FfmpegIntervalCandidateExtractor.prototype, 'extractCandidates');
+  const detect = vi.spyOn(FfmpegSceneChangeDetector.prototype, 'detect');
+  const materialize = vi.spyOn(FfmpegSceneCandidateMaterializer.prototype, 'materializeCandidates');
+  const commands = vi.spyOn(ffmpeg, 'runFfmpeg');
+  const release = vi.spyOn(cleanup, 'cleanupTemporaryVideoFrameCandidateOwnership');
+  try {
+    const indexes = frozen.library.candidates.slice(1, 21).map(candidate => candidate.candidateIndex);
+    expect(indexes).toHaveLength(20);
+    const result = await read(indexes);
+    expect(result.review!.previews).toHaveLength(20);
+    for (const preview of result.review!.previews) {
+      const candidate = frozen.library.candidates[preview.binding.candidateIndex];
+      expect(preview.binding).toEqual({ frameId: videoCandidateFrameId(frozen.library.sourceVideoContentHash, candidate.timestampMs, candidate.frameSha256),
+        representativeFrameId: frozen.library.representativeFrames[0].id, candidateIndex: candidate.candidateIndex,
+        timestampMs: candidate.timestampMs, frameSha256: candidate.frameSha256 });
+      expect(preview.providerEligible).toBe(false); expect(preview.thumbnailDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    }
+    expect(interval).toHaveBeenCalledTimes(1); expect(detect).toHaveBeenCalledTimes(1); expect(materialize).toHaveBeenCalledTimes(1);
+    expect(commands).toHaveBeenCalledTimes(4); expect(release).toHaveBeenCalledTimes(1);
+    for (const directory of release.mock.calls[0][0].temporaryDirectories) await expect(access(directory)).rejects.toThrow();
+    interval.mockClear();
+    await expect(mocks.actualImages(input, { library: frozen.library as never, manifest: frozen.manifest as never, representativeImages: null },
+      Array.from({ length: 25 }, (_, index) => index), async image => image.frameId)).rejects.toThrow('batch is invalid');
+    expect(interval).not.toHaveBeenCalled();
+    const invalid = structuredClone(frozen.manifest); invalid.groups = [];
+    mocks.preparation.mockResolvedValue({ manifest: invalid });
+    await expect(read(indexes)).rejects.toMatchObject({ status: 409 }); expect(interval).not.toHaveBeenCalled();
+    mocks.preparation.mockResolvedValue({ manifest: frozen.manifest });
+    hydrateSource.mockResolvedValue({ ...input, stored: { buffer: Buffer.from('different source') } } as never);
+    await expect(read(indexes)).rejects.toThrow('frozen TRA video preparation'); expect(interval).not.toHaveBeenCalled();
+    hydrateSource.mockResolvedValue(input);
+    const drift = structuredClone(frozen.library);
+    drift.candidates[1].frameSha256 = 'e'.repeat(64);
+    const changed = structuredClone(frozen.manifest); changed.candidates[1].frameSha256 = 'e'.repeat(64);
+    mocks.library.mockResolvedValue(drift); mocks.preparation.mockResolvedValue({ manifest: changed });
+    await expect(read(indexes)).rejects.toThrow('frame has drifted'); expect(interval).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(2);
+    for (const directory of release.mock.calls[1][0].temporaryDirectories) await expect(access(directory)).rejects.toThrow();
+  } finally { interval.mockRestore(); detect.mockRestore(); materialize.mockRestore(); commands.mockRestore(); release.mockRestore(); }
+}, 30_000);
