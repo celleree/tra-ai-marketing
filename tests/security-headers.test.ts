@@ -26,7 +26,8 @@ describe('browser security headers', () => {
     expect(policy).toContain('https://*.r2.cloudflarestorage.com');
     expect(policy).toContain("img-src 'self' data: blob: https:");
     expect(policy).toContain("worker-src 'self' blob:");
-    expect(policy).toContain("media-src 'self' blob:");
+    const mediaDirective = policy.split('; ').find(value => value.startsWith('media-src '));
+    expect(mediaDirective).toBe("media-src 'self' blob: https://*.r2.cloudflarestorage.com");
     expect(policy).not.toContain("'unsafe-eval'");
     expect(policy).not.toContain('script-src https:');
   });

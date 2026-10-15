@@ -68,7 +68,7 @@ export function buildContentSecurityPolicy({
     'worker-src': ["'self'", 'blob:'],
     'style-src': ["'self'", "'unsafe-inline'", ...(preview ? ['https://vercel.live'] : [])],
     'font-src': ["'self'", 'data:', ...(preview ? ['https://vercel.live', 'https://assets.vercel.com'] : [])],
-    'media-src': ["'self'", 'blob:'],
+    'media-src': ["'self'", 'blob:', 'https://*.r2.cloudflarestorage.com'],
     'frame-src': ["'self'", 'https://challenges.cloudflare.com', 'https://*.protect.clerk.com', ...(preview ? ['https://vercel.live'] : [])],
   });
 }
