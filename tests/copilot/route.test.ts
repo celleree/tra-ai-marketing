@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CreativeRecord } from '@/lib/creatives/generated';
-const mocks = vi.hoisted(() => ({ getOperatorAccess: vi.fn(), listCreatives: vi.fn(), requireOperatorQuota: vi.fn(), requestClaudeCopilot: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getOperatorAccess: vi.fn(), listCreatives: vi.fn(), requireOperatorQuota: vi.fn(), requestClaudeCopilot: vi.fn(), getAnthropicCredential: vi.fn(), getProviderSecretStatus: vi.fn(), providerSecretsReady: vi.fn() }));
+vi.mock('@/lib/provider-secrets/anthropic', () => ({ getAnthropicCredential: mocks.getAnthropicCredential, getProviderSecretStatus: mocks.getProviderSecretStatus, providerSecretsReady: mocks.providerSecretsReady }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.getOperatorAccess }));
 vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.requireOperatorQuota }));
 vi.mock('@/lib/creatives/storage', async original => ({ ...await original<typeof import('@/lib/creatives/storage')>(), listCreatives: mocks.listCreatives }));
@@ -20,7 +21,8 @@ const response = async (result: Response, status: number) => {
 };
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv('TRA_CLAUDE_COPILOT_ENABLED', 'true'); vi.stubEnv('TRA_CLAUDE_COPILOT_ALLOW_PAID', 'true'); vi.stubEnv('ANTHROPIC_API_KEY', 'offline-key');
+  vi.stubEnv('TRA_CLAUDE_COPILOT_ENABLED', 'true'); vi.stubEnv('TRA_CLAUDE_COPILOT_ALLOW_PAID', 'true'); vi.stubEnv('TRA_CLAUDE_COPILOT_BYOK_ALLOW_PAID', 'true'); vi.stubEnv('ANTHROPIC_API_KEY', 'global-key-never-used');
+  mocks.providerSecretsReady.mockReturnValue(true); mocks.getProviderSecretStatus.mockResolvedValue({ configured: true }); mocks.getAnthropicCredential.mockResolvedValue('offline-key');
   mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'server-operator' });
   mocks.listCreatives.mockResolvedValue([saved]); mocks.requireOperatorQuota.mockResolvedValue(null);
   mocks.requestClaudeCopilot.mockResolvedValue({ action: 'DO_NOTHING', performance: 'unknown' });
@@ -52,7 +54,7 @@ describe('operator-only Claude recommendation route (offline)', () => {
     expect(await response(await GET(), 200)).toEqual({ available: true, model: CLAUDE_COPILOT_MODEL });
     expect(mocks.listCreatives).not.toHaveBeenCalled(); expect(mocks.requireOperatorQuota).not.toHaveBeenCalled(); expect(mocks.requestClaudeCopilot).not.toHaveBeenCalled();
   });
-  it.each(['TRA_CLAUDE_COPILOT_ENABLED', 'TRA_CLAUDE_COPILOT_ALLOW_PAID', 'ANTHROPIC_API_KEY'])('fails closed with missing %s before POST effects', async name => {
+  it.each(['TRA_CLAUDE_COPILOT_ENABLED', 'TRA_CLAUDE_COPILOT_ALLOW_PAID', 'TRA_CLAUDE_COPILOT_BYOK_ALLOW_PAID'])('fails closed with missing %s before POST effects', async name => {
     vi.stubEnv(name, '');
     expect(await response(await GET(), 200)).toEqual({ available: false, model: CLAUDE_COPILOT_MODEL });
     await response(await POST(request()), 503);
@@ -82,6 +84,12 @@ describe('operator-only Claude recommendation route (offline)', () => {
     const result = await POST(request()); await response(result, status);
     expect(mocks.requireOperatorQuota).toHaveBeenCalledWith('server-operator', 'COPILOT_RECOMMENDATION', 1);
     expect(result.headers.get('Retry-After')).toBe('60'); expect(mocks.requestClaudeCopilot).not.toHaveBeenCalled();
+  });
+  it('requires the authenticated operator key without global fallback', async () => {
+    mocks.getAnthropicCredential.mockResolvedValue(null);
+    await response(await POST(request()), 409);
+    expect(mocks.getAnthropicCredential).toHaveBeenCalledWith('server-operator');
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled(); expect(mocks.requestClaudeCopilot).not.toHaveBeenCalled();
   });
   it('makes exactly one fixed-model adapter request using server-loaded evidence and the request signal', async () => {
     const req = request(); const body = await response(await POST(req), 200);
