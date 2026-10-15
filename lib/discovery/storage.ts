@@ -16,6 +16,7 @@ export type DiscoverySession = {
   acquisitions?: Record<string, { method: 'provider-download' | 'operator-upload'; savedAt: string; imageSha256: string; reused: boolean }>;
   visualEvidence?: Record<string, VisualEvidence>;
   analysisAttempts?: Record<string, 'reserved' | 'unknown' | 'succeeded'>;
+  analysisTokens?: Record<string, string>;
   fingerprints?: Record<string, ImageFingerprint>;
   similarImports?: Record<string, { mediaId: string; kind: 'identical-pixels' | 'possible-visual-variant'; distance: number }[]>;
 };

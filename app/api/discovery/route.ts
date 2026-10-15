@@ -67,7 +67,9 @@ export async function POST(request: Request) {
       if (session.sample) return response({ error: 'Fictional samples cannot be sent for visual analysis.' }, 400);
       if (body.approveTransfer !== true) return response({ error: 'Explicitly approve paid visual analysis and image transfer for this result.' }, 400);
       assertVisualAnalysisAvailable();
-      if (session.visualEvidence?.[candidate.id]) return response(summary(session));
+      const cached = session.visualEvidence?.[candidate.id];
+      if (cached && cached.imageSha256 === session.fingerprints?.[candidate.id]?.byteSha256) return response(summary(session));
+      if (cached) { delete session.visualEvidence?.[candidate.id]; delete session.analysisAttempts?.[candidate.id]; delete session.analysisTokens?.[candidate.id]; }
       if (session.analysisAttempts?.[candidate.id]) return response({ error: 'An analysis attempt already exists. Check its outcome before any further paid request.' }, 409);
       const quotaDenied = await requireOperatorQuota(access.userId, 'REFERENCE_CLASSIFICATION', 1); if (quotaDenied) return quotaDenied;
       const uploadedMedia = session.imports[candidate.id];
@@ -75,18 +77,22 @@ export async function POST(request: Request) {
         assertProviderAvailable(); const file = await downloadSelectedImage(candidate.imageUrl); const { buffer, fileName, mimeType } = await prepareMediaImage(file); return { buffer, fileName, mimeType };
       })();
       if (!source) return response({ error: 'Selected image is no longer available.' }, 400);
-      session.fingerprints = { ...session.fingerprints, [candidate.id]: await fingerprintImage(source.buffer) };
+      const fingerprint = await fingerprintImage(source.buffer), attempt = randomUUID();
+      session.fingerprints = { ...session.fingerprints, [candidate.id]: fingerprint };
+      session.analysisTokens = { ...session.analysisTokens, [candidate.id]: attempt };
       session.analysisAttempts = { ...session.analysisAttempts, [candidate.id]: 'reserved' };
       await saveSession(access.userId, session, etag);
       try {
         const evidence = await analyzeVisualPattern(source);
+        if (evidence.imageSha256 !== fingerprint.byteSha256) throw new DiscoveryError('Analysis did not match its source image.');
         const saved = await updateSession(access.userId, session.id, current => {
+          if (current.analysisTokens?.[candidate.id] !== attempt || current.fingerprints?.[candidate.id]?.byteSha256 !== fingerprint.byteSha256) return;
           current.visualEvidence = { ...current.visualEvidence, [candidate.id]: evidence };
           current.analysisAttempts = { ...current.analysisAttempts, [candidate.id]: 'succeeded' };
         }); Object.assign(session, saved);
       } catch {
         await updateSession(access.userId, session.id, current => {
-          if (!current.visualEvidence?.[candidate.id]) current.analysisAttempts = { ...current.analysisAttempts, [candidate.id]: 'unknown' };
+          if (current.analysisTokens?.[candidate.id] === attempt && current.fingerprints?.[candidate.id]?.byteSha256 === fingerprint.byteSha256 && !current.visualEvidence?.[candidate.id]) current.analysisAttempts = { ...current.analysisAttempts, [candidate.id]: 'unknown' };
         }).catch(() => {});
         return response({ error: 'Analysis outcome is unknown or its receipt could not be saved. No automatic retry is allowed; review the provider console.', sessionId: session.id }, 502);
       }
@@ -108,6 +114,10 @@ export async function POST(request: Request) {
         const file = uploaded instanceof File && uploaded.size ? uploaded : await (async () => { assertProviderAvailable(); return downloadSelectedImage(candidate.imageUrl); })();
         if (file.size > getMaxUploadBytes()) return response({ error: 'Image is too large.' }, 413);
         const stored = await storeSelectedImage(access.userId, file); media = stored.media;
+        const priorHash = session.fingerprints?.[candidate.id]?.byteSha256 ?? session.acquisitions?.[candidate.id]?.imageSha256;
+        if (priorHash !== stored.imageSha256 || (session.visualEvidence?.[candidate.id] && session.visualEvidence[candidate.id].imageSha256 !== stored.imageSha256)) {
+          delete session.visualEvidence?.[candidate.id]; delete session.analysisAttempts?.[candidate.id]; delete session.analysisTokens?.[candidate.id];
+        }
         session.fingerprints = { ...session.fingerprints, [candidate.id]: stored.fingerprint };
         session.similarImports = { ...session.similarImports, [candidate.id]: stored.similarImages };
         session.imports[candidate.id] = media;
