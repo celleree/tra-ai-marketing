@@ -1,10 +1,11 @@
+import { isPeoplePercent } from '@/lib/creatives/people-mix';
 import type { CreativeSourceAsset } from '@/lib/media/types';
 import { parseCreativeSourceAsset } from '@/lib/media/source-contract';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 const STORAGE_KEY = 'tra-ai-marketing:landing-creative-draft';
 const SCHEMA_VERSION = 2;
-const MIN_VARIATIONS = 2;
+const MIN_VARIATIONS = 1;
 const MAX_VARIATIONS = MAX_PORTFOLIO_CREATIVES;
 
 export interface LandingCreativeDraft {
@@ -12,6 +13,8 @@ export interface LandingCreativeDraft {
   context: string;
   sourceAsset: CreativeSourceAsset | null;
   variationCount: number;
+  peoplePercent?: number;
+  useReferenceLibrary?: boolean;
   generateOnOpen: boolean;
 }
 
@@ -50,6 +53,8 @@ export function consumeLandingCreativeDraft(): LandingCreativeDraft | null {
       variationCount: Number.isFinite(variationCount)
         ? Math.min(MAX_VARIATIONS, Math.max(MIN_VARIATIONS, variationCount))
         : 4,
+      useReferenceLibrary: typeof parsed.useReferenceLibrary === 'boolean' ? parsed.useReferenceLibrary : true,
+      peoplePercent: isPeoplePercent(parsed.peoplePercent) ? parsed.peoplePercent : 50,
       generateOnOpen: parsed.generateOnOpen !== false,
     };
   } catch {

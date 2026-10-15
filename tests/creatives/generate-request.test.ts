@@ -34,7 +34,7 @@ const expectGroundedContext = (value: unknown) => {
 describe('multi-source creative generation request', () => {
   it('keeps the legacy ceiling while allowing the resumable caller to opt into 36', () => {
     const request = { ...baseRequest, variationCount: 36 };
-    expect(validateGenerateCreativeRequest(request)).toEqual({ success: false, error: 'variationCount must be an integer between 2 and 30' });
+    expect(validateGenerateCreativeRequest(request)).toEqual({ success: false, error: 'variationCount must be an integer between 1 and 30' });
     expect(validateGenerateCreativeRequest(request, 36).success).toBe(true);
     expect(validateGenerateCreativeRequest({ ...request, variationCount: 37 }, 36).success).toBe(false);
   });

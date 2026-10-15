@@ -735,9 +735,9 @@ describe('creative batch planner', () => {
     expect(body.input[0].content[0].text).toContain('Only claims or proof explicitly present in approved company claims/proof fields');
   });
 
-  it.each([1, 37, 2.5])('rejects invalid count %s before calling the provider', async (count) => {
+  it.each([0, 37, 2.5])('rejects invalid count %s before calling the provider', async (count) => {
     const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
-    await expect(planCreativeBatch({ count, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/2 to 36/);
+    await expect(planCreativeBatch({ count, context: '', analysis, hasApprovedHumanSource: false })).rejects.toThrow(/1 to 36/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -849,4 +849,68 @@ it('blocks legacy representative video analysis without a human assessment befor
   await expect(requestCreativeBatch({ count: 2, context: 'Use the supplied video', analysis, sourceAnalysis, hasApprovedHumanSource: false }))
     .rejects.toThrow('lacks a visible-human assessment');
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+describe('explicit batch people mix', () => {
+  it.each([0, 50, 100])('enforces %s percent with automatic and closed manual sources', async peoplePercent => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const withPeople = Math.round(4 * peoplePercent / 100);
+    const creatives = Array.from({ length: 4 }, (_, i) => concept(i + 1, i < withPeople ? 'approved-tra-human' : 'non-human'));
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives })); vi.stubGlobal('fetch', fetchMock);
+    for (const manual of [false, true]) {
+      const plan = await requestCreativeBatch({ count: 4, peoplePercent, context: 'Source-grounded batch', analysis,
+        hasApprovedHumanSource: true, primaryVideoMediaId: `media_${'a'.repeat(32)}`, primaryVideoHasHuman: true,
+        ...(manual ? { requireSelectedVideoFrames: true } : {}) });
+      expect(plan.creatives.filter(item => item.strategy.execution.subjectSource === 'approved-tra-human')).toHaveLength(withPeople);
+    }
+    const sent = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).input[1].content[0].text);
+    expect(sent.peopleMixRequirement).toMatchObject({ percent: peoplePercent, withPeople, withoutPeople: 4 - withPeople });
+    creatives[0].strategy.execution.subjectSource = peoplePercent === 0 ? 'approved-tra-human' : 'non-human';
+    await expect(requestCreativeBatch({ count: 4, peoplePercent, context: 'Wrong mix', analysis, hasApprovedHumanSource: true })).rejects.toThrow('Ads with people');
+  });
+  it.each([[1, 0, 0], [1, 50, 1], [1, 100, 1], [3, 50, 2], [5, 50, 3]])('rounds %s ads at %s percent to %s human slots', async (count, peoplePercent, humans) => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse({ creatives: Array.from({ length: count }, (_, i) => concept(i + 1, i < humans ? 'approved-tra-human' : 'non-human')) })));
+    const plan = await planCreativeBatch({ count, peoplePercent, context: 'Rounded mix', analysis, hasApprovedHumanSource: true });
+    expect(plan.creatives.filter(item => item.strategy.execution.subjectSource === 'approved-tra-human')).toHaveLength(humans);
+  });
+  it('stops before planning when no eligible human evidence exists and permits explicit zero', async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    await expect(requestCreativeBatch({ count: 4, peoplePercent: 50, context: 'No human source', analysis, hasApprovedHumanSource: false })).rejects.toThrow('set Ads with people to 0%');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('never drops selected cases to satisfy fewer human slots', async () => {
+    const { job } = videoCasePortfolio();
+    const cases = requestedVideoCases('Use video cases', job.request.reviewHandoff)!;
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    await expect(requestCreativeBatch({ count: 2, peoplePercent: 50, context: 'Use video cases', analysis, hasApprovedHumanSource: true,
+      requestedVideoCases: cases, requireSelectedVideoFrames: true })).rejects.toThrow('selected video cases exceed');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('required reference library layout control', () => {
+  it.each([0, 50, 100])('requires a library blueprint with %s percent people, and permits prompt layouts Off', async peoplePercent => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    const library = { ...referenceCandidate('7'), priority: 'library' as const };
+    let creatives = [1, 2, 3, 4, 5].map(index => ({ ...concept(index, index <= Math.round(5 * peoplePercent / 100) ? 'approved-tra-human' : 'non-human'),
+      referenceChoices: { angleSource: null, layoutSource: null as string | null } }));
+    const fetchMock = vi.fn(async () => okResponse({ creatives })); vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 5, peoplePercent, context: 'TRA source and brand', analysis, hasApprovedHumanSource: true };
+    await expect(requestCreativeBatch({ ...args, useReferenceLibrary: true, referenceCatalog: [library] })).rejects.toThrow('no eligible library layout');
+    creatives = creatives.map(item => ({ ...item, referenceChoices: { angleSource: null, layoutSource: library.referenceId } }));
+    const on = await requestCreativeBatch({ ...args, useReferenceLibrary: true, referenceCatalog: [library] });
+    expect(on.creatives.every(item => item.strategy.referenceSelection?.layoutSource === library.referenceId)).toBe(true);
+    creatives = creatives.map(item => ({ ...item, referenceChoices: { angleSource: null, layoutSource: null } }));
+    expect((await requestCreativeBatch({ ...args, useReferenceLibrary: false, referenceCatalog: [] })).creatives).toHaveLength(5);
+  });
+  it('fails empty, excluded, and pinned conflicting catalog choices before a planning call', async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    const args = { count: 2, context: 'TRA', analysis, hasApprovedHumanSource: false, peoplePercent: 0 };
+    const library = { ...referenceCandidate('7'), priority: 'library' as const };
+    await expect(requestCreativeBatch({ ...args, useReferenceLibrary: true, referenceCatalog: [] })).rejects.toThrow('no eligible layout');
+    await expect(requestCreativeBatch({ ...args, useReferenceLibrary: false, referenceCatalog: [library] })).rejects.toThrow('remove library candidates');
+    await expect(requestCreativeBatch({ ...args, useReferenceLibrary: true, referenceCatalog: [library], requiredLayoutReferenceIds: [referenceCandidate('4').referenceId] })).rejects.toThrow('explicitly supplied layout conflicts');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

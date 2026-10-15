@@ -490,6 +490,7 @@ export function CreativeResults({
                 <p className={styles.creativeId}>ID: {creative.id}</p>
                 <CreativeImageFallbackNotice creative={creative} />
                 <DraftVideoSourceNotice planning={creative.planning} />
+                {creative.referenceImageId ? <p className={styles.creativeId}>Library layout: {creative.referenceImageId}</p> : null}
                 {creative.source !== 'uploaded' ? (
                   <RevisionControls creative={creative} onSaved={() => {}} showOtherOperations={false} />
                 ) : null}

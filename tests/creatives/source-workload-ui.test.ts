@@ -17,7 +17,7 @@ const render = (count: number, allowMultipleSources = true) => {
   return renderToStaticMarkup(createElement(CreativeComposer, {
     value: '', onChange: () => {}, onUploadStart: () => {}, onUploaded: () => {},
     sourceAssets, onSourceRoleChange: () => {}, onSourceRemoved: () => {},
-    allowMultipleSources, variationCount: 2, onVariationCountChange: () => {},
+    allowMultipleSources, peoplePercent: 50, onPeoplePercentChange: () => {}, useReferenceLibrary: true, onReferenceLibraryChange: () => {}, variationCount: 2, onVariationCountChange: () => {},
     onSubmit: () => {}, ready: false, generating: false,
   }));
 };

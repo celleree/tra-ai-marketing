@@ -77,7 +77,7 @@ beforeEach(() => {
         ...(proof.type === 'review' ? { includeAttribution: false } : {}) } : null,
       strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${c.index}` },
         execution: { ...c.strategy.execution, taxDocumentReference: 'none' } },
-      referenceChoices: { angleSource: null, layoutSource: plannerInput.requiredLayoutReferenceIds?.[0] ?? null } }));
+      referenceChoices: { angleSource: null, layoutSource: plannerInput.referenceLibraryRequirement?.requiredLayoutReferenceIds?.[0] ?? plannerInput.requiredLayoutReferenceIds?.[0] ?? null } }));
     const creatives = plannerInput.replacementIndexes
       ? allCreatives.filter(c => plannerInput.replacementIndexes.includes(c.index))
       : allCreatives;
@@ -150,7 +150,7 @@ describe('real preparation to Astra with composed sources', () => {
   });
   it('keeps Proof retrieval bound to original Create direction across audit repair feedback', async () => {
     const userDirection = 'Create proof-led ads about wage garnishment.';
-    const parsed = validateGenerateCreativeRequest({ context: userDirection, variationCount: 2,
+    const parsed = validateGenerateCreativeRequest({ context: userDirection, variationCount: 2, peoplePercent: 0, useReferenceLibrary: false,
       companyProfile: { knowledgeBase: { companySummary: 'APPROVED TRA COMPANY CONTEXT IRS tax professionalism patience reassurance.' } } });
     if (!parsed.success) throw new Error(parsed.error);
     const unrelatedId = `proof_${'a'.repeat(32)}`, relevantId = `proof_${'b'.repeat(32)}`;
@@ -199,7 +199,8 @@ describe('real preparation to Astra with composed sources', () => {
     const input = outbound[0]; expect(input.sourceAnalysis.entries).toHaveLength(10);
     for (const item of data.sourceAssets) expect(JSON.stringify(input.sourceAnalysis)).toContain(media[item.mediaId].fileName);
     expect(input.sourceAnalysisGuidance).toContain('not full Video Intelligence'); expect(input.referenceCatalog).toHaveLength(4);
-    const ready = (await step(current, storage)).job;
+    const audited = await step(current, storage); expect(audited.error).toBeUndefined();
+    const ready = audited.job;
     const restored = await restoreCreativePortfolio(ready.snapshot!);
     expect(restored.sourceAnalysis).toEqual(input.sourceAnalysis);
     expect(restored.providerImageSource).toBeUndefined();
@@ -321,5 +322,42 @@ describe('real preparation to Astra with composed sources', () => {
       slots: current.slots.map(slot => ({ ...slot, status: 'SAVED' as const })) }), storage);
     expect((await step(job, storage)).job).toEqual(saved); expect(operations).toEqual(['Astra']);
     expect(saved.snapshot).toEqual(ready.snapshot); expect(saved.sourceCompositionVersion).toBe(marker);
+  });
+});
+
+describe('reference library On/Off preparation', () => {
+  const libraryItem = () => ({ id: `media_${'7'.repeat(32)}`, fileName: 'library.png', originalName: 'Library layout', mimeType: 'image/png' as const,
+    size: png.length, url: '/api/media/files/library.png', addedAt: '2026-09-12T00:00:00.000Z', referenceType: 'layout' as const, angle: 'educational' as const, angleSource: 'manual' as const });
+  async function prepare(durable: boolean, enabled: boolean) {
+    const data = { ...portfolioRequest(), peoplePercent: 0, useReferenceLibrary: enabled };
+    if (!durable) return prepareCreativeGeneration(data, 'http://localhost');
+    let result = await advancePortfolioPreparation(data, 'http://localhost', { quotaReserved: true }, vi.fn(), 2);
+    for (let i = 0; i < 8 && result.state; i++) result = await advancePortfolioPreparation(data, 'http://localhost', result.state, vi.fn(), 2);
+    expect(result.prepared).toBeDefined(); return result.prepared!;
+  }
+  it.each([false, true])('omits every library fetch/selection/layout instruction when Off (durable=%s)', async durable => {
+    mocks.library.mockResolvedValue([libraryItem()]);
+    const prepared = await prepare(durable, false);
+    expect(mocks.library).not.toHaveBeenCalled(); expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.layout).not.toHaveBeenCalled(); expect(prepared.selectedReferences).toEqual([]);
+    expect(prepared.referenceCatalog).toEqual([]); expect(outbound[0].referenceCatalog).toEqual([]);
+    expect(outbound[0].useReferenceLibrary).toBe(false);
+  });
+  it.each([false, true])('loads exact selected bytes for a blueprint and requires that library layout On (durable=%s)', async durable => {
+    const item = libraryItem(); media[item.id] = { fileName: item.fileName, mimeType: 'image/png', mediaType: 'IMAGE', buffer: png };
+    mocks.library.mockResolvedValue([item]); mocks.select.mockResolvedValue([{ item, imageUrl: 'http://localhost/library.png', selectionReason: 'Source-compatible layout' }]);
+    const prepared = await prepare(durable, true);
+    expect(mocks.layout.mock.calls[0][0].buffer).toEqual(png);
+    expect(outbound[0].referenceCatalog[0].blueprint).toEqual(referenceCandidate().blueprint);
+    expect(JSON.stringify(outbound[0])).not.toContain(png.toString('base64'));
+    expect(prepared.batchPlan.creatives.every(item => item.strategy.referenceSelection?.layoutSource === libraryItem().id)).toBe(true);
+  });
+  it.each([false, true])('rejects empty/failed library selection without planning fallback (durable=%s)', async durable => {
+    await expect(prepare(durable, true)).rejects.toThrow('no eligible layout');
+    mocks.library.mockResolvedValue([libraryItem()]);
+    await expect(prepare(durable, true)).rejects.toThrow('no eligible layout');
+    mocks.select.mockRejectedValueOnce(new Error('Library selection unavailable'));
+    await expect(prepare(durable, true)).rejects.toThrow('Library selection unavailable');
+    expect(outbound).toHaveLength(0);
   });
 });

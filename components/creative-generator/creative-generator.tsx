@@ -92,6 +92,8 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
   const [sourceAssets, setSourceAssets] = useState<CreativeSourceAsset[]>([]);
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
+  const [peoplePercent, setPeoplePercent] = useState(50);
+  const [useReferenceLibrary, setUseReferenceLibrary] = useState(true);
   const [placement, setPlacement] = useState<CreativePlacement>('SQUARE_1_1');
   const [omitTestLogo, setOmitTestLogo] = useState(false);
   const [uploadedCreatives, setCreatives] = useState<GeneratedCreative[]>([]);
@@ -104,6 +106,13 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
   const videos = useSavedVideoSources(sourceAssets, setSourceAssets, videoReview, portfolio.observeAccess);
   const generating = portfolio.running || portfolio.loading;
   const savedPortfolio = portfolio.response?.job;
+  useEffect(() => {
+    if (savedPortfolio?.useReferenceLibrary !== undefined) setUseReferenceLibrary(savedPortfolio.useReferenceLibrary);
+    if (savedPortfolio?.peoplePercent !== undefined) {
+      setPeoplePercent(savedPortfolio.peoplePercent);
+      setVariationCount(savedPortfolio.requestedCount);
+    }
+  }, [savedPortfolio?.id, savedPortfolio?.peoplePercent, savedPortfolio?.requestedCount, savedPortfolio?.useReferenceLibrary]);
   const creatives = creationMode === 'generate' ? portfolio.response?.creatives ?? [] : uploadedCreatives;
   const generationComplete = !savedPortfolio || savedPortfolio.slots.every(slot => slot.status === 'SAVED');
   const generationFailures = Object.fromEntries((savedPortfolio?.slots ?? [])
@@ -125,6 +134,8 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
     setSourceAssets(draft.sourceAsset ? [draft.sourceAsset] : []);
     setContext(draft.context);
     setVariationCount(draft.variationCount);
+    setPeoplePercent(draft.peoplePercent ?? 50);
+    setUseReferenceLibrary(draft.useReferenceLibrary ?? true);
     setCreatives([]);
     setGenerationError('');
     setHandoffGenerate(draft.generateOnOpen);
@@ -201,7 +212,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
         ...(brand.colors.length ? { brandColors: brand.colors } : {}),
         ...(brand.fontGuidance.length ? { brandFontNames: brand.fontGuidance } : {}),
         ...(companyProfile ? { companyProfile } : {}),
-        context: context.trim(), variationCount, placement,
+        context: context.trim(), variationCount, peoplePercent, useReferenceLibrary, placement,
       });
     } catch (error) {
       setGenerationError(error instanceof Error ? error.message : 'Creative generation failed.');
@@ -222,7 +233,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
     handoffGenerationStartedRef.current = true;
     setHandoffGenerate(false);
     void generate();
-  }, [handoffGenerate, context, sourceAssets, variationCount, ready, generating]);
+  }, [handoffGenerate, context, sourceAssets, variationCount, peoplePercent, useReferenceLibrary, ready, generating]);
 
   return (
     <main className="workspace-shell">
@@ -301,6 +312,10 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
                     sourceAssets={sourceAssets}
                     onSourceRoleChange={handleSourceRoleChange}
                     onSourceRemoved={handleSourceRemoved}
+                    useReferenceLibrary={useReferenceLibrary}
+                    onReferenceLibraryChange={setUseReferenceLibrary}
+                    peoplePercent={peoplePercent}
+                    onPeoplePercentChange={setPeoplePercent}
                     variationCount={variationCount}
                     onVariationCountChange={setVariationCount}
                     placement={placement}

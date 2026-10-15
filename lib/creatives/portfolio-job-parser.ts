@@ -1,3 +1,5 @@
+import { assertReferenceLibraryConcept } from '@/lib/creatives/reference-library-mode';
+import { assertPeopleMix } from '@/lib/creatives/people-mix';
 import { validProviderPortraitState, validPortraitCropRevision } from '@/lib/video/provider-portrait-contract';
 import { parsePortfolioVideoDependencies, UnsupportedVideoPreparationVersionError } from '@/lib/creatives/portfolio-video-dependency';
 import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
@@ -174,6 +176,8 @@ const validSnapshot = (
       if (!validVideoSelectorBindings(snapshot.sourceAnalysis, job.request.context)) return false;
     }
     const plan = snapshot.batchPlan;
+    assertPeopleMix(plan.creatives, job.request.variationCount, job.request.peoplePercent);
+    plan.creatives.forEach(concept => assertReferenceLibraryConcept(concept, snapshot.referenceCatalog, job.request.useReferenceLibrary));
     if (Array.isArray(plan?.creatives)) plan.creatives.forEach(concept => assertDraftVideoAssertionCopy(concept.draftSourceAssertion, concept));
     const audit = plan.portfolioAudit === undefined ? undefined : parsePortfolioAudit(plan.portfolioAudit);
     if (snapshot.version !== 1 || !isDeepStrictEqual(snapshot.request, job.request)
@@ -199,7 +203,7 @@ const validSnapshot = (
 const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: 'required' | 'forbidden' | 'optional') => {
   if (!record(value) || !record(value.plannerArgs) || !record(value.snapshot)) return false;
   const checkpoint = value as unknown as PortfolioPlanningCheckpoint, args = checkpoint.plannerArgs;
-  if (args.count !== job.slots.length || !text(args.context) || args.proofRetrievalQuery !== job.request.proofRetrievalQuery || !validAnalysis(args.analysis)
+  if (args.useReferenceLibrary !== job.request.useReferenceLibrary || args.peoplePercent !== job.request.peoplePercent || args.count !== job.slots.length || !text(args.context) || args.proofRetrievalQuery !== job.request.proofRetrievalQuery || !validAnalysis(args.analysis)
     || !isDeepStrictEqual(args.operatorSelectedSourceGuidance, job.request.reviewHandoff?.operatorSelectedSourceGuidance)
     || (args.requestedVideoCases !== undefined && !isDeepStrictEqual(args.requestedVideoCases,
       requestedVideoCases(job.request.context, job.request.reviewHandoff)))

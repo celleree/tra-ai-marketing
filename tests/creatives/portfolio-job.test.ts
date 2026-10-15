@@ -20,7 +20,7 @@ describe('creative portfolio job transitions', () => {
     expect(new Set(job.slots.map(slot => slot.creativeId)).size).toBe(36);
     expect(job.slots.every(slot => /^creative_[a-f0-9]{32}$/.test(slot.creativeId))).toBe(true);
     expect(JSON.parse(JSON.stringify(job))).toEqual(job);
-    expect(() => initial(37)).toThrow('2 to 36');
+    expect(() => initial(37)).toThrow('1 to 36');
   });
 
   it('allows only one active lease and requires explicit retry after interrupted planning', () => {

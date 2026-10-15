@@ -1,3 +1,5 @@
+import { assertReferenceLibraryConcept } from '@/lib/creatives/reference-library-mode';
+import { listReferenceLibrary } from '@/lib/references/storage';
 import { createHash, randomUUID } from 'crypto';
 import { isSelectedCaseAssertion } from '@/lib/creatives/portfolio-case-amendment';
 import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
@@ -28,6 +30,7 @@ import type { MediaStorage } from '@/lib/media/storage';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { EligibleProviderImageSource } from '@/lib/media/source-hydration';
 import type { ReferencePlanningCandidate } from '@/lib/references/planning';
+import { assertPeopleMixConcept } from '@/lib/creatives/people-mix';
 import { resolvePlannedHumanVideoSource, type PlannedHumanVideoSource } from '@/lib/creatives/human-video-preflight';
 import type { GeneratedVideoFrameSelection } from '@/lib/video/generation-selection-contract';
 import type { ProviderVideoFrame } from '@/lib/video/source-overlay';
@@ -78,13 +81,24 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   preflightHumanVideo?: PlannedHumanVideoSource } = {}): Promise<GeneratedCreative> {
   const creativeId = options.creativeId ?? `creative_${randomUUID().replaceAll('-', '')}`;
   if (!/^creative_[a-f0-9]{32}$/.test(creativeId)) throw new Error('Invalid reserved creative ID.');
-  if (request.reviewHandoff?.choices.frames?.length) {
+  assertPeopleMixConcept(item, request.variationCount, request.peoplePercent);
+  if (request.reviewHandoff?.choices.frames?.length && item.strategy.execution.subjectSource === 'approved-tra-human') {
     // The explicit operator pool supersedes a catalog choice from an older frozen plan.
     item = structuredClone(item);
     delete item.strategy.approvedHumanId;
     delete item.strategy.humanSourceId;
   }
   assertSelectedVideoInputContract(item, selectedVideoInputContract(request));
+  assertReferenceLibraryConcept(item, referenceCatalog, request.useReferenceLibrary);
+  if (request.useReferenceLibrary) {
+    const chosen = referenceCatalog.find(reference => reference.referenceId === item.strategy.referenceSelection?.layoutSource)!;
+    const available = await listReferenceLibrary();
+    const stored = available.some(reference => reference.id === chosen.referenceId && reference.referenceType === 'layout')
+      ? await storage.readImageById(chosen.referenceId) : null;
+    if (!stored || sha256(stored.buffer) !== chosen.sourceSha256) {
+      throw new Error('The selected library layout is unavailable or changed. Start a new portfolio or restore the reference; no prompt-only fallback was used.');
+    }
+  }
   const copyMode = classifyPlannedCopy(item);
   assertDraftVideoAssertionCopy(item.draftSourceAssertion, item);
   if (item.draftSourceAssertion && !isSelectedCaseAssertion(item.draftSourceAssertion, request.reviewHandoff)) {
@@ -96,7 +110,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   }
   const { human, videoFrames: itemVideoFrames } = options.preflightHumanVideo
     ?? await resolvePlannedHumanVideoSource(item, { videoFrameSet, providerImageSource });
-  const itemImageSource = human ? null : providerImageSource;
+  const itemImageSource = human || (request.peoplePercent !== undefined && item.strategy.execution.subjectSource === 'non-human') ? null : providerImageSource;
   const itemFrameSelection = itemVideoFrames ? human?.record.source ?? generatedVideoFrameSelection : undefined;
   const suppliedVideo = requestedSources.some(source => source.role === 'TRA_VIDEO');
   const videoGuidance = primaryVideoGuidance(sourceAnalysis, videoFrameSet?.source?.media?.id);
@@ -109,7 +123,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   if (suppliedVideo && item.strategy.execution.subjectSource === 'approved-tra-human' && !itemVideoFrames) {
     throw new Error('The selected video human has no verified frames. Select usable frames before generating.');
   }
-  if (request.reviewHandoff?.choices.frames?.length) {
+  if (request.reviewHandoff?.choices.frames?.length && (request.peoplePercent === undefined || item.strategy.execution.subjectSource === 'approved-tra-human')) {
     assertReviewedFrameSelection(request.reviewHandoff.choices, itemFrameSelection);
     if (human || itemImageSource || !itemVideoFrames) throw new Error('Manual reviewed frames require their exact fresh PNG attachment.');
   }
@@ -158,7 +172,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     referenceCatalog,
     ...(proofProvenance ? { proofProvenance } : {}),
   }));
-  const itemContext = `${request.previewOmitBrandLogo ? PREVIEW_NO_LOGO_DIRECTION + '\n\n' : ''}${videoGuidance ? `${primaryVideoRenderDirection(videoGuidance)}\n\n${renderBrief}` : renderBrief}`;
+  const itemContext = `${request.previewOmitBrandLogo ? PREVIEW_NO_LOGO_DIRECTION + '\n\n' : ''}${videoGuidance ? `${primaryVideoRenderDirection(videoGuidance, request.peoplePercent)}\n\n${renderBrief}` : renderBrief}`;
 
   if (itemImageSource) {
     imageResult = copyMode.kind === 'LEGACY'

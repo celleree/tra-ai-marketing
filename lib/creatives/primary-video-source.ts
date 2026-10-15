@@ -4,14 +4,17 @@ import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-requ
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
 
-export type SelectedVideoInputContract = { requireSelectedVideoFrames?: boolean; requiredLayoutReferenceIds?: string[] };
+export type SelectedVideoInputContract = { peoplePercent?: number; useReferenceLibrary?: boolean; requireSelectedVideoFrames?: boolean; requiredLayoutReferenceIds?: string[] };
 export class SelectedVideoInputError extends Error {}
 
 /** Explicit inputs outrank optional catalog inspiration; automatic video mode remains available. */
-export function selectedVideoInputContract(request: Pick<ValidGenerateCreativeRequest, 'sourceAssets' | 'videoFrameSelection' | 'reviewHandoff'>): SelectedVideoInputContract {
-  if (!request.sourceAssets?.some(source => source.role === 'TRA_VIDEO')) return {};
+export function selectedVideoInputContract(request: Pick<ValidGenerateCreativeRequest, 'sourceAssets' | 'videoFrameSelection' | 'reviewHandoff' | 'peoplePercent' | 'useReferenceLibrary'>): SelectedVideoInputContract {
+  const controls = { ...(request.peoplePercent === undefined ? {} : { peoplePercent: request.peoplePercent }),
+    ...(request.useReferenceLibrary === undefined ? {} : { useReferenceLibrary: request.useReferenceLibrary }) };
+  if (!request.sourceAssets?.some(source => source.role === 'TRA_VIDEO')) return controls;
   const layoutIds = request.sourceAssets.filter(source => source.role === 'LAYOUT_REFERENCE').map(source => source.mediaId);
   return {
+    ...controls,
     ...(request.videoFrameSelection || request.reviewHandoff?.choices.frames?.length ? { requireSelectedVideoFrames: true } : {}),
     ...(layoutIds.length ? { requiredLayoutReferenceIds: layoutIds } : {}),
   };
@@ -38,7 +41,7 @@ export function representativeVideoGuidance(source: CreativeGenerationProvenance
 
 export function assertSelectedVideoInputContract(concept: Pick<PlannedCreativeConcept, 'strategy'>, contract: SelectedVideoInputContract,
   preservedHuman?: Pick<PlannedCreativeConcept['strategy'], 'humanSourceId' | 'approvedHumanId'>) {
-  if (contract.requireSelectedVideoFrames && (concept.strategy.execution.subjectSource !== 'approved-tra-human'
+  if (contract.requireSelectedVideoFrames && (contract.peoplePercent === undefined || concept.strategy.execution.subjectSource === 'approved-tra-human') && (concept.strategy.execution.subjectSource !== 'approved-tra-human'
     || concept.strategy.humanSourceId !== preservedHuman?.humanSourceId || concept.strategy.approvedHumanId !== preservedHuman?.approvedHumanId)) {
     throw new SelectedVideoInputError('The plan ignored the explicitly selected TRA video frames. No images were generated. Use those frames or remove the selection explicitly.');
   }
@@ -86,13 +89,13 @@ export function primaryVideoGuidance(state?: PlanningSourceAnalysisState, mediaI
   return { source: entry.source, hasHuman, analysis };
 }
 
-export const primaryVideoDirection = (guidance: NonNullable<ReturnType<typeof primaryVideoGuidance>>) =>
+export const primaryVideoDirection = (guidance: NonNullable<ReturnType<typeof primaryVideoGuidance>>, peoplePercent?: number) =>
   `PRIMARY SELECTED VIDEO ${guidance.source.mediaId} (source SHA-256 ${guidance.source.sha256}).
-Use this video as the primary creative evidence. Company knowledge supports brand and verified facts; it must not replace the selected video with unrelated concepts. These bounded observations/transcript excerpts are partial source content, not approved claims or complete narratives. Preserve the supplied human through assessed fresh frames when using a person; no catalog-person substitution. ${guidance.hasHuman ? 'Include at least one concept using that visible TRA human (subjectSource approved-tra-human, no catalog humanSourceId). If usable human frames cannot be verified, stop visibly rather than substitute unrelated graphics.' : ''}
+Use this video as the primary creative evidence. Company knowledge supports brand and verified facts; it must not replace the selected video with unrelated concepts. These bounded observations/transcript excerpts are partial source content, not approved claims or complete narratives. Preserve the supplied human through assessed fresh frames when using a person; no catalog-person substitution. ${guidance.hasHuman && peoplePercent === undefined ? 'Include at least one concept using that visible TRA human (subjectSource approved-tra-human, no catalog humanSourceId). If usable human frames cannot be verified, stop visibly rather than substitute unrelated graphics.' : ''}
 Read the primary video content in referenceAnalysis and sourceAnalysis. Exact statements may inform current drafts through draftVideoSourceSelection without a manual Proof Library prerequisite. Their claims remain source assertions, not independent verification or publishing permission.`;
 
 /** The image renderer gets visual grounding, not unplanned transcript/claims/caption copy. */
-export const primaryVideoRenderDirection = (guidance: NonNullable<ReturnType<typeof primaryVideoGuidance>>) =>
+export const primaryVideoRenderDirection = (guidance: NonNullable<ReturnType<typeof primaryVideoGuidance>>, peoplePercent?: number) =>
   `PRIMARY SELECTED VIDEO ${guidance.source.mediaId} (source SHA-256 ${guidance.source.sha256}).
-The selected video is the primary visual source. Use the planned concept and exactCopy; company knowledge supplies supporting brand/facts. Preserve the attached assessed TRA identity. Do not redraw source captions, logos or unplanned text/claims. These partial visual observations are guidance, not advertising evidence:
+The selected video is the primary visual source. Use the planned concept and exactCopy; company knowledge supplies supporting brand/facts. ${peoplePercent === undefined ? 'Preserve the attached assessed TRA identity.' : 'When this concept calls for a person, preserve the attached assessed TRA identity. Non-human concepts must depict no person and receive no human source pixels.'} Do not redraw source captions, logos or unplanned text/claims. These partial visual observations are guidance, not advertising evidence:
 ${JSON.stringify({ summary: guidance.analysis.summary, composition: guidance.analysis.visualStructure })}`;

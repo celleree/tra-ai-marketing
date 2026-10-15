@@ -11,7 +11,7 @@ For each group, summarize its shared proposition and explain its distinction fro
 Separately report execution concentration (mechanisms, subjects, archetypes, desk/paper imagery, CTA approaches) in executionNotes. Judge whether repetition serves the propositions, without human/graphic or reference-use quotas. This is a semantic audit, not prediction of advertising performance or approval of source claims.`;
 
 export async function auditCreativePortfolio(concepts: PlannedCreativeConcept[], operatorSelectedSourceGuidance?: VideoReviewHandoff['operatorSelectedSourceGuidance']): Promise<PortfolioAudit> {
-  if (concepts.length < 2 || concepts.length > MAX_PORTFOLIO_CREATIVES) throw new Error(`Portfolio audit requires 2–${MAX_PORTFOLIO_CREATIVES} concepts.`);
+  if (concepts.length < 1 || concepts.length > MAX_PORTFOLIO_CREATIVES) throw new Error(`Portfolio audit requires 2–${MAX_PORTFOLIO_CREATIVES} concepts.`);
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol';
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY is not configured.');

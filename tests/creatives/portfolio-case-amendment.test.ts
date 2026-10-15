@@ -156,3 +156,17 @@ describe('explicit source case amendments', () => {
     expect(() => portfolioSavedCreatives(saved, [generic as never])).toThrow('reserved portfolio concept');
   });
 });
+
+it("pairs only human slots in a new mixed batch and never inserts a person case into a graphic ad", () => {
+  const { job, pairs } = videoCasePortfolio(); job.request.peoplePercent = 50;
+  job.snapshot!.batchPlan.creatives[0].strategy.execution.subjectSource = 'approved-tra-human';
+  const graphic = structuredClone(job.snapshot!.batchPlan.creatives[1]);
+  const proposed = proposeCaseAmendment(job, [pairs[0]]);
+  expect(proposed.creatives[1]).toEqual(graphic); expect(proposed.creatives[1].draftSourceAssertion).toBeUndefined();
+  expect(caseAmendmentOptions(job).slots.map(slot => slot.index)).toEqual([1]);
+  expect(() => proposeCaseAmendment(job, pairs)).toThrow('frozen portfolio');
+  job.videoCaseAmendment = proposed.amendment;
+  expect(caseReviewChoices(job, 1)?.frames).toHaveLength(1); expect(caseReviewChoices(job, 2)?.frames).toBeNull();
+  expect(effectiveCaseConcept(job, 2)).toEqual(graphic);
+  expect(parseCreativePortfolioJob(encode(job), job.id).videoCaseAmendment).toEqual(proposed.amendment);
+});

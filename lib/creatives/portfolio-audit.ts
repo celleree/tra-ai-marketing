@@ -23,7 +23,7 @@ const isText = (value: unknown): value is string => typeof value === 'string' &&
 export function parsePortfolioAudit(value: unknown): PortfolioAudit | null {
   if (!record(value) || !exact(value, ['version', 'model', 'conceptCount', 'executionNotes', 'groups']) || value.version !== 1
     || !isText(value.model) || value.model.length > 200 || !isText(value.executionNotes)
-    || !Number.isInteger(value.conceptCount) || Number(value.conceptCount) < 2 || Number(value.conceptCount) > MAX_PORTFOLIO_CREATIVES
+    || !Number.isInteger(value.conceptCount) || Number(value.conceptCount) < 1 || Number(value.conceptCount) > MAX_PORTFOLIO_CREATIVES
     || !Array.isArray(value.groups) || !value.groups.length || value.groups.length > Number(value.conceptCount)) return null;
   const indexes: number[] = [];
   for (const group of value.groups) {

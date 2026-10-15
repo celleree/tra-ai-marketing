@@ -7,6 +7,7 @@ import { selectBestReferenceCreatives, type ReferenceSelectionCandidate, type Se
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
+import { requireReferenceLibrarySelection } from '@/lib/creatives/reference-library-mode';
 import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import type { PreparedCreativeGeneration } from '@/lib/creatives/prepare-generation';
 import { formatLayoutBlueprintForPlanning, LAYOUT_BLUEPRINT_SCHEMA_VERSION, type LayoutBlueprint } from '@/lib/layouts/blueprint';
@@ -189,7 +190,8 @@ export async function advancePortfolioPreparation(
   }
 
   if (!state.selectedReferences) {
-    const library = isPreviewAcceptanceOperation() ? [] : (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
+    const library = isPreviewAcceptanceOperation() || data.useReferenceLibrary === false ? [] : (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
+    requireReferenceLibrarySelection(data.useReferenceLibrary, library.length);
     const requestedReferenceCount = Math.min(8, data.variationCount, library.length);
     if (requestedReferenceCount > 0) {
       onProviderOperationStart();
@@ -205,6 +207,10 @@ export async function advancePortfolioPreparation(
     state.selectedReferences = [];
   }
 
+  requireReferenceLibrarySelection(data.useReferenceLibrary, state.selectedReferences.length);
+  if (data.useReferenceLibrary === false && (state.selectedReferences.length || state.referenceCatalog?.some(item => item.priority === 'library'))) {
+    throw new Error('Saved preparation conflicts with Use reference library Off. Start a new portfolio.');
+  }
   if (!state.referenceCatalog) {
     state.referenceCatalog = source && generationSourceAsset && state.sourceLayout
       ? [toCatalogItem(generationSourceAsset.media.id, 'user', state.analysis.hookOrAngle, state.sourceLayout)]
@@ -260,7 +266,7 @@ export async function advancePortfolioPreparation(
   }
   const approvedHumanOptions = manualFrames || videoGuidance ? [] : await loadApprovedHumanOptions();
   const humanSourceDirection = manualFrames
-    ? 'The operator explicitly selected a closed pool of TRA video human frames in operatorSelectedSourceGuidance. Every concept must use that pool, with null humanSourceId/approvedHumanId; no catalog, image, representative or neighbor substitution. Visual suitability and overlay assessment plus fresh PNG extraction are still required before rendering. Stop visibly if the pool is unusable; do not replace it with a non-human concept.'
+    ? 'The operator explicitly selected a closed pool of TRA video human frames in operatorSelectedSourceGuidance. Every human concept in the requested mix must use that pool (all concepts for historical requests without a mix), with null humanSourceId/approvedHumanId; no catalog, image, representative or neighbor substitution. Visual suitability and overlay assessment plus fresh PNG extraction are still required before rendering. Stop visibly if the pool is unusable; do not replace it with a non-human concept.'
     : approvedHumanOptions.length
     ? 'Curated approvedHumanOptions are available as independent human sources. Choose a stable ID only when that person strengthens the proposition; selecting one replaces any supplied human source for that concept. Choose null for a graphic concept or an explicitly supplied approved source. No invented people or identity-based claims.'
     : videoFrameSet
@@ -280,8 +286,8 @@ export async function advancePortfolioPreparation(
     : videoFrameSet
       ? 'referenceAnalysis describes the approved TRA video-frame source; preserve approved TRA cues and obey its avoid guidance.'
       : '';
-  const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
-  state.referenceCatalog = await withCuratedReferenceMetadata(state.referenceCatalog);
+  const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\n${data.useReferenceLibrary ? 'Required library layout options (choose a validated blueprint for every ad)' : 'Optional analysis-only reference guidance for the batch'}:\n${referenceDirections}\n${data.useReferenceLibrary ? 'Choose a supplied library layout for every ad; a layout may be reused for distinct concepts. Do not copy reference content or treat its library category as required.' : 'Use a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.'}` : ''}`;
+  if (data.useReferenceLibrary !== false) state.referenceCatalog = await withCuratedReferenceMetadata(state.referenceCatalog);
   const logoPlacement = brandLogo
     ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, data.placement)
     : undefined;
@@ -290,7 +296,7 @@ export async function advancePortfolioPreparation(
     ...(data.reviewHandoff ? { operatorSelectedSourceGuidance: data.reviewHandoff.operatorSelectedSourceGuidance } : {}),
     requestedVideoCases: requestedVideoCases(data.context, data.reviewHandoff),
     count: data.variationCount,
-    context: `${data.previewOmitBrandLogo ? PREVIEW_NO_LOGO_DIRECTION + '\n\n' : ''}${videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext}`,
+    context: `${data.previewOmitBrandLogo ? PREVIEW_NO_LOGO_DIRECTION + '\n\n' : ''}${videoGuidance ? `${primaryVideoDirection(videoGuidance, data.peoplePercent)}\n\n${generationContext}` : generationContext}`,
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis: state.analysis,
     ...(sourceCompositionVersion === 2 ? { sourceAnalysis: state.sourceAnalysis } : {}),

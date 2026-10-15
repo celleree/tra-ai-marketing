@@ -176,6 +176,18 @@ Unsupported claims remain unknown rather than inferred.
 
 The real TRA logo is the source of truth. Image models must not redraw it; reserve space and composite the approved logo deterministically. Preserve its artwork, aspect ratio, colors, shapes, and spacing; proportional resizing is allowed.
 
+## Create batch controls (2026-10-15)
+
+New Create and landing submissions explicitly carry `peoplePercent` (default 50) and `useReferenceLibrary` (default On). Ads with people counts ads containing an approved person, not the number of people within an ad. The displayed exact count is `Math.round(batchCount * percent / 100)`, with ties toward people: four at 50% gives 2/2, five gives 3/2, and one gives 1/0. Ordinary batches support 1–36; the legacy single-request ceiling remains 30 and the separately approved two-ad Preview fence stays exact.
+
+The first rounded number of concept indexes must use approved TRA humans; remaining indexes must be non-human with no human IDs or attached human pixels. The assignment is enforced through planner/repair, saved checkpoints/readback and rendering. Manually selected frames remain a closed identity pool for human slots. Selected individual cases require enough human slots and the existing exact person/case confirmation; mixed case amendments cover only human slots and preserve graphic concepts. Missing or unsuitable human evidence stops visibly: add eligible TRA sources or explicitly change the mix. Never invent identities/cases or convert a required human slot to graphics.
+
+Use reference library On requires every ad to select a known eligible library layout ID and use its validated blueprint; one layout can support multiple distinct ads. Empty/failed selection or missing/changed selected media stops before image dispatch. An explicitly pinned uploaded layout conflicting with the library requirement requires removal of that upload or switching Off. Off skips library discovery/selection and removes library catalogs, angles and layout instructions; prompt, explicit supplied sources, source facts, logo and people mix remain active. Results show the used library reference ID.
+
+Library image bytes reach the existing reference selector/layout preprocessing only. The final image provider receives the chosen design-only blueprint and separately approved TRA human/document inputs; raw external layout pixels, people, branding, copy and claims remain excluded. The provider-body regression verifies this boundary.
+
+Both controls persist immutably in new request/planner snapshots and submission identities. Reload, resume and explicit Retry reuse frozen values, creative IDs, paid checkpoints and quota behavior. Historical requests/snapshots and old-client retransmissions with absent fields retain their original optional-library, automatic-at-least-one/manual-all-human behavior; no saved record is migrated. These explicit controls supersede earlier no-fixed-ratio/optional-library guidance only when present.
+
 ## Variation planner
 
 GPT-6 Astra plans the batch before image generation using medium reasoning.
@@ -274,7 +286,7 @@ The current image workflow is ready when these work end-to-end:
 
 ## Current remaining roadmap for Astra
 
-The approved [image productionization checkpoint](image-gen-improvement.md) defines the proposition-first planner, independent angle/layout, portfolio diversity, approved-human library and resumable generation. Prefer approved TRA humans when strategically useful, without fixed human/graphic quotas; fictional adults remain a later product decision. Use tax documents only when they materially help the concept. Historical manual-test exceptions do not change these implementation boundaries.
+The approved [image productionization checkpoint](image-gen-improvement.md) defines the proposition-first planner, independent angle/layout, portfolio diversity, approved-human library and resumable generation. Prefer approved TRA humans when strategically useful, subject to the explicit Create batch mix when present; historical absent-field requests have no fixed human/graphic quota; fictional adults remain a later product decision. Use tax documents only when they materially help the concept. Historical manual-test exceptions do not change these implementation boundaries.
 
 The separately owned Proof Library of exact customer reviews and verified case studies extends Company proof/customer-insight context. Stable proof-record selection stays separate from angle/layout and asset provenance. The [Create integration plan](tra-create-integration-plan.md) now owns planner/render integration, with detailed human/Proof requirements in [PR #222](https://github.com/celleree/tra-ai-marketing/pull/222). Proof use-approval semantics and runtime integration remain pending under D; record readiness or ACTIVE status alone is not advertising-use approval.
 

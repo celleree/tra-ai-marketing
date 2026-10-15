@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { peopleMix } from '@/lib/creatives/people-mix';
 import { PortfolioCaseAmendment } from './portfolio-case-amendment';
 
 import { portfolioCanAdvance } from '@/lib/creatives/portfolio-client';
@@ -20,6 +21,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
     {' '}<a href={portfolio.signInUrl}>Sign in to restore saved progress</a></p> : null;
   if (!job) return signInNotice;
 
+  const savedMix = job.peoplePercent === undefined ? null : peopleMix(job.requestedCount, job.peoplePercent);
   const savedCount = job.slots.filter(slot => slot.status === 'SAVED').length;
   const failed = job.slots.filter(slot => slot.status === 'RETRY_REQUIRED');
   const ordinaryFailed = failed.filter(slot=>slot.videoSelection?.version!==2 || !slot.videoSelection.portraitCropRevision);
@@ -51,6 +53,8 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
 
   return <section className={`panel ${styles.panel}`} aria-label="Saved portfolio progress">
     {signInNotice}
+    {savedMix ? <p>Saved mix: {savedMix.withPeople} with people · {savedMix.withoutPeople} without people ({job.peoplePercent}%).</p> : null}
+    {job.useReferenceLibrary === undefined ? null : <p>Saved reference library: {job.useReferenceLibrary ? 'On' : 'Off'}.</p>}
     {!complete ? <p>Leaving this page pauses continuation after the current step. Saved progress is preserved; returning does not restart generation.</p> : null}
     {initializationAvailable ? <p role="status">The stopped run is preserved. Prepare the approved reassessment with the same saved inputs and layout preparation. This starts no AI calls; use Resume separately for the two approved frame assessments.</p> : null}
     {portfolio.response?.previewPreparationApproved ? <p role="status">This saved Preview test reuses the saved layout preparation and permits two new selected-frame assessments once each. Both frames must pass before planning. The $1 budget is an estimate, with no guaranteed dollar ceiling. No retries, repair or fallback are authorized.</p> : null}

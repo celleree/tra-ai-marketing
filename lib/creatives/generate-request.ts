@@ -1,3 +1,4 @@
+import { DEFAULT_PEOPLE_PERCENT, isPeoplePercent } from '@/lib/creatives/people-mix';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
 import type { VideoReviewHandoff, VideoReviewReference } from '@/lib/creatives/review-handoff';
@@ -37,6 +38,9 @@ export type GenerateCreativeRequest = {
   placement?: CreativePlacement;
   context: string;
   variationCount: number;
+  /** Share of ads containing an approved person; absence is legacy saved state only. */
+  peoplePercent?: number;
+  useReferenceLibrary?: boolean;
 };
 
 export type ValidGenerateCreativeRequest = Omit<
@@ -143,6 +147,11 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
   );
   const companyProfile = normalizeRuntimeCompanyProfile(body.companyProfile);
   const userContext = typeof body.context === 'string' ? body.context.trim() : '';
+  if (body.useReferenceLibrary !== undefined && typeof body.useReferenceLibrary !== 'boolean') {
+    return { success: false, error: 'useReferenceLibrary must be a boolean' };
+  }
+  const peoplePercent = body.peoplePercent === undefined ? DEFAULT_PEOPLE_PERCENT : body.peoplePercent;
+  if (!isPeoplePercent(peoplePercent)) return { success: false, error: 'peoplePercent must be an integer between 0 and 100' };
   const variationCount =
     typeof body.variationCount === 'number'
       ? body.variationCount
@@ -208,12 +217,12 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
 
   if (
     !Number.isInteger(variationCount) ||
-    variationCount < 2 ||
+    variationCount < 1 ||
     variationCount > maximumCount
   ) {
     return {
       success: false,
-      error: `variationCount must be an integer between 2 and ${maximumCount}`,
+      error: `variationCount must be an integer between 1 and ${maximumCount}`,
     };
   }
 
@@ -248,6 +257,8 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
       context,
       proofRetrievalQuery: userContext,
       variationCount,
+      ...(body.peoplePercent === undefined ? {} : { peoplePercent }),
+      ...(body.useReferenceLibrary === undefined ? {} : { useReferenceLibrary: body.useReferenceLibrary as boolean }),
     },
   };
 }
