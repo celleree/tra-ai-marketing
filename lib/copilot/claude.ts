@@ -1,3 +1,4 @@
+import { readCopilotBody } from '@/lib/copilot/request-body';
 import { parseCopilotContextSnapshot, parseCopilotRecommendation, type CopilotRecommendationRecord } from '@/lib/copilot/records';
 import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
 
@@ -44,7 +45,7 @@ export async function requestClaudeCopilot(suppliedContext: unknown, options: Cl
         messages: [{ role: 'user', content: input }] }),
     });
     if (!response.ok) throw new ClaudeCopilotError('provider_error', response.status);
-    const result = await response.json();
+    const result = await readCopilotBody(response, 128 * 1024) as { stop_reason?: unknown; content?: { type?: unknown; text?: unknown }[] };
     if (signal.aborted) throw new ClaudeCopilotError('aborted');
     if (result?.stop_reason !== 'end_turn' || !Array.isArray(result.content) || !result.content.length) {
       throw new ClaudeCopilotError('invalid_response');
