@@ -103,7 +103,9 @@ export async function loadVideoLinkedPlanningInputs(
     explicitProofIds === undefined ? snapshot.items : snapshot.items.filter(item =>
       explicitProofIds.includes(item.id) || projected.some(insight => insight.linkedProofReference.id === item.id)),
     proofRetrievalQuery,
-    projected.map((insight) => insight.linkedProofReference)
+    [...projected.map((insight) => insight.linkedProofReference),
+      ...(explicitProofIds === undefined ? [] : snapshot.items.filter(item => explicitProofIds.includes(item.id))
+        .map(({ id, type, updatedAt }) => ({ id, type, updatedAt })))]
   );
   const available = new Set(proofCatalog.map((proof) =>
     `${proof.id}:${proof.type}:${proof.updatedAt}`));

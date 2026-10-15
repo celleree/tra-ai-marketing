@@ -7,6 +7,7 @@ const { listProofRecordsMock } = vi.hoisted(() => ({
 vi.mock('@/lib/proof/storage', () => ({ listProofRecords: listProofRecordsMock }));
 
 import {
+  loadPlanningProofCatalog,
   MAX_PLANNING_PROOF_RECORDS,
   MAX_PLANNING_PROOF_SERIALIZED_CHARS,
   selectProofForPlanning,
@@ -104,6 +105,14 @@ afterEach(() => {
 });
 
 describe('Proof planning retrieval', () => {
+  it('uses an explicitly selected company case despite an unrelated query and excludes other shared cases', async () => {
+    const own = caseStudy('a'), other = review('b'), unapproved = caseStudy('c', { advertisingUseApproved: false });
+    listProofRecordsMock.mockResolvedValue([own, other, unapproved]);
+    const records = await loadPlanningProofCatalog('A completely different marketing direction', [own.id, unapproved.id]);
+    expect(records.map(item => item.id)).toEqual([own.id]);
+    expect(records[0]).toMatchObject({ approvedClaimWording: own.approvedClaimWording,
+      requiredDisclaimer: own.requiredDisclaimer, usageRestrictions: own.usageRestrictions });
+  });
   it('preserves an approved ACTIVE Review exactly and gates attribution', () => {
     const attributed = review('a', { attribution: { display: 'Sam', allowed: true } });
     const unattributed = review('b', {
