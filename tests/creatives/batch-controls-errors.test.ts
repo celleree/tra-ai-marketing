@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import * as operatorQuota from '@/lib/quotas/operator-quota';
 import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
@@ -12,7 +13,8 @@ vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({ readImag
 vi.mock('@/lib/creatives/storage', () => ({ listCreatives: async () => [] }));
 vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: mocks.humans }));
 const secret = 'SECRET_PROVIDER_STORAGE_OR_CREDENTIAL_DETAIL';
-beforeEach(() => { vi.resetAllMocks(); mocks.library.mockResolvedValue([]); mocks.image.mockResolvedValue(null); mocks.humans.mockResolvedValue([]); });
+// Quota admission has its own real-storage suite; these cases isolate post-admission controls and redaction.
+beforeEach(() => { vi.resetAllMocks(); vi.spyOn(operatorQuota, 'reserveOperatorQuota').mockResolvedValue({ allowed: true }); mocks.library.mockResolvedValue([]); mocks.image.mockResolvedValue(null); mocks.humans.mockResolvedValue([]); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 it.each(['empty-library', 'empty-selection', 'failed-selection', 'missing-human', 'missing-render-reference', 'changed-render-reference'])('retains actionable stopped state through the real runner: %s', async reason => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
