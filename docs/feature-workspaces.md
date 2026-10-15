@@ -1,0 +1,33 @@
+# Copilot, AI Videos and Discovery
+
+These additive workspaces are disabled for live provider execution by default. They preserve Create and the saved creative, Proof, Company and reference libraries. Bookmark a workspace with `?workspace=copilot`, `ai-videos` or `discovery`. Opening those bookmarks never consumes an old automatic Create handoff.
+
+## Claude Copilot
+
+Configure `TRA_PROVIDER_SECRETS_MASTER_KEY` as a server Secret containing canonical base64 of exactly 32 cryptographically random bytes and verify the intended existing private R2 binding. This task does not provision that secret. Preserve it across deployments; a master-key rotation requires a separately designed migration, not replacement of the value. Operator credentials use AES-256-GCM, operator/provider-bound authenticated data and conditional revisions in the private store. Never put the master or operator keys in public environment variables, logs, screenshots or chat.
+
+Operators enter their own Anthropic key in Copilot settings. Saving does not contact Anthropic or authorize spend. Replacement/removal requires the current revision and working original master key; deletion writes an encrypted tombstone and does not erase historical backups. Removal does not cancel an already-dispatched request. The key is never exported or persisted in browser storage, and there is no shared-key fallback.
+
+Paid suggestions require all three `TRA_CLAUDE_COPILOT_ENABLED`, `TRA_CLAUDE_COPILOT_ALLOW_PAID`, `TRA_CLAUDE_COPILOT_BYOK_ALLOW_PAID` flags plus each operator's explicit approval. Copilot uses saved creative text/planning and approved company context, not image pixels or measured performance. Recommendations require human review. Provider authentication, permission and rate-limit failures produce redacted actions; no automatic retry occurs. Acceptance previews disallow key changes and paid requests.
+
+## AI Videos
+
+V1 proposes Fal's documented Wan 2.2 Animate Move and Replace: a character image plus source motion video. Move animates the character; Replace substitutes the source subject while preserving the scene. This is not ordinary image-to-video. Profile notes organize jobs; they are not a model prompt. Audio preservation/voice cloning is not provided or guaranteed. Replicate's official Wan Animate Replace is a potentially cheaper Replace-only alternative; switching providers is a separate bounded change.
+
+Activation requires explicit provider/budget approval, `WAN_ACCESS_ENABLED`, `WAN_PAID_ENABLED`, `FAL_KEY`, and the existing private R2 configuration. `WAN_MAX_ESTIMATED_USD` bounds the app's estimate (maximum $5), not the provider's final billing. Estimates use server-decoded frames and dated rates; quote expiry and all three cost/rights/provider-transfer confirmations are enforced before one submission attempt.
+
+Private source URLs have bounded lifetimes. The queue disables provider retry and stored input/output metadata; outputs request private ACL and one-hour expiry, then are recovered into authenticated private app storage. The documented short-lived Fal CDN token exchange is server-only. A job is persisted before submission; an ambiguous response becomes UNKNOWN and never silently repurchases. Accepted requests can resume output recovery with paid admission disabled. Output owner checks and byte ranges apply. No live provider call or media transfer was part of implementation verification.
+
+## Discovery
+
+Search across industries, review candidates, select and import. Tax relevance is one preference, not an exclusive source. The historical PR13 was starting material only: its unauthenticated auto-import and automatic paid classification were not retained. Activation requires an approved programmatic-access basis and budget, `DISCOVERY_PROVIDER_ACCESS_APPROVED`, `DISCOVERY_PAID_EXECUTION_ENABLED` and `APIFY_TOKEN`. Search uses Apify's documented Facebook Ads scraper adapter; no actual scraping run was made.
+
+Review provenance, explainable text relevance and diversity. Copy similarity is distinct from visual duplication. On already fetched protected previews/imports/explicit analysis, normalized pixel hashes identify exact visual duplicates and a perceptual hash flags possible variants for manual review. Uninspected visual similarity stays unknown; viewing a search does not fetch all media for analysis. Selected imports use bounded validated CDN fetches; unsupported media has a manual-upload fallback. Import receipts preserve partial progress; shared reference mutations use conditional writes to avoid losing concurrent imports/edits.
+
+Optional selected-image analysis uses the existing OpenAI analysis provider only after `DISCOVERY_VISUAL_ANALYSIS_ENABLED`, `DISCOVERY_ANALYSIS_TRANSFER_APPROVED` and explicit per-action approval. It records layout/offer/angle/human observations with model/date/source provenance. No paid analysis runs automatically during search/import. Human presence is descriptive evidence, never permission to reuse a person's likeness or factual Proof. Private opt-in feedback affects research preferences; it is not a performance label. Account performance remains unknown without a separately verified account-data integration.
+
+## Verification and activation boundary
+
+CI and intercepted desktop/mobile fixtures use synthetic data and provider mocks. They demonstrate API/state/security and UI behavior, not provider availability or physical-device acceptance of these new features. Live secrets/configuration, provider calls, user-media transfers, migrations, staging merges and Production release require separate explicit authorization. Existing accepted Preview data is not automatically moved to Production.
+
+Primary contracts: [Wan upstream](https://github.com/Wan-Video/Wan2.2), [Fal Move](https://fal.ai/models/fal-ai/wan/v2.2-14b/animate/move/api), [Fal Replace](https://fal.ai/models/fal-ai/wan/v2.2-14b/animate/replace/api), [Fal queue](https://fal.ai/docs/documentation/model-apis/inference/queue), [Fal media expiration](https://fal.ai/docs/documentation/model-apis/media-expiration), [Fal private files](https://fal.ai/docs/documentation/model-apis/file-access-controls), [Replicate Replace](https://replicate.com/wan-video/wan-2.2-animate-replace), [Anthropic Messages](https://platform.claude.com/docs/en/api/messages/create), [Apify actor](https://apify.com/apify/facebook-ads-scraper).
