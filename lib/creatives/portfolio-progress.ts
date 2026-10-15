@@ -1,7 +1,10 @@
+import { isPeoplePercent } from '@/lib/creatives/people-mix';
 import type { CreativePortfolioJob, PortfolioPlanningPhase, PortfolioSlot } from '@/lib/creatives/portfolio-job';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 export type PortfolioProgress = {
+  peoplePercent?: number;
+  useReferenceLibrary?: boolean;
   id: string; requestedCount: number; planReady: boolean; planningPhase: PortfolioPlanningPhase; planningCheckpoint: number;
   preparationFingerprint?: string;
   previewPreparationResume?: true;
@@ -51,6 +54,8 @@ export const portfolioProgress = (job: CreativePortfolioJob): PortfolioProgress 
   const fingerprint = preparationFingerprint(job);
   const video = videoPreparation(job);
   return {
+    ...(job.request.useReferenceLibrary === undefined ? {} : { useReferenceLibrary: job.request.useReferenceLibrary }),
+    ...(job.request.peoplePercent === undefined ? {} : { peoplePercent: job.request.peoplePercent }),
     id: job.id, requestedCount: job.slots.length, planReady: Boolean(job.snapshot), planningPhase: job.planning.phase,
     planningCheckpoint: planningCheckpoint(job), ...(fingerprint ? { preparationFingerprint: fingerprint } : {}),
     ...(video ? { videoPreparation: video } : {}),
@@ -62,7 +67,7 @@ export const portfolioProgress = (job: CreativePortfolioJob): PortfolioProgress 
 
 export function parsePortfolioProgress(value: unknown): PortfolioProgress | null {
   const job = value as PortfolioProgress;
-  if (!job || !/^portfolio_[a-f0-9]{32}$/.test(job.id) || typeof job.planReady !== 'boolean'
+  if (!job || (job.useReferenceLibrary !== undefined && typeof job.useReferenceLibrary !== 'boolean') || (job.peoplePercent !== undefined && !isPeoplePercent(job.peoplePercent)) || !/^portfolio_[a-f0-9]{32}$/.test(job.id) || typeof job.planReady !== 'boolean'
     || (job.previewAcceptanceError !== undefined && (typeof job.previewAcceptanceError !== 'string'
       || !job.previewAcceptanceError.trim() || job.previewAcceptanceError.length > 1000 || job.previewPreparationResume !== undefined))
     || (job.previewPreparationResume !== undefined && (job.previewPreparationResume !== true
@@ -72,7 +77,7 @@ export function parsePortfolioProgress(value: unknown): PortfolioProgress | null
     || (job.preparationFingerprint !== undefined && (!/^[a-f0-9]{8}$/.test(job.preparationFingerprint)
       || job.planningPhase !== 'INITIAL_PLAN'))
     || job.planReady !== (job.planningPhase === 'READY_TO_RENDER')
-    || !Number.isInteger(job.requestedCount) || job.requestedCount < 2 || job.requestedCount > MAX_PORTFOLIO_CREATIVES
+    || !Number.isInteger(job.requestedCount) || job.requestedCount < 1 || job.requestedCount > MAX_PORTFOLIO_CREATIVES
     || !Array.isArray(job.slots) || job.slots.length !== job.requestedCount
     || new Set(job.slots.map(slot => slot?.creativeId)).size !== job.slots.length
     || job.slots.some((slot, index) => !slot || slot.index !== index + 1 || !/^creative_[a-f0-9]{32}$/.test(slot.creativeId)

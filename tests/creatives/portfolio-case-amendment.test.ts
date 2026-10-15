@@ -1,3 +1,4 @@
+import { claimCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -155,4 +156,24 @@ describe('explicit source case amendments', () => {
     const generic = { ...record, copy: job.snapshot!.batchPlan.creatives[1].copy };
     expect(() => portfolioSavedCreatives(saved, [generic as never])).toThrow('reserved portfolio concept');
   });
+});
+
+it("pairs only human slots in a new mixed batch and never inserts a person case into a graphic ad", () => {
+  const { job, pairs } = videoCasePortfolio(); job.request.peoplePercent = 50;
+  job.snapshot!.batchPlan.creatives[0].strategy.execution.subjectSource = 'approved-tra-human';
+  const graphic = structuredClone(job.snapshot!.batchPlan.creatives[1]);
+  const proposed = proposeCaseAmendment(job, [pairs[0]]);
+  expect(proposed.providerOperations).toMatchObject({ maximumFrameAssessments: 2, maximumPrimaryImages: 2, fallbackImages: 0 });
+  expect(proposed.creatives[1]).toEqual(graphic); expect(proposed.creatives[1].draftSourceAssertion).toBeUndefined();
+  expect(caseAmendmentOptions(job).slots.map(slot => slot.index)).toEqual([1]);
+  expect(() => proposeCaseAmendment(job, pairs)).toThrow('frozen portfolio');
+  job.videoCaseAmendment = proposed.amendment;
+  expect(caseReviewChoices(job, 1)?.frames).toHaveLength(1); expect(caseReviewChoices(job, 2)?.frames).toBeNull();
+  expect(effectiveCaseConcept(job, 2)).toEqual(graphic);
+  const human = claimCreativePortfolio(job, Date.now(), 'human');
+  human.job.slots[0].status = 'SAVED'; human.job.lease = null;
+  const next = claimCreativePortfolio(human.job, Date.now(), 'graphic');
+  expect(next.status).toBe('WORK'); expect(next.job.lease?.slotIndex).toBe(2);
+  expect(next.job.snapshot!.batchPlan.creatives[1].strategy.execution.subjectSource).toBe('non-human');
+  expect(parseCreativePortfolioJob(encode(job), job.id).videoCaseAmendment).toEqual(proposed.amendment);
 });

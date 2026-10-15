@@ -7,6 +7,10 @@ Approved target behavior, not a claim of implementation. This checkpoint superse
 
 The newer [Create integration plan](tra-create-integration-plan.md) owns remaining source composition, automatic Video Intelligence/Proof integration, full selected human pools and separate image/Meta copy. Its A1 packet establishes types only; runtime wiring, Proof approval semantics, legacy-job transitions and final staging verification remain pending. Earlier three-frame/deferred-Proof directions below describe historical scope, not the new target.
 
+## Current Create control override (2026-10-15)
+
+The [Create batch controls](image-workflow.md#create-batch-controls-2026-10-15) supersede the historical no-fixed-ratio/optional-library guidance for explicitly marked new requests: default 50% ads with people, exact rounded per-ad counts, and a default-On required library blueprint control. Manual frame pools constrain only human slots in marked requests. Both fields remain absent on historical frozen requests and old-client retransmissions; their prior behavior and hashes remain unchanged. Exact source/person-case checks, external-layout pixel exclusion, paid-work leases/checkpoints and Preview approval fences are preserved. No live paid image-quality acceptance is implied.
+
 ## 1. Foundations to preserve
 
 | Area | Implemented and reusable | Specific gap |

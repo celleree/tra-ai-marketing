@@ -19,6 +19,8 @@ export function MomentumLanding() {
   const [sourceAsset, setSourceAsset] = useState<CreativeSourceAsset | null>(null);
   const [context, setContext] = useState('');
   const [variationCount, setVariationCount] = useState(4);
+  const [peoplePercent, setPeoplePercent] = useState(50);
+  const [useReferenceLibrary, setUseReferenceLibrary] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const ready = Boolean(context.trim());
@@ -51,6 +53,8 @@ export function MomentumLanding() {
       context: context.trim(),
       sourceAsset,
       variationCount,
+      peoplePercent,
+      useReferenceLibrary,
       generateOnOpen: true,
     });
     router.push('/');
@@ -99,7 +103,11 @@ export function MomentumLanding() {
             onSourceRoleChange={handleSourceRoleChange}
             onSourceRemoved={handleSourceRemoved}
             allowMultipleSources={false}
-            variationCount={variationCount}
+            useReferenceLibrary={useReferenceLibrary}
+                    onReferenceLibraryChange={setUseReferenceLibrary}
+                    peoplePercent={peoplePercent}
+                    onPeoplePercentChange={setPeoplePercent}
+                    variationCount={variationCount}
             onVariationCountChange={setVariationCount}
             onSubmit={openStudioAndGenerate}
             ready={ready}

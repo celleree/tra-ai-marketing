@@ -1,3 +1,4 @@
+import { requireReferenceLibrarySelection, selectRequiredLibraryReferences, withRequiredLibrarySource } from '@/lib/creatives/reference-library-mode';
 import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import type { CreativeRenderContext } from '@/lib/creatives/render-planned';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -110,23 +111,25 @@ export async function prepareCreativeGeneration(
     hookOrAngle: angle?.angleDescription ?? '' } : buildPromptOnlyAnalysis(data.context));
   let selectedReferences: SelectedReferenceCreative[] = [];
 
-  const library = (await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
+  const library = (data.useReferenceLibrary === false ? [] : await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
+  requireReferenceLibrarySelection(data.useReferenceLibrary, library.length);
   const requestedReferenceCount = Math.min(8, data.variationCount, library.length);
   const selectionArgs = {
     candidates: buildReferenceCandidates(library, requestUrl), requestedCount: requestedReferenceCount,
     userContext: data.context, traSummary: analysis.summary, traPreserve: analysis.preserve,
   };
   if (requestedReferenceCount > 0) selectedReferences = await checkpointPaidPreparation('reference-shortlist', selectionArgs,
-    () => selectBestReferenceCreatives(selectionArgs));
+    () => selectRequiredLibraryReferences(data.useReferenceLibrary, () => selectBestReferenceCreatives(selectionArgs)));
+  requireReferenceLibrarySelection(data.useReferenceLibrary, selectedReferences.length);
   const uploadedCatalog = composedSourceCatalog(sourceAnalysis);
-  let referenceCatalog = [...uploadedCatalog, ...await buildReferencePlanningCatalog({ storage,
+  let referenceCatalog = [...uploadedCatalog, ...await withRequiredLibrarySource(data.useReferenceLibrary, () => buildReferencePlanningCatalog({ storage,
     selections: selectedReferences.filter(selection => !uploadedCatalog.some(item => item.referenceId === selection.item.id)),
-  })];
+  }))];
   let angleStep = 0;
   while (true) {
     const catalog = referenceCatalog;
     const enriched = await checkpointPaidPreparation(`reference-angle:${angleStep++}`, catalog,
-      () => advanceReferenceAngles(catalog, storage, () => {}));
+      () => withRequiredLibrarySource(data.useReferenceLibrary, () => advanceReferenceAngles(catalog, storage, () => {})));
     if (!enriched) break;
     referenceCatalog = enriched;
   }
@@ -181,15 +184,15 @@ export async function prepareCreativeGeneration(
       ? 'referenceAnalysis describes the approved TRA video-frame source; preserve approved TRA cues and obey its avoid guidance.'
       : '';
 
-  const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\nOptional analysis-only reference guidance for the batch:\n${referenceDirections}\nUse a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.` : ''}`;
-  referenceCatalog = await withCuratedReferenceMetadata(referenceCatalog);
+  const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\n${data.useReferenceLibrary ? 'Required library layout options (choose a validated blueprint for every ad)' : 'Optional analysis-only reference guidance for the batch'}:\n${referenceDirections}\n${data.useReferenceLibrary ? 'Choose a supplied library layout for every ad; a layout may be reused for distinct concepts. Do not copy reference content or treat its library category as required.' : 'Use a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.'}` : ''}`;
+  if (data.useReferenceLibrary !== false) referenceCatalog = await withCuratedReferenceMetadata(referenceCatalog);
   const logoPlacement = brandLogo
     ? await resolveCreativeBrandLogoPlacementContext(brandLogo.buffer, data.placement)
     : undefined;
   const plannerArgs: CreativeBatchPlannerArgs = {
     ...selectedVideoInputContract(data),
     count: data.variationCount,
-    context: videoGuidance ? `${primaryVideoDirection(videoGuidance)}\n\n${generationContext}` : generationContext,
+    context: videoGuidance ? `${primaryVideoDirection(videoGuidance, data.peoplePercent)}\n\n${generationContext}` : generationContext,
     proofRetrievalQuery: data.proofRetrievalQuery,
     analysis, sourceAnalysis,
     ...(videoGuidance ? { primaryVideoMediaId: videoGuidance.source.mediaId } : {}),

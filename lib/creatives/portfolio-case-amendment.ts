@@ -1,3 +1,4 @@
+import { assertPeopleMix, peopleMix } from '@/lib/creatives/people-mix';
 import { isDeepStrictEqual } from 'node:util';
 import type { CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
@@ -8,6 +9,8 @@ import { reviewSourceSha256, record, ReviewSelectionError } from '@/lib/video/re
 
 export type VideoCasePair = { slotIndex: number; claimIndex: number; frameId: string; attributionConfirmed: boolean };
 export type VideoCaseAmendment = { version: 1; intent: 'VIDEO_CASE_STUDY'; baseSnapshotSha256: string; pairs: VideoCasePair[] };
+const caseSlots = (job: CreativePortfolioJob) => job.request.peoplePercent === undefined ? job.slots
+  : job.slots.slice(0, peopleMix(job.slots.length, job.request.peoplePercent).withPeople);
 const deny = (message: string): never => { throw new ReviewSelectionError(message, 409); };
 export const CASE_ATTRIBUTION_NOTICE = 'Timestamp overlap and cached scene observations do not verify speaker identity. Confirm that this statement belongs to this person after reviewing the video and surrounding qualifications. Do not combine separate speakers’ accounts. These are unverified source accounts, not approved Proof.';
 
@@ -48,15 +51,18 @@ export function assertCaseAmendmentAvailable(job: CreativePortfolioJob) {
 
 /** Validation also runs on saved readback; eligibility is checked separately before applying. */
 export function validateCaseAmendment(job: CreativePortfolioJob, value: unknown, requireConfirmation = true): VideoCaseAmendment {
+  if (job.snapshot) assertPeopleMix(job.snapshot.batchPlan.creatives, job.slots.length, job.request.peoplePercent);
+  const humanSlots = caseSlots(job);
+  if (!humanSlots.length) return deny('There are no people ads to pair with a case in this portfolio.');
   if (!record(value) || Object.keys(value).length !== 4 || value.version !== 1 || value.intent !== 'VIDEO_CASE_STUDY'
     || !job.snapshot || job.planning.phase !== 'READY_TO_RENDER' || job.videoPreparationVersion !== 1
     || value.baseSnapshotSha256 !== reviewSourceSha256(job.snapshot)
-    || !Array.isArray(value.pairs) || value.pairs.length !== job.slots.length || isPreviewTestPortfolio(job)) {
+    || !Array.isArray(value.pairs) || value.pairs.length !== humanSlots.length || isPreviewTestPortfolio(job)) {
     return deny('Case amendment does not match the original frozen portfolio.');
   }
   const handoff = job.request.reviewHandoff;
   value.pairs.forEach((pair, index) => {
-    if (!record(pair) || Object.keys(pair).length !== 4 || pair.slotIndex !== index + 1
+    if (!record(pair) || Object.keys(pair).length !== 4 || pair.slotIndex !== humanSlots[index].index
       || !Number.isSafeInteger(pair.claimIndex) || Number(pair.claimIndex) < 0 || typeof pair.frameId !== 'string'
       || typeof pair.attributionConfirmed !== 'boolean' || (requireConfirmation && pair.attributionConfirmed !== true)) {
       return deny('Choose a source statement and confirm its person for every creative. Generic copy cannot fulfill a video case amendment.');
@@ -79,7 +85,7 @@ export function proposeCaseAmendment(job: CreativePortfolioJob, pairs: VideoCase
   return { amendment, attributionNotice: CASE_ATTRIBUTION_NOTICE,
     creatives: job.slots.map(slot => effectiveCaseConcept({ ...job, videoCaseAmendment: amendment }, slot.index, false)),
     providerOperations: { transcription: 0, planning: 0, audit: 0, maximumFrameAssessments: pairs.length * 2,
-      maximumPrimaryImages: pairs.length, fallbackImages: 0 } };
+      maximumPrimaryImages: job.slots.length, fallbackImages: 0 } };
 }
 
 /** Derive an overlay while leaving the original paid plan and layout/source snapshots intact. */
@@ -88,7 +94,9 @@ export function effectiveCaseConcept(job: CreativePortfolioJob, slotIndex: numbe
   if (!original) return deny('Portfolio concept is unavailable.');
   if (!job.videoCaseAmendment) return original;
   const amendment = validateCaseAmendment(job, job.videoCaseAmendment, requireConfirmation);
-  const pair = amendment.pairs[slotIndex - 1], assertion = selectedCaseAssertion(job.request.reviewHandoff, pair.claimIndex);
+  const pair = amendment.pairs.find(pair => pair.slotIndex === slotIndex);
+  if (!pair) return original; // Explicit non-human slots keep their frozen concept and no case wording.
+  const assertion = selectedCaseAssertion(job.request.reviewHandoff, pair.claimIndex);
   const concept = structuredClone(original);
   concept.selectionReason = 'Explicit operator video case amendment v1. Exact source wording and person pairing supersede the original copy; the original portfolio audit applies only to its frozen plan.';
   concept.draftSourceAssertion = assertion;
@@ -116,7 +124,8 @@ export function caseReviewChoices(job: CreativePortfolioJob, slotIndex: number) 
   if (!job.videoCaseAmendment) return job.request.reviewHandoff?.choices;
   const amendment = validateCaseAmendment(job, job.videoCaseAmendment);
   const choices = job.request.reviewHandoff!.choices;
-  return { ...choices, frames: choices.frames!.filter(frame => frame.frameId === amendment.pairs[slotIndex - 1].frameId) };
+  const pair = amendment.pairs.find(pair => pair.slotIndex === slotIndex);
+  return { ...choices, frames: pair ? choices.frames!.filter(frame => frame.frameId === pair.frameId) : null };
 }
 
 /** A source account is not permission to choose any person from a larger manual pool. */
@@ -131,7 +140,7 @@ export function caseAssociationNeedsReview(job: CreativePortfolioJob) {
 export function caseAmendmentOptions(job: CreativePortfolioJob) {
   assertCaseAmendmentAvailable(job);
   const video = job.request.reviewHandoff!.choices.video!;
-  const plannedPairs = job.slots.map(slot => {
+  const plannedPairs = caseSlots(job).map(slot => {
     const assertion = job.snapshot!.batchPlan.creatives[slot.index - 1].draftSourceAssertion;
     const claimIndex = assertion ? job.request.reviewHandoff!.claimSnapshots.findIndex((_, index) => {
       try { return isDeepStrictEqual(assertion, selectedCaseAssertion(job.request.reviewHandoff, index)); }
@@ -140,7 +149,7 @@ export function caseAmendmentOptions(job: CreativePortfolioJob) {
     return { slotIndex: slot.index, claimIndex, frameId: '', attributionConfirmed: false };
   });
   return { plannedPairs, attributionNotice: CASE_ATTRIBUTION_NOTICE, video: { mediaId: video.locator.sourceVideoMediaId,
-    libraryId: video.libraryId, sourceVideoContentHash: video.locator.sourceVideoContentHash }, slots: job.slots.map(slot => ({ index: slot.index,
+    libraryId: video.libraryId, sourceVideoContentHash: video.locator.sourceVideoContentHash }, slots: caseSlots(job).map(slot => ({ index: slot.index,
     layoutSource: job.snapshot!.batchPlan.creatives[slot.index - 1].strategy.referenceSelection?.layoutSource ?? null })),
     claims: job.request.reviewHandoff!.claimSnapshots.flatMap((_, claimIndex) => {
       try {

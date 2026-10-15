@@ -1,6 +1,9 @@
 import { parseReferenceCuratedMetadata, type ReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseLayoutBlueprint, type LayoutBlueprint } from '@/lib/layouts/blueprint';
 
+/** Deterministic reference-media binding failure; arbitrary storage/provider errors stay separate. */
+export class ReferenceSourceUnavailableError extends Error {}
+
 export type ReferenceSelection = {
   angleSource: string | null;
   layoutSource: string | null;

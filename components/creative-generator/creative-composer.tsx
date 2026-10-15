@@ -1,5 +1,6 @@
 'use client';
 
+import { peopleMix } from '@/lib/creatives/people-mix';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -37,6 +38,10 @@ interface CreativeComposerProps {
   onSourceRoleChange: (mediaId: string, role: CreativeSourceRole) => void;
   onSourceRemoved: (mediaId: string) => void;
   allowMultipleSources?: boolean;
+  useReferenceLibrary: boolean;
+  onReferenceLibraryChange: (value: boolean) => void;
+  peoplePercent: number;
+  onPeoplePercentChange: (value: number) => void;
   variationCount: number;
   onVariationCountChange: (value: number) => void;
   placement?: CreativePlacement;
@@ -62,7 +67,7 @@ type ServerUploadResponse = CreativeSourceMediaAsset & {
 const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_VIDEO_TYPES = ['video/mp4'];
-const MIN_VARIATIONS = 2;
+const MIN_VARIATIONS = 1;
 const MAX_VARIATIONS = MAX_PORTFOLIO_CREATIVES;
 
 const ROLE_LABELS: Record<CreativeSourceRole, string> = {
@@ -82,12 +87,17 @@ export function CreativeComposer({
   allowMultipleSources = true,
   variationCount,
   onVariationCountChange,
+  peoplePercent,
+  onPeoplePercentChange,
+  useReferenceLibrary,
+  onReferenceLibraryChange,
   placement,
   onPlacementChange,
   onSubmit,
   ready,
   generating,
 }: CreativeComposerProps) {
+  const mix = peopleMix(variationCount, peoplePercent);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const uploadInFlightRef = useRef(false);
@@ -449,6 +459,26 @@ export function CreativeComposer({
           }
           disabled={generating}
         />
+      </div>
+
+      <div className={styles.peopleControl}>
+        <label><input type="checkbox" role="switch" aria-label="Use reference library" checked={useReferenceLibrary}
+          onChange={event => onReferenceLibraryChange(event.target.checked)} disabled={generating} />
+          Use reference library · {useReferenceLibrary ? 'On' : 'Off'}</label>
+        <p>{useReferenceLibrary ? 'Use library layouts. People, copy and branding come from TRA.' : 'Create from your prompt and supplied TRA sources.'}</p>
+      </div>
+      <div className={styles.peopleControl}>
+        <div className={styles.variationControl}>
+          <label htmlFor="creative-people-slider">Ads with people</label>
+          <strong>{peoplePercent}%</strong>
+          <input id="creative-people-slider" className={styles.variationSlider} type="range"
+            min={0} max={100} step={1} value={peoplePercent}
+            style={{ '--slider-progress': `${peoplePercent}%` } as CSSProperties}
+            aria-describedby="creative-people-counts"
+            aria-valuetext={`${peoplePercent} percent: ${mix.withPeople} with people, ${mix.withoutPeople} without people`}
+            onChange={event => onPeoplePercentChange(Number(event.target.value))} disabled={generating} />
+        </div>
+        <span id="creative-people-counts" aria-live="polite">{mix.withPeople} with people · {mix.withoutPeople} without people</span>
       </div>
 
       <div className={styles.toolbar}>

@@ -1,3 +1,5 @@
+import { assertReferenceLibraryConcept } from '@/lib/creatives/reference-library-mode';
+import { assertPeopleMix } from '@/lib/creatives/people-mix';
 import { randomUUID } from 'node:crypto';
 import { caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
 import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
@@ -64,8 +66,8 @@ const validVideoSelectionModel = (value: unknown): value is string => typeof val
   && value.trim().length > 0 && value.length <= MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH;
 
 export function newCreativePortfolio(request: ValidGenerateCreativeRequest, now = Date.now()): CreativePortfolioJob {
-  if (!Number.isInteger(request.variationCount) || request.variationCount < 2 || request.variationCount > MAX_PORTFOLIO_CREATIVES) {
-    throw new Error('A portfolio requires 2 to 36 creatives.');
+  if (!Number.isInteger(request.variationCount) || request.variationCount < 1 || request.variationCount > MAX_PORTFOLIO_CREATIVES) {
+    throw new Error('A portfolio requires 1 to 36 creatives.');
   }
   return { version: 1, sourceCompositionVersion: 2,
     ...(request.sourceAssets.some(source => source.role === 'TRA_VIDEO') ? { videoPreparationVersion: 1 as const } : {}),
@@ -172,6 +174,10 @@ export function finishPortfolioInitialPlan(
   current: CreativePortfolioJob, leaseId: string, checkpoint: PortfolioPlanningCheckpoint, now = Date.now(),
 ) {
   const lease = requireLease(current, leaseId, now);
+  assertPeopleMix(checkpoint.snapshot.batchPlan.creatives, current.request.variationCount, current.request.peoplePercent);
+  checkpoint.snapshot.batchPlan.creatives.forEach(concept => assertReferenceLibraryConcept(concept, checkpoint.snapshot.referenceCatalog, current.request.useReferenceLibrary));
+  if (checkpoint.plannerArgs.useReferenceLibrary !== current.request.useReferenceLibrary) throw new Error('Planner reference mode differs from the saved request.');
+  if (checkpoint.plannerArgs.peoplePercent !== current.request.peoplePercent) throw new Error('Planner mix differs from the saved request.');
   if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'INITIAL_PLAN'
     || !current.planning.preparation.quotaReserved
     || checkpoint.snapshot.batchPlan.portfolioAudit || !planMatchesSlots(current, checkpoint.snapshot)
@@ -245,6 +251,8 @@ export function finishPortfolioAuditFailure(
 }
 
 export function finishPortfolioPlan(current: CreativePortfolioJob, leaseId: string, snapshot: CreativePortfolioSnapshot, now = Date.now()) {
+  assertPeopleMix(snapshot.batchPlan.creatives, current.request.variationCount, current.request.peoplePercent);
+  snapshot.batchPlan.creatives.forEach(concept => assertReferenceLibraryConcept(concept, snapshot.referenceCatalog, current.request.useReferenceLibrary));
   const lease = requireLease(current, leaseId, now);
   if (lease.slotIndex !== null || current.snapshot || !planMatchesSlots(current, snapshot)) {
     throw new Error('Portfolio plan does not match the reserved slots.');

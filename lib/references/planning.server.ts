@@ -9,7 +9,7 @@ import { getLayoutBlueprintCache, getOrAnalyzeLayoutBlueprint, type ResolvedLayo
 import type { SelectedReferenceCreative } from '@/lib/ai/reference-selector';
 import type { StoredMediaFile } from '@/lib/media/types';
 import type { MediaStorage } from '@/lib/media/storage';
-import { parseReusableReferenceAngle, REUSABLE_ANGLE_SCHEMA_VERSION, type ReferencePlanningCandidate } from '@/lib/references/planning';
+import { ReferenceSourceUnavailableError, parseReusableReferenceAngle, REUSABLE_ANGLE_SCHEMA_VERSION, type ReferencePlanningCandidate } from '@/lib/references/planning';
 
 /** Reuse the layout cache; uploading a reference never makes it an approved content source. */
 export async function buildReferencePlanningCatalog(args: {
@@ -31,7 +31,7 @@ export async function buildReferencePlanningCatalog(args: {
   for (const selection of args.selections) {
     if (catalog.some(item => item.referenceId === selection.item.id)) continue;
     const stored = await args.storage.readImageById(selection.item.id);
-    if (!stored) throw new Error(`Reference ${selection.item.id} is unavailable.`);
+    if (!stored) throw new ReferenceSourceUnavailableError(`Reference ${selection.item.id} is unavailable.`);
     add(selection.item.id, 'library', `${CREATIVE_CATEGORY_LABELS[selection.item.angle]}: ${selection.selectionReason}`,
       await layoutFor(selection.item.id, stored));
   }
@@ -50,7 +50,7 @@ export async function advanceReferenceAngles(
   if (!pending) return null;
   const source = await storage.readImageById(pending.referenceId);
   if (!source || createHash('sha256').update(source.buffer).digest('hex') !== pending.sourceSha256) {
-    throw new Error(`Reference ${pending.referenceId} is unavailable or changed. Start fresh preparation.`);
+    throw new ReferenceSourceUnavailableError(`Reference ${pending.referenceId} is unavailable or changed. Start fresh preparation.`);
   }
   const cache = getLayoutBlueprintCache();
   let reusableAngle = await cache.readAngle(pending.sourceSha256, model);

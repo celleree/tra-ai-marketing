@@ -44,12 +44,13 @@ const storage = { saveImage: vi.fn().mockResolvedValue({ id: `media_${'1'.repeat
   mimeType: 'image/png', size: 5, url: '/creative.png' }) } as any;
 
 async function render(explicit = false, human = true, selected: typeof selection = selection, reviewed = false,
-  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState, layout?: 'SELECTED' | 'IGNORED', draft = false, omitLogo = false) {
+  sourceAnalysis?: import('@/lib/creatives/planning-source-packet').PlanningSourceAnalysisState, layout?: 'SELECTED' | 'IGNORED', draft = false, omitLogo = false, peoplePercent?: number) {
   const referenceCatalog = layout ? [referenceCandidate('4')] : [];
   const request = { ...portfolioRequest(), sourceAssets: [{ role: 'TRA_VIDEO', mediaId },
     ...(layout ? [{ role: 'LAYOUT_REFERENCE', mediaId: referenceCatalog[0].referenceId }] : [])],
     ...(explicit ? { videoFrameSelection: { libraryId: selected.libraryId, sourceVideoContentHash: sourceHash,
       frameIds: [selected.frames[0].libraryFrameId] } } : {}) } as any;
+  if (peoplePercent !== undefined) request.peoplePercent = peoplePercent;
   if (omitLogo) { request.previewOmitBrandLogo = true; delete request.brandLogoMediaId; }
   if (reviewed) request.reviewHandoff = { choices: { video: { libraryId: selected.libraryId,
     librarySha256: '1'.repeat(64), locator: { sourceVideoMediaId: mediaId, sourceVideoContentHash: sourceHash } },
@@ -64,7 +65,7 @@ async function render(explicit = false, human = true, selected: typeof selection
     Object.assign(item, composed, { copy: composed.adCopy });
   }
   if (human) item.strategy.execution.subjectSource = 'approved-tra-human';
-  if (reviewed) item.strategy.humanSourceId = approvedHumanSourceId(humanId);
+  if (reviewed && (peoplePercent === undefined || human)) item.strategy.humanSourceId = approvedHumanSourceId(humanId);
   if (layout === 'SELECTED') item.strategy.referenceSelection = { angleSource: null, layoutSource: referenceCatalog[0].referenceId, referenceRelationship: 'mixed' };
   return renderPlannedCreative(item, {
     request, batchPlan: snapshot.batchPlan, referenceCatalog, selectedReferences: [],
@@ -262,4 +263,28 @@ it('saves manual review selection and exact candidate/provider provenance', asyn
 it('rejects an automatic or unknown frame at the final manual render boundary before image work', async () => {
   await expect(render(false, true, selection, true)).rejects.toThrow('closed-pool');
   expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.promptOnly).not.toHaveBeenCalled(); expect(mocks.saveBatch).not.toHaveBeenCalled();
+});
+
+describe('rendering explicit people mix', () => {
+  const evidence = { version: 1, entries: [{ source: { role: 'TRA_VIDEO', mediaId, sha256: sourceHash },
+    analyzer: { kind: 'REPRESENTATIVE_VIDEO_FRAMES', model: 'fixture', schemaVersion: 1, contextSha256: 'a'.repeat(64) },
+    evidenceStatus: 'UNVERIFIED_MODEL_OBSERVATION', result: { kind: 'REPRESENTATIVE_VIDEO_FRAMES',
+      analyzedFrames: [{ timestampMs: 1200, frameSha256: 'e'.repeat(64) }],
+      analysis: { summary: 'TRA source direction', visibleHuman: true, visibleText: [], visualStructure: 'Person',
+        hookOrAngle: 'Consultation', offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'customer-problems' } } }] } as any;
+  it.each([false, true])('renders zero-percent graphics without attaching video people (explicit=%s)', async explicit => {
+    const creative = await render(explicit, false, selection, false, evidence, undefined, false, false, 0);
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.promptOnly).toHaveBeenCalledTimes(1);
+    expect(mocks.promptOnly.mock.calls[0][0].context).toContain('must depict no person');
+    expect(creative.generationProvenance?.attachedSource).toBeNull();
+  });
+  it('allows a graphic slot in a manually reviewed pool without attaching its frames', async () => {
+    await render(false, false, selection, true, evidence, undefined, false, false, 0);
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.resolveHuman).not.toHaveBeenCalled();
+    expect(mocks.promptOnly).toHaveBeenCalledTimes(1);
+  });
+  it('blocks an attempted graphic substitution for a required human slot before paid work', async () => {
+    await expect(render(false, false, selection, false, evidence, undefined, false, false, 100)).rejects.toThrow('Ads with people');
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.promptOnly).not.toHaveBeenCalled();
+  });
 });

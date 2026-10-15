@@ -1,5 +1,7 @@
 # Create integration completion plan
 
+Current bounded control decision (2026-10-15): [Create batch controls](image-workflow.md#create-batch-controls-2026-10-15) add explicit `peoplePercent` and `useReferenceLibrary` snapshots. They supersede this plan's earlier no-human-quota and optional-library targets only when those fields are present. Default UI is 50% people ads and library On; marked manual pools constrain human slots, and On requires a selected validated library blueprint for each ad. Off excludes library-derived inputs while preserving supplied TRA sources and facts. External layout pixels remain excluded from the final image request; historical absent-field runs and paid-work recovery retain prior behavior.
+
 **Status: IN PROGRESS — A1–A3 and B1 implementation is merged; B2 is assessed below; final combined-staging verification remains pending.**
 **Initial inspected baseline:** staging `15e217bba0c2cdcada3cb2d9aa73c6e495daf502` (2026-09-11).
 

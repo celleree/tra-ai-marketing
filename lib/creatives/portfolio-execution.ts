@@ -1,3 +1,4 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { randomUUID } from 'node:crypto';
 import { ReviewSelectionError } from '@/lib/video/review-selection';
 import { effectiveCaseConcept, caseReviewChoices, caseAssociationNeedsReview } from '@/lib/creatives/portfolio-case-amendment';
@@ -497,18 +498,18 @@ async function advancePortfolio(
       return { job: await updateCreativePortfolio(id, current =>
         blockPortfolioVideoSelection(current, token, admissionAttempt!, message), storage), error: message, status: 409 };
     }
-    const message = error instanceof ReviewSelectionError || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError || error instanceof GeneratedImageValidationError
+    const message = error instanceof BatchControlsError || error instanceof ReviewSelectionError || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError || error instanceof GeneratedImageValidationError
       ? error.message : 'Portfolio work could not be completed. Review its status before retrying.';
     const current = await updateCreativePortfolio(id, value => {
       if (value.lease?.id !== token) return value;
       if (value.lease.expiresAtMs <= Date.now()) return stopAfterError(
         claimCreativePortfolio(value, Date.now(), undefined, approvedPreview).job, message);
-      const next = approvedPreview || providerWorkStarted || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError || error instanceof InvalidPlannedCreativeCopyError
+      const next = approvedPreview || providerWorkStarted || error instanceof BatchControlsError || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError || error instanceof InvalidPlannedCreativeCopyError
         ? failPortfolioWork(value, token, message)
         : releasePortfolioWork(value, token);
       return stopAfterError(next, message);
     }, storage);
     return { job: current, error: message, status: error instanceof OperatorQuotaUnavailableError ? 503
-      : error instanceof ReviewSelectionError || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError ? error.status : 500 };
+      : error instanceof BatchControlsError || error instanceof ReviewSelectionError || error instanceof PreviewAcceptanceError || error instanceof CreativeGenerationPreparationError ? error.status : 500 };
   }
 }

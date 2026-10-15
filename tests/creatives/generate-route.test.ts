@@ -1,3 +1,4 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
 import { createSubmissionIdentity } from '@/lib/creatives/submission-id';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1878,3 +1879,18 @@ describe('progressive creative delivery', () => {
 vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => offlineExecutionStorage }));
 let offlineExecutionStorage = new MemoryPortfolioStorage();
 beforeEach(() => { offlineExecutionStorage = new MemoryPortfolioStorage(); });
+
+it('exposes an authored batch-control preparation failure through the legacy route without exposing arbitrary errors', async () => {
+  mocks.planCreativeBatch.mockRejectedValueOnce(new BatchControlsError('Start a new portfolio with Ads with people at 0%.'));
+  const response = await POST(generationRequest([]));
+  expect(response.status).toBe(409); expect((await response.json()).error).toContain('new portfolio');
+});
+
+it.each([false, true])('keeps only safe typed messages in legacy per-image SSE errors (safe=%s)', async safe => {
+  const message = 'Restore the exact reference and explicitly Retry this creative.';
+  mocks.validateGeneratedCreativeImage.mockRejectedValueOnce(safe ? new BatchControlsError(message) : new Error('PRIVATE_PROVIDER_SECRET'));
+  const events = await readStreamEvents(await POST(generationRequest([])));
+  const errors = events.filter(event => event.event === 'error');
+  expect(errors).toHaveLength(1); expect(errors[0].data.error).toBe(safe ? message : 'Creative 1 could not be completed.');
+  expect(JSON.stringify(events)).not.toContain('PRIVATE_PROVIDER_SECRET');
+});

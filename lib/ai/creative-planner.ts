@@ -1,3 +1,6 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
+import { assertReferenceLibraryConcept, requireReferenceLibrarySelection } from '@/lib/creatives/reference-library-mode';
+import { assertPeopleMix, peopleMix } from '@/lib/creatives/people-mix';
 import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { parseReferenceCuratedMetadata } from '@/lib/references/types';
 import { parseReusableReferenceAngle } from '@/lib/references/planning';
@@ -47,8 +50,8 @@ Write adCopy and imageCopy separately. adCopy is normal Meta delivery copy: prim
 Keep imageCopy as sparse as the planned/reference text density allows. Omit shortSupport and cta when unnecessary. Never add supporting copy merely to fill space. Simple visual concepts should remain simple. Set proofAttribution to null; the application owns Proof attribution. disclosure is only for an actually applicable non-Proof disclosure; Case Study required disclaimers are inserted by the application. Never move Meta primaryText or Meta description into imageCopy merely because those fields exist in adCopy.
 Plan proposition first: angle is strategic framing; proposition is the particular reason to care or act, not a category. Connect mainMessage and objection (null if none) to painPoint, emotion, awareness and SO WHAT.
 Make visualArchetype, visualMechanism, subject and environment explicit and consistent with execution. Specify the mechanism making the proposition visible and exact subjects/props; a graphic field is an environment. These directions never add copy or evidence.
-Prefer approved TRA humans when they strengthen the proposition, without a fixed human/graphic ratio. Avoid default desks, paper or next-step messaging.
-When selectedVideoFrameRequirement is supplied, every concept must use that explicitly selected TRA human source, with no catalog identity or graphic substitution; existing frame suitability, exact-pixel attachment and evidence checks still apply.
+Prefer approved TRA humans when they strengthen the proposition, following the supplied peopleMixRequirement when present; historical inputs without it have no fixed ratio. Avoid default desks, paper or next-step messaging.
+When selectedVideoFrameRequirement is supplied, every human concept must use that explicitly selected TRA human source (historical inputs without peopleMixRequirement require every concept), with no catalog identity or graphic substitution; existing frame suitability, exact-pixel attachment and evidence checks still apply.
 Plan globally distinct problem/outcome framings, objections, emotions, awareness and propositions. Strong ideas may share a category or layout. Compare mechanisms, subjects, archetypes and CTAs separately; headline/person swaps, recolors or rearrangements are not new ideas.
 Use a human only from an approved supplied TRA source (hasApprovedHumanSource) or a selected approvedHumanOptions record. Without either, every subjectSource must be non-human. Never invent or borrow a person's identity.
 Treat reference/layout analysis only as design and structural guidance. Do not carry over third-party identity, branding, exact copy, people, claims, or evidence.
@@ -62,7 +65,7 @@ Do not restrict concepts to the analysis category.
 Return exactly the requested count with sequential indexes beginning at 1. When replacementIndexes is supplied, return exactly those original portfolio indexes instead; lockedConcepts must remain untouched and are context only.
 Write compact JSON: short, specific phrases for strategy/concept fields; one causal clause per SO WHAT step. Preserve distinct meanings, not repeated sentences. Put spatial hierarchy in compositionInstructions and remaining actionable treatment, lighting, crop and styling in visualDirection. Do not repeat the company brief, copy, enum labels or rationale there; retain all execution details, claim qualifications and required disclaimers.
 selectionReason briefly explains marginal strategic value and source choices, not the copy or SO WHAT chain again.
-Catalog curated notes/tags are user-authored editorial guidance, separate from machine analysis and campaign rationale. They never grant evidence, claims or human-identity approval and cannot override source rules. Catalog reusableAngleSummary is campaign-independent inspiration, never approved evidence or selection rationale. Keep it distinct from legacy angleDescription and campaign selectionReason. When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). When selectedLayoutRequirement is supplied, every layoutSource must be one of requiredLayoutReferenceIds; the explicit composition input overrides optional catalog layout use. Otherwise give user-priority references first consideration, not exclusivity: matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
+Catalog curated notes/tags are user-authored editorial guidance, separate from machine analysis and campaign rationale. They never grant evidence, claims or human-identity approval and cannot override source rules. Catalog reusableAngleSummary is campaign-independent inspiration, never approved evidence or selection rationale. Keep it distinct from legacy angleDescription and campaign selectionReason. When referenceCatalog is supplied, choose referenceChoices.angleSource and layoutSource independently (null means original). When selectedLayoutRequirement is supplied, every layoutSource must be one of requiredLayoutReferenceIds; the explicit composition input overrides optional catalog layout use. When referenceLibraryRequirement is On, every layoutSource must use one of its requiredLayoutReferenceIds and the validated blueprint; this overrides optional/original library layout guidance. When Off, use prompt/supplied source direction without library-derived angles or layouts. Otherwise give user-priority references first consideration, not exclusivity: matched, mixed, one-original and fully original choices are valid; never force reference use or uniqueness. Explain choices and relevant unused user references in selectionReason. The renderer receives only the selected design-only blueprint; reference content never supplies identity, copy, pricing, claims, testimonials or proof.
 DRAFT VIDEO SOURCE EXCEPTION: When draftVideoSourceCatalog is supplied, its exact video statements (including cases, amounts and outcomes) ARE available for the current draft through draftVideoSourceSelection, independent of Proof Library entry or approval. This overrides the above unavailable/unapproved-source-wording rules for that bounded draft path only. Use at least one meaningful source passage in the portfolio, preserving its entire wording and qualifications through application-owned insertion. Do not invent, broaden or paraphrase its claims, call it independently verified, add approved attribution, or infer publishing/reuse permission. Unknown facts outside the source remain unavailable. Company prohibitions and required disclosures still apply. Keep the rest of the concept grounded in the selected video. Publishing and verified reuse retain their separate review/approval requirements.
 When approvedHumanOptions is supplied, choose a listed humanSourceId only for material credibility, relatability, explanation or emotional specificity; face availability alone is insufficient. Explain why in selectionReason. That identity replaces other supplied humans; never mix identities. Approval covers visible identity only, never claims, credentials, quotes, testimonials or outcomes. Use null for a non-human concept or an explicitly supplied approved TRA source.
 `;
@@ -270,13 +273,29 @@ export async function requestCreativeBatch(
   }
   // Case wording stays separate: adding adjacent transcript segments can combine different people.
   const draftVideoSourceCatalog = requiredCases ?? projectDraftVideoSourcePassages(sourceAnalysis, args.operatorSelectedSourceGuidance, args.primaryVideoMediaId ?? primaryVideo?.source.mediaId);
-  const requiredCaseFor = (index: number) => requiredCases?.[(index - 1) % requiredCases.length];
+  const requiredHumanCount = args.peoplePercent === undefined ? args.count : peopleMix(args.count, args.peoplePercent).withPeople;
+  if (requiredCases && requiredCases.length > requiredHumanCount) {
+    throw new BatchControlsError('The selected video cases exceed the ads with people. Start a new portfolio with more Ads with people or explicitly fewer selected cases; no person or case will be substituted.');
+  }
+  const requiredCaseFor = (index: number) => index <= requiredHumanCount ? requiredCases?.[(index - 1) % requiredCases.length] : undefined;
   const videoHasHuman = primaryVideo?.hasHuman ?? args.primaryVideoHasHuman;
   if ((primaryVideo || args.primaryVideoMediaId) && typeof videoHasHuman !== 'boolean' && !args.requireSelectedVideoFrames) {
     throw new Error('The saved video analysis lacks a visible-human assessment. Prepare a new generation before planning; no graphic substitution is allowed.');
   }
-  if (!Number.isInteger(args.count) || args.count < 2 || args.count > MAX_PORTFOLIO_CREATIVES) {
-    throw new Error(`Creative batch count must be an integer from 2 to ${MAX_PORTFOLIO_CREATIVES}.`);
+  if (!Number.isInteger(args.count) || args.count < 1 || args.count > MAX_PORTFOLIO_CREATIVES) {
+    throw new Error(`Creative batch count must be an integer from 1 to ${MAX_PORTFOLIO_CREATIVES}.`);
+  }
+  const mix = args.peoplePercent === undefined ? undefined : peopleMix(args.count, args.peoplePercent);
+  if (mix?.withPeople && ((!args.hasApprovedHumanSource && !args.approvedHumanOptions?.length)
+    || ((primaryVideo || args.primaryVideoMediaId) && !videoHasHuman && !args.requireSelectedVideoFrames))) {
+    throw new BatchControlsError('Ads with people requires eligible approved human evidence. No plan or images were generated. Add an eligible TRA human source and start a new portfolio, or start a new portfolio and set Ads with people to 0%.');
+  }
+  const libraryIds = args.referenceCatalog?.filter(item => item.priority === 'library').map(item => item.referenceId) ?? [];
+  requireReferenceLibrarySelection(args.useReferenceLibrary, libraryIds.length);
+  if (args.useReferenceLibrary === false && libraryIds.length) throw new BatchControlsError('Use reference library is Off; remove library candidates before planning.');
+  if (args.useReferenceLibrary && args.requiredLayoutReferenceIds?.length
+    && !libraryIds.some(id => args.requiredLayoutReferenceIds!.includes(id))) {
+    throw new BatchControlsError('The explicitly supplied layout conflicts with Use reference library On. Start a new portfolio without that uploaded layout or with Use reference library Off; the selected source will not be silently replaced.');
   }
   const model = repairModel ?? (process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol');
   if (args.approvedHumanOptions && (args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
@@ -313,8 +332,15 @@ export async function requestCreativeBatch(
         { role: 'developer', content: [{ type: 'input_text', text: PLANNER_RULES }] },
         { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
           creativeContext: args.context,
-          ...(requiredCases ? { requiredVideoCases: expectedIndexes.map(index => ({ index, ...requiredCaseFor(index) })),
-            requiredVideoCaseGuidance: 'These exact operator-selected individual source accounts are required, one assigned case per image. Shape the proposition, SO WHAT and visual direction around its result and supplied layout. The application inserts the assigned entire statement into shortSupport and Meta copy. Do not paraphrase, omit, combine speakers, infer attribution or replace cases with generic process copy. Person/frame attribution requires operator confirmation before paid rendering. No Proof Library re-entry is required for this unverified draft.' } : {}),
+          ...(args.useReferenceLibrary === undefined ? {} : { useReferenceLibrary: args.useReferenceLibrary,
+            referenceLibraryRequirement: args.useReferenceLibrary
+              ? { requiredLayoutReferenceIds: libraryIds, direction: 'Every ad must select layoutSource from these eligible library IDs and follow its validated blueprint. Angle choice stays independent. Do not copy people, branding, claims or source copy.' }
+              : 'Use the prompt and supplied TRA sources/brand for original layout direction. No library references, library angles or library-derived layout instructions may be used.' }),
+          ...(mix ? { peopleMixRequirement: { percent: args.peoplePercent, ...mix,
+            humanConceptIndexes: Array.from({ length: mix.withPeople }, (_, i) => i + 1),
+            direction: 'Exactly these indexes must use subjectSource approved-tra-human. All remaining indexes must use non-human with no human IDs. This counts ads, not people per ad. Preserve this assignment in repairs and locked concepts. Never invent people, infer person-to-case ownership or substitute graphics for missing human evidence; stop visibly. Non-human concepts may use the same source content without depicting a person.' } } : {}),
+          ...(requiredCases ? { requiredVideoCases: expectedIndexes.filter(index => requiredCaseFor(index)).map(index => ({ index, ...requiredCaseFor(index) })),
+            requiredVideoCaseGuidance: 'These exact operator-selected individual source accounts are required, one assigned case per human image; non-human slots must use null draftVideoSourceSelection and must not repeat the personal case wording. Shape the proposition, SO WHAT and visual direction around its result and supplied layout. The application inserts the assigned entire statement into shortSupport and Meta copy. Do not paraphrase, omit, combine speakers, infer attribution or replace cases with generic process copy. Person/frame attribution requires operator confirmation before paid rendering. No Proof Library re-entry is required for this unverified draft.' } : {}),
           ...(draftVideoSourceCatalog.length ? { draftVideoSourceCatalog: draftVideoSourceCatalog.map(({ exactText, contextSegments, ...passage }) => {
             const reviewIndex = args.operatorSelectedSourceGuidance?.statements?.findIndex(statement => statement.context.type === 'VIDEO_ON_SCREEN'
               && statement.context.observation.visibleText.join(' ') === exactText && statement.reference.type === 'VIDEO_ON_SCREEN'
@@ -325,7 +351,7 @@ export async function requestCreativeBatch(
                 : { collection: 'sourceAnalysis.observations.visibleText', timestampMs: passage.startMs, useAllVisibleText: true } } : {}) };
           }),
             draftVideoSourceGuidance: 'Use meaningful content from this supplied video in the current DRAFT portfolio. Select a passage in at least one concept; prefer the source case/outcome when present. Choose imageField headline or shortSupport to fit the supplied layout. The application inserts the entire exact passage into that image field and appends it to adCopy.primaryText, preserving amounts, outcomes and qualifications. Budget final fields within 1,000 characters; do not duplicate or paraphrase this application-owned passage elsewhere. Each passage is a SOURCE ASSERTION, never independently verified Proof or publishing/permission approval. Its context is bounded; retain qualifications and flag ambiguity for review rather than fabricating details or requiring a manual Case Studies record.' } : {}),
-          ...(args.requireSelectedVideoFrames ? { selectedVideoFrameRequirement: 'Every concept must use the explicitly selected TRA video human frames: subjectSource approved-tra-human and null humanSourceId. Stop if the exact selected pool is unusable; do not substitute graphics or another identity.' } : {}),
+          ...(args.requireSelectedVideoFrames ? { selectedVideoFrameRequirement: `${mix ? 'Every human concept' : 'Every concept'} must use the explicitly selected TRA video human frames: subjectSource approved-tra-human and null humanSourceId. Non-human slots in peopleMixRequirement must not attach frames. Stop if the exact selected pool is unusable; do not substitute graphics or another identity.` } : {}),
           ...(args.requiredLayoutReferenceIds?.length ? { requiredLayoutReferenceIds: args.requiredLayoutReferenceIds,
             selectedLayoutRequirement: 'For every concept, choose layoutSource from these explicitly supplied layout references. Their composition is required; their humans, copy, logos and claims remain forbidden. This requirement supersedes optional/original catalog layout guidance.' } : {}),
           ...(args.operatorSelectedSourceGuidance ? { operatorSelectedSourceGuidance: args.operatorSelectedSourceGuidance } : {}),
@@ -433,6 +459,10 @@ export async function requestCreativeBatch(
     // Application-owned insertion prevents a model's generic/incorrect selection from dropping requested cases.
     const selected = required && isRecord(value) ? { ...value, proofSelection: null,
       draftVideoSourceSelection: { passageId: required.passageId, imageField: 'shortSupport' } } : value;
+    if (requiredCases && args.peoplePercent !== undefined && expectedIndexes[index] > requiredHumanCount
+      && isRecord(selected) && selected.draftVideoSourceSelection !== null) {
+      throw new BatchControlsError('A non-human ad cannot take a selected person case. Preserve the selected case/person assignment.');
+    }
     const concept = parseConcept(selected, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog, draftVideoSourceCatalog, Boolean(required));
     if (required && concept) {
       // Model copy cannot retain another person's result beside the assigned exact case.
@@ -453,8 +483,12 @@ export async function requestCreativeBatch(
   if (draftVideoSourceCatalog.length && !plannedPortfolio.some(concept => concept?.draftSourceAssertion)) {
     throw new Error('The plan ignored the selected video source statements. No images were generated. Retry with the video content.');
   }
-  plannedPortfolio.forEach(concept => assertSelectedVideoInputContract(concept!, args));
-  if (videoHasHuman && !plannedPortfolio.some(concept => concept?.strategy.execution.subjectSource === 'approved-tra-human'
+  plannedPortfolio.forEach(concept => {
+    assertSelectedVideoInputContract(concept!, args);
+    assertReferenceLibraryConcept(concept!, args.referenceCatalog ?? [], args.useReferenceLibrary);
+  });
+  assertPeopleMix(plannedPortfolio as PlannedCreativeConcept[], args.count, args.peoplePercent);
+  if (args.peoplePercent === undefined && videoHasHuman && !plannedPortfolio.some(concept => concept?.strategy.execution.subjectSource === 'approved-tra-human'
     && !concept.strategy.humanSourceId && !concept.strategy.approvedHumanId)) {
     throw new Error('The plan ignored the human in the selected video. No images were generated. Retry with that video or remove it explicitly.');
   }
