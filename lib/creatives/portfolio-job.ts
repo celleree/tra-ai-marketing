@@ -1,0 +1,421 @@
+import { randomUUID } from 'node:crypto';
+import { caseReviewChoices } from '@/lib/creatives/portfolio-case-amendment';
+import { assertReviewedFrameSelection } from '@/lib/creatives/review-handoff';
+import { isDeepStrictEqual } from 'node:util';
+import type { CreativeBatchPlannerArgs } from '@/lib/ai/creative-planner';
+import { classifyCreativeCopyContract } from '@/lib/creatives/copy-contract';
+import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
+import type { PortfolioAudit } from '@/lib/creatives/portfolio-audit';
+import { getCreativeDiversityRepairPlan, type CreativeDiversityRepairPlan } from '@/lib/creatives/diversity';
+import type { CreativeBatchPlan } from '@/lib/creatives/planned';
+import type { CreativePortfolioSnapshot } from '@/lib/creatives/portfolio-snapshot';
+import type { PortfolioPreparationState } from '@/lib/creatives/portfolio-preparation';
+import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+import { videoDependenciesFromPlanningSourceAnalysis } from '@/lib/creatives/video-intelligence-planning';
+import { parseGenerateVideoFrameSelection, type GenerateVideoFrameSelection } from '@/lib/video/generation-selection-contract';
+import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY, HUMAN_FRAME_SELECTION_POLICY, canonicalizeVideoFrameReuseContext, type AutomaticVideoSelectionPolicy,
+  type VideoFrameReuseContext } from '@/lib/video/human-frame-selection';
+export { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+
+export const PORTFOLIO_LEASE_MS = 10 * 60 * 1000;
+export const MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH = 200;
+export type LegacyPortfolioVideoSelectionState = {
+  version: 1;
+  selectionModel: string;
+  selection?: GenerateVideoFrameSelection;
+  retryAuthorization?: { version: 1 };
+};
+export type PortfolioVideoSelectionState = LegacyPortfolioVideoSelectionState | {
+  version: 2;
+  selectionModel: string;
+  selectionPolicy: AutomaticVideoSelectionPolicy;
+  portraitCropRevision?: import('@/lib/video/provider-portrait-contract').PortraitCropRevision;
+  providerPortrait?: import('@/lib/video/provider-portrait-contract').ProviderPortraitState;
+  reuseContext: VideoFrameReuseContext;
+  selection?: GenerateVideoFrameSelection;
+  retryAuthorization?: { version: 1 };
+};
+export type PortfolioSlot = { index: number; creativeId: string; status: 'PENDING' | 'SAVED' | 'RETRY_REQUIRED' | 'BLOCKED'; error?: string;
+  videoSelection?: PortfolioVideoSelectionState; boundCaseCropRecovery?: { version: 1; previousError: string } };
+export type PortfolioPlanningPhase = 'INITIAL_PLAN' | 'DIVERSITY_AUDIT' | 'TARGETED_REPAIR' | 'READY_TO_RENDER';
+export type PortfolioPlanningCheckpoint = { snapshot: CreativePortfolioSnapshot; plannerArgs: CreativeBatchPlannerArgs };
+export type PortfolioPlanningState =
+  | { phase: 'INITIAL_PLAN'; preparation: PortfolioPreparationState }
+  | { phase: 'DIVERSITY_AUDIT'; checkpoint: PortfolioPlanningCheckpoint; repairAttempted: boolean }
+  | { phase: 'TARGETED_REPAIR'; checkpoint: PortfolioPlanningCheckpoint; repairPlan?: CreativeDiversityRepairPlan; replacementIndexes?: number[] }
+  | { phase: 'READY_TO_RENDER' };
+export type CreativePortfolioJob = {
+  version: 1; id: string; createdAtMs: number; updatedAtMs: number;
+  // Missing/1 retain legacy behavior; 2 composes all supplied sources. Immutable after creation.
+  readonly sourceCompositionVersion?: 1 | 2;
+  // Present only on durable portfolios created with a video; absence preserves existing behavior.
+  readonly videoPreparationVersion?: 1;
+  request: ValidGenerateCreativeRequest; snapshot: CreativePortfolioSnapshot | null; slots: PortfolioSlot[];
+  // Explicit operator overlay; the original snapshot remains immutable.
+  videoCaseAmendment?: import('@/lib/creatives/portfolio-case-amendment').VideoCaseAmendment;
+  planning: PortfolioPlanningState; planningError?: string;
+  // A terminal approved-Preview stop survives individual saved-slot reconciliation.
+  previewAcceptanceError?: string;
+  lease: { id: string; slotIndex: number | null; expiresAtMs: number } | null;
+};
+export type PortfolioClaim = { status: 'WORK' | 'BUSY' | 'COMPLETE' | 'RETRY_REQUIRED' | 'BLOCKED'; job: CreativePortfolioJob };
+const id = (prefix: string) => prefix + randomUUID().replaceAll('-', '');
+const validVideoSelectionModel = (value: unknown): value is string => typeof value === 'string'
+  && value.trim().length > 0 && value.length <= MAX_PORTFOLIO_VIDEO_SELECTION_MODEL_LENGTH;
+
+export function newCreativePortfolio(request: ValidGenerateCreativeRequest, now = Date.now()): CreativePortfolioJob {
+  if (!Number.isInteger(request.variationCount) || request.variationCount < 2 || request.variationCount > MAX_PORTFOLIO_CREATIVES) {
+    throw new Error('A portfolio requires 2 to 36 creatives.');
+  }
+  return { version: 1, sourceCompositionVersion: 2,
+    ...(request.sourceAssets.some(source => source.role === 'TRA_VIDEO') ? { videoPreparationVersion: 1 as const } : {}),
+    id: id('portfolio_'), createdAtMs: now, updatedAtMs: now, request: structuredClone(request),
+    snapshot: null, planning: { phase: 'INITIAL_PLAN', preparation: { quotaReserved: false } }, lease: null,
+    slots: Array.from({ length: request.variationCount }, (_, index) => ({
+      index: index + 1, creativeId: id('creative_'), status: 'PENDING',
+    })) };
+}
+const requireLease = (job: CreativePortfolioJob, leaseId: string, now: number) => {
+  if (!job.lease || job.lease.id !== leaseId || job.lease.expiresAtMs <= now) throw new Error('Portfolio work lease is no longer current.');
+  return job.lease;
+};
+const requireVideoSelectionSlot = (job: CreativePortfolioJob, leaseId: string, now: number) => {
+  const lease = requireLease(job, leaseId, now);
+  const slot = job.slots.find(candidate => candidate.index === lease.slotIndex);
+  if (job.videoPreparationVersion !== 1 || !job.snapshot || job.planning.phase !== 'READY_TO_RENDER'
+    || !job.request.sourceAssets.some(source => source.role === 'TRA_VIDEO') || !slot || slot.status !== 'PENDING') {
+    throw new Error('Video frame selection does not match the reserved creative.');
+  }
+  return { lease, slot };
+};
+const planMatchesSlots = (job: CreativePortfolioJob, snapshot: CreativePortfolioSnapshot) =>
+  isDeepStrictEqual(snapshot.request, job.request)
+    && snapshot.batchPlan.creatives.length === job.slots.length
+    && snapshot.batchPlan.creatives.every((concept, index) => concept.index === job.slots[index].index);
+const failed = (job: CreativePortfolioJob, message: string) => {
+  const next = structuredClone(job);
+  if (next.lease!.slotIndex === null) next.planningError = message;
+  else {
+    const slot = next.slots.find(slot => slot.index === next.lease!.slotIndex)!;
+    slot.status = 'RETRY_REQUIRED'; slot.error = message;
+    if (slot.videoSelection) {
+      delete slot.videoSelection.retryAuthorization;
+      if (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait) delete slot.videoSelection.providerPortrait.retryAuthorized;
+    }
+  }
+  next.lease = null;
+  return next;
+};
+
+/** Expired work may have incurred provider cost. Never silently claim it again. */
+export function claimCreativePortfolio(current: CreativePortfolioJob, now = Date.now(), leaseId: string = randomUUID(), stopOnFailure = false): PortfolioClaim {
+  const job = structuredClone(current);
+  if (job.previewAcceptanceError) return { status: 'BLOCKED', job };
+  const priorError = job.planningError ?? job.slots.find(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status))?.error;
+  if (stopOnFailure && !job.lease && (priorError || job.slots.some(slot => ['RETRY_REQUIRED', 'BLOCKED'].includes(slot.status)))) {
+    return { status: 'BLOCKED', job: { ...job, previewAcceptanceError: priorError?.slice(0, 1000) || 'This approved Preview test is stopped.', updatedAtMs: now } };
+  }
+  if (job.lease) {
+    if (job.lease.expiresAtMs > now) return { status: 'BUSY', job };
+    const message = stopOnFailure ? 'Previous work was interrupted; its provider outcome may be uncertain. This approved Preview test is stopped.'
+      : 'Previous work was interrupted; its provider outcome may be uncertain. Explicit retry is required.';
+    return { status: 'RETRY_REQUIRED', job: { ...failed(job, message), ...(stopOnFailure ? { previewAcceptanceError: message } : {}), updatedAtMs: now } };
+  }
+  // Older portfolios may have blocked a graphic concept during unnecessary human-frame selection.
+  // No image provider work occurred for a blocked slot, so it can proceed with its frozen plan.
+  if (job.snapshot) for (const slot of job.slots) {
+    const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
+    if (!job.videoCaseAmendment && slot.status === 'BLOCKED' && slot.videoSelection && concept?.strategy?.execution?.subjectSource === 'non-human') {
+      slot.status = 'PENDING'; delete slot.error; delete slot.videoSelection;
+    }
+  }
+  const slot = job.snapshot ? job.slots.find(slot => slot.status === 'PENDING') : undefined;
+  if (!job.snapshot && job.planningError) return { status: 'RETRY_REQUIRED', job };
+  if (job.snapshot && !slot) return { status: job.slots.every(slot => slot.status === 'SAVED') ? 'COMPLETE'
+    : job.slots.some(slot => slot.status === 'BLOCKED') ? 'BLOCKED' : 'RETRY_REQUIRED', job };
+  job.lease = { id: leaseId, slotIndex: slot?.index ?? null, expiresAtMs: now + PORTFOLIO_LEASE_MS };
+  job.updatedAtMs = now;
+  return { status: 'WORK', job };
+}
+
+export function finishPortfolioPreparation(
+  current: CreativePortfolioJob, leaseId: string, preparation: PortfolioPreparationState, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'INITIAL_PLAN') {
+    throw new Error('Portfolio preparation does not match the reserved planning work.');
+  }
+  return { ...structuredClone(current), planning: { phase: 'INITIAL_PLAN' as const, preparation: structuredClone(preparation) },
+    lease: null, updatedAtMs: now };
+}
+
+/** Save child dependency progress while retaining the current parent lease. */
+export function checkpointPortfolioPreparation(
+  current: CreativePortfolioJob, leaseId: string, preparation: PortfolioPreparationState, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'INITIAL_PLAN') {
+    throw new Error('Portfolio preparation does not match the reserved planning work.');
+  }
+  return { ...structuredClone(current), planning: { phase: 'INITIAL_PLAN' as const, preparation: structuredClone(preparation) },
+    updatedAtMs: now };
+}
+
+export function finishPortfolioPreparationFailure(
+  current: CreativePortfolioJob, leaseId: string, preparation: PortfolioPreparationState, message: string, now = Date.now(),
+) {
+  const job = finishPortfolioPreparation(current, leaseId, preparation, now);
+  return { ...job, planningError: message.slice(0, 1000) || 'Video preparation requires review.' };
+}
+
+export function finishPortfolioInitialPlan(
+  current: CreativePortfolioJob, leaseId: string, checkpoint: PortfolioPlanningCheckpoint, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'INITIAL_PLAN'
+    || !current.planning.preparation.quotaReserved
+    || checkpoint.snapshot.batchPlan.portfolioAudit || !planMatchesSlots(current, checkpoint.snapshot)
+    || checkpoint.plannerArgs.count !== current.slots.length
+    || !isDeepStrictEqual(checkpoint.plannerArgs.referenceCatalog ?? [], checkpoint.snapshot.referenceCatalog)) {
+    throw new Error('Portfolio initial plan does not match the reserved work.');
+  }
+  return { ...structuredClone(current), planning: { phase: 'DIVERSITY_AUDIT' as const,
+    checkpoint: structuredClone(checkpoint), repairAttempted: false }, lease: null, updatedAtMs: now };
+}
+
+export function finishPortfolioAuditForRepair(
+  current: CreativePortfolioJob, leaseId: string, audit: PortfolioAudit, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'DIVERSITY_AUDIT'
+    || current.planning.repairAttempted || current.planning.checkpoint.snapshot.batchPlan.portfolioAudit
+    || audit.conceptCount !== current.slots.length) throw new Error('Portfolio audit does not match the current initial plan.');
+  const checkpoint = structuredClone(current.planning.checkpoint);
+  const repairPlan = getCreativeDiversityRepairPlan(checkpoint.snapshot.batchPlan.creatives, audit);
+  if (!repairPlan.replacementIndexes.length) throw new Error('Portfolio audit did not identify repairable concept indexes.');
+  const job = structuredClone(current);
+  job.planning = { phase: 'TARGETED_REPAIR', repairPlan, checkpoint: { ...checkpoint,
+    snapshot: { ...checkpoint.snapshot, batchPlan: { ...checkpoint.snapshot.batchPlan, portfolioAudit: structuredClone(audit) } } } };
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
+export function finishPortfolioRepair(
+  current: CreativePortfolioJob, leaseId: string, batchPlan: CreativeBatchPlan, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  const repairPlan = current.planning.phase === 'TARGETED_REPAIR' ? current.planning.repairPlan : undefined;
+  const replacementIndexes = repairPlan?.replacementIndexes;
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'TARGETED_REPAIR'
+    || !replacementIndexes?.length || !current.planning.checkpoint.snapshot.batchPlan.portfolioAudit || batchPlan.portfolioAudit
+    || batchPlan.plannerModel !== current.planning.checkpoint.snapshot.batchPlan.plannerModel
+    || batchPlan.reasoningEffort !== current.planning.checkpoint.snapshot.batchPlan.reasoningEffort
+    || batchPlan.creatives.length !== replacementIndexes.length
+    || batchPlan.creatives.some((concept, index) => concept.index !== replacementIndexes[index])) {
+    throw new Error('Portfolio repair does not match the current audited plan.');
+  }
+  const checkpoint = structuredClone(current.planning.checkpoint);
+  const replacements = new Map(batchPlan.creatives.map(concept => [concept.index, structuredClone(concept)] as const));
+  const repairedBatchPlan: CreativeBatchPlan = {
+    creatives: checkpoint.snapshot.batchPlan.creatives.map(concept => replacements.get(concept.index) ?? structuredClone(concept)),
+    plannerModel: checkpoint.snapshot.batchPlan.plannerModel,
+    reasoningEffort: checkpoint.snapshot.batchPlan.reasoningEffort,
+  };
+  const job = structuredClone(current);
+  job.planning = { phase: 'DIVERSITY_AUDIT', checkpoint: { ...checkpoint,
+    snapshot: { ...checkpoint.snapshot, batchPlan: repairedBatchPlan } }, repairAttempted: true };
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
+export function finishPortfolioAuditFailure(
+  current: CreativePortfolioJob, leaseId: string, audit: PortfolioAudit, message: string, now = Date.now(),
+) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || current.planning.phase !== 'DIVERSITY_AUDIT'
+    || !current.planning.repairAttempted || current.planning.checkpoint.snapshot.batchPlan.portfolioAudit
+    || audit.conceptCount !== current.slots.length) throw new Error('Portfolio audit failure does not match the repaired plan.');
+  const checkpoint = structuredClone(current.planning.checkpoint);
+  checkpoint.snapshot.batchPlan.portfolioAudit = structuredClone(audit);
+  const job = structuredClone(current);
+  job.planning = { phase: 'DIVERSITY_AUDIT', checkpoint, repairAttempted: true };
+  job.planningError = message.slice(0, 1000) || 'Creative planning did not pass the diversity audit.';
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
+export function finishPortfolioPlan(current: CreativePortfolioJob, leaseId: string, snapshot: CreativePortfolioSnapshot, now = Date.now()) {
+  const lease = requireLease(current, leaseId, now);
+  if (lease.slotIndex !== null || current.snapshot || !planMatchesSlots(current, snapshot)) {
+    throw new Error('Portfolio plan does not match the reserved slots.');
+  }
+  return { ...structuredClone(current), snapshot: structuredClone(snapshot), planning: { phase: 'READY_TO_RENDER' as const },
+    lease: null, updatedAtMs: now };
+}
+
+/** Freeze/consume durable selection-attempt state before any B3 provider work. */
+export function resolvePortfolioVideoSelectionAttempt(
+  current: CreativePortfolioJob, leaseId: string,
+  proposed: { selectionModel: string; selectionPolicy: AutomaticVideoSelectionPolicy; reuseContext: VideoFrameReuseContext },
+  now = Date.now(),
+) {
+  const { slot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (slot.videoSelection?.selection) throw new Error('Video frame selection is already complete.');
+  const savedModel = slot.videoSelection?.selectionModel;
+  if (slot.videoSelection && !validVideoSelectionModel(savedModel)) throw new Error('Saved video frame selection state is invalid.');
+  if (!savedModel && !validVideoSelectionModel(proposed.selectionModel)) throw new Error('Video frame selection model is invalid.');
+  const savedV2 = slot.videoSelection?.version === 2 ? slot.videoSelection : undefined;
+  return { selectionModel: savedModel ?? proposed.selectionModel,
+    selectionPolicy: savedV2?.selectionPolicy ?? proposed.selectionPolicy,
+    reuseContext: savedV2?.reuseContext ?? canonicalizeVideoFrameReuseContext(proposed.reuseContext),
+    retry: slot.videoSelection?.retryAuthorization?.version === 1 };
+}
+
+export function checkpointPortfolioVideoSelectionAttempt(
+  current: CreativePortfolioJob, leaseId: string,
+  proposed: { selectionModel: string; selectionPolicy: AutomaticVideoSelectionPolicy; reuseContext: VideoFrameReuseContext },
+  now = Date.now(),
+) {
+  requireVideoSelectionSlot(current, leaseId, now);
+  const attempt = resolvePortfolioVideoSelectionAttempt(current, leaseId, proposed, now);
+  const job = structuredClone(current);
+  const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
+  slot.videoSelection = { version: 2, selectionModel: attempt.selectionModel,
+    selectionPolicy: attempt.selectionPolicy, reuseContext: structuredClone(attempt.reuseContext) };
+  job.updatedAtMs = now;
+  return { job, selectionModel: slot.videoSelection.selectionModel, selectionPolicy: slot.videoSelection.selectionPolicy,
+    reuseContext: slot.videoSelection.reuseContext, retry: attempt.retry };
+}
+
+/** Persist a deterministic automatic-selection admission failure. This state cannot be retried or reset. */
+export function blockPortfolioVideoSelection(
+  current: CreativePortfolioJob, leaseId: string,
+  attempt: { selectionModel: string; selectionPolicy: AutomaticVideoSelectionPolicy; reuseContext: VideoFrameReuseContext },
+  message: string, now = Date.now(),
+) {
+  const { slot: currentSlot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (currentSlot.videoSelection?.selection) throw new Error('Completed video frame selection cannot be blocked.');
+  const job = structuredClone(current);
+  const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
+  slot.status = 'BLOCKED'; slot.error = message.slice(0, 1000) || 'Automatic video selection cannot continue.';
+  slot.videoSelection = { version: 2, selectionModel: attempt.selectionModel, selectionPolicy: attempt.selectionPolicy,
+    reuseContext: canonicalizeVideoFrameReuseContext(attempt.reuseContext) };
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
+/** Persist a completed B3 frame choice, then release the parent lease for generation. */
+export function finishPortfolioVideoFrameSelection(
+  current: CreativePortfolioJob, leaseId: string, selection: GenerateVideoFrameSelection, now = Date.now(),
+) {
+  const { slot: currentSlot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (!currentSlot.videoSelection || !validVideoSelectionModel(currentSlot.videoSelection.selectionModel)
+    || currentSlot.videoSelection.selection) {
+    throw new Error('Frozen video frame selection state is required.');
+  }
+  const parsed = parseGenerateVideoFrameSelection(selection);
+  if (!parsed) throw new Error('Completed video frame selection is invalid.');
+  if (current.videoCaseAmendment) assertReviewedFrameSelection(caseReviewChoices(current, currentSlot.index), parsed);
+  const job = structuredClone(current);
+  const slot = job.slots.find(candidate => candidate.index === job.lease!.slotIndex)!;
+  slot.videoSelection = currentSlot.videoSelection.version === 1
+    ? { version: 1, selectionModel: currentSlot.videoSelection.selectionModel, selection: parsed }
+    : { version: 2, selectionModel: currentSlot.videoSelection.selectionModel,
+        selectionPolicy: currentSlot.videoSelection.selectionPolicy,
+        reuseContext: structuredClone(currentSlot.videoSelection.reuseContext), selection: parsed };
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
+export function finishPortfolioSlot(current: CreativePortfolioJob, leaseId: string, creativeId: string, now = Date.now()) {
+  const lease = requireLease(current, leaseId, now);
+  const job = structuredClone(current);
+  const slot = job.slots.find(slot => slot.index === lease.slotIndex);
+  if (!job.snapshot || !slot || slot.creativeId !== creativeId || slot.status !== 'PENDING') throw new Error('Portfolio result does not match the reserved creative.');
+  const concept = job.snapshot.batchPlan.creatives[slot.index - 1];
+  if (!job.videoCaseAmendment && concept?.strategy?.execution?.subjectSource === 'non-human') delete slot.videoSelection;
+  if (slot.videoSelection && (!slot.videoSelection.selection || slot.videoSelection.retryAuthorization
+    || (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait
+      && (!slot.videoSelection.providerPortrait.verified || slot.videoSelection.providerPortrait.retryAuthorized))
+    || !parseGenerateVideoFrameSelection(slot.videoSelection.selection))) {
+    throw new Error('Completed video frame selection is required before saving this creative.');
+  }
+  slot.status = 'SAVED'; delete slot.error;
+  job.lease = null; job.updatedAtMs = now;
+  return job;
+}
+
+export function failPortfolioWork(current: CreativePortfolioJob, leaseId: string, message: string, now = Date.now()) {
+  requireLease(current, leaseId, now);
+  return { ...failed(current, message.slice(0, 1000) || 'Creative work could not be completed.'), updatedAtMs: now };
+}
+
+/** Only for failures before any provider work, such as quota denial. */
+export function releasePortfolioWork(current: CreativePortfolioJob, leaseId: string, now = Date.now()) {
+  requireLease(current, leaseId, now);
+  return { ...structuredClone(current), lease: null, updatedAtMs: now };
+}
+
+/** Candidate assessment is durably saved before this lease is released for the next bounded step. */
+export function continuePortfolioVideoFrameSelection(current: CreativePortfolioJob, leaseId: string, now = Date.now()) {
+  const { slot } = requireVideoSelectionSlot(current, leaseId, now);
+  if (slot.videoSelection?.version !== 2 || slot.videoSelection.selection) {
+    throw new Error('Candidate assessment continuation requires a frozen unfinished selection.');
+  }
+  return { ...structuredClone(current), lease: null, updatedAtMs: now };
+}
+
+/** An explicit operator action; successful slots and the completed plan are never reset. */
+export function retryPortfolioWork(current: CreativePortfolioJob, slotIndex: number | null, now = Date.now()) {
+  if (current.previewAcceptanceError) throw new Error('This approved Preview test is stopped; further work is not authorized.');
+  if (current.lease) throw new Error('Portfolio work is still leased.');
+  const job = structuredClone(current);
+  if (slotIndex === null) {
+    if (job.snapshot || !job.planningError) throw new Error('Portfolio planning does not require a retry.');
+    const invalidTerminalAudit = job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
+      && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit
+      && job.planning.checkpoint.snapshot.batchPlan.creatives.some(concept =>
+        classifyCreativeCopyContract(concept).kind === 'INVALID');
+    if (invalidTerminalAudit) {
+      job.planningError = 'Creative plan has an invalid separated ad/image copy contract and cannot be rendered.';
+    } else {
+      delete job.planningError;
+      if (job.planning.phase === 'INITIAL_PLAN' && job.planning.preparation.videoProgress?.retryState) {
+        job.planning.preparation.videoRetryAuthorization = structuredClone(job.planning.preparation.videoProgress.retryState);
+      }
+      // A completed second audit is a known quality failure. Restart planning explicitly without re-reserving portfolio quota.
+      if (job.planning.phase === 'DIVERSITY_AUDIT' && job.planning.repairAttempted
+        && job.planning.checkpoint.snapshot.batchPlan.portfolioAudit) {
+        const { plannerArgs, snapshot } = job.planning.checkpoint;
+        job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true,
+          ...(job.sourceCompositionVersion === 2 && plannerArgs.sourceAnalysis ? {
+            sourceAnalysis: plannerArgs.sourceAnalysis, selectedReferences: snapshot.selectedReferences,
+            referenceCatalog: snapshot.referenceCatalog,
+            ...(job.videoPreparationVersion === 1 ? {
+              videoDependencies: videoDependenciesFromPlanningSourceAnalysis(plannerArgs.sourceAnalysis),
+            } : {}),
+          } : {}),
+        } };
+      }
+    }
+  } else {
+    const slot = job.slots.find(slot => slot.index === slotIndex);
+    if (slot?.videoSelection?.version === 2 && slot.videoSelection.portraitCropRevision) throw new Error('Revised portrait work does not authorize a repeated paid attempt. Reload its diagnostic.');
+    if (!job.snapshot || !slot || slot.status !== 'RETRY_REQUIRED') throw new Error('This creative does not require a retry.');
+    slot.status = 'PENDING'; delete slot.error;
+    if (slot.videoSelection && job.snapshot.batchPlan.creatives[slot.index - 1]?.strategy.execution.subjectSource === 'approved-tra-human'
+      && (slot.videoSelection.version === 1
+        || slot.videoSelection.selectionPolicy === HUMAN_FRAME_SELECTION_POLICY
+        || slot.videoSelection.selectionPolicy === 'human-frame-visual-quality-v1')) {
+      delete slot.videoSelection;
+    } else if (slot.videoSelection && !slot.videoSelection.selection) slot.videoSelection.retryAuthorization = { version: 1 };
+    else if (slot.videoSelection) {
+      delete slot.videoSelection.retryAuthorization;
+      if (slot.videoSelection.version === 2 && slot.videoSelection.providerPortrait && !slot.videoSelection.providerPortrait.verified) {
+        slot.videoSelection.providerPortrait.retryAuthorized = true;
+      }
+    }
+  }
+  job.updatedAtMs = now;
+  return job;
+}

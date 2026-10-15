@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import {
   CREATIVE_CATEGORIES,
   CREATIVE_CATEGORY_LABELS,
@@ -6,18 +7,30 @@ import {
 import type { CreativeFormatId } from '@/lib/creative-formats';
 import { CREATIVE_FORMAT_LABELS } from '@/lib/creative-formats';
 import {
+  creativeImageHttpError,
+  creativeImageMissingOutputError,
+  fetchCreativeImage,
+  runCreativeImageModelRoute,
+} from '@/lib/creatives/image-models';
+import {
   CREATIVE_PLACEMENT_SPECS,
   type CreativePlacement,
 } from '@/lib/creatives/placements';
 import type { PlannedCreativeFormat } from '@/lib/creatives/generate-request';
-import type { CreativeCopy } from '@/lib/creatives/generated';
+import type { CreativeCopy, CreativeImageCopy } from '@/lib/creatives/generated';
 import type { ImageGenerationResult } from '@/lib/ai/image-generation-result';
 import { formatCreativeLogoReservation, formatCreativeSafeZoneRules } from '@/lib/creatives/safe-zones';
+import type { CreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import type { StoredMediaFile } from '@/lib/media/types';
+
+import { prepareTaxDocumentReference } from '@/lib/references/tax-documents.server';
+import type { TaxDocumentSelection } from '@/lib/references/tax-documents';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 export interface CreativeReferenceAnalysis {
+  /** Representative-video observation only; never grants human-source eligibility. */
+  visibleHuman?: boolean;
   summary: string;
   visibleText: string[];
   visualStructure: string;
@@ -120,7 +133,7 @@ const analyzeCreative = async (
   schemaName: string
 ): Promise<CreativeReferenceAnalysis> => {
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('source-reference-analysis', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
@@ -215,6 +228,13 @@ export async function analyzeReferenceCreative(
   );
 }
 
+/** No campaign/user context is accepted by this reusable producer. */
+export async function analyzeReusableReferenceAngle(source: StoredMediaFile): Promise<CreativeReferenceAnalysis> {
+  return analyzeCreative(source, '',
+    'Describe only campaign-independent creative inspiration visibly grounded in the image. Do not adapt to a company, audience or campaign, or infer performance. No exact copy, identities, brands, claims or proof. Use abstract mechanisms; never selection rationale. In hookOrAngle give a concise summary of at most 2000 characters. If unclear, say no reusable angle is observable.',
+    'Analyze the reusable angle of this image independently of any intended campaign.', 'reusable_reference_angle');
+}
+
 export async function analyzeTraSourceCreative(
   source: StoredMediaFile,
   context: string
@@ -258,7 +278,7 @@ export async function generateCreativeCopy(
       : null,
   }));
 
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('legacy-copy', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
@@ -366,21 +386,31 @@ export async function generateCreativeCopy(
   return copyByIndex;
 }
 
+const formatImageCopy = (copy: CreativeImageCopy) => [
+  `Headline: ${copy.headline}`,
+  copy.shortSupport ? `Short support: ${copy.shortSupport}` : '',
+  copy.proofAttribution ? `Proof attribution: ${copy.proofAttribution}` : '',
+  copy.cta ? `CTA: ${copy.cta}` : '',
+  copy.disclosure ? `Disclosure: ${copy.disclosure}` : '',
+].filter(Boolean).join('\n');
+
 const buildApprovedTraSourceImagePrompt = (
   primaryFormat: CreativeFormatId,
   secondaryFormat: CreativeFormatId | undefined,
   placement: CreativePlacement,
   context: string,
-  copy: CreativeCopy,
-  reserveLogoArea: boolean
+  copy: CreativeImageCopy,
+  logoGeometry: CreativeLogoGeometry | undefined,
+  documentPrompt = ''
 ) => {
   const placementSpec = CREATIVE_PLACEMENT_SPECS[placement];
   return `
 Create an ORIGINAL ${placementSpec.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
 
-Compose natively for the ${placementSpec.aspectRatio} canvas (${placementSpec.width}x${placementSpec.height}). Recompose the hierarchy, subject, copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
+Compose natively for the ${placementSpec.aspectRatio} canvas (${placementSpec.width}x${placementSpec.height}). Recompose the hierarchy, subject, image copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
-The ONE attached image is a validated, TRA-owned reference and is the only raw source image supplied to this generation call. Layout references, external reference-library images, and video frames are not attached.
+The first attached image is a validated, TRA-owned reference. Layout references and video frames are not attached.
+${documentPrompt}
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}
 ${
@@ -388,20 +418,18 @@ ${
     ? `Secondary creative format: ${CREATIVE_FORMAT_LABELS[secondaryFormat]}`
     : ''
 }
-User direction: ${context}
+One-ad render brief: ${context}
 
-Use this approved ad copy as the messaging source:
-Headline: ${copy.headline}
-Primary text idea: ${copy.primaryText}
-Description: ${copy.description}
+Use only this planned image copy when rendering text inside the creative:
+${formatImageCopy(copy)}
 
 Approved-source rules:
-- The attached TRA image is the only allowed raw visual and the only approved human-identity source for this generation call.
+- The first attached TRA image is the only approved human-identity source for this generation call.
 - If the output depicts a person, preserve the visible identity from the attached TRA image. Do not invent, replace, blend, or add another person.
 - Do not recreate the attached image verbatim or depend on its old layout unless the text direction explicitly asks for a high-level structural cue.
 - Make the result clearly original and specific to TRA.
 ${formatCreativeSafeZoneRules(placement)}
-${reserveLogoArea ? formatCreativeLogoReservation(placement) : ''}
+${logoGeometry ? formatCreativeLogoReservation(logoGeometry) : ''}
 TRA guardrails:
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
@@ -427,57 +455,58 @@ const appendImage = (
 const generateImageEdit = async (
   prompt: string,
   images: Array<{ source: StoredMediaFile; fileName: string }>,
-  providerSize: string
+  providerSize: string,
+  document: Awaited<ReturnType<typeof prepareTaxDocumentReference>> = null
 ): Promise<ImageGenerationResult> => {
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst';
-  const formData = new FormData();
-  formData.set('model', model);
-  formData.set('prompt', prompt);
-  formData.set('size', providerSize);
-  formData.set('quality', 'high');
-  formData.set('output_format', 'png');
-
-  for (const image of images) {
-    appendImage(formData, image.source, image.fileName);
-  }
-
-  const response = await fetch(`${OPENAI_BASE_URL}/images/edits`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${getApiKey()}` },
-    body: formData,
+  const routed = await runCreativeImageModelRoute({
+    operationType: 'TRA_REFERENCE_GENERATION',
+    generate: async (model) => {
+      const formData = new FormData();
+      formData.set('model', model);
+      formData.set('prompt', prompt);
+      formData.set('size', providerSize);
+      formData.set('quality', 'high');
+      formData.set('output_format', 'png');
+      for (const image of images) appendImage(formData, image.source, image.fileName);
+      document?.appendTo(formData);
+      const response = await fetchCreativeImage(`${OPENAI_BASE_URL}/images/edits`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getApiKey()}` },
+        body: formData,
+      });
+      if (!response.ok) {
+        throw creativeImageHttpError(response.status, await getErrorMessage(response));
+      }
+      const payload = (await response.json()) as {
+        data?: Array<{ b64_json?: string }>;
+      };
+      const base64 = payload.data?.[0]?.b64_json;
+      if (!base64) throw creativeImageMissingOutputError();
+      return Buffer.from(base64, 'base64');
+    },
   });
-
-  if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
-  }
-
-  const payload = (await response.json()) as {
-    data?: Array<{ b64_json?: string }>;
-  };
-  const base64 = payload.data?.[0]?.b64_json;
-  if (!base64) {
-    throw new Error('OpenAI returned no generated image.');
-  }
-
-  return { buffer: Buffer.from(base64, 'base64'), prompt, model };
+  return { buffer: routed.value, prompt, model: routed.routing.actualModel, routing: routed.routing };
 };
 
 export async function generateApprovedTraReferenceCreativeImage(args: {
+  taxDocumentReference?: TaxDocumentSelection;
   source: StoredMediaFile;
   primaryFormat: CreativeFormatId;
   secondaryFormat?: CreativeFormatId;
   placement?: CreativePlacement;
   context: string;
-  copy: CreativeCopy;
-  reserveLogoArea?: boolean;
+  copy: CreativeImageCopy;
+  logoGeometry?: CreativeLogoGeometry;
 }): Promise<ImageGenerationResult> {
+  const document = await prepareTaxDocumentReference(args.taxDocumentReference);
   const prompt = buildApprovedTraSourceImagePrompt(
       args.primaryFormat,
       args.secondaryFormat,
       args.placement ?? 'SQUARE_1_1',
       args.context,
       args.copy,
-      Boolean(args.reserveLogoArea)
+      args.logoGeometry,
+      document?.prompt
     );
   return generateImageEdit(
     prompt,
@@ -487,6 +516,7 @@ export async function generateApprovedTraReferenceCreativeImage(args: {
         fileName: `approved-tra-source-${args.source.fileName}`,
       },
     ],
-    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize
+    CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'].providerSize,
+    document
   );
 }

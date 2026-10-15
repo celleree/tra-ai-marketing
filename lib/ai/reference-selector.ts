@@ -1,3 +1,4 @@
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import { getMediaStorage } from '@/lib/media/local-storage';
 import { validateStoredMediaImage } from '@/lib/media/storage';
@@ -108,12 +109,9 @@ const buildCandidatePool = (
 };
 
 const SELECTION_RULES = `
-You are selecting individual reference ads for Tax Relief Advocates (TRA) creative generation.
+You are shortlisting reusable reference options for Tax Relief Advocates (TRA) creative planning.
 
-CRITICAL WORKFLOW RULE:
-- Each generated TRA creative will use exactly ONE selected reference image.
-- References will NEVER be blended together.
-- Select the best individual references so each can be recreated separately as a clean TRA adaptation.
+The requested count is a shortlist budget, not a number of ads. Astra later chooses angle and layout independently from these options or creates original concepts. A reference may support multiple concepts or remain unused. Describe its reusable marketing framing in the selection reason, without treating source claims, proof, copy or identity as approved TRA content.
 
 Selection priorities, in order:
 1. Fit with the user's requested direction and the TRA brand/message context.
@@ -157,7 +155,7 @@ export async function selectBestReferenceCreatives(args: {
   const userContent: Array<Record<string, unknown>> = [
     {
       type: 'input_text',
-      text: `Choose exactly ${args.requestedCount} reference images for separate TRA recreations.\n\nUser direction:\n${args.userContext}\n\nTRA source summary:\n${args.traSummary}\n\nTRA identity/message cues:\n${args.traPreserve.join('; ') || 'Tax Relief Advocates identity'}\n\nReview every candidate below. Each candidate is labeled with its exact reference ID and current library category.`,
+      text: `Shortlist ${args.requestedCount} reference options for independent angle/layout planning.\n\nUser direction:\n${args.userContext}\n\nTRA source summary:\n${args.traSummary}\n\nTRA identity/message cues:\n${args.traPreserve.join('; ') || 'Tax Relief Advocates identity'}\n\nReview every candidate below. Each candidate is labeled with its exact reference ID and current library category.`,
     },
   ];
 
@@ -173,7 +171,7 @@ export async function selectBestReferenceCreatives(args: {
     });
   }
 
-  const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+  const response = await fetchWithProviderUsage('reference-shortlist', model, `${OPENAI_BASE_URL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,

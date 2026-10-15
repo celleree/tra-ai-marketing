@@ -25,15 +25,15 @@ This gate checks configuration presence and Clerk environment markers, not crede
 
 Production media storage requires the R2 variables listed in `.env.example`.
 
-Direct browser uploads use short-lived presigned PUT URLs. The production bucket must have a CORS policy that:
+Direct browser uploads and downloads use short-lived presigned URLs. The production bucket must have a CORS policy that:
 
-- allows only the exact approved application origins that need browser uploads;
-- allows `PUT`;
+- allows only the exact approved application origins that need browser media access;
+- allows `GET` and `PUT`;
 - allows the `Content-Type` request header;
 - may expose `ETag` when needed by the client;
 - does not use a wildcard production origin.
 
-Preview origins should be added only when those previews need direct uploads. R2 credentials remain server-side.
+Preview origins should be added only when those previews need direct media access. R2 credentials remain server-side.
 
 Cloudflare configuration is authoritative for the live bucket. Keep this document to requirements, not copied account IDs, credentials, or dashboard snapshots.
 
@@ -54,6 +54,51 @@ See [Clerk access restrictions](https://clerk.com/docs/guides/secure/restricting
 - Store `OPENAI_API_KEY` server-side.
 - Model override variable names and current defaults are defined by `.env.example` and source code.
 
+### Image admission, durable recovery and usage events
+
+Server-only image authorization and purpose are independent; `.env.example` documents their exact values. Keep local/Preview offline unless a paid run is explicitly authorized. Diagnostics use LOW Sunburst and no fallback; staging smoke and production use HIGH. Deployed production keeps its existing admission. Review and smoke approval are operational gates, not a browser-selectable override.
+
+Paid image attempts and raw results use the existing environment-isolated video-intelligence storage with conditional writes. Configure staging R2 access before authorizing spend. Unknown provider outcomes are retained and never automatically repurchased; missing/corrupt purchased results fail closed. Local storage ownership is process-local; deployed ownership relies on R2 conditional writes. This does not promise exactly-once provider billing.
+
+Server logs emit `tra_provider_usage` events with allowlisted metadata and a versioned estimate. Count unique dispatched attempt IDs, not start/terminal log lines; `reused` events add no request or cost. A missing terminal event or usage category is unknown, never free. Keep unknown-cost attempts separate from known estimates and reconcile provider billing independently. `confirmedBilledCostUsd` is not populated from estimates. Model/tier prices and supported categories are centralized in `lib/ai/provider-pricing.ts`; update that version/source when rates change. Do not retain prompts, pixels, transcripts or credentials in usage exports.
+
+Browser recovery requires session storage and retains only a request digest and UUID in the current tab. Retry or refresh keeps an unresolved paid intent; completing it or choosing an explicit new paid action permits fresh work. Do not clear session storage during recovery. Review the offline corpus in `tests/fixtures/cost-regression-corpus.md`; actual creative quality and cost per accepted output require a separately authorized staging run and human review.
+
+## Claude creative copilot
+
+Store `ANTHROPIC_API_KEY` as a server-only Secret in the intended Vercel environment. For an acceptance test, scope it to the exact Preview branch through the secure Vercel dashboard; do not paste credentials into chat or commit them. Local credentials belong in an ignored local environment file. The application model is defined in `lib/copilot/claude.ts`.
+
+Adding the key alone leaves the copilot disabled. Both `TRA_CLAUDE_COPILOT_ENABLED=true` and `TRA_CLAUDE_COPILOT_ALLOW_PAID=true` are required, followed by a new deployment. Enable them only after access and a paid budget are approved for that environment. Production configuration requires separate explicit authorization.
+
+The operator route requires approval of the effective company snapshot and each paid request. It uses authoritative saved creative evidence, a 4,096-token output limit, and a durable quota of 12 requests per operator per hour. Quotas and token limits do not enforce a total dollar cap. Provider failure or interruption can leave billing unknown; there are no automatic paid retries. Recommendations require human review and do not change creatives, publish ads, or claim measured performance or revenue. Adding credentials does not establish live quality or end-to-end acceptance.
+
+## Video generation setup
+
+WAN 2.2 is the selected next model family. A hosted API or an approved GPU deployment, exact variant, input/output contract and cost/compute budget must be selected before live integration. Do not treat the existing Higgsfield environment variables or credentials as WAN access.
+
+Keep the application UI and control routes on Vercel; run WAN inference on a separate GPU worker or hosted API. Vercel Hobby functions provide 2 GB of CPU memory, while the official WAN TI2V-5B setup documents a GPU with at least 24 GB VRAM. Vercel free function hosting therefore does not supply suitable WAN inference compute. See [Vercel function limits](https://vercel.com/docs/functions/limitations) and [WAN 2.2 setup](https://github.com/Wan-Video/Wan2.2); verify requirements for the selected variant before provisioning.
+
+### Preserved Higgsfield/Kling integration
+
+Kling 2.6 Motion Control Standard (`kling-video/motion-control/std`) is retained as an optional future integration. Its server transport in `lib/video-generation/higgsfield.ts` accepts a source image and motion-reference video. The offline store in `lib/video-generation/job-store.ts` preserves source-bound intents and conditional one-shot claims, with Higgsfield-specific receipts. Application execution routes, output ingestion, UI and live acceptance are still unfinished. Further Higgsfield setup is deferred while WAN 2.2 is the selected direction.
+
+Developer API access and billing are separate from the Higgsfield website subscription.
+Keep `HF_API_KEY_ID` and `HF_API_KEY_SECRET` server-side; never use browser-visible variables.
+Credentials alone do not authorize generation. Before enabling a caller, verify source media
+authority and permissions, duration-based pricing and an approved budget; a caller-supplied
+quote is not a provider-enforced cost cap. Sound retention must be chosen explicitly.
+
+Persist the submission's idempotency key and exact inputs before calling the provider, then
+store the returned request ID and status URL. The transport submits once without automatic
+retries or model fallback. Recover an accepted job by polling its existing provider identity.
+An ambiguous submission remains unresolved; do not automatically resubmit it. Copy completed output
+to private application storage before provider retention expires. Do not expose generated output
+as approved advertising without the normal human/compliance review.
+
+References: [model contract](https://open.higgsfield.ai/models/kling-video/motion-control/std/api-reference),
+[request lifecycle](https://docs.higgsfield.ai/docs/concepts/requests),
+[idempotency](https://docs.higgsfield.ai/docs/concepts/idempotency).
+
 ## Meta
 
 - Store `META_ACCESS_TOKEN` server-side.
@@ -63,4 +108,4 @@ See [Clerk access restrictions](https://clerk.com/docs/guides/secure/restricting
 
 ## Verification
 
-Before production release, verify the deployment builds successfully, required environment variables are present in the intended environment, R2 uploads work from approved origins, and any external OpenAI/Meta credentials have the intended least-privilege access.
+Before production release, verify the deployment builds successfully, required environment variables are present in the intended environment, R2 uploads work from approved origins, and any external OpenAI/Meta credentials have the intended least-privilege access. For stored media, verify the authenticated `/api/media/files/...` request returns a `307` redirect and the browser then receives the actual media bytes directly from Cloudflare R2 with a successful response.

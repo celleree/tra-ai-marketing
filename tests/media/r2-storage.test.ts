@@ -1,12 +1,17 @@
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { R2MediaStorage } from '@/lib/media/r2-storage';
+import { MediaValidationError } from '@/lib/media/storage';
 import { REAL_ENCODED_MP4 } from '@/tests/fixtures/media';
 
-const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
+const { getSignedUrlMock, sendMock } = vi.hoisted(() => ({
+  getSignedUrlMock: vi.fn(),
+  sendMock: vi.fn(),
+}));
 
 vi.mock('@aws-sdk/client-s3', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@aws-sdk/client-s3')>();
@@ -17,6 +22,9 @@ vi.mock('@aws-sdk/client-s3', async (importOriginal) => {
     }),
   };
 });
+vi.mock('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: getSignedUrlMock,
+}));
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const MP4_SIGNATURE = Array.from(REAL_ENCODED_MP4);
@@ -41,6 +49,7 @@ const makeStorage = () =>
   });
 
 beforeEach(() => {
+  getSignedUrlMock.mockReset();
   sendMock.mockReset();
   vi.stubEnv('CREATIVE_PUBLIC_BASE_URL', '');
   vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', '');
@@ -51,6 +60,61 @@ afterEach(() => {
 });
 
 describe('R2 media storage observable contract', () => {
+  it('creates a short-lived GET URL after validating object metadata', async () => {
+    const signedUrl =
+      'https://bucket.account.r2.cloudflarestorage.com/media.png?X-Amz-Signature=test';
+    sendMock.mockResolvedValueOnce({ ContentLength: PNG_SIGNATURE.length });
+    getSignedUrlMock.mockResolvedValueOnce(signedUrl);
+
+    await expect(makeStorage().getMediaDeliveryUrl(FILE_NAME)).resolves.toBe(
+      signedUrl
+    );
+
+    const headCommand = sendMock.mock.calls[0][0] as HeadObjectCommand;
+    expect(headCommand).toBeInstanceOf(HeadObjectCommand);
+    expect(headCommand.input).toEqual({
+      Bucket: 'bucket-name',
+      Key: FILE_NAME,
+    });
+    const getCommand = getSignedUrlMock.mock.calls[0][1] as GetObjectCommand;
+    expect(getCommand).toBeInstanceOf(GetObjectCommand);
+    expect(getCommand.input).toEqual({
+      Bucket: 'bucket-name',
+      Key: FILE_NAME,
+    });
+    expect(getSignedUrlMock.mock.calls[0][2]).toEqual({ expiresIn: 60 });
+  });
+
+  it('does not access R2 or sign a URL for a noncanonical stored name', async () => {
+    await expect(
+      makeStorage().getMediaDeliveryUrl('../fixture.png')
+    ).resolves.toBeNull();
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(getSignedUrlMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'NotFound' },
+    { $metadata: { httpStatusCode: 404 } },
+  ])('does not sign a URL when object metadata is missing %#', async (error) => {
+    sendMock.mockRejectedValueOnce(error);
+
+    await expect(
+      makeStorage().getMediaDeliveryUrl(FILE_NAME)
+    ).resolves.toBeNull();
+    expect(getSignedUrlMock).not.toHaveBeenCalled();
+  });
+
+  it('does not sign a URL when object metadata exceeds the configured limit', async () => {
+    vi.stubEnv('MAX_UPLOAD_BYTES', String(PNG_SIGNATURE.length));
+    sendMock.mockResolvedValueOnce({ ContentLength: PNG_SIGNATURE.length + 1 });
+
+    await expect(
+      makeStorage().getMediaDeliveryUrl(FILE_NAME)
+    ).rejects.toBeInstanceOf(MediaValidationError);
+    expect(getSignedUrlMock).not.toHaveBeenCalled();
+  });
+
   it('writes the configured bucket, canonical key, content type, and bytes', async () => {
     sendMock.mockResolvedValueOnce({});
     const asset = await makeStorage().saveImage(

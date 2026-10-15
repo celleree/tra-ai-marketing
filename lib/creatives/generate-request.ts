@@ -1,3 +1,6 @@
+import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+import { isPreviewAcceptance } from '@/lib/creatives/preview-acceptance';
+import type { VideoReviewHandoff, VideoReviewReference } from '@/lib/creatives/review-handoff';
 import {
   CREATIVE_CATEGORIES,
   type CreativeCategoryId,
@@ -22,8 +25,11 @@ import {
 } from '@/lib/video/generation-selection-contract';
 
 export type GenerateCreativeRequest = {
+  videoReview?: VideoReviewReference;
   sourceAssets?: CreativeSourceSelection[];
   brandLogoMediaId?: string;
+  /** Explicit operator choice for the bounded Preview test only. */
+  previewOmitBrandLogo?: true;
   brandColors?: string[];
   brandFontNames?: string[];
   companyProfile?: RuntimeCompanyProfileSnapshot;
@@ -39,6 +45,9 @@ export type ValidGenerateCreativeRequest = Omit<
 > & {
   sourceAssets: CreativeSourceSelection[];
   placement: CreativePlacement;
+  proofRetrievalQuery?: string;
+  /** Server-resolved at durable admission; never accepted from the client. */
+  reviewHandoff?: VideoReviewHandoff;
 };
 
 export type PlannedCreative = {
@@ -82,7 +91,7 @@ const stringArray = (value: unknown, max: number) =>
         .slice(0, max)
     : [];
 
-export function validateGenerateCreativeRequest(input: unknown):
+export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30 | typeof MAX_PORTFOLIO_CREATIVES = 30):
   | { success: true; data: ValidGenerateCreativeRequest }
   | { success: false; error: string } {
   if (!input || typeof input !== 'object') {
@@ -90,6 +99,14 @@ export function validateGenerateCreativeRequest(input: unknown):
   }
 
   const body = input as Record<string, unknown>;
+  const review = body.videoReview as Record<string, unknown> | undefined;
+  if (body.reviewHandoff !== undefined || (review !== undefined && (maximumCount !== MAX_PORTFOLIO_CREATIVES
+    || !review || typeof review !== 'object' || Array.isArray(review)
+    || Object.keys(review).length !== 2 || typeof review.draftId !== 'string' || !/^review_[a-f0-9]{32}$/.test(review.draftId)
+    || typeof review.revision !== 'string' || !review.revision.trim() || review.revision.length > 1024
+    || body.videoFrameSelection !== undefined))) {
+    return { success: false, error: 'Use a saved videoReview ID/revision through portfolios without videoFrameSelection or client handoff data.' };
+  }
 
   if (body.mediaId !== undefined || body.uploadMode !== undefined) {
     return {
@@ -116,6 +133,10 @@ export function validateGenerateCreativeRequest(input: unknown):
     typeof body.brandLogoMediaId === 'string'
       ? body.brandLogoMediaId.trim()
       : '';
+  if (body.previewOmitBrandLogo !== undefined && (body.previewOmitBrandLogo !== true
+    || maximumCount !== MAX_PORTFOLIO_CREATIVES || !isPreviewAcceptance() || body.brandLogoMediaId !== undefined)) {
+    return { success: false, error: 'Logo omission requires the explicit Preview acceptance portfolio choice with no brandLogoMediaId.' };
+  }
   const brandColors = stringArray(body.brandColors, 6);
   const brandFontNames = stringArray(body.brandFontNames, 6).map((name) =>
     name.slice(0, 500)
@@ -137,6 +158,10 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   if (!isCreativePlacement(placement)) {
     return { success: false, error: 'placement is unsupported' };
+  }
+
+  if (body.imageModel !== undefined) {
+    return { success: false, error: 'imageModel is selected automatically' };
   }
 
   if (
@@ -161,11 +186,12 @@ export function validateGenerateCreativeRequest(input: unknown):
 
   if (
     videoFrameSelection &&
-    (sourceAssets.length !== 1 || sourceAssets[0].role !== 'TRA_VIDEO')
+    (sourceAssets.filter(source => source.role === 'TRA_VIDEO').length !== 1 ||
+      sourceAssets.some(source => source.role === 'TRA_REFERENCE'))
   ) {
     return {
       success: false,
-      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset',
+      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset with optional LAYOUT_REFERENCE assets only',
     };
   }
 
@@ -183,11 +209,11 @@ export function validateGenerateCreativeRequest(input: unknown):
   if (
     !Number.isInteger(variationCount) ||
     variationCount < 2 ||
-    variationCount > 30
+    variationCount > maximumCount
   ) {
     return {
       success: false,
-      error: 'variationCount must be an integer between 2 and 30',
+      error: `variationCount must be an integer between 2 and ${maximumCount}`,
     };
   }
 
@@ -210,14 +236,17 @@ export function validateGenerateCreativeRequest(input: unknown):
   return {
     success: true,
     data: {
+      ...(review ? { videoReview: { draftId: review.draftId as string, revision: review.revision as string } } : {}),
       sourceAssets,
       placement,
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
+      ...(body.previewOmitBrandLogo === true ? { previewOmitBrandLogo: true } : {}),
       ...(brandColors.length ? { brandColors } : {}),
       ...(brandFontNames.length ? { brandFontNames } : {}),
       ...(companyProfile ? { companyProfile } : {}),
       ...(videoFrameSelection ? { videoFrameSelection } : {}),
       context,
+      proofRetrievalQuery: userContext,
       variationCount,
     },
   };

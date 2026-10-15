@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVideoResponse } from '@/lib/media/video-response';
 
-const storage = vi.hoisted(() => ({ readMedia: vi.fn() }));
+const storage = vi.hoisted(() => ({
+  getMediaDeliveryUrl: undefined as
+    | ((fileName: string) => Promise<string | null>)
+    | undefined,
+  readMedia: vi.fn(),
+}));
 const requireOperatorAccess = vi.hoisted(() => vi.fn(async () => null));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => storage }));
 vi.mock('@/lib/auth/require-operator', () => ({ requireOperatorAccess }));
@@ -13,6 +18,11 @@ const request = (range?: string, extra: Record<string, string> = {}) => new Requ
 });
 
 describe('private video response', () => {
+  beforeEach(() => {
+    storage.getMediaDeliveryUrl = undefined;
+    storage.readMedia.mockReset();
+  });
+
   it('streams a video larger than 4.5 MB in bounded chunks with identical bytes', async () => {
     const large = new Uint8Array(6 * 1024 * 1024 + 3).fill(23);
     const response = createVideoResponse(large, request());
@@ -65,5 +75,29 @@ describe('private video response', () => {
     expect(new Uint8Array(await image.arrayBuffer())).toEqual(bytes);
     storage.readMedia.mockResolvedValueOnce(null);
     expect((await GET(request(), context)).status).toBe(404);
+  });
+
+  it('redirects authorized R2 delivery without reading media bytes through the route', async () => {
+    const deliveryUrl =
+      'https://bucket.account.r2.cloudflarestorage.com/fixture.mp4?X-Amz-Signature=test';
+    storage.getMediaDeliveryUrl = vi.fn().mockResolvedValue(deliveryUrl);
+    const context = { params: Promise.resolve({ fileName: 'fixture.mp4' }) };
+
+    const response = await GET(request('bytes=2-3'), context);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('Location')).toBe(deliveryUrl);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(response.headers.get('Referrer-Policy')).toBe('no-referrer');
+    expect(storage.getMediaDeliveryUrl).toHaveBeenCalledWith('fixture.mp4');
+    expect(storage.readMedia).not.toHaveBeenCalled();
+  });
+
+  it('preserves not-found behavior without reading bytes when R2 metadata is missing', async () => {
+    storage.getMediaDeliveryUrl = vi.fn().mockResolvedValue(null);
+    const context = { params: Promise.resolve({ fileName: 'missing.mp4' }) };
+
+    expect((await GET(request(), context)).status).toBe(404);
+    expect(storage.readMedia).not.toHaveBeenCalled();
   });
 });

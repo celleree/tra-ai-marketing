@@ -4,6 +4,7 @@ import {
   type CreativeGenerationProvenance,
 } from '@/lib/creatives/generation-provenance';
 import type { CreativeRecord, GeneratedCreative } from '@/lib/creatives/generated';
+import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
 
 const mediaId = (hex: string) => `media_${hex.repeat(32)}`;
 const hash = (hex: string) => hex.repeat(64);
@@ -52,6 +53,37 @@ describe('creative generation provenance', () => {
     expect(parsed?.logoOverlaySource).toEqual({ mediaId: mediaId('e'), sha256: hash('e') });
   });
 
+  it('stores automatic routing and keeps legacy model-only provenance readable', () => {
+    const value = provenance();
+    value.imageGeneration.routing = {
+      operationType: 'EDIT',
+      preferredModel: 'gpt-image-2.5-sunburst',
+      actualModel: 'gpt-image-2.5-flare',
+      fallbackUsed: true,
+      fallbackFromModel: 'gpt-image-2.5-sunburst',
+      fallbackReason: 'provider_unavailable',
+    };
+    value.imageGeneration.model = 'gpt-image-2.5-flare';
+    expect(parseCreativeGenerationProvenance(value)?.imageGeneration.routing).toEqual(value.imageGeneration.routing);
+
+    const legacy = provenance();
+    expect(parseCreativeGenerationProvenance(legacy)?.imageGeneration).toEqual(legacy.imageGeneration);
+  });
+
+  it('rejects inconsistent or unsanitized routing provenance', () => {
+    const value = provenance();
+    value.imageGeneration.model = 'gpt-image-2.5-flare';
+    value.imageGeneration.routing = {
+      operationType: 'EDIT',
+      preferredModel: 'gpt-image-2.5-sunburst',
+      actualModel: 'gpt-image-2.5-flare',
+      fallbackUsed: true,
+      fallbackFromModel: 'gpt-image-2.5-sunburst',
+      fallbackReason: 'raw provider message!',
+    };
+    expect(parseCreativeGenerationProvenance(value)).toBeNull();
+  });
+
   it('accepts attached video frames and requires their matching requested source', () => {
     const value = provenance();
     const videoAttached: Extract<CreativeGenerationProvenance['attachedSource'], { type: 'TRA_VIDEO_FRAMES' }> = {
@@ -63,6 +95,43 @@ describe('creative generation provenance', () => {
 
     videoAttached.sourceSha256 = hash('f');
     expect(parseCreativeGenerationProvenance(value)).toBeNull();
+  });
+
+  it('round trips original and cropped provider pixels without treating a legacy record as assessed', () => {
+    const value = provenance();
+    value.attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: videoId, sourceSha256: hash('b'),
+      selectionMode: 'AUTOMATIC', frames: [{ timestampMs: 1333, approvedPngSha256: hash('1'),
+        providerPngSha256: hash('2'), sourceOverlay: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM',
+          removePermille: 400, overlayDepthPermille: 390 }, crop: { left: 0, top: 0, width: 100, height: 60 } }] };
+    expect(parseCreativeGenerationProvenance(JSON.parse(JSON.stringify(value)))?.attachedSource).toEqual(value.attachedSource);
+    const changed = structuredClone(value);
+    if (changed.attachedSource?.type === 'TRA_VIDEO_FRAMES') changed.attachedSource.frames[0].crop = null;
+    expect(parseCreativeGenerationProvenance(changed)).toBeNull();
+    const legacy = provenance();
+    legacy.attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: videoId, sourceSha256: hash('b'),
+      selectionMode: 'AUTOMATIC', frames: [{ timestampMs: 1333, approvedPngSha256: hash('1') }] };
+    expect(parseCreativeGenerationProvenance(legacy)?.attachedSource).toEqual(legacy.attachedSource);
+  });
+
+  it('round trips a non-representative candidate and rejects partial or changed provenance', () => {
+    const value = provenance();
+    const frameHash = hash('d');
+    value.attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: videoId, sourceSha256: hash('b'),
+      selectionMode: 'USER_SELECTED', libraryId: `video-library:${hash('e')}`, librarySha256: hash('f'),
+      frames: [{ timestampMs: 1333, approvedPngSha256: hash('1'), providerPngSha256: hash('2'),
+        sourceOverlay: { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 100, overlayDepthPermille: 80 },
+        crop: { left: 0, top: 0, width: 100, height: 90 },
+        libraryFrameId: videoCandidateFrameId(hash('b'), 1333, frameHash),
+        representativeFrameId: `video-frame:${hash('c')}`, candidateIndex: 7, candidateFrameSha256: frameHash }] };
+    expect(parseCreativeGenerationProvenance(value)?.attachedSource).toEqual(value.attachedSource);
+    const changed = structuredClone(value);
+    if (changed.attachedSource?.type === 'TRA_VIDEO_FRAMES') changed.attachedSource.frames[0].candidateIndex = 8;
+    expect(parseCreativeGenerationProvenance(changed)?.attachedSource).toEqual(changed.attachedSource);
+    if (changed.attachedSource?.type === 'TRA_VIDEO_FRAMES') changed.attachedSource.frames[0].candidateFrameSha256 = hash('a');
+    expect(parseCreativeGenerationProvenance(changed)).toBeNull();
+    const partial = structuredClone(value);
+    if (partial.attachedSource?.type === 'TRA_VIDEO_FRAMES') delete partial.attachedSource.librarySha256;
+    expect(parseCreativeGenerationProvenance(partial)).toBeNull();
   });
 
   it.each([

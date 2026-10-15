@@ -10,10 +10,14 @@ Keep normal AI/Codex context small. Read only what the current task requires.
 - Do not build multi-file app changes directly on `staging` or `main`.
 - Merge completed feature work into `staging`; promote `staging` to `main` only with explicit production approval.
 - Preserve intended work from parallel branches when resolving conflicts; do not silently overwrite another agent's work.
+- Prefer ChatGPT/the coordinator for work that connected tools can complete safely without a local checkout, including GitHub state/check/log inspection, PR metadata, merge execution, and supported repository administration. Spend Codex/local-agent credits primarily on work that actually requires local repository edits, local tests/builds, or runtime interaction.
+- Any coordinator repository write must explicitly target the intended dedicated feature branch and follow the normal PR/review path. Never let a repository write fall through to the default branch, and never write directly to `staging` or `main` unless an existing rule explicitly authorizes that action.
 
 ## Current product scope
 
 The active build is the Stage 1 static-image creative system. For current implementation behavior and ordering, use `docs/image-workflow.md` before the long-term roadmap.
+
+For image-generation continuation work, read `docs/image-gen-improvement.md` first, then follow the linked canonical docs and code. Treat it as the active checkpoint for this workstream, not a replacement for code or canonical architecture docs.
 
 For the current remaining Stage 1 implementation order, use the `Current remaining roadmap for Astra` section in `docs/image-workflow.md`.
 
@@ -76,9 +80,14 @@ By default:
 - Repository CI provides the full typecheck + test suite + production build regression pass.
 - Run the full local suite/build before CI only when the change is cross-cutting/high-risk, changes build/dependencies, CI is unavailable, or focused evidence indicates it is necessary.
 - Stop after the first correct verified fix; do not refactor or improve unrelated code.
+- Before implementation handoff, perform a proportional completion audit: reread the acceptance criteria, inspect the complete diff, exercise realistic edge cases/state transitions, and fix issues found. Keep this lightweight for mechanical changes; it is not an independent review.
+- Do not request a required independent review until implementation is stable, the PR is in its intended final review state, and exact-HEAD CI is green.
 
 ## Risk and review
 
+**Review realism:** TRA is an internal trusted-user tool. Review defects that are realistically reachable through normal use, ordinary operator mistakes, expected application/API/model flows, retries, partial failures, or plausible persisted state. Do not fail work solely for contrived adversarial cases that require intentional human bypass, manual data corruption, abnormal internal requests, or deliberate exploitation. This does not relax strict review of auth/authz, secrets/security, compliance and Proof/provenance, publishing/spend, destructive actions, production-data integrity, realistic data-loss risks, or other hard safety invariants. A material finding should identify a realistic path by which the failure can occur.
+
+Detailed review rules live in `docs/agent-workflow.md`.
 - LOW: docs/copy/simple styling/additive tests or similarly contained reversible work.
 - MEDIUM: runtime/business logic, APIs, data mappings, storage/creative behavior, external integrations, meaningful dependencies/infrastructure.
 - HIGH: ad spend/publishing, Meta mutation, auth/authz, secrets/security boundaries, destructive production operations, production data/assets/storage, billing, or weakened safeguards.
@@ -90,6 +99,7 @@ When review is required:
 - one qualifying review of the final exact HEAD is sufficient unless a second opinion is explicitly justified;
 - any subsequent commit, rebase, or base sync that changes HEAD invalidates the prior review;
 - live GitHub state, not stale PR-body metadata, is authoritative for current HEAD/base/diff/checks.
+- use independent review as a final gate, not as the normal debugging loop; when a review returns multiple material findings, collect them and repair them together where practical before requesting the next fresh exact-HEAD review.
 
 Each PR must keep the fields in `.github/pull_request_template.md` current, including acceptance criteria, verification, risk, required independent-review status, and reusable-learning outcome.
 
@@ -97,19 +107,14 @@ Detailed planning/implementation-cycle/review/handoff rules live in `docs/agent-
 
 ## Model and reasoning routing
 
-Optimize for the lowest expected total cost of a correct, verified result, including retries and rework. Choose model and reasoning effort independently.
+**TRA coding-agent model allowlist (hard rule):** Only GPT-6 Luna (`gpt-6-luna`) and GPT-6.1 Sol (`gpt-6.1-sol`) are authorized for Codex launcher sessions, workers, subagents, implementation/repair, orchestration and fresh independent reviews. Never launch or silently fall back to any other coding model, including GPT-6 Sol, GPT-6 Astra, Terra, or GPT-5.6 variants. If an allowed model is unavailable or its exact ID cannot be confirmed, stop and report the blocker. This scope is coding agents only; do not change the application's existing image/AI provider models.
 
-Starting points:
-- Luna: mechanical/repetitive work, extraction/classification, targeted inspection, very easy tasks.
-- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation.
-- Sol: difficult but bounded planning, debugging, unfamiliar subsystems, complex implementation, substantial review.
-- Astra: architecture, cross-phase decisions, difficult root-cause debugging, high-risk review, large-context orchestration, repeated failures, expensive mistakes.
+Optimize for the lowest expected total cost of a correct, verified result:
+- **GPT-6 Luna:** mechanical and repetitive work, inspection, routing, simple local edits/tests and launch/setup verification. Prefer Low/Medium reasoning.
+- **GPT-6.1 Sol:** difficult implementation/debugging, cross-slice integration, architecture and high-risk independent review. Prefer Medium/High reasoning as needed.
+- For the overnight Video Review supervisor, both implementations and fresh independent reviews default to `gpt-6.1-sol`; `gpt-6-luna` is an explicitly allowed override for a suitable role. The supervisor must validate the exact allowlist at start and resume.
 
-Reasoning: Low for straightforward/local work, Medium for normal implementation/investigation, High for difficult ambiguity/integration/consequential review, Extra-high only when clearly justified.
-
-Before using very high reasoning on a lower-tier model, compare the next model tier at Low/Medium and choose the route with lower expected total cost. If a preferred route is unavailable, use the next-cheapest configuration likely to succeed. Repeated repository-specific evidence may override these defaults.
-
-Do not retry a failed model/reasoning configuration unchanged without new evidence. Escalate only when difficulty, ambiguity, context, risk, or failed verification warrants it.
+Choose reasoning separately; do not escalate to a forbidden model under any circumstances. Do not repeat a failed model/reasoning configuration unchanged without new evidence. Fresh independent reviewer context is required where review policy calls for it, including when implementation and review use the same model.
 
 The coordinating agent owns the concrete Codex route; detailed launch/handoff format lives in `docs/agent-workflow.md`.
 

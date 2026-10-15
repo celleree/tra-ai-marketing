@@ -4,6 +4,7 @@ import { withTemporaryTraVideoFrameCandidates } from '@/lib/video/candidate-life
 import { runFfmpeg } from '@/lib/video/ffmpeg';
 import { isStructurallyValidPng } from '@/lib/video/frame-cache';
 import type { VideoFrameLibrary } from '@/lib/video/frame-library';
+import { videoCandidateFrameId, type VideoCandidateFrameBinding } from '@/lib/video/generation-selection-contract';
 import {
   assertLocalVideoIntelligence,
   videoSourceHash,
@@ -17,6 +18,7 @@ import {
 export interface SelectedTraVideoFrameProvenance {
   frameIndex: number; libraryFrameId: string; candidateFrameSha256: string;
   timestampMs: number; approvedPngSha256: string;
+  representativeFrameId?: string; candidateIndex?: number;
 }
 
 export interface ApprovedSelectedTraVideoFrameSet extends ApprovedTraVideoFrameSet {
@@ -82,6 +84,31 @@ export const selectedRepresentatives = (
   });
 };
 
+/** A candidate is eligible only through its original, frozen technical group. */
+export const selectedCandidateBindings = (
+  source: HydratedTraVideoSource, library: VideoFrameLibrary, bindings: readonly VideoCandidateFrameBinding[],
+) => {
+  if (library.sourceVideoMediaId !== source.media.id || library.sourceVideoContentHash !== videoSourceHash(source)) {
+    throw new Error('Selected TRA video frame library does not match the hydrated source.');
+  }
+  if (!Number.isFinite(library.durationMs) || library.durationMs <= 0
+    || bindings.length < 1 || bindings.length > MAX_PROVIDER_VIDEO_FRAMES
+    || new Set(bindings.map((binding) => binding.frameId)).size !== bindings.length) {
+    throw new Error('Selected TRA video candidate bindings are invalid.');
+  }
+  return bindings.map((binding) => {
+    const representative = library.representativeFrames.find((frame) => frame.id === binding.representativeFrameId);
+    const candidate = library.candidates.find((entry) => entry.candidateIndex === binding.candidateIndex);
+    if (!representative || !candidate || !representative.candidateIndexes.includes(binding.candidateIndex)
+      || candidate.timestampMs !== binding.timestampMs || candidate.frameSha256 !== binding.frameSha256
+      || candidate.timestampMs < 0 || candidate.timestampMs >= library.durationMs
+      || binding.frameId !== videoCandidateFrameId(library.sourceVideoContentHash, candidate.timestampMs, candidate.frameSha256)) {
+      return reanalyze(`candidate frame ${binding.frameId} does not match its saved technical group.`);
+    }
+    return { frameId: binding.frameId, representative, candidate };
+  });
+};
+
 export const extractPng = async (
   sourcePath: string,
   candidate: Pick<
@@ -115,10 +142,13 @@ export const extractPng = async (
 export const getApprovedSelectedTraVideoFrames = async (
   source: HydratedTraVideoSource,
   library: VideoFrameLibrary,
-  frameIds: readonly string[]
+  frameIds: readonly string[] | readonly VideoCandidateFrameBinding[]
 ): Promise<ApprovedSelectedTraVideoFrameSet> => {
   assertLocalVideoIntelligence();
-  const selections = selectedRepresentatives(source, library, frameIds);
+  const candidateAddressed = frameIds.length > 0 && typeof frameIds[0] !== 'string';
+  const selections = candidateAddressed
+    ? selectedCandidateBindings(source, library, frameIds as readonly VideoCandidateFrameBinding[])
+    : selectedRepresentatives(source, library, frameIds as readonly string[]);
 
   return withTemporaryTraVideoFrameCandidates(source, async (set) => {
     if (
@@ -135,8 +165,8 @@ export const getApprovedSelectedTraVideoFrames = async (
       const regenerated = set.candidates[selection.candidate.candidateIndex];
       if (
         !regenerated ||
-        regenerated.timestampMs !== selection.representative.timestampMs ||
-        regenerated.frameSha256 !== selection.representative.frameSha256
+        regenerated.timestampMs !== selection.candidate.timestampMs ||
+        regenerated.frameSha256 !== selection.candidate.frameSha256
       ) {
         reanalyze(`representative frame ${selection.frameId} has drifted from fresh analysis.`);
       }
@@ -167,6 +197,8 @@ export const getApprovedSelectedTraVideoFrames = async (
         candidateFrameSha256: regenerated.frameSha256,
         timestampMs: regenerated.timestampMs,
         approvedPngSha256,
+        ...(candidateAddressed ? { representativeFrameId: selection.representative.id,
+          candidateIndex: regenerated.candidateIndex } : {}),
       });
     }
 

@@ -2,6 +2,8 @@
 
 import type { GeneratedCreative } from '@/lib/creatives/generated';
 import type { MediaAsset } from '@/lib/media/types';
+import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
+import { CREATIVE_PLACEMENT_SPECS } from '@/lib/creatives/placements';
 
 const COMPANY_PROFILE_STORAGE_KEY = 'tra-company-profile-v2';
 const STORED_MEDIA_URL = /\/api\/media\/files\/(media_[a-f0-9]{32})\.(?:png|jpg|webp)(?:\?.*)?$/;
@@ -139,7 +141,7 @@ const fetchDrawableImage = async (
 ): Promise<DrawableImage> => {
   let response: Response;
   try {
-    response = await fetch(url, { cache: 'no-store' });
+    response = await fetch(url);
   } catch {
     throw new Error(`${label} could not be fetched from this deployment.`);
   }
@@ -197,6 +199,8 @@ const brandOneCreative = async (
   creative: GeneratedCreative,
   logoUrl: string
 ): Promise<GeneratedCreative> => {
+  // The server render path already saved the official overlay on this image.
+  if (creative.generationProvenance?.logoOverlaySource) return creative;
   const creativeUrl = `/api/media/files/${creative.image.fileName}`;
   const safeLogoUrl = toSameOriginMediaUrl(logoUrl);
   const creativeSource = await fetchDrawableImage(
@@ -220,28 +224,26 @@ const brandOneCreative = async (
 
       const width = canvas.width;
       const height = canvas.height;
-      const maxLogoWidth = width * 0.23;
-      const maxLogoHeight = height * 0.085;
-      const scale = Math.min(
-        maxLogoWidth / logoSource.width,
-        maxLogoHeight / logoSource.height
+      const placement = creative.placement ?? 'SQUARE_1_1';
+      const expected = CREATIVE_PLACEMENT_SPECS[placement];
+      if (width !== expected.width || height !== expected.height) {
+        throw new Error('The creative dimensions do not match the requested placement.');
+      }
+      const geometry = resolveCreativeLogoGeometry(
+        placement,
+        creative.planning?.logoAnchor ?? 'top-left',
+        logoSource.width,
+        logoSource.height,
       );
-      const logoWidth = Math.max(1, Math.round(logoSource.width * scale));
-      const logoHeight = Math.max(1, Math.round(logoSource.height * scale));
-      const margin = Math.round(width * 0.03);
-      const paddingX = Math.round(width * 0.014);
-      const paddingY = Math.round(height * 0.012);
-      const panelWidth = logoWidth + paddingX * 2;
-      const panelHeight = logoHeight + paddingY * 2;
 
       context.save();
       context.fillStyle = 'rgba(255, 255, 255, 0.94)';
       context.beginPath();
       context.roundRect(
-        margin,
-        margin,
-        panelWidth,
-        panelHeight,
+        geometry.panel.left,
+        geometry.panel.top,
+        geometry.panel.width,
+        geometry.panel.height,
         Math.round(width * 0.012)
       );
       context.fill();
@@ -251,10 +253,10 @@ const brandOneCreative = async (
       context.imageSmoothingQuality = 'high';
       context.drawImage(
         logoSource.image,
-        margin + paddingX,
-        margin + paddingY,
-        logoWidth,
-        logoHeight
+        geometry.artwork.left,
+        geometry.artwork.top,
+        geometry.artwork.width,
+        geometry.artwork.height
       );
 
       const file = await canvasToPngFile(

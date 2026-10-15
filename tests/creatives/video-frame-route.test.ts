@@ -1,3 +1,4 @@
+import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { parseCreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
@@ -39,7 +40,7 @@ vi.mock('@/lib/quotas/require-quota', () => ({
   requireOperatorQuota: requireOperatorQuotaMock,
 }));
 
-vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: saveCreativeBatchMock }));
+vi.mock('@/lib/creatives/storage', () => ({ saveCreativeBatch: saveCreativeBatchMock, listCreatives: async () => [] }));
 
 vi.mock('@/lib/creatives/generated-image-validation', async (original) => ({
   ...(await original<typeof import('@/lib/creatives/generated-image-validation')>()),
@@ -54,7 +55,8 @@ vi.mock('@/lib/ai/openai', () => ({
 vi.mock('@/lib/ai/creative-planner', () => ({
   planCreativeBatch: planCreativeBatchMock,
 }));
-vi.mock('@/lib/ai/video-frame-generation', () => ({
+vi.mock('@/lib/ai/video-frame-generation', async original => ({
+  ...await original<typeof import('@/lib/ai/video-frame-generation')>(),
   analyzeApprovedTraVideoFrames: analyzeApprovedTraVideoFramesMock,
   generateApprovedTraVideoFrameCreativeImage: generateApprovedTraVideoFrameCreativeImageMock,
 }));
@@ -72,16 +74,17 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const imageResult = {
   buffer: PNG,
   prompt: 'Mock final image prompt',
-  model: 'gpt-image-2',
+  model: 'gpt-image-2.5-sunburst',
+  routing: { operationType: 'TRA_VIDEO_FRAME_GENERATION' as const, preferredModel: 'gpt-image-2.5-sunburst' as const, actualModel: 'gpt-image-2.5-sunburst' as const, fallbackUsed: false, fallbackFromModel: null, fallbackReason: null },
 };
 const VIDEO_ID = `media_${'1'.repeat(32)}`;
 const HASH = createHash('sha256').update(REAL_ENCODED_MP4).digest('hex');
 const analysis = { summary: 'Approved TRA video source.', visibleText: [], visualStructure: 'Talking-head source context.', hookOrAngle: 'clarity', offerOrCta: 'consultation', styleNotes: 'Use identity, not old layout.', preserve: ['visible person identity'], avoid: ['old captions'], unknowns: [], dominantCategory: 'customer-problems' };
 const makeFrameSet = (source: unknown): ApprovedTraVideoFrameSet => ({
   source: source as ApprovedTraVideoFrameSet['source'], sourceVideoContentHash: HASH, durationMs: 10_000, reused: false,
-  frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', buffer: PNG, ...getVideoFrameIntegrity(PNG), sourceRole: 'TRA_VIDEO', sourceVideoMediaId: VIDEO_ID, sourceVideoFileName: `${VIDEO_ID}.mp4`, sourceVideoContentHash: HASH, approvedHumanSource: true, cacheKey: `derived/video-frames/${VIDEO_ID}/${HASH}/frame-000.png` }],
+  frames: [{ frameIndex: 0, timestampMs: 0, mimeType: 'image/png', buffer: PNG, ...getVideoFrameIntegrity(PNG), sourceRole: 'TRA_VIDEO', sourceVideoMediaId: VIDEO_ID, sourceVideoFileName: `${VIDEO_ID}.mp4`, sourceVideoContentHash: HASH, approvedHumanSource: true, sourceOverlay: { version: 2, status: 'CLEAN' }, cacheKey: `derived/video-frames/${VIDEO_ID}/${HASH}/frame-000.png` }],
 });
-const makeRequest = () => new Request('https://tra.example/api/creatives/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: 'Create clear TRA ads.', variationCount: 2, sourceAssets: [{ mediaId: VIDEO_ID, role: 'TRA_VIDEO' }] }) });
+const makeRequest = () => new Request('https://tra.example/api/creatives/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ context: 'Create clear TRA ads.', variationCount: 2, sourceAssets: [{ mediaId: VIDEO_ID, role: 'TRA_VIDEO' }] }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -94,48 +97,55 @@ beforeEach(() => {
   readImageByIdMock.mockResolvedValue(null);
   getApprovedTraVideoFramesMock.mockImplementation(async (source) => makeFrameSet(source));
   analyzeApprovedTraVideoFramesMock.mockResolvedValue(analysis);
-  const concept = (index: number) => ({
-    index,
-    format: 'direct-response',
-    copy: {
+  const concept = (index: number) => {
+    const adCopy = {
       headline: `Clear next step ${index}`,
       primaryText: 'Talk with TRA.',
       description: 'No-pressure consultation.',
-    },
-    strategy: {
-      category: 'customer-problems',
-      awarenessStage: index === 1 ? 'problem-aware' : 'solution-aware',
-      persona: 'Taxpayer',
-      painPoint: 'Unclear options',
-      desiredOutcome: 'Clarity',
-      emotion: 'reassured',
-      hook: `Option ${index}`,
-      cta: 'Talk with TRA',
-      offer: null,
-      soWhat: {
-        surfaceMessage: `Message ${index}`,
-        functionalConsequence: `Consequence ${index}`,
-        meaningfulOutcome: `Outcome ${index}`,
+    };
+    return {
+      index,
+      format: 'direct-response',
+      copy: adCopy,
+      adCopy: { ...adCopy },
+      imageCopy: { headline: `Clear next step ${index}`, cta: 'Talk with TRA' },
+      strategy: {
+        category: 'customer-problems',
+        awarenessStage: index === 1 ? 'problem-aware' : 'solution-aware',
+        persona: 'Taxpayer',
+        painPoint: 'Unclear options',
+        desiredOutcome: 'Clarity',
+        emotion: 'reassured',
+        hook: `Option ${index}`,
+        cta: 'Talk with TRA',
+        offer: null,
+        soWhat: {
+          surfaceMessage: `Message ${index}`,
+          functionalConsequence: `Consequence ${index}`,
+          meaningfulOutcome: `Outcome ${index}`,
+        },
+        execution: {
+          subjectSource: 'approved-tra-human',
+          composition: index === 1 ? 'single-focus' : 'split',
+          imageTreatment: index === 1 ? 'photographic' : 'mixed-media',
+          textDensity: 'medium',
+          ctaTreatment: 'button',
+          typographyHierarchy: 'headline-dominant',
+        },
+        visualDirection: `Source-bound direction ${index}`,
       },
-      execution: {
-        subjectSource: 'approved-tra-human',
-        composition: index === 1 ? 'single-focus' : 'split',
-        imageTreatment: index === 1 ? 'photographic' : 'mixed-media',
-        textDensity: 'medium',
-        ctaTreatment: 'button',
-        typographyHierarchy: 'headline-dominant',
-      },
-      visualDirection: `Source-bound direction ${index}`,
-    },
-    selectionReason: `Distinct fit ${index}`,
-  });
+      selectionReason: `Distinct fit ${index}`,
+    };
+  };
   planCreativeBatchMock.mockResolvedValue({
     creatives: [concept(1), concept(2)],
     plannerModel: 'gpt-6-astra',
     reasoningEffort: 'medium',
   });
   generateApprovedTraVideoFrameCreativeImageMock.mockImplementation(
-    async ({ frames }) => ({ ...imageResult, providerFrames: frames })
+    async ({ frames }) => ({ ...imageResult, providerFrames: frames.map((frame: { buffer: Buffer }) => ({
+      ...frame, providerBuffer: frame.buffer, providerPngSha256: getVideoFrameIntegrity(frame.buffer).frameSha256, crop: null,
+    })) })
   );
   saveImageMock.mockResolvedValue({ id: `media_${'9'.repeat(32)}`, fileName: `media_${'9'.repeat(32)}.png`, originalName: 'generated.png', mimeType: 'image/png', size: PNG.length, url: '/generated.png' });
 });
@@ -156,12 +166,17 @@ describe('creative generation TRA video integration', () => {
         };
       });
     expect(response.status).toBe(200);
-    expect(getApprovedTraVideoFramesMock).toHaveBeenCalledTimes(1);
+    expect(getApprovedTraVideoFramesMock).toHaveBeenCalledTimes(2);
     expect(analyzeApprovedTraVideoFramesMock).toHaveBeenCalledWith(expect.objectContaining({ context: expect.stringContaining('USER CREATIVE DIRECTION') }));
     expect(planCreativeBatchMock).toHaveBeenCalledWith(
       expect.objectContaining({ hasApprovedHumanSource: true })
     );
     expect(generateApprovedTraVideoFrameCreativeImageMock).toHaveBeenCalledTimes(2);
+    for (const [call] of generateApprovedTraVideoFrameCreativeImageMock.mock.calls) {
+      expect(call.copy).toMatchObject({ headline: expect.stringContaining('Clear next step'), cta: 'Talk with TRA' });
+      expect(call.copy).not.toHaveProperty('primaryText');
+      expect(call.copy).not.toHaveProperty('description');
+    }
     expect(validateGeneratedCreativeImageMock).toHaveBeenCalledTimes(2);
     expect(validateGeneratedCreativeImageMock).toHaveBeenCalledWith(PNG, 'SQUARE_1_1');
     expect(
@@ -173,11 +188,12 @@ describe('creative generation TRA video integration', () => {
     ).toEqual([PNG, PNG]);
     expect(events.filter(({ event }) => event === 'creative')).toHaveLength(2);
     for (const { data } of events.filter(({ event }) => event === 'creative')) {
-      const provenance = parseCreativeGenerationProvenance(
-        (data.creative as { generationProvenance?: unknown }).generationProvenance
-      );
+      const creative = data.creative as { copy?: unknown; adCopy?: unknown; imageCopy?: unknown; generationProvenance?: unknown };
+      expect(creative.copy).toEqual(creative.adCopy);
+      expect(creative.imageCopy).toBeDefined();
+      const provenance = parseCreativeGenerationProvenance(creative.generationProvenance);
       expect(provenance).toMatchObject({
-        imageGeneration: { prompt: imageResult.prompt, model: imageResult.model },
+        imageGeneration: { prompt: imageResult.prompt, model: imageResult.model, routing: imageResult.routing },
         requestedSources: [
           { role: 'TRA_VIDEO', mediaId: VIDEO_ID, sha256: HASH },
         ],
@@ -212,3 +228,6 @@ describe('creative generation TRA video integration', () => {
     expect(generateApprovedTraVideoFrameCreativeImageMock).not.toHaveBeenCalled();
   });
 });
+vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => offlineExecutionStorage }));
+let offlineExecutionStorage = new MemoryPortfolioStorage();
+beforeEach(() => { offlineExecutionStorage = new MemoryPortfolioStorage(); });

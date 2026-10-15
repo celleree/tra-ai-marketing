@@ -1,5 +1,6 @@
+import { getLayoutAnalysisModel } from '@/lib/ai/layout-analyzer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { analyzeLayoutReference, getLayoutAnalysisModel } from '@/lib/ai/layout-analyzer';
+import { analyzeLayoutReference } from '@/lib/ai/layout-analyzer';
 import type { StoredMediaFile } from '@/lib/media/types';
 
 const source: StoredMediaFile = {
@@ -134,8 +135,9 @@ describe('layout analyzer provider boundary', () => {
 });
 
 it('defaults analysis to Luna while retaining an explicit provider override', () => {
-  vi.stubEnv('OPENAI_ANALYSIS_MODEL', '');
-  expect(getLayoutAnalysisModel()).toBe('gpt-6-luna');
-  vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'configured-analysis-model');
-  expect(getLayoutAnalysisModel()).toBe('configured-analysis-model');
-});
+   vi.stubEnv('OPENAI_ANALYSIS_MODEL', '');
+   expect(getLayoutAnalysisModel()).toBe('gpt-6-luna');
+   vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'configured-analysis-model');
+   expect(getLayoutAnalysisModel()).toBe('configured-analysis-model');
+   vi.unstubAllEnvs();
+ });

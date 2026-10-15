@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { CreativeResults } from '@/components/creative-generator/creative-results';
+import type { GeneratedCreative } from '@/lib/creatives/generated';
 
 const creative = {
   id: 'creative_abc',
@@ -56,5 +57,26 @@ describe('CreativeResults progressive delivery state', () => {
     expect(incomplete).toMatch(/<button[^>]*disabled[^>]*>Select all/);
     expect(complete).toContain('Select all');
     expect(complete).not.toMatch(/<button[^>]*disabled[^>]*>Select all/);
+  });
+
+  it('shows Edit and a fallback notice for an editable generated creative', () => {
+    const editable = {
+      ...creative,
+      placement: 'SQUARE_1_1',
+      identity: {},
+      planning: {},
+      generationProvenance: {
+        imageGeneration: {
+          routing: { fallbackUsed: true },
+        },
+      },
+    } as unknown as GeneratedCreative;
+    const html = renderToStaticMarkup(createElement(CreativeResults, {
+      creatives: [editable],
+      generationComplete: true,
+    }));
+    expect(html).toMatch(/<button[^>]*>Edit<\/button>/);
+    expect(html).toContain('A compatible fallback image model was used.');
+    expect(html).not.toContain('Image model');
   });
 });

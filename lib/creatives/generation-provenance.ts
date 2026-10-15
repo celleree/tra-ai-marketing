@@ -2,13 +2,23 @@ import {
   isCreativeSourceRole,
   type CreativeSourceRole,
 } from '@/lib/media/types';
+import {
+  isCreativeImageModel,
+  isCreativeImageOperationType,
+  FALLBACK_CREATIVE_IMAGE_MODEL,
+  PREFERRED_CREATIVE_IMAGE_MODEL,
+  type CreativeImageRouting,
+} from '@/lib/creatives/image-routing';
+import { parseSourceOverlayDecision, type SourceCrop, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
+import { isCreativeLogoAnchor, type CreativeLogoAnchor } from '@/lib/creatives/logo-placement';
+import { videoCandidateFrameId } from '@/lib/video/generation-selection-contract';
 
 const SAFE_MEDIA_ID = /^media_[a-f0-9]{32}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 
 export type CreativeGenerationProvenance = {
   version: 1;
-  imageGeneration: { prompt: string; model: string };
+  imageGeneration: { prompt: string; model: string; routing?: CreativeImageRouting };
   requestedSources: Array<{
     role: CreativeSourceRole;
     mediaId: string;
@@ -22,7 +32,12 @@ export type CreativeGenerationProvenance = {
         mediaId: string;
         sourceSha256: string;
         selectionMode: 'AUTOMATIC' | 'USER_SELECTED';
-        frames: Array<{ timestampMs: number; approvedPngSha256: string }>;
+        libraryId?: string;
+        librarySha256?: string;
+        frames: Array<{ timestampMs: number; approvedPngSha256: string;
+          providerPngSha256?: string; sourceOverlay?: SourceOverlayDecision; crop?: SourceCrop | null;
+          libraryFrameId?: string; representativeFrameId?: string; candidateIndex?: number;
+          candidateFrameSha256?: string }>;
       };
   analysisSources: Array<
     | {
@@ -44,6 +59,7 @@ export type CreativeGenerationProvenance = {
     canvasMediaId: string;
     canvasSha256: string;
     instruction?: string;
+    logoOverlay?: { version: 1; anchor: CreativeLogoAnchor; outputSha256: string };
   };
 };
 
@@ -77,7 +93,11 @@ export const parseCreativeGenerationProvenance = (
     !hasExactKeys(value, rootKeys) ||
     value.version !== 1 ||
     !isRecord(value.imageGeneration) ||
-    !hasExactKeys(value.imageGeneration, ['prompt', 'model']) ||
+    !hasExactKeys(value.imageGeneration, [
+      'prompt',
+      'model',
+      ...('routing' in value.imageGeneration ? ['routing'] : []),
+    ]) ||
     typeof value.imageGeneration.prompt !== 'string' ||
     value.imageGeneration.prompt.length === 0 ||
     !isNonBlankModel(value.imageGeneration.model) ||
@@ -85,6 +105,40 @@ export const parseCreativeGenerationProvenance = (
     !Array.isArray(value.analysisSources)
   ) {
     return null;
+  }
+
+  let routing: CreativeImageRouting | undefined;
+  if ('routing' in value.imageGeneration) {
+    const route = value.imageGeneration.routing;
+    if (
+      !isRecord(route) ||
+      !hasExactKeys(route, [
+        'operationType',
+        'preferredModel',
+        'actualModel',
+        'fallbackUsed',
+        'fallbackFromModel',
+        'fallbackReason',
+      ]) ||
+      !isCreativeImageOperationType(route.operationType) ||
+      !isCreativeImageModel(route.preferredModel) ||
+      !isCreativeImageModel(route.actualModel) ||
+      route.preferredModel !== PREFERRED_CREATIVE_IMAGE_MODEL ||
+      typeof route.fallbackUsed !== 'boolean' ||
+      route.actualModel !== value.imageGeneration.model ||
+      (route.fallbackUsed
+        ? route.fallbackFromModel !== route.preferredModel ||
+          route.actualModel === route.preferredModel ||
+          route.actualModel !== FALLBACK_CREATIVE_IMAGE_MODEL ||
+          typeof route.fallbackReason !== 'string' ||
+          !/^[a-z0-9_]{1,80}$/.test(route.fallbackReason)
+        : route.fallbackFromModel !== null ||
+          route.fallbackReason !== null ||
+          route.actualModel !== route.preferredModel)
+    ) {
+      return null;
+    }
+    routing = route as CreativeImageRouting;
   }
 
   const requestedSources = value.requestedSources.map((source) => {
@@ -123,7 +177,8 @@ export const parseCreativeGenerationProvenance = (
   } else if (isRecord(value.attachedSource) && value.attachedSource.type === 'TRA_VIDEO_FRAMES') {
     const source = value.attachedSource;
     if (
-      !hasExactKeys(source, ['type', 'mediaId', 'sourceSha256', 'selectionMode', 'frames']) ||
+      !(hasExactKeys(source, ['type', 'mediaId', 'sourceSha256', 'selectionMode', 'frames'])
+        || hasExactKeys(source, ['type', 'mediaId', 'sourceSha256', 'selectionMode', 'libraryId', 'librarySha256', 'frames'])) ||
       !isMediaId(source.mediaId) ||
       !isHash(source.sourceSha256) ||
       (source.selectionMode !== 'AUTOMATIC' && source.selectionMode !== 'USER_SELECTED') ||
@@ -132,15 +187,43 @@ export const parseCreativeGenerationProvenance = (
       source.frames.length > 3 ||
       !requestedSource('TRA_VIDEO', source.mediaId, source.sourceSha256)
     ) return null;
+    const candidateAddressed = 'librarySha256' in source;
+    if (candidateAddressed && (typeof source.libraryId !== 'string' || !/^video-library:[a-f0-9]{64}$/.test(source.libraryId)
+      || !isHash(source.librarySha256))) return null;
     const frames = source.frames.map((frame) => {
-      if (!isRecord(frame) || !hasExactKeys(frame, ['timestampMs', 'approvedPngSha256'])) return null;
+      if (!isRecord(frame) || !(hasExactKeys(frame, ['timestampMs', 'approvedPngSha256'])
+        || hasExactKeys(frame, ['timestampMs', 'approvedPngSha256', 'providerPngSha256', 'sourceOverlay', 'crop'])
+        || hasExactKeys(frame, ['timestampMs', 'approvedPngSha256', 'providerPngSha256', 'sourceOverlay', 'crop',
+          'libraryFrameId', 'representativeFrameId', 'candidateIndex', 'candidateFrameSha256']))) return null;
       if (typeof frame.timestampMs !== 'number' || !Number.isSafeInteger(frame.timestampMs) || frame.timestampMs < 0 || !isHash(frame.approvedPngSha256)) return null;
-      return { timestampMs: frame.timestampMs, approvedPngSha256: frame.approvedPngSha256 };
+      if (candidateAddressed !== ('candidateIndex' in frame)) return null;
+      if (candidateAddressed && (typeof frame.libraryFrameId !== 'string' || !/^video-frame:[a-f0-9]{64}$/.test(frame.libraryFrameId)
+        || typeof frame.representativeFrameId !== 'string' || !/^video-frame:[a-f0-9]{64}$/.test(frame.representativeFrameId)
+        || !Number.isSafeInteger(frame.candidateIndex) || Number(frame.candidateIndex) < 0
+        || !isHash(frame.candidateFrameSha256)
+        || frame.libraryFrameId !== videoCandidateFrameId(source.sourceSha256 as string,
+          frame.timestampMs as number, frame.candidateFrameSha256))) return null;
+      if (!('providerPngSha256' in frame)) return { timestampMs: frame.timestampMs, approvedPngSha256: frame.approvedPngSha256 };
+      const decision = parseSourceOverlayDecision(frame.sourceOverlay);
+      const crop = frame.crop;
+      if (!isHash(frame.providerPngSha256) || !decision || decision.status === 'UNSAFE'
+        || (decision.status === 'CLEAN' && (crop !== null || frame.providerPngSha256 !== frame.approvedPngSha256))
+        || (decision.status === 'EDGE_CROP' && (!isRecord(crop)
+          || !hasExactKeys(crop, ['left', 'top', 'width', 'height'])
+          || ![crop.left, crop.top, crop.width, crop.height].every(value => Number.isSafeInteger(value) && Number(value) >= 0)
+          || Number(crop.width) < 2 || Number(crop.height) < 2))) return null;
+      return { timestampMs: frame.timestampMs, approvedPngSha256: frame.approvedPngSha256,
+        providerPngSha256: frame.providerPngSha256, sourceOverlay: decision, crop: crop as SourceCrop | null,
+        ...(candidateAddressed ? { libraryFrameId: frame.libraryFrameId as string,
+          representativeFrameId: frame.representativeFrameId as string,
+          candidateIndex: frame.candidateIndex as number, candidateFrameSha256: frame.candidateFrameSha256 as string } : {}) };
     });
     if (frames.some((frame) => !frame)) return null;
     const validFrames = frames as NonNullable<Extract<CreativeGenerationProvenance['attachedSource'], { type: 'TRA_VIDEO_FRAMES' }>>['frames'];
     if (new Set(validFrames.map((frame) => `${frame.timestampMs}:${frame.approvedPngSha256}`)).size !== validFrames.length) return null;
-    attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: source.mediaId, sourceSha256: source.sourceSha256, selectionMode: source.selectionMode, frames: validFrames };
+    attachedSource = { type: 'TRA_VIDEO_FRAMES', mediaId: source.mediaId, sourceSha256: source.sourceSha256,
+      selectionMode: source.selectionMode, frames: validFrames,
+      ...(candidateAddressed ? { libraryId: source.libraryId as string, librarySha256: source.librarySha256 as string } : {}) };
   } else {
     return null;
   }
@@ -178,17 +261,24 @@ export const parseCreativeGenerationProvenance = (
   let revision: CreativeGenerationProvenance['revision'];
   if ('revision' in value) {
     const source = value.revision;
-    if (!isRecord(source) || !hasExactKeys(source, ['parentCreativeId', 'canvasMediaId', 'canvasSha256', ...('instruction' in source ? ['instruction'] : [])]) ||
+    if (!isRecord(source) || !hasExactKeys(source, ['parentCreativeId', 'canvasMediaId', 'canvasSha256', ...('instruction' in source ? ['instruction'] : []), ...('logoOverlay' in source ? ['logoOverlay'] : [])]) ||
       typeof source.parentCreativeId !== 'string' || !/^creative_[a-f0-9]{32}$/.test(source.parentCreativeId) ||
       !isMediaId(source.canvasMediaId) || !isHash(source.canvasSha256) ||
       ('instruction' in source && (typeof source.instruction !== 'string' || !source.instruction.trim() || source.instruction.length > 4000))) return null;
+    if ('logoOverlay' in source && (!isRecord(source.logoOverlay) || !hasExactKeys(source.logoOverlay, ['version', 'anchor', 'outputSha256'])
+      || source.logoOverlay.version !== 1 || !isCreativeLogoAnchor(source.logoOverlay.anchor) || !isHash(source.logoOverlay.outputSha256) || !logoOverlaySource)) return null;
     revision = { parentCreativeId: source.parentCreativeId, canvasMediaId: source.canvasMediaId, canvasSha256: source.canvasSha256,
-      ...(typeof source.instruction === 'string' ? { instruction: source.instruction } : {}) };
+      ...(typeof source.instruction === 'string' ? { instruction: source.instruction } : {}),
+      ...(source.logoOverlay ? { logoOverlay: source.logoOverlay as NonNullable<CreativeGenerationProvenance['revision']>['logoOverlay'] } : {}) };
   }
 
   return {
     version: 1,
-    imageGeneration: { prompt: value.imageGeneration.prompt, model: value.imageGeneration.model },
+    imageGeneration: {
+      prompt: value.imageGeneration.prompt,
+      model: value.imageGeneration.model,
+      ...(routing ? { routing } : {}),
+    },
     requestedSources: validRequestedSources,
     attachedSource,
     analysisSources: analysisSources as CreativeGenerationProvenance['analysisSources'],

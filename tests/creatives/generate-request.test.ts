@@ -32,6 +32,12 @@ const expectGroundedContext = (value: unknown) => {
 };
 
 describe('multi-source creative generation request', () => {
+  it('keeps the legacy ceiling while allowing the resumable caller to opt into 36', () => {
+    const request = { ...baseRequest, variationCount: 36 };
+    expect(validateGenerateCreativeRequest(request)).toEqual({ success: false, error: 'variationCount must be an integer between 2 and 30' });
+    expect(validateGenerateCreativeRequest(request, 36).success).toBe(true);
+    expect(validateGenerateCreativeRequest({ ...request, variationCount: 37 }, 36).success).toBe(false);
+  });
   it('preserves multiple typed image and video sources in request order', () => {
     const sourceAssets = [
       makeSource('TRA_VIDEO', 'a'),
@@ -110,8 +116,10 @@ describe('multi-source creative generation request', () => {
     });
   });
 
-  it('accepts a strict selected-frame contract for exactly one TRA video', () => {
-    const sourceAssets = [makeSource('TRA_VIDEO', 'a')];
+  it.each([false, true])('accepts selected frames with one video and optional layouts, layouts=%s', layouts => {
+    const sourceAssets = layouts
+      ? [makeSource('LAYOUT_REFERENCE', 'b'), makeSource('TRA_VIDEO', 'a'), makeSource('LAYOUT_REFERENCE', 'c')]
+      : [makeSource('TRA_VIDEO', 'a')];
     const result = validateGenerateCreativeRequest({
       ...baseRequest,
       sourceAssets,
@@ -121,6 +129,7 @@ describe('multi-source creative generation request', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.videoFrameSelection).toEqual(videoFrameSelection);
+    expect(result.data.sourceAssets).toEqual(sourceAssets);
   });
 
   it.each([
@@ -134,7 +143,7 @@ describe('multi-source creative generation request', () => {
   ])('rejects malformed selected-frame metadata %#', (selection) => {
     const result = validateGenerateCreativeRequest({
       ...baseRequest,
-      sourceAssets: [makeSource('TRA_VIDEO', 'a')],
+      sourceAssets: [makeSource('TRA_VIDEO', 'a'), makeSource('LAYOUT_REFERENCE', 'b')],
       videoFrameSelection: selection,
     });
 
@@ -145,13 +154,33 @@ describe('multi-source creative generation request', () => {
     });
   });
 
+  it('requires one valid v2 overlay decision for each exact selected frame', () => {
+    const assessed = { ...videoFrameSelection, version: 2, sourceOverlays: [{ version: 2, status: 'CLEAN' }] };
+    const valid = validateGenerateCreativeRequest({ ...baseRequest,
+      sourceAssets: [makeSource('TRA_VIDEO', 'a')], videoFrameSelection: assessed });
+    expect(valid.success).toBe(true);
+    for (const invalid of [
+      { ...assessed, sourceOverlays: [] },
+      { ...assessed, sourceOverlays: [{ version: 2, status: 'UNSAFE' }] },
+      { ...assessed, frameIds: [...assessed.frameIds, `video-frame:${'d'.repeat(64)}`] },
+      { ...assessed, sourceVideoContentHash: 'stale' },
+    ]) {
+      expect(validateGenerateCreativeRequest({ ...baseRequest, sourceAssets: [makeSource('TRA_VIDEO', 'a')],
+        videoFrameSelection: invalid }).success).toBe(false);
+    }
+  });
+
   it.each([
     { sourceAssets: [] },
     { sourceAssets: [makeSource('TRA_REFERENCE', 'a')] },
+    { sourceAssets: [makeSource('LAYOUT_REFERENCE', 'a')] },
+    { sourceAssets: [makeSource('TRA_VIDEO', 'a'), makeSource('TRA_VIDEO', 'b')] },
+    { sourceAssets: [makeSource('TRA_VIDEO', 'a'), makeSource('TRA_REFERENCE', 'b')] },
     {
       sourceAssets: [
         makeSource('TRA_VIDEO', 'a'),
         makeSource('LAYOUT_REFERENCE', 'b'),
+        makeSource('TRA_REFERENCE', 'c'),
       ],
     },
   ])('rejects selected frames without exactly one TRA video source %#', ({ sourceAssets }) => {
@@ -163,7 +192,7 @@ describe('multi-source creative generation request', () => {
       })
     ).toEqual({
       success: false,
-      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset',
+      error: 'videoFrameSelection requires exactly one TRA_VIDEO source asset with optional LAYOUT_REFERENCE assets only',
     });
   });
 

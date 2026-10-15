@@ -1,5 +1,7 @@
 'use client';
 
+import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
+
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   ChangeEvent,
@@ -7,6 +9,8 @@ import type {
   DragEvent,
   KeyboardEvent,
 } from 'react';
+import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
+import type { CreativePlacement } from '@/lib/creatives/placements';
 import type {
   CreativeSourceAsset,
   CreativeSourceMediaAsset,
@@ -35,6 +39,8 @@ interface CreativeComposerProps {
   allowMultipleSources?: boolean;
   variationCount: number;
   onVariationCountChange: (value: number) => void;
+  placement?: CreativePlacement;
+  onPlacementChange?: (value: CreativePlacement) => void;
   onSubmit: () => void;
   ready: boolean;
   generating: boolean;
@@ -57,7 +63,7 @@ const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_VIDEO_TYPES = ['video/mp4'];
 const MIN_VARIATIONS = 2;
-const MAX_VARIATIONS = 30;
+const MAX_VARIATIONS = MAX_PORTFOLIO_CREATIVES;
 
 const ROLE_LABELS: Record<CreativeSourceRole, string> = {
   TRA_VIDEO: 'TRA_VIDEO',
@@ -76,6 +82,8 @@ export function CreativeComposer({
   allowMultipleSources = true,
   variationCount,
   onVariationCountChange,
+  placement,
+  onPlacementChange,
   onSubmit,
   ready,
   generating,
@@ -455,13 +463,20 @@ export function CreativeComposer({
           >
             +
           </button>
-          <span className={styles.hint}>
-            {uploadBusy
-              ? 'Uploading source assets…'
-              : sourceLimitReached
-                ? `Maximum of ${MAX_CREATIVE_SOURCE_ASSETS} sources attached. Remove one to add another.`
-                : 'Images default to TRA_REFERENCE · MP4 uses TRA_VIDEO'}
-          </span>
+          {placement && onPlacementChange ? (
+            <CreativePlacementSelect
+              value={placement}
+              onChange={onPlacementChange}
+              disabled={generating}
+            />
+          ) : null}
+          {uploadBusy || sourceLimitReached ? (
+            <span className={styles.hint}>
+              {uploadBusy
+                ? 'Uploading source assets…'
+                : `Maximum of ${MAX_CREATIVE_SOURCE_ASSETS} sources attached. Remove one to add another.`}
+            </span>
+          ) : null}
         </div>
 
         <div className={styles.submitGroup}>

@@ -1,24 +1,54 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/creatives/[creativeId]/revise/route';
 import { buildCreativeIdentity } from '@/lib/creatives/identity.server';
 import { CreativeRevisionHydrationError } from '@/lib/creatives/revision-source-hydration';
 import { GeneratedImageValidationError } from '@/lib/creatives/generated-image-validation';
+import { ProofRevalidationError } from '@/lib/proof/provenance';
+import { approvedHumanSourceId } from '@/lib/video/approved-human';
 import type { CreativeRecord } from '@/lib/creatives/generated';
 import type { CreativeStrategy } from '@/lib/creatives/strategy';
+import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
+import { referenceCandidate } from '../fixtures/reference-catalog';
+import { createHash } from 'node:crypto';
+import sharp from 'sharp';
+import type { ApprovedTraVideoFrame } from '@/lib/video/types';
+import { MemoryPortfolioStorage } from '../fixtures/creative-portfolio';
+import { fetchCreativeImage } from '@/lib/creatives/image-models';
+import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
+import { draftVideoAssertion } from '../fixtures/draft-video-source';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn() }));
+let executionStorage = new MemoryPortfolioStorage();
+vi.mock('@/lib/video/intelligence-storage', () => ({ getVideoIntelligenceStorage: () => executionStorage }));
+
+const mocks = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), hydrate: vi.fn(), plan: vi.fn(), generate: vi.fn(), validate: vi.fn(), logo: vi.fn(), logoGeometry: vi.fn(), eraseLogo: vi.fn(), saveImage: vi.fn(), getOperatorAccess: vi.fn(), requireOperatorQuota: vi.fn(), human: vi.fn(), proof: vi.fn() }));
+vi.mock('@/lib/video/approved-human-service', () => ({ requireActiveHumanSelection: mocks.human }));
 vi.mock('@/lib/auth/server-access', () => ({ getOperatorAccess: mocks.getOperatorAccess }));
 vi.mock('@/lib/quotas/require-quota', () => ({ requireOperatorQuota: mocks.requireOperatorQuota }));
 vi.mock('@/lib/creatives/storage', async importOriginal => ({ ...await importOriginal<object>(), listCreatives: mocks.list, saveCreativeBatch: mocks.save }));
+vi.mock('@/lib/proof/provenance', async importOriginal => ({ ...await importOriginal<object>(), revalidateCreativeProofProvenanceForPaidWork: mocks.proof }));
 vi.mock('@/lib/creatives/revision-source-hydration', async importOriginal => ({ ...await importOriginal<object>(), hydrateSavedCreativeRevisionContext: mocks.hydrate }));
 vi.mock('@/lib/creatives/generated-image-validation', async importOriginal => ({ ...await importOriginal<object>(), validateGeneratedCreativeImage: mocks.validate }));
 vi.mock('@/lib/ai/creative-revision-planner', () => ({ planCreativeRevision: mocks.plan }));
 vi.mock('@/lib/ai/creative-revision-image', () => ({ generateCreativeRevisionImage: mocks.generate }));
-vi.mock('@/lib/creatives/brand-logo.server', () => ({ compositeCreativeBrandLogo: mocks.logo }));
+vi.mock('@/lib/creatives/brand-logo.server', () => ({
+  compositeCreativeBrandLogo: mocks.logo,
+  resolveCreativeBrandLogoPlacementContext: mocks.logoGeometry,
+  eraseCreativeBrandLogo: mocks.eraseLogo,
+}));
 vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: () => ({ saveImage: mocks.saveImage }) }));
 
 const parentId = `creative_${'a'.repeat(32)}`;
 const mediaId = `media_${'b'.repeat(32)}`;
+const approvedHumanRecordId = `human_${'f'.repeat(64)}`;
+const generalizedHumanSourceId = approvedHumanSourceId(approvedHumanRecordId);
+const videoPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
+const videoPngHash = createHash('sha256').update(videoPng).digest('hex');
+const largePng = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#9c7049' } }).png().toBuffer();
+const largePngHash = createHash('sha256').update(largePng).digest('hex');
+const videoFrame = (): ApprovedTraVideoFrame => ({ frameIndex: 0, timestampMs: 1000, mimeType: 'image/png', buffer: videoPng,
+  frameSha256: videoPngHash, byteLength: videoPng.length, sourceRole: 'TRA_VIDEO', sourceVideoMediaId: mediaId,
+  sourceVideoFileName: `${mediaId}.mp4`, sourceVideoContentHash: 'f'.repeat(64), approvedHumanSource: true,
+  cacheKey: null, sourceOverlay: { version: 2, status: 'CLEAN' }, expectedProviderPngSha256: videoPngHash, expectedCrop: null });
 const strategy: CreativeStrategy = {
   category: 'customer-problems', awarenessStage: 'problem-aware', persona: 'Taxpayer', painPoint: 'Unclear next steps', desiredOutcome: 'Clarity', emotion: 'Relief', hook: 'Get clarity', cta: 'Consult us', offer: null,
   soWhat: { surfaceMessage: 'Organize your case', functionalConsequence: 'Understand your options', meaningfulOutcome: 'Move forward confidently' },
@@ -32,23 +62,493 @@ const parent = (): CreativeRecord => ({
   planning: { strategy, selectionReason: 'Saved choice', model: 'saved-planner', reasoningEffort: 'medium' },
   generationProvenance: { version: 1, imageGeneration: { prompt: 'old prompt', model: 'old-image-model' }, requestedSources: [], attachedSource: null, analysisSources: [] },
 });
-const call = (body: unknown, creativeId = parentId) => POST(new Request('http://localhost/api/creatives/revise', { method: 'POST', body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
+const generalizedHumanParent = (): CreativeRecord => {
+  const record = parent();
+  const humanStrategy: CreativeStrategy = { ...strategy, humanSourceId: generalizedHumanSourceId,
+    execution: { ...strategy.execution, subjectSource: 'approved-tra-human' } };
+  record.planning = { ...record.planning!, strategy: humanStrategy };
+  record.identity = buildCreativeIdentity({ creativeId: record.id, operation: 'GENERATE', strategy: humanStrategy });
+  record.videoFrameSelection = { libraryId:`video-library:${'a'.repeat(64)}`, sourceVideoMediaId:mediaId, sourceVideoContentHash:'f'.repeat(64),
+    frames:[{frameIndex:0,libraryFrameId:`video-frame:${'c'.repeat(64)}`,candidateFrameSha256:'d'.repeat(64),timestampMs:1000,approvedPngSha256:videoPngHash}] };
+  record.generationProvenance = {
+    ...record.generationProvenance!,
+    requestedSources: [{ role: 'TRA_VIDEO', mediaId, sha256: 'f'.repeat(64) }],
+    attachedSource: { type: 'TRA_VIDEO_FRAMES', mediaId, sourceSha256: 'f'.repeat(64), selectionMode: 'USER_SELECTED',
+      frames: [{ timestampMs: 1000, approvedPngSha256: videoPngHash, providerPngSha256: videoPngHash,
+        sourceOverlay: { version: 2, status: 'CLEAN' }, crop: null }] },
+  };
+  return record;
+};
+const e2Parent = (): CreativeRecord => {
+  const record = parent();
+  const adCopy = { primaryText: 'META_PRIMARY_SENTINEL_NEVER_IMAGE', headline: 'Meta headline', description: 'META_DESCRIPTION_SENTINEL_NEVER_IMAGE' };
+  return { ...record, copy: adCopy, adCopy, imageCopy: { headline: 'IMAGE_HEADLINE_SENTINEL', cta: 'IMAGE_CTA_SENTINEL' } };
+};
+const proofParent = (): CreativeRecord => {
+  const record = e2Parent();
+  const selectedText = 'The representative explained every step clearly.';
+  const adCopy = {
+    ...record.adCopy!,
+    primaryText: [record.adCopy!.primaryText, selectedText, 'Verified TRA client'].join('\n\n'),
+  };
+  return {
+    ...record, copy: adCopy, adCopy,
+    imageCopy: { ...record.imageCopy!, proofAttribution: 'Verified TRA client' },
+    proofProvenance: {
+      version: 1,
+      type: 'review',
+      proofId: `proof_${'9'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T13:00:00.000Z',
+      selectedText,
+      attribution: 'Verified TRA client',
+    },
+  };
+};
+const caseStudyProofParent = (): CreativeRecord => {
+  const record = e2Parent();
+  const selectedText = 'Approved source-bound claim wording.';
+  const adCopy = {
+    ...record.adCopy!,
+    primaryText: [record.adCopy!.primaryText, selectedText, 'Results vary by circumstances.'].join('\n\n'),
+  };
+  return {
+    ...record, copy: adCopy, adCopy,
+    imageCopy: { ...record.imageCopy!, disclosure: 'Results vary by circumstances.' },
+    proofProvenance: {
+      version: 1,
+      type: 'case-study',
+      proofId: `proof_${'8'.repeat(32)}`,
+      proofUpdatedAt: '2026-09-18T14:00:00.000Z',
+      selectedText,
+      usageRestrictions: 'Use only for bank-levy messaging.',
+      requiredDisclaimer: 'Results vary by circumstances.',
+    },
+  };
+};
+const call = (body: unknown, creativeId = parentId, submissionId = crypto.randomUUID()) => POST(new Request('http://localhost/api/creatives/revise', {
+  method: 'POST', headers: { 'Idempotency-Key': submissionId }, body: JSON.stringify(body) }), { params: Promise.resolve({ creativeId }) });
 const hydrate = (record: CreativeRecord) => ({ parent: { record, identity: record.identity, planning: record.planning, provenance: record.generationProvenance }, canvas: { kind: 'EDITING_CANVAS', approvedHumanSource: false, mediaId, sha256: 'c'.repeat(64) }, originalApprovedSource: null, logoOverlay: null });
+const hydrateGeneralizedHuman = (record: CreativeRecord) => ({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[videoFrame()]} });
+const savedVideoParent = (mode: 'AUTOMATIC' | 'USER_SELECTED'): CreativeRecord => {
+  const record = generalizedHumanParent();
+  const selectedStrategy: CreativeStrategy = { ...strategy, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' } };
+  record.planning = { ...record.planning!, strategy: selectedStrategy };
+  record.identity = buildCreativeIdentity({ creativeId: record.id, operation: 'GENERATE', strategy: selectedStrategy });
+  if (record.generationProvenance?.attachedSource?.type === 'TRA_VIDEO_FRAMES') {
+    record.generationProvenance.attachedSource.selectionMode = mode;
+  }
+  return record;
+};
+afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
+  executionStorage = new MemoryPortfolioStorage();
   Object.values(mocks).forEach(mock => mock.mockReset());
   mocks.getOperatorAccess.mockResolvedValue({ allowed: true, userId: 'operator' });
   mocks.requireOperatorQuota.mockResolvedValue(null);
+  mocks.proof.mockImplementation(async proof => proof);
   const record = parent();
   mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrate(record));
-  mocks.generate.mockResolvedValue({ buffer: Buffer.from('raw'), prompt: 'actual revision prompt', model: 'actual-image-model' });
+  mocks.generate.mockImplementation(async ({ operation }) => ({
+    buffer: Buffer.from('raw'), prompt: 'actual revision prompt', model: 'gpt-image-2.5-sunburst',
+    routing: { operationType: operation, preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false, fallbackFromModel: null, fallbackReason: null },
+  }));
   mocks.validate.mockResolvedValue(undefined); mocks.logo.mockResolvedValue(Buffer.from('final branded'));
+  mocks.logoGeometry.mockImplementation(async (_logo, placement) => ({ placement, sourceWidth: 200, sourceHeight: 100 }));
+  mocks.eraseLogo.mockResolvedValue(Buffer.from('debranded canvas'));
   mocks.saveImage.mockResolvedValue({ ...record.image, id: `media_${'d'.repeat(32)}`, fileName: `media_${'d'.repeat(32)}.png` });
   mocks.save.mockImplementation(async records => records);
   mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: { ...record.copy, headline: 'Edited headline' }, strategy, selectionReason: 'Requested edit' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
 });
 
+it.each(['EDIT', 'VARIATION', 'PLACEMENT', 'REGENERATE'])('blocks normal %s in acceptance Preview before quota, state or provider work', async operation => {
+  vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+  const response = await call({ operation, instruction: 'Change the headline', placement: 'PORTRAIT_4_5' });
+  expect(response.status).toBe(409); expect(await response.json()).toHaveProperty('error', expect.stringContaining('blocked'));
+  for (const mock of [mocks.list, mocks.hydrate, mocks.requireOperatorQuota, mocks.plan, mocks.generate, mocks.save]) {
+    expect(mock).not.toHaveBeenCalled();
+  }
+});
+it.each([['production', 'staging-smoke'], ['preview', 'diagnostic']])('retains ordinary revisions for %s / %s', async (environment, purpose) => {
+  vi.stubEnv('VERCEL_ENV', environment); vi.stubEnv('TRA_IMAGE_PURPOSE', purpose);
+  expect((await call({ operation: 'REGENERATE' })).status).toBe(201);
+  expect(mocks.generate).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  [{ operation: 'EDIT', instruction: 'Simplify the headline' }, 1],
+  [{ operation: 'VARIATION', instruction: 'Use another supported angle' }, 1],
+  [{ operation: 'PLACEMENT', placement: 'PORTRAIT_4_5' }, 0],
+  [{ operation: 'REGENERATE' }, 0],
+])('replays %j under the same intent without another planner or image operation', async (body, plans) => {
+  if (typeof body === 'object' && body.operation === 'VARIATION') mocks.plan.mockResolvedValue({
+    concept: { index: 1, format: 'direct-response', copy: parent().copy, selectionReason: 'Changed strategy',
+      strategy: { ...strategy, awarenessStage: 'solution-aware', execution: { ...strategy.execution, composition: 'split' } } },
+    plannerModel: 'gpt-6-astra', reasoningEffort: 'medium',
+  });
+  const key = crypto.randomUUID(); const first = await call(body, parentId, key);
+  expect(first.status).toBe(201); const firstBody = await first.json();
+  const replay = await call(body, parentId, key); expect(await replay.json()).toEqual(firstBody);
+  expect(mocks.plan).toHaveBeenCalledTimes(Number(plans)); expect(mocks.generate).toHaveBeenCalledTimes(1);
+  expect(mocks.save).toHaveBeenCalledTimes(1); expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(1);
+});
+
+it('attributes paid revision planning to the reserved run and child creative, including replay', async () => {
+  const logs = vi.spyOn(console, 'info').mockImplementation(() => {}), plan = mocks.plan.getMockImplementation()!;
+  mocks.plan.mockImplementation(async (...args) => {
+    await fetchWithProviderUsage('revision-plan', 'gpt-6-astra', 'https://api.openai.com/v1/responses', {},
+      async () => Response.json({ status: 'completed', usage: { input_tokens: 1 } }));
+    return plan(...args);
+  });
+  const key = crypto.randomUUID(), body = { operation: 'EDIT', instruction: 'Simplify the headline' };
+  const result = await (await call(body, parentId, key)).json(); await call(body, parentId, key);
+  const events = logs.mock.calls.map(([value]) => JSON.parse(String(value)));
+  expect(events).toHaveLength(2);
+  for (const event of events) expect(event).toMatchObject({ runId: expect.any(String), creativeId: result.creative.id,
+    operationId: result.creative.id, operationType: 'EDIT', portfolioId: null });
+  logs.mockRestore();
+});
+
+it('preserves fresh deliberate regeneration while rejecting mutation of an existing intent', async () => {
+  const key = crypto.randomUUID(); const first = await (await call({ operation: 'REGENERATE' }, parentId, key)).json();
+  const next = await (await call({ operation: 'REGENERATE' })).json();
+  expect(next.creative.id).not.toBe(first.creative.id); expect(mocks.generate).toHaveBeenCalledTimes(2);
+  expect((await call({ operation: 'PLACEMENT', placement: 'PORTRAIT_4_5' }, parentId, key)).status).toBe(409);
+  expect((await call({ operation: 'REGENERATE' }, parentId, 'invalid')).status).toBe(400);
+  expect(mocks.generate).toHaveBeenCalledTimes(2);
+});
+
+it('admits one concurrent revision planner and blocks unknown planner outcomes on replay', async () => {
+  const body = { operation: 'EDIT', instruction: 'Simplify the headline' }; const key = crypto.randomUUID();
+  const plan = mocks.plan.getMockImplementation()!; let release!: () => void;
+  mocks.plan.mockImplementation(async (...args) => { await new Promise<void>(resolve => { release = resolve; }); return plan(...args); });
+  const first = call(body, parentId, key); await vi.waitFor(() => expect(release).toBeDefined());
+  expect((await call(body, parentId, key)).status).toBe(202); release(); expect((await first).status).toBe(201);
+  expect(mocks.plan).toHaveBeenCalledTimes(1); expect(mocks.generate).toHaveBeenCalledTimes(1);
+  const unknownKey = crypto.randomUUID(); mocks.plan.mockRejectedValueOnce(new Error('Lost planner response'));
+  expect((await call(body, parentId, unknownKey)).status).toBe(500);
+  expect((await call(body, parentId, unknownKey)).status).toBe(409);
+  expect(mocks.plan).toHaveBeenCalledTimes(2); expect(mocks.generate).toHaveBeenCalledTimes(1);
+});
+
+it.each(['save acknowledgement', 'completion checkpoint'])('recovers persisted revision after lost %s without reinserting it', async failure => {
+  const saved: CreativeRecord[] = []; const original = parent();
+  mocks.list.mockImplementation(async () => [original, ...saved]);
+  mocks.save.mockImplementation(async records => {
+    if (saved.length) throw new Error('Duplicate creative ID');
+    saved.push(...records);
+    if (failure === 'save acknowledgement') throw new Error('Acknowledgement lost after persistence');
+    return records;
+  });
+  if (failure === 'completion checkpoint') {
+    const write = executionStorage.write.bind(executionStorage); let failed = false;
+    executionStorage.write = async (key, bytes, etag) => {
+      const value = JSON.parse(bytes.toString());
+      if (!failed && value.status === 'COMPLETE' && value.value?.creative) { failed = true; throw new Error('Checkpoint outage'); }
+      return write(key, bytes, etag);
+    };
+  }
+  const key = crypto.randomUUID();
+  expect((await call({ operation: 'REGENERATE' }, parentId, key)).status).toBe(500);
+  const replay = await call({ operation: 'REGENERATE' }, parentId, key);
+  expect(replay.status).toBe(201); expect(await replay.json()).toEqual({ creative: saved[0] });
+  expect(mocks.generate).toHaveBeenCalledTimes(1); expect(mocks.saveImage).toHaveBeenCalledTimes(1);
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+});
+
+it('reuses a purchased raw revision after finalization failure without another image request', async () => {
+  const makeResult = mocks.generate.getMockImplementation()!;
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ data: [{ b64_json: 'cmF3' }] }));
+  mocks.generate.mockImplementation(async args => {
+    const response = await fetchCreativeImage('https://api.openai.com/v1/images/generations', { method: 'POST',
+      body: JSON.stringify({ model: 'gpt-image-2.5-sunburst', prompt: 'Same revision', size: '1024x1024' }) });
+    return { ...await makeResult(args), buffer: Buffer.from((await response.json()).data[0].b64_json, 'base64') };
+  });
+  const key = crypto.randomUUID(); mocks.save.mockRejectedValueOnce(new Error('Save interrupted'));
+  try {
+    expect((await call({ operation: 'REGENERATE' }, parentId, key)).status).toBe(500);
+    expect((await call({ operation: 'REGENERATE' }, parentId, key)).status).toBe(201);
+    expect(fetcher).toHaveBeenCalledTimes(1); expect(mocks.plan).not.toHaveBeenCalled();
+  } finally { fetcher.mockRestore(); }
+});
+
 describe('saved creative revision API', () => {
-  it.each(['REGENERATE', 'PLACEMENT'] as const)('creates a new saved %s without replanning or modifying the parent', async operation => {
+  it.each([
+    ['EDIT', 'top-center'],
+    ['VARIATION', 'top-center'],
+    ['PLACEMENT', 'bottom-right'],
+    ['REGENERATE', 'bottom-right'],
+  ] as const)('%s revisions remove the known old panel, use one target geometry, and persist %s', async (operation, expectedAnchor) => {
+    const record = parent();
+    record.planning = { ...record.planning!, logoAnchor: 'bottom-right' };
+    mocks.list.mockResolvedValue([record]);
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), logoOverlay: { buffer: Buffer.from('logo') } });
+    if (operation === 'EDIT' || operation === 'VARIATION') {
+      const revisedStrategy = operation === 'VARIATION'
+        ? { ...strategy, awarenessStage: 'solution-aware' as const,
+            execution: { ...strategy.execution, composition: 'split' as const, imageTreatment: 'illustrative' as const } }
+        : strategy;
+      mocks.plan.mockResolvedValueOnce({ concept: { index: 1, format: record.format, copy: record.copy,
+        logoAnchor: 'top-center', strategy: revisedStrategy, selectionReason: 'Reflow around the revised composition.' },
+        plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    }
+    const body = operation === 'PLACEMENT'
+      ? { operation, placement: 'VERTICAL_9_16' }
+      : operation === 'EDIT' || operation === 'VARIATION'
+        ? { operation, instruction: 'Use a different composition.' }
+        : { operation };
+
+    const response = await call(body);
+    const { creative } = await response.json();
+    const targetPlacement = operation === 'PLACEMENT' ? 'VERTICAL_9_16' : 'SQUARE_1_1';
+    const expected = resolveCreativeLogoGeometry(targetPlacement, expectedAnchor, 200, 100);
+    expect(response.status).toBe(201);
+    expect(mocks.generate.mock.calls[0][0]).toMatchObject({
+      logoGeometry: expected,
+      sources: { canvas: { buffer: Buffer.from('debranded canvas'), mimeType: 'image/png' } },
+    });
+    expect(mocks.logo).toHaveBeenCalledWith(Buffer.from('raw'), Buffer.from('logo'), expected);
+    expect(creative.planning.logoAnchor).toBe(expectedAnchor);
+    if (operation === 'EDIT' || operation === 'VARIATION') {
+      expect(mocks.plan.mock.calls[0][0]).toMatchObject({
+        parent: { logoAnchor: 'bottom-right' },
+        logoPlacement: { placement: 'SQUARE_1_1', sourceWidth: 200, sourceHeight: 100 },
+      });
+    }
+  });
+
+  it('erases the legacy top-left overlay when historical planning has no persisted anchor', async () => {
+    const record = parent();
+    const reference = referenceCandidate();
+    reference.blueprint.regions = [{
+      ...reference.blueprint.regions[0], role: 'LOGO_PLACEHOLDER',
+      xPct: 75, yPct: 80, widthPct: 20, heightPct: 10,
+    }];
+    record.planning = {
+      ...record.planning!,
+      strategy: {
+        ...record.planning!.strategy,
+        referenceSelection: {
+          angleSource: null,
+          layoutSource: reference.referenceId,
+          referenceRelationship: 'mixed',
+        },
+      },
+      referenceCatalog: [reference],
+    };
+    mocks.list.mockResolvedValue([record]);
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), logoOverlay: { buffer: Buffer.from('logo') } });
+
+    const response = await call({ operation: 'REGENERATE' });
+    const { creative } = await response.json();
+    const legacyGeometry = resolveCreativeLogoGeometry('SQUARE_1_1', 'top-left', 200, 100);
+
+    expect(response.status).toBe(201);
+    expect(mocks.eraseLogo.mock.calls[0][1]).toEqual(legacyGeometry);
+    expect(mocks.generate.mock.calls[0][0]).toMatchObject({ logoGeometry: legacyGeometry });
+    expect(mocks.logo).toHaveBeenCalledWith(Buffer.from('raw'), Buffer.from('logo'), legacyGeometry);
+    expect(creative.planning.logoAnchor).toBe('top-left');
+  });
+
+  it('drops a removed library human and prevents later reuse after deactivation', async () => {
+    const record = parent();
+    record.planning!.strategy = { ...strategy, approvedHumanId: `human_${'a'.repeat(64)}`, execution: { ...strategy.execution, subjectSource: 'approved-tra-human' } };
+    record.identity = buildCreativeIdentity({ creativeId: record.id, operation:'GENERATE', strategy: record.planning!.strategy });
+    record.videoFrameSelection = { libraryId:`video-library:${'a'.repeat(64)}`, sourceVideoMediaId:mediaId, sourceVideoContentHash:'b'.repeat(64),
+      frames:[{frameIndex:0,libraryFrameId:`video-frame:${'c'.repeat(64)}`,candidateFrameSha256:'d'.repeat(64),timestampMs:1000,approvedPngSha256:'e'.repeat(64)}] };
+    mocks.list.mockResolvedValue([record]);
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), originalApprovedSource:{kind:'TRA_VIDEO_FRAMES',frames:[videoFrame()]} });
+    const response = await call({ operation:'EDIT', instruction:'Remove the person and make this a graphic ad.' });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource).toBeNull();
+    expect(creative.generationProvenance.attachedSource).toBeNull();
+    expect(creative).not.toHaveProperty('videoFrameSelection');
+    expect(creative.planning.strategy).not.toHaveProperty('approvedHumanId');
+    mocks.generate.mockClear(); mocks.human.mockRejectedValue(new Error('Human deactivated after planning'));
+    expect((await call({operation:'REGENERATE'})).status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('preserves generalized approved-human identity and source through %s', async operation => {
+    const record = generalizedHumanParent();
+    const revisedStrategy: CreativeStrategy = { ...record.planning!.strategy,
+      ...(operation === 'VARIATION' ? { awarenessStage: 'solution-aware' as const, execution: { ...record.planning!.strategy.execution, composition: 'split' as const } } : {}) };
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: revisedStrategy, selectionReason: 'Keep the same approved person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    const response = await call({ operation, instruction: 'Keep the same approved person while revising the creative.' });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(creative.planning.strategy.humanSourceId).toBe(generalizedHumanSourceId);
+    expect(creative.planning.strategy).not.toHaveProperty('approvedHumanId');
+    expect(mocks.human).toHaveBeenCalledWith(approvedHumanRecordId, record.videoFrameSelection);
+    expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource).not.toBeNull();
+    expect(mocks.hydrate.mock.invocationCallOrder[0]).toBeLessThan(mocks.requireOperatorQuota.mock.invocationCallOrder[0]);
+    expect(mocks.requireOperatorQuota.mock.invocationCallOrder[0]).toBeLessThan(mocks.plan.mock.invocationCallOrder[0]);
+    expect(creative.generationProvenance.attachedSource).toEqual(record.generationProvenance!.attachedSource);
+    expect(creative.videoFrameSelection).toEqual(record.videoFrameSelection);
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('rejects revoked generalized approved-human identity after %s planning before provider work', async operation => {
+    const record = generalizedHumanParent();
+    const revisedStrategy: CreativeStrategy = { ...record.planning!.strategy,
+      ...(operation === 'VARIATION' ? { awarenessStage: 'solution-aware' as const, execution: { ...record.planning!.strategy.execution, composition: 'split' as const } } : {}) };
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: revisedStrategy, selectionReason: 'Keep the same approved person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    mocks.human.mockRejectedValueOnce(new Error('Human deactivated after planning'));
+    const response = await call({ operation, instruction: 'Keep the same approved person.' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'Human deactivated after planning' });
+    expect(mocks.human).toHaveBeenCalledWith(approvedHumanRecordId, record.videoFrameSelection);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('fully detaches generalized approved-human identity when %s becomes non-human', async operation => {
+    const record = generalizedHumanParent();
+    const nonHumanStrategy: CreativeStrategy = { ...strategy,
+      ...(operation === 'VARIATION' ? { awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } } : {}) };
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: nonHumanStrategy, selectionReason: 'Remove the person.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    const response = await call({ operation, instruction: 'Remove the person and make this non-human.', removeVideoSource: true });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(creative.planning.strategy).not.toHaveProperty('humanSourceId');
+    expect(creative.planning.strategy).not.toHaveProperty('approvedHumanId');
+    expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource).toBeNull();
+    expect(creative.generationProvenance.attachedSource).toBeNull();
+    expect(creative).not.toHaveProperty('videoFrameSelection');
+  });
+  it.each([
+    ['EDIT', 'AUTOMATIC'], ['VARIATION', 'AUTOMATIC'],
+    ['EDIT', 'USER_SELECTED'], ['VARIATION', 'USER_SELECTED'],
+  ] as const)('%s detaches saved %s video-human frames when the final concept is non-human', async (operation, mode) => {
+    const record = savedVideoParent(mode);
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    const response = await call({ operation, instruction: 'Make this a graphic ad with no person.', ...(mode === 'USER_SELECTED' ? { removeVideoSource: true } : {}) });
+    expect(response.status).toBe(201);
+    const { creative } = await response.json();
+    expect(mocks.generate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      sources: expect.objectContaining({ originalApprovedSource: null }),
+      concept: expect.objectContaining({ strategy: expect.objectContaining({ execution: expect.objectContaining({ subjectSource: 'non-human' }) }) }),
+    }));
+    expect(creative.generationProvenance.attachedSource).toBeNull();
+    expect(creative).not.toHaveProperty('videoFrameSelection');
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('blocks unrequested manual-frame removal during %s before image generation', async operation => {
+    const record = savedVideoParent('USER_SELECTED');
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    const response = await call({ operation, instruction: 'Make the headline blue.' });
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('explicitly selected TRA video frames');
+    expect(mocks.plan.mock.calls[0][0].requireSelectedVideoFrames).toBe(true);
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('requires inherited supplied layout unless explicitly removed: %s', async removeLayoutReference => {
+    const record = savedVideoParent('AUTOMATIC'), catalog = [referenceCandidate('7')];
+    record.planning!.referenceCatalog = catalog;
+    record.planning!.strategy.referenceSelection = { angleSource: null, layoutSource: catalog[0].referenceId, referenceRelationship: 'mixed' };
+    record.generationProvenance!.requestedSources.push({ role: 'LAYOUT_REFERENCE', mediaId: catalog[0].referenceId, sha256: catalog[0].sourceSha256 });
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    const response = await call({ operation: 'EDIT', instruction: 'Make the headline blue.', ...(removeLayoutReference ? { removeLayoutReference: true } : {}) });
+    expect(response.status).toBe(removeLayoutReference ? 201 : 409);
+    if (!removeLayoutReference) {
+      expect((await response.json()).error).toContain('supplied video layout reference');
+      expect(mocks.generate).not.toHaveBeenCalled();
+    } else {
+      const { creative } = await response.json();
+      expect(mocks.plan.mock.calls[0][0].referenceCatalog).toEqual([]);
+      expect(creative.generationProvenance.requestedSources.some((source: any) => source.role === 'LAYOUT_REFERENCE')).toBe(false);
+    }
+  });
+  it('blocks dropping a qualified source assertion during an ordinary draft edit before image work', async () => {
+    const record = e2Parent(), assertion = draftVideoAssertion();
+    record.copy.primaryText += `\n\n${assertion.exactText}`;
+    record.adCopy = { ...record.copy };
+    record.imageCopy!.shortSupport = assertion.exactText;
+    record.planning!.draftSourceAssertion = assertion;
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrate(record));
+    const response = await call({ operation: 'EDIT', instruction: 'Make the headline blue.' });
+    expect(response.status).toBe(409); expect((await response.json()).error).toContain('exact video source passage');
+    expect(mocks.plan.mock.calls[0][0].parent.draftSourceAssertion).toEqual(assertion);
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+
+  it('retains supplied layout across video-only removal and the next ordinary edit', async () => {
+    const record = savedVideoParent('USER_SELECTED'), catalog = [referenceCandidate('7')];
+    const retainedStrategy = { ...strategy, referenceSelection: { angleSource: null, layoutSource: catalog[0].referenceId, referenceRelationship: 'mixed' as const } };
+    record.planning!.referenceCatalog = catalog;
+    record.planning!.strategy.referenceSelection = retainedStrategy.referenceSelection;
+    record.generationProvenance!.requestedSources.push({ role: 'LAYOUT_REFERENCE', mediaId: catalog[0].referenceId, sha256: catalog[0].sourceSha256 });
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValueOnce({ concept: { index: 1, format: record.format, copy: record.copy, strategy: retainedStrategy, selectionReason: 'Keep the supplied layout.' }, plannerModel: 'saved-planner', reasoningEffort: 'medium' });
+    const first = await call({ operation: 'EDIT', instruction: 'Remove only the person.', removeVideoSource: true });
+    expect(first.status).toBe(201);
+    const child = (await first.json()).creative;
+    expect(child.generationProvenance.requestedSources.map((source: any) => source.role)).toEqual(['LAYOUT_REFERENCE']);
+    mocks.list.mockResolvedValue([child]); mocks.hydrate.mockResolvedValue(hydrate(child));
+    mocks.generate.mockClear(); mocks.save.mockClear();
+    const next = await call({ operation: 'EDIT', instruction: 'Make the headline blue.' }, child.id);
+    expect(next.status).toBe(409); expect((await next.json()).error).toContain('supplied video layout reference');
+    expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
+    const removed = await call({ operation: 'EDIT', instruction: 'Use an original layout.', removeLayoutReference: true }, child.id);
+    expect(removed.status).toBe(201);
+    expect((await removed.json()).creative.generationProvenance.requestedSources).toEqual([]);
+  });
+
+  it('keeps a non-human TRA reference image source attached under its existing semantics', async () => {
+    const record = parent();
+    record.generationProvenance = { ...record.generationProvenance!, requestedSources: [{ role: 'TRA_REFERENCE', mediaId, sha256: 'a'.repeat(64) }],
+      attachedSource: { type: 'TRA_REFERENCE_IMAGE', mediaId, sha256: 'a'.repeat(64) } };
+    mocks.list.mockResolvedValue([record]);
+    mocks.hydrate.mockResolvedValue({ ...hydrate(record), originalApprovedSource: { kind: 'TRA_REFERENCE', source: { stored: { buffer: videoPng } } } });
+    const response = await call({ operation: 'EDIT', instruction: 'Keep the source image and use no person.' });
+    expect(response.status).toBe(201);
+    expect(mocks.generate.mock.calls[0][0].sources.originalApprovedSource?.kind).toBe('TRA_REFERENCE');
+    expect((await response.json()).creative.generationProvenance.attachedSource).toEqual(record.generationProvenance.attachedSource);
+  });
+  it.each(['unassessed', 'crop mismatch', 'provider hash mismatch'] as const)(
+    'rejects %s saved video frames before revision quota, planner and image provider', async problem => {
+      const record = savedVideoParent('AUTOMATIC');
+      const frame = videoFrame();
+      if (problem === 'unassessed') delete frame.sourceOverlay;
+      else {
+        frame.buffer = largePng; frame.frameSha256 = largePngHash; frame.byteLength = largePng.length;
+        frame.sourceOverlay = { version: 2, status: 'EDGE_CROP', edge: 'BOTTOM', removePermille: 400, overlayDepthPermille: 390 };
+        frame.expectedCrop = problem === 'crop mismatch'
+          ? { left: 0, top: 0, width: 100, height: 59 } : { left: 0, top: 0, width: 100, height: 60 };
+        frame.expectedProviderPngSha256 = '0'.repeat(64);
+      }
+      mocks.list.mockResolvedValue([record]);
+      mocks.hydrate.mockResolvedValue({ ...hydrate(record), originalApprovedSource: { kind: 'TRA_VIDEO_FRAMES', frames: [frame] } });
+      const key = crypto.randomUUID();
+      const request = { operation: 'EDIT', instruction: 'Keep the person.' };
+      const response = await call(request, parentId, key);
+      expect(response.status).toBe(409);
+      expect((await call(request, parentId, key)).status).toBe(409);
+      expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+      expect(mocks.plan).not.toHaveBeenCalled();
+      expect(mocks.generate).not.toHaveBeenCalled();
+      expect(mocks.saveImage).not.toHaveBeenCalled();
+    });
+  it('returns a historical hydration failure before revision quota or planner work', async () => {
+    mocks.hydrate.mockRejectedValueOnce(new CreativeRevisionHydrationError(
+      'This creative predates source-overlay assessment.', 409));
+    const response = await call({ operation: 'EDIT', instruction: 'Keep the person.' });
+    expect(response.status).toBe(409);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it('fails closed on a malformed generalized human identity before provider work', async () => {
+    const record = generalizedHumanParent();
+    const malformedStrategy: CreativeStrategy = { ...record.planning!.strategy, humanSourceId: 'approved-human:invalid' };
+    mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: record.format, copy: record.copy, strategy: malformedStrategy, selectionReason: 'Malformed source.' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    const response = await call({ operation: 'EDIT', instruction: 'Keep the same person.' });
+    expect(response.status).toBe(409);
+    expect(mocks.human).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it.each(['REGENERATE', 'PLACEMENT'] as const)('creates a new saved legacy %s without inventing separated copy', async operation => {
     const original = parent();
     const result = await call({ operation, ...(operation === 'PLACEMENT' ? { placement: 'PORTRAIT_4_5' } : {}) });
     expect(result.status).toBe(201);
@@ -56,23 +556,221 @@ describe('saved creative revision API', () => {
     expect(creative.id).not.toBe(parentId);
     expect(creative.identity).toMatchObject({ operation, parentCreativeId: parentId, fingerprint: original.identity!.fingerprint, conceptId: operation === 'PLACEMENT' ? parentId : creative.id });
     expect(creative.copy).toEqual(original.copy);
+    expect(creative).not.toHaveProperty('adCopy');
+    expect(creative).not.toHaveProperty('imageCopy');
     expect(creative.placement).toBe(operation === 'PLACEMENT' ? 'PORTRAIT_4_5' : 'SQUARE_1_1');
-    expect(creative.generationProvenance).toMatchObject({ imageGeneration: { prompt: 'actual revision prompt', model: 'actual-image-model' }, revision: { parentCreativeId: parentId, canvasMediaId: mediaId, canvasSha256: 'c'.repeat(64) } });
+    expect(creative.generationProvenance).toMatchObject({ imageGeneration: { prompt: 'actual revision prompt', model: 'gpt-image-2.5-sunburst', routing: { preferredModel: 'gpt-image-2.5-sunburst', actualModel: 'gpt-image-2.5-sunburst', fallbackUsed: false } }, revision: { parentCreativeId: parentId, canvasMediaId: mediaId, canvasSha256: 'c'.repeat(64) } });
     expect(mocks.plan).not.toHaveBeenCalled();
     expect(mocks.save.mock.calls[0][0]).toHaveLength(1);
-    expect(mocks.list.mock.results[0].value).resolves.toEqual([original]);
+    await expect(mocks.list.mock.results[0].value).resolves.toEqual([original]);
   });
-  it.each(['EDIT', 'VARIATION'] as const)('plans %s with current company context and stores its resulting strategy', async operation => {
+  it.each(['EDIT', 'VARIATION', 'REGENERATE', 'PLACEMENT'] as const)('revalidates and preserves Proof provenance through %s before provider work', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]);
+    mocks.hydrate.mockResolvedValue(hydrate(original));
+    if (operation === 'EDIT' || operation === 'VARIATION') {
+      const changed = operation === 'VARIATION'
+        ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+        : strategy;
+      mocks.plan.mockResolvedValue({
+        concept: { index: 1, format: original.format, copy: original.copy, adCopy: original.adCopy, imageCopy: original.imageCopy, strategy: changed, selectionReason: 'Proof remains applicable.' },
+        plannerModel: 'gpt-6-astra', reasoningEffort: 'medium',
+      });
+    }
+    const response = await call({
+      operation,
+      ...((operation === 'EDIT' || operation === 'VARIATION') ? { instruction: 'Keep the approved proof while revising the execution.' } : {}),
+      ...(operation === 'PLACEMENT' ? { placement: 'PORTRAIT_4_5' } : {}),
+    });
+    const { creative } = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(mocks.proof).toHaveBeenCalledWith(original.proofProvenance);
+    expect(mocks.proof.mock.invocationCallOrder[0]).toBeLessThan(mocks.generate.mock.invocationCallOrder[0]);
+    if (operation === 'EDIT' || operation === 'VARIATION') {
+      expect(mocks.proof.mock.invocationCallOrder[0]).toBeLessThan(mocks.plan.mock.invocationCallOrder[0]);
+      expect(mocks.plan.mock.calls[0][0].proofProvenance).toEqual(original.proofProvenance);
+    }
+    expect(mocks.generate.mock.calls[0][0].proofProvenance).toEqual(original.proofProvenance);
+    expect(creative.proofProvenance).toEqual(original.proofProvenance);
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when inherited Review attribution is changed or removed', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: original.copy, adCopy: original.adCopy,
+      imageCopy: operation === 'EDIT'
+        ? { headline: original.imageCopy!.headline, cta: original.imageCopy!.cta }
+        : { ...original.imageCopy!, proofAttribution: 'Changed attribution' },
+      strategy: changed, selectionReason: 'Invalid proof edit.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Change the proof presentation.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when inherited selected Proof text is changed or removed', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    const adCopy = { ...original.adCopy!, primaryText: operation === 'EDIT' ? 'Rewritten testimonial.' : 'Different claim.' };
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: adCopy, adCopy, imageCopy: original.imageCopy,
+      strategy: changed, selectionReason: 'Invalid proof rewrite.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Rewrite the proof.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when text is appended after the inherited D2 Proof block', async operation => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    const adCopy = {
+      ...original.adCopy!,
+      primaryText: `${original.adCopy!.primaryText}\n\nExtra proof-derived wording.`,
+    };
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: adCopy, adCopy, imageCopy: original.imageCopy,
+      strategy: changed, selectionReason: 'Invalid proof expansion.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Expand the proof wording.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['EDIT', 'VARIATION'] as const)('rejects %s when inherited Case Study disclaimer is changed or removed', async operation => {
+    const original = caseStudyProofParent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const changed = operation === 'VARIATION'
+      ? { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const } }
+      : strategy;
+    mocks.plan.mockResolvedValue({ concept: {
+      index: 1, format: original.format, copy: original.copy, adCopy: original.adCopy,
+      imageCopy: operation === 'EDIT'
+        ? { headline: original.imageCopy!.headline, cta: original.imageCopy!.cta }
+        : { ...original.imageCopy!, disclosure: 'Changed disclaimer.' },
+      strategy: changed, selectionReason: 'Invalid disclaimer edit.',
+    }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+
+    const response = await call({ operation, instruction: 'Change the disclaimer.' });
+
+    expect(response.status).toBe(409);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('blocks a revoked historical Proof before revision planning, hydration, image provider, or saving', async () => {
+    const original = proofParent();
+    mocks.list.mockResolvedValue([original]);
+    mocks.proof.mockRejectedValue(new ProofRevalidationError(
+      'Selected Proof must be reselected before paid rendering or revision: advertising use is no longer approved.'
+    ));
+
+    const response = await call({ operation: 'EDIT', instruction: 'Refresh this creative.' });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'Selected Proof must be reselected before paid rendering or revision: advertising use is no longer approved.',
+    });
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(original.proofProvenance).toEqual(proofParent().proofProvenance);
+  });
+
+  it('does not fabricate or revalidate Proof provenance for legacy no-Proof revisions', async () => {
+    const response = await call({ operation: 'REGENERATE' });
+    const { creative } = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(mocks.proof).not.toHaveBeenCalled();
+    expect(creative).not.toHaveProperty('proofProvenance');
+  });
+
+  it.each(['REGENERATE', 'PLACEMENT'] as const)('preserves separated E2 copy through saved %s revisions', async operation => {
+    const original = e2Parent();
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    const response = await call({ operation, ...(operation === 'PLACEMENT' ? { placement: 'PORTRAIT_4_5' } : {}) });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.generate.mock.calls[0][0].concept).toMatchObject({ copy: original.adCopy, adCopy: original.adCopy, imageCopy: original.imageCopy });
+    expect(creative.copy).toEqual(original.adCopy);
+    expect(creative.adCopy).toEqual(original.adCopy);
+    expect(creative.imageCopy).toEqual(original.imageCopy);
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('plans legacy %s with current company context without inventing separated copy', async operation => {
     const changed = { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const, textDensity: 'medium' as const } };
     mocks.plan.mockResolvedValue({ concept: { index: 1, format: 'direct-response', copy: parent().copy, strategy: changed, selectionReason: 'Changed strategy' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
     const response = await call({ operation, instruction: 'Use a different composition.' });
     const { creative } = await response.json();
     expect(response.status).toBe(201);
     expect(mocks.plan).toHaveBeenCalledWith(expect.objectContaining({ operation, hasApprovedHumanSource: false, instruction: 'Use a different composition.', companyContext: expect.stringContaining('APPROVED TRA COMPANY CONTEXT') }));
+    expect(mocks.generate.mock.calls[0][0]).not.toHaveProperty('companyContext');
+    expect(mocks.generate.mock.calls[0][0]).not.toHaveProperty('instruction');
+    expect(mocks.generate.mock.calls[0][0].concept.strategy).toEqual(changed);
+    expect(creative).not.toHaveProperty('adCopy');
+    expect(creative).not.toHaveProperty('imageCopy');
     expect(creative.planning.strategy).toEqual(changed);
     expect(creative.identity.fingerprint).not.toBe(parent().identity!.fingerprint);
     expect(creative.identity.conceptId).toBe(operation === 'EDIT' ? parentId : creative.id);
     expect(creative.generationProvenance.revision.instruction).toBe('Use a different composition.');
+  });
+  it.each(['EDIT', 'VARIATION'] as const)('preserves separated E2 copy through planned %s revisions', async operation => {
+    const original = e2Parent();
+    const changed = { ...strategy, awarenessStage: 'solution-aware' as const, execution: { ...strategy.execution, composition: 'split' as const, textDensity: 'medium' as const } };
+    const adCopy = { primaryText: 'Revised Meta body', headline: 'Revised Meta headline', description: 'Revised Meta description' };
+    const imageCopy = { headline: 'Revised image headline', cta: 'Start here' };
+    mocks.list.mockResolvedValue([original]); mocks.hydrate.mockResolvedValue(hydrate(original));
+    mocks.plan.mockResolvedValue({ concept: { index: 1, format: 'direct-response', copy: adCopy, adCopy, imageCopy, strategy: changed, selectionReason: 'Changed strategy' }, plannerModel: 'gpt-6-astra', reasoningEffort: 'medium' });
+    const response = await call({ operation, instruction: 'Use a different composition.' });
+    const { creative } = await response.json();
+    expect(response.status).toBe(201);
+    expect(mocks.plan.mock.calls[0][0].parent).toMatchObject({ copy: original.adCopy, adCopy: original.adCopy, imageCopy: original.imageCopy });
+    expect(mocks.generate.mock.calls[0][0].concept).toMatchObject({ copy: adCopy, adCopy, imageCopy });
+    expect(creative.copy).toEqual(adCopy);
+    expect(creative.adCopy).toEqual(adCopy);
+    expect(creative.imageCopy).toEqual(imageCopy);
+  });
+  it.each([
+    ['adCopy-only', (record: CreativeRecord) => { record.adCopy = { ...record.copy }; }],
+    ['imageCopy-only', (record: CreativeRecord) => { record.imageCopy = { headline: 'Image only' }; }],
+    ['copy/adCopy mismatch', (record: CreativeRecord) => { record.adCopy = { ...record.copy, headline: 'Mismatch' }; record.imageCopy = { headline: 'Image copy' }; }],
+  ])('rejects invalid saved %s state before hydration, providers, or child save', async (_name, mutate) => {
+    const record = parent(); mutate(record); mocks.list.mockResolvedValue([record]);
+    const response = await call({ operation: 'REGENERATE' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'Saved creative has an invalid separated ad/image copy contract.' });
+    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.saveImage).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
   });
   it('validates before branding and persists only the final image before returning success', async () => {
     mocks.hydrate.mockResolvedValue({ ...hydrate(parent()), logoOverlay: { buffer: Buffer.from('logo') } });
@@ -93,15 +791,16 @@ describe('saved creative revision API', () => {
     mocks.list.mockResolvedValue([]);
     expect((await call({ operation: 'REGENERATE' })).status).toBe(404);
     expect(mocks.generate).not.toHaveBeenCalled();
-    expect(mocks.requireOperatorQuota).toHaveBeenCalledTimes(1);
+    expect(mocks.requireOperatorQuota).not.toHaveBeenCalled();
   });
-  it.each([429, 503])('rejects quota admission %i before creative storage, hydration, provider, or saving', async status => {
+  it.each([429, 503])('rejects quota admission %i after local hydration but before planning, provider, or saving', async status => {
     mocks.requireOperatorQuota.mockResolvedValue(new Response(JSON.stringify({ error: 'Quota unavailable.' }), { status }));
     const response = await call({ operation: 'REGENERATE' });
     expect(response.status).toBe(status);
     expect(mocks.requireOperatorQuota).toHaveBeenCalledWith('operator', 'CREATIVE_REVISION', 1);
-    expect(mocks.list).not.toHaveBeenCalled();
-    expect(mocks.hydrate).not.toHaveBeenCalled();
+    expect(mocks.list).toHaveBeenCalledOnce();
+    expect(mocks.hydrate).toHaveBeenCalledOnce();
+    expect(mocks.plan).not.toHaveBeenCalled();
     expect(mocks.generate).not.toHaveBeenCalled();
     expect(mocks.saveImage).not.toHaveBeenCalled();
     expect(mocks.save).not.toHaveBeenCalled();

@@ -1,10 +1,11 @@
 import type { CreativeSourceAsset } from '@/lib/media/types';
 import { parseCreativeSourceAsset } from '@/lib/media/source-contract';
+import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
 const STORAGE_KEY = 'tra-ai-marketing:landing-creative-draft';
 const SCHEMA_VERSION = 2;
 const MIN_VARIATIONS = 2;
-const MAX_VARIATIONS = 30;
+const MAX_VARIATIONS = MAX_PORTFOLIO_CREATIVES;
 
 export interface LandingCreativeDraft {
   version: typeof SCHEMA_VERSION;

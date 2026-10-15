@@ -17,11 +17,13 @@ describe('studio layout session entry', () => {
     redirectMock.mockImplementation((path: string) => { throw new Error(`NEXT_REDIRECT:${path}`); });
   });
 
-  it('renders studio children and an account control for an allowed operator', async () => {
+  it('renders studio children and a normal account control for an allowed operator', async () => {
     accessMock.mockResolvedValue({ allowed: true, userId: 'operator' });
     const view = await StudioLayout({ children: studioContent() });
-    expect(renderToStaticMarkup(view)).toContain('Studio content');
-    expect(renderToStaticMarkup(view)).toContain('Account');
+    const html = renderToStaticMarkup(view);
+    expect(html).toContain('Studio content');
+    expect(html).toContain('Account');
+    expect(html).not.toContain('class="studio-account"');
   });
 
   it('redirects signed-out visitors to sign-in', async () => {
@@ -35,6 +37,7 @@ describe('studio layout session entry', () => {
     const html = renderToStaticMarkup(await StudioLayout({ children: studioContent() }));
     expect(html).toContain('Operator access required');
     expect(html).toContain('Account');
+    expect(html).not.toContain('class="studio-account"');
     expect(html).not.toContain('Studio content');
   });
 

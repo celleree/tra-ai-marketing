@@ -1,5 +1,7 @@
 'use client';
 
+import { createSubmissionIdentity, SUBMISSION_HEADER } from '@/lib/creatives/submission-id';
+
 import { useEffect, useRef, useState } from 'react';
 import { CreativePlacementSelect } from '@/components/creative-generator/creative-placement-select';
 import type { CreativePlacement } from '@/lib/creatives/placements';
@@ -43,6 +45,7 @@ export function SelectedFrameGeneration({
   const [failures, setFailures] = useState<Record<number, string>>({});
   const [previews, setPreviews] = useState<Array<{ frameId: string; timestampMs: number; url: string }>>([]);
   const [previewing, setPreviewing] = useState(false);
+  const [assessmentRetry, setAssessmentRetry] = useState(false);
   const completedIndexes = useRef(new Set<number>());
   const failedIndexes = useRef(new Map<number, string>());
   const previewAbort = useRef<AbortController | null>(null);
@@ -105,8 +108,10 @@ export function SelectedFrameGeneration({
     }
   };
 
-  const generate = async () => {
-    if (generating) return;
+  const submission = useRef(createSubmissionIdentity('direct-generation'));
+  const submitting = useRef(false);
+  const generate = async (mode: 'recover' | 'fresh' = 'recover') => {
+    if (submitting.current) return;
     const selectedFrames = selection.frames.filter((frame) =>
       selectedFrameIds.includes(frame.frameId)
     );
@@ -116,6 +121,7 @@ export function SelectedFrameGeneration({
       return;
     }
 
+    submitting.current = true;
     setGenerating(true);
     setError('');
     setFailures({});
@@ -131,18 +137,19 @@ export function SelectedFrameGeneration({
     };
 
     try {
+      const assessmentResponse = await fetch('/api/video/intelligence/source-overlay-assessment', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaId: media.id, videoFrameSelection: { libraryId: library.id,
+          sourceVideoContentHash: library.sourceVideoContentHash, frameIds }, ...(assessmentRetry ? { retry: true } : {}) }),
+      });
+      const assessment = await assessmentResponse.json();
+      setAssessmentRetry(Boolean(assessment.retryRequired));
+      if (!assessmentResponse.ok) throw new Error(assessment.error || 'Source-frame visual assessment failed.');
       const brand = readStoredBrandGuidance();
       const companyProfile = readStoredRuntimeCompanyProfile();
-      const response = await fetch('/api/creatives/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const requestBody = JSON.stringify({
           sourceAssets: [{ mediaId: media.id, role: 'TRA_VIDEO' }],
-          videoFrameSelection: {
-            libraryId: library.id,
-            sourceVideoContentHash: library.sourceVideoContentHash,
-            frameIds,
-          },
+          videoFrameSelection: assessment.videoFrameSelection,
           ...(brand.logo ? { brandLogoMediaId: brand.logo.mediaId } : {}),
           ...(brand.colors.length ? { brandColors: brand.colors } : {}),
           ...(brand.fontGuidance.length ? { brandFontNames: brand.fontGuidance } : {}),
@@ -150,7 +157,12 @@ export function SelectedFrameGeneration({
           context: conceptContext,
           variationCount: 2,
           placement,
-        }),
+        });
+      const submissionId = await submission.current.forInput(requestBody, mode);
+      const response = await fetch('/api/creatives/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [SUBMISSION_HEADER]: submissionId },
+        body: requestBody,
       });
       if (!response.ok || !isGenerationEventStream(response)) {
         const payload = await parseGenerationResponse(response);
@@ -211,12 +223,14 @@ export function SelectedFrameGeneration({
       });
 
       if (!receivedComplete) throw new Error('Creative generation ended before reporting completion.');
+      submission.current.completeGeneration(submissionId, 2, completedIndexes.current.size, failedIndexes.current.size);
       if (failedIndexes.current.size) {
         setError(`Completed ${completedIndexes.current.size} of 2 creatives. ${failedIndexes.current.size} failed.`);
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Creative generation failed.');
     } finally {
+      submitting.current = false;
       setGenerating(false);
     }
   };
@@ -246,13 +260,17 @@ export function SelectedFrameGeneration({
     </fieldset>
     <button className={styles.primary} type="button" onClick={() => void preview()} disabled={generating || previewing || selectedFrameIds.length < 1}>{previewing ? 'Extracting source frames…' : 'Preview source frames'}</button>
     <p className={styles.muted}>Extracted from the original video. No image generation.</p>
+    {error && !generating ? <button type="button" onClick={() => void generate('fresh')}>
+      Start a new paid generation
+    </button> : null}
     {previews.length ? <section className={styles.generatedResults}>{previews.map((frame) => <article className={styles.frameChoice} key={frame.frameId}>
       {/* eslint-disable-next-line @next/next/no-img-element */}<img src={frame.url} alt={`Verified source video frame at ${(frame.timestampMs / 1000).toFixed(3)} seconds`} />
       <span><b>{(frame.timestampMs / 1000).toFixed(3)}s</b> Fresh source PNG</span>
     </article>)}</section> : null}
     <CreativePlacementSelect value={placement} onChange={setPlacement} disabled={generating || previewing} />
     <button className={styles.primary} type="button" onClick={() => void generate()} disabled={generating || previewing || selectedFrameIds.length < 1}>
-      {generating ? 'Generating 2 creatives…' : 'Generate 2 creatives from checked frames (uses API)'}
+      {generating ? 'Assessing source and generating…' : assessmentRetry
+        ? 'Retry source assessment and generate (uses API)' : 'Assess checked frames and generate 2 creatives (uses API)'}
     </button>
     {savedCount ? <p className={styles.progress} role="status">Saved {savedCount} {savedCount === 1 ? 'creative' : 'creatives'} to the TRA creative library.</p> : null}
     {error ? <p className={styles.error} role="alert">{error}</p> : null}

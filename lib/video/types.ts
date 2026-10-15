@@ -1,4 +1,5 @@
 import type { HydratedCreativeSourceAsset } from '@/lib/media/source-hydration';
+import type { SourceCrop, SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
 
 export const MAX_REPRESENTATIVE_VIDEO_FRAMES = 6;
 export const MAX_PROVIDER_VIDEO_FRAMES = 3;
@@ -16,6 +17,10 @@ export interface ApprovedTraVideoFrame {
   sourceVideoContentHash: string;
   approvedHumanSource: true;
   cacheKey: string | null;
+  /** Original extracted pixels remain in buffer; image adapters attach the assessed derivative. */
+  sourceOverlay?: SourceOverlayDecision;
+  expectedProviderPngSha256?: string;
+  expectedCrop?: SourceCrop | null;
 }
 
 export interface ApprovedTraVideoFrameSet {

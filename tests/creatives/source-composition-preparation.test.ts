@@ -1,0 +1,325 @@
+import { createHash } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
+import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
+import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
+import { readCreativePortfolio, updateCreativePortfolio } from '@/lib/creatives/portfolio-job-storage';
+import { newCreativePortfolio, retryPortfolioWork, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
+import { restoreCreativePortfolio } from '@/lib/creatives/portfolio-snapshot';
+import type { StoredCreativeSourceMediaFile } from '@/lib/media/types';
+import { REAL_ENCODED_MP4 } from '../fixtures/media';
+import { referenceCandidate } from '../fixtures/reference-catalog';
+import { conceptDetails } from '../fixtures/creative-concept-details';
+import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
+import { portfolioAudit } from '../fixtures/portfolio-audit';
+import { withPaidPreparationScope } from '@/lib/creatives/preparation-checkpoint';
+import { advancePortfolioPreparation } from '@/lib/creatives/portfolio-preparation';
+import { withProviderUsageContext } from '@/lib/ai/provider-telemetry';
+
+// The non-durable preparation helper stays disconnected from durable portfolio Video Intelligence.
+const disabledVideo = vi.hoisted(() => vi.fn(() => { throw new Error('Disabled video adapter reached'); }));
+vi.mock('@/lib/video/intelligence-service', () => ({ executeVideoIntelligenceStep: disabledVideo, readVideoIntelligenceSource: disabledVideo }));
+afterEach(() => expect(disabledVideo).not.toHaveBeenCalled());
+const mocks = vi.hoisted(() => ({ image: vi.fn(), angle: vi.fn(), video: vi.fn(), layout: vi.fn(), media: vi.fn(), frames: vi.fn(), audit: vi.fn(), library: vi.fn(), select: vi.fn(), proof: vi.fn() }));
+vi.mock('@/lib/ai/openai', () => ({ analyzeTraSourceCreative: mocks.image, analyzeReferenceCreative: mocks.angle }));
+vi.mock('@/lib/ai/video-frame-generation', async original => ({
+  ...await original<typeof import('@/lib/ai/video-frame-generation')>(), analyzeApprovedTraVideoFrames: mocks.video,
+}));
+vi.mock('@/lib/layouts/service', () => ({
+  getOrAnalyzeContextualLayoutAngle: async (source: import('@/lib/media/types').StoredMediaFile, context: string, start: () => void) => {
+    start();
+    return (await (await import('@/lib/ai/openai')).analyzeReferenceCreative(source, context)).hookOrAngle.slice(0, 2000);
+  }, getOrAnalyzeLayoutBlueprint: mocks.layout, getLayoutBlueprintCache: () => ({
+  readAngle: async (sourceSha256: string, analyzerModel: string) => ({ version: 1, sourceSha256, analyzerModel, angleSummary: 'Cached reusable angle' }),
+}) }));
+vi.mock('@/lib/media/local-storage', () => ({ getMediaStorage: mocks.media }));
+vi.mock('@/lib/video/tra-video-frames', () => ({ getApprovedTraVideoFrames: mocks.frames }));
+vi.mock('@/lib/references/storage', () => ({ listAllReferenceLibrary: mocks.library, listReferenceLibrary: mocks.library }));
+vi.mock('@/lib/ai/reference-selector', () => ({ selectBestReferenceCreatives: mocks.select }));
+vi.mock('@/lib/video/approved-human-planning', () => ({ loadApprovedHumanOptions: async () => [] }));
+vi.mock('@/lib/creatives/storage', () => ({ listCreatives: async () => [] }));
+vi.mock('@/lib/proof/storage', () => ({ listProofRecords: mocks.proof }));
+vi.mock('@/lib/ai/portfolio-auditor', () => ({ auditCreativePortfolio: mocks.audit }));
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
+const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+const analysis = (sentinel: string) => ({ visibleHuman: false, summary: sentinel, visibleText: [], visualStructure: '', hookOrAngle: sentinel,
+  offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'educational' as const });
+const request = () => ({ ...portfolioRequest(), sourceAssets:
+  (['TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE', 'TRA_VIDEO', 'TRA_REFERENCE', 'LAYOUT_REFERENCE'] as const)
+    .map((role, i) => ({ role, mediaId: `media_${String(i + 1).repeat(32)}` })) });
+let operations: string[], outbound: Record<string, any>[], media: Record<string, StoredCreativeSourceMediaFile>;
+beforeEach(() => {
+  vi.clearAllMocks(); operations = []; outbound = []; media = {};
+  mocks.audit.mockResolvedValue(portfolioAudit(2));
+  mocks.library.mockResolvedValue([]); mocks.select.mockResolvedValue([]); mocks.proof.mockResolvedValue([]);
+  vi.stubEnv('OPENAI_API_KEY', 'mock-key'); vi.stubEnv('OPENAI_ANALYSIS_MODEL', 'analysis-model');
+  for (const { role, mediaId } of request().sourceAssets) media[mediaId] = role === 'TRA_VIDEO'
+    ? { fileName: `${mediaId}.mp4`, mediaType: 'VIDEO', mimeType: 'video/mp4', buffer: Buffer.from(REAL_ENCODED_MP4) }
+    : { fileName: `${mediaId}.png`, mediaType: 'IMAGE', mimeType: 'image/png', buffer: png };
+  mocks.media.mockReturnValue({ readMediaById: async (id: string) => media[id], readImageById: async (id: string) => media[id] });
+  mocks.image.mockImplementation(async source => { operations.push(source.fileName); return analysis(source.fileName); });
+  mocks.angle.mockImplementation(async source => { operations.push(source.fileName); return analysis(source.fileName); });
+  mocks.layout.mockImplementation(async source => { operations.push(`layout:${source.fileName}`);
+    return { blueprint: referenceCandidate().blueprint, analyzerModel: 'analysis-model', contentHash: hash(source.buffer), cacheHit: false }; });
+  mocks.frames.mockImplementation(async source => ({ source, sourceVideoContentHash: hash(source.stored.buffer), durationMs: 1000, reused: true,
+    frames: [{ frameIndex: 0, timestampMs: 500, mimeType: 'image/png', buffer: png, frameSha256: hash(png), byteLength: png.length,
+      sourceRole: 'TRA_VIDEO', sourceVideoMediaId: source.media.id, sourceVideoFileName: source.media.fileName,
+      sourceVideoContentHash: hash(source.stored.buffer), approvedHumanSource: true, cacheKey: null }] }));
+  mocks.video.mockImplementation(async ({ frames }) => { operations.push(frames[0].sourceVideoFileName); return analysis(frames[0].sourceVideoFileName); });
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+    const body = JSON.parse(init.body); expect(body.model).toBe('gpt-6.1-sol');
+    const plannerInput = JSON.parse(body.input[1].content[0].text);
+    outbound.push(plannerInput); operations.push('Astra');
+    const proof = plannerInput.proofCatalog?.[0];
+    const allCreatives = portfolioSnapshot(newCreativePortfolio(portfolioRequest())).batchPlan.creatives.map(c => ({ ...c,
+      proofSelection: proof ? { type: proof.type, proofId: proof.id, proofUpdatedAt: proof.updatedAt,
+        selectedText: proof.type === 'review' ? proof.originalReviewText : proof.approvedClaimWording,
+        ...(proof.type === 'review' ? { includeAttribution: false } : {}) } : null,
+      strategy: { ...c.strategy, conceptDetails: { ...conceptDetails, proposition: `Distinct proposition ${c.index}` },
+        execution: { ...c.strategy.execution, taxDocumentReference: 'none' } },
+      referenceChoices: { angleSource: null, layoutSource: plannerInput.requiredLayoutReferenceIds?.[0] ?? null } }));
+    const creatives = plannerInput.replacementIndexes
+      ? allCreatives.filter(c => plannerInput.replacementIndexes.includes(c.index))
+      : allCreatives;
+    return Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ creatives }) }] }] });
+  }));
+});
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+const step = (job: CreativePortfolioJob, storage: MemoryPortfolioStorage) => advanceCreativePortfolio(job.id, 'operator', 'http://localhost', storage);
+const createHistoricalPortfolio = async (data: ReturnType<typeof request>, storage: MemoryPortfolioStorage) => {
+  const { videoPreparationVersion: _marker, ...job } = newCreativePortfolio(data);
+  await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
+  return job;
+};
+
+describe('real preparation to Astra with composed sources', () => {
+  it('keeps no-logo planner direction separate from source context and denies unapproved Preview admission', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    const data = { ...portfolioRequest(), previewOmitBrandLogo: true as const, sourceAssets: [request().sourceAssets[2]] };
+    const sourceLayout = { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true };
+    const cached = await advancePortfolioPreparation(data, 'http://localhost', {
+      quotaReserved: true, analysis: analysis('Cached layout'), sourceLayout,
+    }, vi.fn(), 1, true);
+    expect(cached.state?.previewPreflightReady).toBe(true); expect(outbound).toHaveLength(0);
+    await expect(withProviderUsageContext({ portfolioId: 'bounded-test' }, () => advancePortfolioPreparation(
+      data, 'http://localhost', cached.state!, vi.fn(), 1))).rejects.toThrow('Preview acceptance blocked creative-plan before dispatch');
+    expect(outbound).toHaveLength(0);
+    // Exercise context construction with the mocked local provider; Preview requires the exact approved saved job.
+    vi.stubEnv('VERCEL_ENV', 'development');
+    let local = cached;
+    for (let index = 0; index < 3 && local.state; index++) local = await withProviderUsageContext(
+      { portfolioId: 'bounded-test' }, () => advancePortfolioPreparation(data, 'http://localhost', local.state!, vi.fn(), 1));
+    expect(local.prepared).toBeDefined();
+    expect(outbound).toHaveLength(1); expect(outbound[0].creativeContext).toContain('Do not render, invent or redraw any logo');
+    expect(data.context).not.toContain('unbranded Preview'); expect(mocks.angle).not.toHaveBeenCalled();
+  });
+  it('checkpoints cached preparation before the planner and skips optional reference-provider stages in Preview', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('TRA_IMAGE_PURPOSE', 'staging-smoke');
+    const data = { ...portfolioRequest(), sourceAssets: [request().sourceAssets[2]] };
+    mocks.library.mockResolvedValue([{ id: `media_${'7'.repeat(32)}`, referenceType: 'layout' }]);
+    const sourceLayout = { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true };
+    const prepared = await advancePortfolioPreparation(data, 'http://localhost', {
+      quotaReserved: true, analysis: analysis('Cached layout'), sourceLayout,
+    }, vi.fn(), 1, true);
+    expect(prepared).toMatchObject({ state: { previewPreflightReady: true, selectedReferences: [], sourceLayout } });
+    expect(prepared).not.toHaveProperty('prepared');
+    expect(mocks.select).not.toHaveBeenCalled(); expect(mocks.angle).not.toHaveBeenCalled();
+    expect(mocks.layout).not.toHaveBeenCalled(); expect(outbound).toHaveLength(0);
+  });
+  it('rejects an all-graphic direct plan when representative frames visibly contain a TRA person', async () => {
+    mocks.video.mockImplementation(async ({ frames }) => ({ ...analysis(frames[0].sourceVideoFileName), visibleHuman: true }));
+    await expect(prepareCreativeGeneration(request(), 'http://localhost')).rejects.toThrow('plan ignored the human');
+    expect(outbound[0].referenceAnalysis.visibleHuman).toBe(true);
+    expect(outbound[0].creativeContext).toContain('at least one concept');
+  });
+  it('replays all completed source analysis, planning and audit without another paid call', async () => {
+    const scope = { runId: 'same-submission', storage: new MemoryPortfolioStorage() };
+    const run = () => withPaidPreparationScope(scope, () => prepareCreativeGeneration(request(), 'http://localhost'));
+    const first = await run(); const calls = [...operations];
+    const replay = await run();
+    expect(replay.batchPlan).toEqual(first.batchPlan); expect(replay.sourceAnalysis).toEqual(first.sourceAnalysis);
+    expect(operations).toEqual(calls); expect(outbound).toHaveLength(1); expect(mocks.audit).toHaveBeenCalledTimes(1);
+  });
+  it('retains earlier source checkpoints when a later provider outcome becomes unknown', async () => {
+    const scope = { runId: 'unknown-source', storage: new MemoryPortfolioStorage() };
+    mocks.image.mockRejectedValueOnce(new Error('Connection lost after provider admission'));
+    const run = () => withPaidPreparationScope(scope, () => prepareCreativeGeneration(request(), 'http://localhost'));
+    await expect(run()).rejects.toThrow('Connection lost'); const calls = [...operations];
+    await expect(run()).rejects.toThrow('unknown');
+    expect(operations).toEqual(calls); expect(mocks.image).toHaveBeenCalledTimes(1); expect(outbound).toHaveLength(0);
+  });
+  it('keeps Proof retrieval bound to original Create direction across audit repair feedback', async () => {
+    const userDirection = 'Create proof-led ads about wage garnishment.';
+    const parsed = validateGenerateCreativeRequest({ context: userDirection, variationCount: 2,
+      companyProfile: { knowledgeBase: { companySummary: 'APPROVED TRA COMPANY CONTEXT IRS tax professionalism patience reassurance.' } } });
+    if (!parsed.success) throw new Error(parsed.error);
+    const unrelatedId = `proof_${'a'.repeat(32)}`, relevantId = `proof_${'b'.repeat(32)}`;
+    const proofBase = { type: 'review' as const, status: 'ACTIVE' as const, advertisingUseApproved: true, createdAt: '2026-09-10T12:00:00.000Z' };
+    const firstRelevant = { ...proofBase, id: relevantId, originalReviewText: 'Wage garnishment support.', tags: ['wage garnishment'], updatedAt: '2026-09-10T13:00:00.000Z' };
+    const repairedRelevant = { ...firstRelevant, originalReviewText: 'Updated wage garnishment support.', updatedAt: '2026-09-10T14:00:00.000Z' };
+    mocks.proof
+      .mockResolvedValueOnce([
+        { ...proofBase, id: unrelatedId, originalReviewText: 'IRS tax professionalism patience reassurance.', tags: ['IRS', 'professionalism', 'patience'], updatedAt: proofBase.createdAt },
+        firstRelevant,
+      ])
+      .mockResolvedValueOnce([repairedRelevant]);
+    mocks.audit.mockResolvedValueOnce({ ...portfolioAudit(2),
+      groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] })
+      .mockResolvedValueOnce(portfolioAudit(2));
+    expect(parsed.data.proofRetrievalQuery).toBe(userDirection);
+    const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
+    expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection, context: expect.stringContaining('IRS tax professionalism patience reassurance.') });
+    expect(outbound).toHaveLength(2);
+    expect(outbound[1].creativeContext).toBe(outbound[0].creativeContext);
+    expect(outbound[1]).toMatchObject({ replacementIndexes: [2], portfolioCount: 2, requestedCount: 1 });
+    expect(outbound[0].proofCatalog).toEqual([expect.objectContaining({ id: relevantId, updatedAt: firstRelevant.updatedAt })]);
+    expect(outbound[1].proofCatalog).toEqual([expect.objectContaining({ id: relevantId, updatedAt: repairedRelevant.updatedAt })]);
+    expect(JSON.stringify(outbound[0].proofCatalog)).not.toContain(unrelatedId);
+    expect(prepared.batchPlan.creatives.map(creative => creative.selectedProof?.proofUpdatedAt))
+      .toEqual([firstRelevant.updatedAt, repairedRelevant.updatedAt]);
+  });
+
+  it.each([false, true])('checkpoints mixed/repeated sources before Astra, ordering=%s and stop/resume', async reversed => {
+    const data = request(); if (reversed) data.sourceAssets.reverse();
+    const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(data, storage);
+    let current = job;
+    for (let i = 0; i < 30 && current.planning.phase === 'INITIAL_PLAN'; i++) {
+      const before = operations.length, result = await step(current, storage);
+      expect(result.error).toBeUndefined(); current = result.job;
+      expect(operations.length - before).toBeLessThanOrEqual(1);
+      expect(current.lease).toBeNull(); expect(current.slots).toEqual(job.slots);
+      const paused = operations.length;
+      expect(await readCreativePortfolio(job.id, storage)).toEqual(current); expect(operations).toHaveLength(paused);
+      if (current.planning.phase === 'INITIAL_PLAN' && current.planning.preparation.sourceAnalysis) {
+        expect(current.planning.preparation.sourceAnalysis.entries.filter(e => e.result)).toHaveLength(operations.length);
+        expect(outbound).toHaveLength(0);
+      }
+    }
+    expect(current.planning.phase).toBe('DIVERSITY_AUDIT'); expect(operations).toHaveLength(11);
+    const input = outbound[0]; expect(input.sourceAnalysis.entries).toHaveLength(10);
+    for (const item of data.sourceAssets) expect(JSON.stringify(input.sourceAnalysis)).toContain(media[item.mediaId].fileName);
+    expect(input.sourceAnalysisGuidance).toContain('not full Video Intelligence'); expect(input.referenceCatalog).toHaveLength(4);
+    const ready = (await step(current, storage)).job;
+    const restored = await restoreCreativePortfolio(ready.snapshot!);
+    expect(restored.sourceAnalysis).toEqual(input.sourceAnalysis);
+    expect(restored.providerImageSource).toBeUndefined();
+    expect(restored.videoFrameSet?.source.media.id).toBe(data.sourceAssets.find(s => s.role === 'TRA_VIDEO')!.mediaId);
+    expect(restored.generatedVideoFrameSelection).toBeUndefined();
+    expect(ready.slots).toEqual(job.slots);
+    const direct = await prepareCreativeGeneration(data, 'http://localhost');
+    expect(outbound[1].sourceAnalysis).toEqual(input.sourceAnalysis);
+    expect(direct.sourceAnalysis).toEqual(restored.sourceAnalysis);
+    expect(direct.providerImageSource?.media.id).toBe(restored.providerImageSource?.media.id);
+    expect(direct.videoFrameSet?.source.media.id).toBe(restored.videoFrameSet?.source.media.id);
+    expect(outbound).toHaveLength(2);
+  });
+
+  it('reuses completed source and reference preparation after explicit retry of a failed second audit', async () => {
+    const id = `media_${'a'.repeat(32)}`;
+    const item = { id, fileName: `${id}.png`, originalName: 'Library layout', mimeType: 'image/png', size: png.length,
+      url: `/api/media/files/${id}.png`, addedAt: '2026-09-12T00:00:00.000Z', referenceType: 'layout', angle: 'educational', angleSource: 'manual' };
+    media[id] = { fileName: item.fileName, mimeType: 'image/png', mediaType: 'IMAGE', buffer: png };
+    mocks.library.mockResolvedValue([item]);
+    mocks.select.mockImplementation(async () => { operations.push('reference-selection');
+      return [{ item, imageUrl: `http://localhost${item.url}`, selectionReason: 'Useful geometry' }]; });
+    const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(request(), storage);
+    let current = job;
+    for (let i = 0; i < 30 && current.planning.phase === 'INITIAL_PLAN'; i++) current = (await step(current, storage)).job;
+    if (current.planning.phase !== 'DIVERSITY_AUDIT') throw new Error('Missing initial plan');
+    const checkpoint = structuredClone(current.planning.checkpoint);
+    expect(checkpoint.snapshot.referenceCatalog).toHaveLength(5); expect(checkpoint.snapshot.selectedReferences).toHaveLength(1);
+    mocks.audit.mockResolvedValue({ ...portfolioAudit(2), groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] });
+    for (let i = 0; i < 3; i++) current = (await step(current, storage)).job; // audit, repair, second audit
+    expect(current.planningError).toBeTruthy(); expect(outbound).toHaveLength(2);
+    expect((await step(current, storage)).job).toEqual(current);
+    const retried = await updateCreativePortfolio(job.id, value => retryPortfolioWork(value, null), storage);
+    expect(await readCreativePortfolio(job.id, storage)).toEqual(retried);
+    expect(retried.planning).toMatchObject({ phase: 'INITIAL_PLAN', preparation: { quotaReserved: true,
+      sourceAnalysis: checkpoint.plannerArgs.sourceAnalysis, referenceCatalog: checkpoint.snapshot.referenceCatalog,
+      selectedReferences: checkpoint.snapshot.selectedReferences } });
+    const before = operations.length, planned = await step(retried, storage);
+    expect(planned.error).toBeUndefined(); expect(planned.job.planning.phase).toBe('DIVERSITY_AUDIT');
+    expect(operations.slice(before)).toEqual(['Astra']); expect(outbound).toHaveLength(3);
+    expect(outbound[2].sourceAnalysis).toEqual(outbound[0].sourceAnalysis);
+    expect(outbound[2].referenceCatalog).toEqual(outbound[0].referenceCatalog);
+    expect(planned.job.slots).toEqual(job.slots);
+  });
+
+  it.each(['provider', 'expired-lease', 'oversized-save'])('preserves completed work after %s until explicit retry', async failure => {
+    const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(request(), storage);
+    for (let i = 0; i < 3; i++) await step(job, storage); // quota, inventory, first video observation
+    const checkpoint = await readCreativePortfolio(job.id, storage);
+    mocks.image.mockImplementationOnce(async () => {
+      if (failure === 'provider') throw new Error('Uncertain provider outcome');
+      if (failure === 'expired-lease') await updateCreativePortfolio(job.id, current => ({ ...current,
+        lease: { ...current.lease!, expiresAtMs: Date.now() - 1 } }), storage);
+      return analysis(failure === 'oversized-save' ? 'x'.repeat(2 * 1024 * 1024) : 'Completed after lease expiry');
+    });
+    const failed = await step(job, storage);
+    expect(failed.job.planningError).toBeTruthy(); expect(failed.job.planning).toEqual(checkpoint!.planning);
+    expect((await step(job, storage)).job).toEqual(failed.job); expect(mocks.image).toHaveBeenCalledTimes(1);
+    await updateCreativePortfolio(job.id, current => retryPortfolioWork(current, null), storage);
+    expect((await step(job, storage)).error).toBeUndefined();
+    expect(mocks.video).toHaveBeenCalledTimes(1); expect(mocks.image).toHaveBeenCalledTimes(2); expect(outbound).toHaveLength(0);
+    mocks.image.mockRejectedValueOnce(new Error('Single request uncertain'));
+    await expect(prepareCreativeGeneration(request(), 'http://localhost')).rejects.toThrow('Single request uncertain');
+    expect(mocks.image).toHaveBeenCalledTimes(3); expect(outbound).toHaveLength(0);
+  });
+
+  it.each(['', '   '])('stops changed sources and supports an empty angle %j', async angle => {
+    const storage = new MemoryPortfolioStorage(), job = await createHistoricalPortfolio(request(), storage);
+    for (let i = 0; i < 3; i++) await step(job, storage);
+    const saved = (await readCreativePortfolio(job.id, storage))!.planning;
+    const id = request().sourceAssets[1].mediaId;
+    media[id].buffer = Buffer.concat([png, Buffer.from('changed')]);
+    expect((await step(job, storage)).error).toContain('changed');
+    expect((await readCreativePortfolio(job.id, storage))!.planning).toEqual(saved);
+    expect(mocks.image).not.toHaveBeenCalled(); expect(outbound).toHaveLength(0);
+    mocks.angle.mockResolvedValueOnce(analysis(angle));
+    const prepared = await prepareCreativeGeneration(request(), 'http://localhost');
+    expect(prepared.referenceCatalog.some(item => item.angleDescription === 'No angle observed. Layout guidance only.')).toBe(true);
+  });
+
+  it('rejects render/analysis hash disagreement before the single-request Astra call', async () => {
+    let reads = 0;
+    const changedId = request().sourceAssets[1].mediaId;
+    mocks.media.mockReturnValue({ readMediaById: async (id: string) => {
+      reads++;
+      return id === changedId && reads > 6 ? { ...media[id], buffer: Buffer.concat([png, Buffer.from('changed')]) } : media[id];
+    } });
+    await expect(prepareCreativeGeneration(request(), 'http://localhost')).rejects.toThrow('planning source analysis');
+    expect(outbound).toHaveLength(0);
+  });
+
+  it.each([undefined, 1] as const)('blocks legacy automatic-video jobs with unknown human assessment before planning: %s', async marker => {
+    const { videoPreparationVersion: _videoMarker, ...created } = newCreativePortfolio(request());
+    const { visibleHuman: _assessment, ...oldAnalysis } = analysis('SAVED_LEGACY');
+    const job = { ...created, sourceCompositionVersion: marker };
+    job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis: oldAnalysis,
+      referenceCatalog: [], selectedReferences: [] } };
+    const storage = new MemoryPortfolioStorage();
+    await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
+    const result = await step(job, storage);
+    expect(result.error).toContain('visible-human assessment');
+    expect(outbound).toHaveLength(0); expect(operations).toEqual([]);
+  });
+
+  it.each([undefined, 1] as const)('resumes legacy partial/rendered jobs with marker %s without composing', async marker => {
+    const { videoPreparationVersion: _videoMarker, ...created } = newCreativePortfolio(request());
+    const job = { ...created, sourceCompositionVersion: marker };
+    job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, analysis: analysis('SAVED_LEGACY'),
+      sourceLayout: { blueprint: referenceCandidate().blueprint, contentHash: hash(png), analyzerModel: 'saved-model', cacheHit: true },
+      referenceCatalog: [{ ...referenceCandidate('3'), sourceSha256: hash(png) }], selectedReferences: [] } };
+    const storage = new MemoryPortfolioStorage();
+    await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
+    let result = await step(job, storage);
+    for (let index = 0; index < 3 && !outbound.length && !result.error; index++) result = await step(job, storage);
+    expect(result.error).toBeUndefined(); expect(outbound[0].referenceAnalysis.summary).toBe('SAVED_LEGACY');
+    expect(outbound[0]).not.toHaveProperty('sourceAnalysis'); expect(operations).toEqual(['Astra']);
+    const ready = (await step(job, storage)).job;
+    const saved = await updateCreativePortfolio(job.id, current => ({ ...current,
+      slots: current.slots.map(slot => ({ ...slot, status: 'SAVED' as const })) }), storage);
+    expect((await step(job, storage)).job).toEqual(saved); expect(operations).toEqual(['Astra']);
+    expect(saved.snapshot).toEqual(ready.snapshot); expect(saved.sourceCompositionVersion).toBe(marker);
+  });
+});
