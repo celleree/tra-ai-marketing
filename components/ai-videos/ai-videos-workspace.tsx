@@ -24,9 +24,9 @@ async function uploadImage(file: File): Promise<string> {
   return plan.media.id;
 }
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-const fieldStyle = { display: 'grid', gap: 6, marginBottom: 16 } as const;
-const inputStyle = { background: '#111827', color: '#f8fafc', border: '1px solid #475569', padding: 10, borderRadius: 8, width: '100%' } as const;
-const buttonStyle = { minHeight: 44, border: '1px solid #64748b', borderRadius: 8, padding: '10px 16px', background: '#223046', color: '#fff', cursor: 'pointer' } as const;
+const fieldStyle = { display: 'grid', minWidth: 0, gap: 6, marginBottom: 16 } as const;
+const inputStyle = { background: '#111827', color: '#f8fafc', border: '1px solid #475569', padding: 10, borderRadius: 8, width: '100%', minWidth: 0, maxWidth: '100%' } as const;
+const buttonStyle = { minHeight: 44, border: '1px solid #64748b', borderRadius: 8, padding: '10px 16px', background: '#223046', color: '#fff', cursor: 'pointer', maxWidth: '100%', overflowWrap: 'anywhere' } as const;
 export function AIVideosWorkspace() {
   const [jobs, setJobs] = useState<WanSummary[]>([]);
   const [access, setAccess] = useState(false); const [paid, setPaid] = useState(false); const [loading, setLoading] = useState(true);
@@ -63,27 +63,27 @@ export function AIVideosWorkspace() {
     });
   }
   const chosen = jobs.find(job => job.id === selected);
-  return <section aria-labelledby="wan-title" style={{ padding: 24, color: '#e2e8f0', maxWidth: 1100, margin: '0 auto' }}>
+  return <section aria-labelledby="wan-title" style={{ padding: 24, color: '#e2e8f0', maxWidth: 1100, minWidth: 0, overflowWrap: 'anywhere', margin: '0 auto' }}>
     <h1 id="wan-title">AI Videos</h1>
     <p>Wan Animate transfers movement from a source video to a character image. Move animates your character; Replace substitutes the subject in the source scene.</p>
     <p style={{ color: '#94a3b8' }}>Fal Wan 2.2 · Images may be center-cropped · Audio preservation and voice cloning are not guaranteed or provided.</p>
     {loading ? <p role="status">Restoring private jobs…</p> : !access && <p role="status">AI Videos is disabled. An administrator must approve access and provider activation before use.</p>}
     {access && !paid && <p role="status">Paid generation is disabled. You can prepare quotes and inspect saved jobs; no generation can launch.</p>}
     {error && <p role="alert" style={{ color: '#fda4af' }}>{error}</p>}
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 28 }}>
-      <form onSubmit={event => { event.preventDefault(); void quote(); }}>
-        <fieldset disabled={busy || !access || loading} style={{ border: 0, padding: 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: 28 }}>
+      <form style={{ minWidth: 0 }} onSubmit={event => { event.preventDefault(); void quote(); }}>
+        <fieldset disabled={busy || !access || loading} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <legend><h2>Character and source</h2></legend>
           <label style={fieldStyle}>Character profile name<input required maxLength={100} value={name} onChange={e => setName(e.target.value)} style={inputStyle} /></label>
           <label style={fieldStyle}>Profile notes<textarea maxLength={2000} value={notes} onChange={e => setNotes(e.target.value)} style={inputStyle} /><small>Organizational notes only. Wan does not receive a text prompt.</small></label>
-          <label style={fieldStyle}>Character image<input required type="file" accept="image/png,image/jpeg,image/webp" onChange={e => setImage(e.target.files?.[0] || null)} /></label>
-          <label style={fieldStyle}>Motion source MP4<input required type="file" accept="video/mp4" onChange={e => setVideo(e.target.files?.[0] || null)} /><small>Maximum 30 seconds, 1800 decoded frames, 100 MB.</small></label>
+          <label style={fieldStyle}>Character image<input required style={{ width: '100%', maxWidth: '100%', minWidth: 0 }} type="file" accept="image/png,image/jpeg,image/webp" onChange={e => setImage(e.target.files?.[0] || null)} /></label>
+          <label style={fieldStyle}>Motion source MP4<input required style={{ width: '100%', maxWidth: '100%', minWidth: 0 }} type="file" accept="video/mp4" onChange={e => setVideo(e.target.files?.[0] || null)} /><small>Maximum 30 seconds, 1800 decoded frames, 100 MB.</small></label>
           <label style={fieldStyle}>Mode<select value={mode} onChange={e => setMode(e.target.value as WanMode)} style={inputStyle}><option value="MOVE">Move — character follows source motion</option><option value="REPLACE">Replace — character replaces source subject</option></select></label>
           <label style={fieldStyle}>Resolution<select value={resolution} onChange={e => setResolution(e.target.value as WanResolution)} style={inputStyle}><option>480p</option><option>580p</option><option>720p</option></select></label>
           <button type="submit" style={buttonStyle}>{busy ? 'Working…' : 'Upload privately and prepare quote'}</button>
         </fieldset>
       </form>
-      <div><h2>Private job history</h2>
+      <div style={{ minWidth: 0 }}><h2>Private job history</h2>
         <button type="button" disabled={busy || loading} style={buttonStyle} onClick={() => void operation(restore)}>Restore jobs</button>
         {!jobs.length && <p>No saved jobs yet. Upload sources to prepare an estimate.</p>}
         {jobs.map(job => <article key={job.id} style={{ padding: 16, border: '1px solid #475569', borderRadius: 12, marginTop: 14 }}>

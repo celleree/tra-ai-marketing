@@ -66,7 +66,7 @@ export function CreativeDiscoveryWorkspace() {
         <label><input type="checkbox" checked={approveAnalysis} onChange={event => setApproveAnalysis(event.target.checked)} disabled={!analysisAvailable} /> I approve the image transfer and paid model analysis when I press Analyze on a result.</label></>}
       <label>Filter reviewed patterns (layout, offer, angle, human presence)<input value={patternQuery} onChange={event => { setPatternQuery(event.target.value); setSelected([]); }} placeholder="e.g. GRID, free-consultation, present" /></label>
       {patternQuery && <p>Filters search inferred pattern labels only. Unanalyzed visual fields stay unknown; no matching evidence means no displayed cards.</p>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: 16 }}>
         {session.candidates.filter(candidate => !patternQuery.trim() || JSON.stringify({ ...candidate.inference, ...session.visualEvidence?.[candidate.id] }).toLowerCase().includes(patternQuery.trim().toLowerCase())).map(candidate => <article key={candidate.id} style={{ border: '1px solid #d1d5db', borderRadius: 12, padding: 16 }}>
           <h3>{candidate.advertiser}</h3>
           {!session.sample && available && <img src={`/api/discovery/preview?session=${encodeURIComponent(session.id)}&candidate=${encodeURIComponent(candidate.id)}`} alt={`Reference creative from ${candidate.advertiser}`} loading="lazy" style={{ width: '100%', maxHeight: 320, objectFit: 'contain' }} />}
