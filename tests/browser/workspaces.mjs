@@ -42,7 +42,7 @@ try {
         assert.equal(new URL(page.url()).searchParams.get('workspace'), section);
         assert.equal(new URL(page.url()).searchParams.get('keep'), '1');
         await page.reload(); await page.locator('.workspace-section-header h1').filter({ hasText: name }).waitFor();
-        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${name} fits the viewport`);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${name} fits the viewport: ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('*')].filter(element => element.getBoundingClientRect().right > innerWidth + 1).map(element => ({ tag: element.tagName, type: element.getAttribute('type'), width: element.getBoundingClientRect().width, right: element.getBoundingClientRect().right })).slice(0, 15)))}`);
       }
       assert.ok(await page.evaluate(() => sessionStorage.getItem('tra-ai-marketing:landing-creative-draft')));
       assert.deepEqual(writes, []); assert.deepEqual(errors, []);

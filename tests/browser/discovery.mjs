@@ -51,7 +51,7 @@ try {
     assert.equal(await page.getByRole('button', { name: 'Import 2 selected reference(s)' }).isDisabled(), true);
     await page.getByRole('checkbox', { name: /I may store these images/ }).check(); failSecond(); await page.getByRole('button', { name: 'Import 2 selected reference(s)' }).click();
     await page.getByRole('alert').getByText(/Second source expired/).waitFor(); assert.equal(await page.getByRole('checkbox', { name: 'Select for import' }).nth(0).isChecked(), false); assert.equal(await page.getByRole('checkbox', { name: 'Select for import' }).nth(1).isChecked(), true);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('*')].filter(element => element.getBoundingClientRect().right > innerWidth + 1).map(element => ({ tag: element.tagName, type: element.getAttribute('type'), width: element.getBoundingClientRect().width, right: element.getBoundingClientRect().right })).slice(0, 15))));
     if (process.env.DISCOVERY_SCREENSHOT_PATH) await page.screenshot({ path: process.env.DISCOVERY_SCREENSHOT_PATH, fullPage: true });
     await page.reload(); await page.getByRole('heading', { name: 'Tax fixture' }).waitFor(); assert.equal(posts.filter(post => post.action === 'search').length, 1);
   });

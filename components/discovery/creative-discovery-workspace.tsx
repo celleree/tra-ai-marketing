@@ -43,7 +43,7 @@ export function CreativeDiscoveryWorkspace() {
     return fingerprint ? Object.entries(session?.fingerprints ?? {}).filter(([other]) => other !== id).flatMap(([other, value]) => { const match = visualSimilarity(fingerprint, value); return match ? [`${match.kind} with ${other} (distance ${match.distance})`] : []; }) : [];
   };
   return <section className="discovery-workspace" aria-label="Creative discovery" style={{ display: 'grid', gap: 16, padding: 24, minWidth: 0, overflowWrap: 'anywhere' }}>
-    <style>{'.discovery-workspace button { min-height:44px; padding:8px 12px; } .discovery-workspace input:not([type=checkbox]) { display:block; max-width:100%; min-height:40px; } .discovery-workspace label { line-height:1.6; }'}</style>
+    <style>{'.discovery-workspace button { min-height:44px; padding:8px 12px; } .discovery-workspace input:not([type=checkbox]) { display:block; max-width:100%; min-height:40px; } .discovery-workspace label { line-height:1.6; min-width:0; max-width:100%; } .discovery-workspace input[type=file] { width:100%; min-width:0; max-width:100%; } .discovery-workspace article { min-width:0; max-width:100%; }'}</style>
     <header><h2>Creative discovery</h2><p>Find transferable copy, offers, angles, and layouts across industries. Prefer tax context when useful.</p></header>
     <p role="status">{available ? 'Live provider search is enabled and can incur charges.' : 'Live provider disabled. Authorized access and paid-execution approval are required. Explore fictional samples without provider calls.'}</p>
     <form onSubmit={event => { event.preventDefault(); void search(false); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'end' }}>
