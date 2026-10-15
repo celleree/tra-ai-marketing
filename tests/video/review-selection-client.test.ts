@@ -128,7 +128,7 @@ describe('serialized conditional review writes', () => {
     await Promise.allSettled([client.save(selected()), client.save({ ...selected(), frames: [] })]);
     expect(request).toHaveBeenCalledTimes(2);
     expect(client.getState().error).toContain(`HTTP ${status}`);
-    expect(client.getState().error).toContain(status === 401 ? 'Sign in again' : status === 403 ? 'approved TRA operator' : status === 409 ? 'newer saved revision' : 'could not be confirmed');
+    expect(client.getState().error).toContain(status === 401 ? 'Sign in again' : status === 403 ? 'approved workspace operator' : status === 409 ? 'newer saved revision' : 'could not be confirmed');
     expect(client.getState().saved).toEqual(saved());
     request.mockResolvedValueOnce(Response.json(saved())); await client.load(id);
     expect(client.getState()).toMatchObject({ error: '', conflict: false, choices: selected() });

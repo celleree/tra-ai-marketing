@@ -50,7 +50,7 @@ const getErrorMessage = async (response: Response) => {
 
 const validateApprovedFrames = (frames: ApprovedTraVideoFrame[]) => {
   if (frames.length < 1 || frames.length > MAX_REPRESENTATIVE_VIDEO_FRAMES) {
-    throw new Error('Approved TRA video frames must be a bounded non-empty frame set.');
+    throw new Error('Approved company video frames must be a bounded non-empty frame set.');
   }
   const first = frames[0];
   for (const [index, frame] of frames.entries()) {
@@ -69,7 +69,7 @@ const validateApprovedFrames = (frames: ApprovedTraVideoFrame[]) => {
       !Number.isInteger(frame.timestampMs) ||
       frame.timestampMs < 0
     ) {
-      throw new Error('Refusing non-TRA or invalid pixels at the TRA video-frame provider boundary.');
+      throw new Error('Refusing non-company or invalid pixels at the company video-frame provider boundary.');
     }
   }
 };
@@ -108,7 +108,7 @@ export async function analyzeApprovedTraVideoFrames(args: {
 }): Promise<CreativeReferenceAnalysis> {
   const providerFrames = selectProviderVideoFrames(args.frames);
   const model = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-6-luna';
-  const rules = `Analyze still frames extracted by the server from ONE validated Tax Relief Advocates (TRA) video. These are approved TRA-owned source pixels. Use visible human identity and factual/content cues as TRA source context, NOT as a static-ad layout blueprint. Do not infer customer identity, testimonial status, outcomes, performance, or unsupported claims. Old captions, logos, and framing are context only. Preserve the visible approved person when useful; avoid stale copy/layout and unsupported implications. Classify into exactly one category:\n${categoryList}`;
+  const rules = `Analyze still frames extracted by the server from ONE validated the company described in the supplied company context video. These are approved company-owned source pixels. Use visible human identity and factual/content cues as company source context, NOT as a static-ad layout blueprint. Do not infer customer identity, testimonial status, outcomes, performance, or unsupported claims. Old captions, logos, and framing are context only. Preserve the visible approved person when useful; avoid stale copy/layout and unsupported implications. Classify into exactly one category:\n${categoryList}`;
   const content: Array<Record<string, unknown>> = [
     { type: 'input_text', text: `Source video: ${providerFrames[0].sourceVideoMediaId}\nTimestamps: ${providerFrames.map((frame) => `${frame.timestampMs}ms`).join(', ')}\n\nUser/company direction:\n${args.context}` },
     ...providerFrames.map((frame) => ({
@@ -142,12 +142,12 @@ export async function analyzeApprovedTraVideoFrames(args: {
   if (!response.ok) throw new Error(await getErrorMessage(response));
   const payload = await response.json() as { status?: string } | null;
   if (payload?.status !== 'completed') {
-    throw new Error('TRA video-frame analysis did not complete.');
+    throw new Error('company video-frame analysis did not complete.');
   }
   const text = extractOutputText(payload);
-  if (!text) throw new Error('OpenAI returned no TRA video-frame analysis.');
+  if (!text) throw new Error('OpenAI returned no company video-frame analysis.');
   const analysis = JSON.parse(text) as CreativeReferenceAnalysis;
-  if (typeof analysis.visibleHuman !== 'boolean') throw new Error('TRA video-frame analysis did not assess visible human content.');
+  if (typeof analysis.visibleHuman !== 'boolean') throw new Error('company video-frame analysis did not assess visible human content.');
   return analysis;
 }
 
@@ -175,7 +175,7 @@ export async function generateApprovedTraVideoFrameCreativeImage(args: {
   const frames = await prepareProviderVideoFrames(selectProviderVideoFrames(args.frames));
   const document = await prepareTaxDocumentReference(args.taxDocumentReference);
   const placement = CREATIVE_PLACEMENT_SPECS[args.placement ?? 'SQUARE_1_1'];
-  const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA). Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, image copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attachments named approved-tra-video-* are server-extracted still frames or pixel-only edge crops from one validated TRA-owned video. Raw video is NOT attached. No layout-reference pixels or third-party people are attached. ${document?.prompt ?? ''} Source TRA video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. One-ad render brief: ${args.context}. Use only this planned image copy when rendering text inside the creative: ${formatImageCopy(args.copy)}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(args.placement ?? 'SQUARE_1_1')}`;
+  const prompt = `Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for the company described in the supplied company context. Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}); recompose the hierarchy, person, image copy, CTA, and logo space for this ratio rather than cropping or stretching a square design. The attachments named approved-tra-video-* are server-extracted still frames or pixel-only edge crops from one validated company-owned video. Raw video is NOT attached. No layout-reference pixels or third-party people are attached. ${document?.prompt ?? ''} Source company video media ID: ${frames[0].sourceVideoMediaId}. Timestamps: ${frames.map((frame) => `${frame.timestampMs}ms`).join(', ')}. Primary format: ${CREATIVE_FORMAT_LABELS[args.primaryFormat]}. One-ad render brief: ${args.context}. Use only this planned image copy when rendering text inside the creative: ${formatImageCopy(args.copy)}. The frames are the only approved human-identity source. Depict a person only when visibly grounded in them; preserve identity and never invent, replace, blend, or add another person. Do not recreate old captions, logos, badges, or video layout. ${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''} Do not invent testimonials, statistics, dollar amounts, outcomes, endorsements, government affiliation, competitor claims, or guarantees. Keep the ad credible and readable. ${formatCreativeSafeZoneRules(args.placement ?? 'SQUARE_1_1')}`;
   const routed = await runCreativeImageModelRoute({
     operationType: 'TRA_VIDEO_FRAME_GENERATION',
     generate: async (model) => {

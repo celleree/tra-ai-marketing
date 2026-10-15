@@ -26,7 +26,7 @@ type WebsiteAnalysisResponse = {
   error?: string;
 };
 
-const STORAGE_KEY = 'tra-company-profile-v2';
+const STORAGE_KEY = 'tax-marketing-studio:company-profile:v1';
 const BRAND_ASSET_KEYS = new Set(['logo', 'brandColors', 'fonts']);
 
 const COMPANY_TABS: Array<{ id: CompanyTab; label: string }> = [
@@ -143,7 +143,7 @@ export function CompanyView() {
           <p className={styles.eyebrow}>Company intelligence</p>
           <h1>Company Profile</h1>
           <p className={styles.intro}>
-            This is the source the creative system should use for TRA. Blank fields mean the information has not been verified yet.
+            Enter this company’s own identity, assets, offers and evidence. Blank fields are unverified. Prefilled audience, tone and tax-marketing guidance are general suggestions, not company facts.
           </p>
         </div>
         <div className={styles.overallScore}>

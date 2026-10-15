@@ -1,7 +1,7 @@
 import type { VideoReviewHandoff } from '@/lib/creatives/review-handoff';
 import { selectedCaseAssertion } from '@/lib/creatives/portfolio-case-amendment';
 
-const userDirection = (context: string) => context.split('APPROVED TRA COMPANY CONTEXT')[0];
+const userDirection = (context: string) => context.split(/APPROVED (?:TRA )?COMPANY CONTEXT/)[0];
 const excludesCases = (context: string) => /\b(?:no|without|avoid|exclude)\s+(?:video\s+)?(?:case[\s-]+stud(?:y|ies)|testimonials?)\b/i.test(userDirection(context));
 
 /** Inspect only user direction, never company policies or appended planner instructions. */

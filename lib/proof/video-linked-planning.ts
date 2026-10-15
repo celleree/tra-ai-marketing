@@ -87,7 +87,8 @@ export function projectVideoLinkedCustomerInsights(sourceAnalysis: PlanningSourc
 
 export async function loadVideoLinkedPlanningInputs(
   sourceAnalysis: PlanningSourceAnalysisState,
-  proofRetrievalQuery: string
+  proofRetrievalQuery: string,
+  explicitProofIds?: readonly string[]
 ): Promise<{
   customerInsights: VideoLinkedCustomerInsight[];
   proofCatalog: PlanningProofRecord[];
@@ -99,7 +100,8 @@ export async function loadVideoLinkedPlanningInputs(
     snapshot.candidates
   );
   const proofCatalog = selectProofForPlanning(
-    snapshot.items,
+    explicitProofIds === undefined ? snapshot.items : snapshot.items.filter(item =>
+      explicitProofIds.includes(item.id) || projected.some(insight => insight.linkedProofReference.id === item.id)),
     proofRetrievalQuery,
     projected.map((insight) => insight.linkedProofReference)
   );

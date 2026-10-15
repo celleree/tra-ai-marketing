@@ -1,5 +1,7 @@
 'use client';
 
+import { readSelectedCompanyReferenceIds } from '@/lib/company/reference-selection';
+
 import { useEffect, useRef, useState } from 'react';
 import { CompanyView } from '@/components/company/company-view';
 import { CreativeLibrary } from '@/components/creative-library/creative-library';
@@ -35,7 +37,7 @@ const NAV_ITEMS: Array<{
   icon: string;
 }> = [
   { id: 'upload', label: 'Create', shortLabel: 'Create', icon: '+' },
-  { id: 'tra-creatives', label: 'TRA Creatives', shortLabel: 'Creatives', icon: 'T' },
+  { id: 'tra-creatives', label: 'Company Creatives', shortLabel: 'Creatives', icon: 'T' },
   { id: 'company', label: 'Company', shortLabel: 'Company', icon: 'C' },
   { id: 'proof-library', label: 'Proof Library', shortLabel: 'Proof', icon: 'P' },
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
@@ -48,12 +50,12 @@ const SECTION_HEADERS: Record<
   upload: {
     eyebrow: 'Creative studio',
     title: 'Create',
-    description: 'Generate new TRA creatives with AI or upload finished ads.',
+    description: 'Generate new Company creatives with AI or upload finished ads.',
   },
   'tra-creatives': {
-    eyebrow: 'TRA creative library',
+    eyebrow: 'Company creative library',
     title: 'Creatives',
-    description: 'Review, revise, and manage saved generated and uploaded TRA creatives.',
+    description: 'Review, revise, and manage saved generated and uploaded Company creatives.',
   },
   company: {
     eyebrow: 'Company intelligence',
@@ -70,7 +72,7 @@ const SECTION_HEADERS: Record<
     eyebrow: 'Reference library',
     title: 'References',
     description:
-      'Manage layout inspiration and TRA-owned source imagery used for new creatives.',
+      'Manage layout inspiration and Company-owned source imagery used for new creatives.',
   },
 };
 
@@ -201,10 +203,10 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
     try {
       const previewOmitBrandLogo = acceptancePreview && omitTestLogo;
       const brand = readStoredBrandGuidance({ omitLogo: previewOmitBrandLogo });
-      if (!brand.logo && !previewOmitBrandLogo) throw new Error('The approved TRA logo is missing for this site. Restore the original logo in Company > Brand Guidelines before generating.');
       const companyProfile = readStoredRuntimeCompanyProfile();
       const reviewReference = videoReview.generationReference();
       await portfolio.start({
+        companySourceScope: { version: 1, referenceIds: readSelectedCompanyReferenceIds() },
         ...(reviewReference ? { videoReview: reviewReference } : {}),
         ...(previewOmitBrandLogo ? { previewOmitBrandLogo: true } : {}),
         sourceAssets: sourceAssets.map(source => ({ mediaId: source.media.id, role: source.role })),
@@ -239,7 +241,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
     <main className="workspace-shell">
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
-          <div className="workspace-brand-mark">TRA</div>
+          <div className="workspace-brand-mark">TM</div>
         </div>
 
         <nav className="workspace-nav" aria-label="Creative workspace">
@@ -263,7 +265,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
 
         <div className="workspace-sidebar-footer">
           <span className="workspace-status-dot" />
-          TRA workspace
+          Company workspace
         </div>
       </aside>
 

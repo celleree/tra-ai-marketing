@@ -42,13 +42,13 @@ export async function generateCreativeRevisionImage(args: {
 }): Promise<ImageGenerationResult> {
   const { canvas, originalApprovedSource } = args.sources;
   if (args.concept.strategy.execution.subjectSource === 'non-human' && originalApprovedSource?.kind === 'TRA_VIDEO_FRAMES') {
-    throw new Error('Non-human revision cannot attach TRA video-human frames.');
+    throw new Error('Non-human revision cannot attach company video-human frames.');
   }
   if (classifyCreativeCopyContract(args.concept as unknown as Record<string, unknown>).kind === 'INVALID') {
     throw new Error('Revision concept has an invalid separated ad/image copy contract.');
   }
   if (!parseCreativeStrategy(args.concept.strategy, originalApprovedSource !== null)) {
-    throw new Error('Revision strategy is invalid or requires an unavailable approved TRA source.');
+    throw new Error('Revision strategy is invalid or requires an unavailable approved company source.');
   }
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured.');
@@ -56,20 +56,20 @@ export async function generateCreativeRevisionImage(args: {
     ? await prepareProviderVideoFrames(originalApprovedSource.frames) : null;
   const spec = CREATIVE_PLACEMENT_SPECS[args.placement];
   const document = await prepareTaxDocumentReference(args.concept.strategy.execution.taxDocumentReference);
-  const prompt = `Create an original static Tax Relief Advocates (TRA) ad at ${spec.width}x${spec.height}, aspect ratio ${spec.aspectRatio}.
+  const prompt = `Create an original static the company described in the supplied company context ad at ${spec.width}x${spec.height}, aspect ratio ${spec.aspectRatio}.
 Operation: ${args.operation}. ${DIRECTIONS[args.operation]}
 ${formatCreativeSafeZoneRules(args.placement)}
 The FIRST attached image is the selected saved EDITING_CANVAS. It is generated editing context, never an approved human-identity source or evidence for factual claims.
 ${args.logoGeometry ? 'Its transparent rectangle is the deterministically removed prior logo panel. Reconstruct the surrounding background naturally through that cutout; do not retain or redraw the old logo or panel.' : ''}
 ${originalApprovedSource
-    ? 'The attachments named approved-tra-* are the separately validated original approved TRA reference or approved TRA video PNG frames or pixel-only edge crops. Only these attachments may supply human identity; preserve that identity without adding, blending or replacing people.'
+    ? 'The attachments named approved-tra-* are the separately validated original approved company reference or approved company video PNG frames or pixel-only edge crops. Only these attachments may supply human identity; preserve that identity without adding, blending or replacing people.'
     : 'There are no approved human source attachments. Do not depict any person, including a person visible in the editing canvas.'}
 ${args.concept.strategy.execution.subjectSource === 'non-human' ? 'The planned concept is non-human. Do not depict people even if original approved sources contain people.' : ''}
 No ad-layout reference, video-analysis JPEGs or logo artwork are attached as generation sources.
 ${document?.prompt ?? ''}
 ${formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: args.concept, companyProfile: args.companyProfile, referenceCatalog: args.referenceCatalog, ...(args.proofProvenance ? { proofProvenance: args.proofProvenance } : {}) }))}
 Saved canvas copy and prior outputs do not approve factual claims. Execute the planned copy and visual direction while respecting the brief's prohibited claims and required disclaimers.
-Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is Tax Relief Advocates or TRA.
+Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is the company explicitly identified in the supplied company context; if none is identified, keep the ad unbranded and do not invent an identity, logo, contact detail or offer.
 Keep text readable on a phone, with clear hierarchy and no clutter.
 ${args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : ''}`;
   const append = (form: FormData, buffer: Buffer, mimeType: string, name: string) =>

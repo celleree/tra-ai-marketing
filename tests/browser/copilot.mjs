@@ -68,7 +68,7 @@ try {
     await panel.getByText('Test a consultation-focused concept.').waitFor();
     assert.equal(posts.length, 1); assert.deepEqual(Object.keys(posts[0]).sort(), ['allowPaidRequest', 'companyContextApproved', 'companyProfile', 'creativeId']);
     assert.equal(posts[0].creativeId, creativeId); assert.equal(posts[0].companyContextApproved, true);
-    await page.evaluate(() => localStorage.setItem('tra-company-profile-v2', JSON.stringify({ knowledgeBase: { companySummary: 'Changed approved company context' } })));
+    await page.evaluate(() => localStorage.setItem('tax-marketing-studio:company-profile:v1', JSON.stringify({ knowledgeBase: { companySummary: 'Changed approved company context' } })));
     await panel.getByRole('button', { name: 'Refresh company context' }).click();
     assert.equal(await panel.getByRole('checkbox').isChecked(), false); assert.equal(await button.isDisabled(), true);
     await panel.getByRole('checkbox').check(); mode('failure'); await button.click();

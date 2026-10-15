@@ -109,14 +109,14 @@ const buildCandidatePool = (
 };
 
 const SELECTION_RULES = `
-You are shortlisting reusable reference options for Tax Relief Advocates (TRA) creative planning.
+You are shortlisting reusable reference options for the company described in the supplied company context creative planning.
 
-The requested count is a shortlist budget, not a number of ads. Astra later chooses angle and layout independently from these options or creates original concepts. A reference may support multiple concepts or remain unused. Describe its reusable marketing framing in the selection reason, without treating source claims, proof, copy or identity as approved TRA content.
+The requested count is a shortlist budget, not a number of ads. Astra later chooses angle and layout independently from these options or creates original concepts. A reference may support multiple concepts or remain unused. Describe its reusable marketing framing in the selection reason, without treating source claims, proof, copy or identity as approved company content.
 
 Selection priorities, in order:
-1. Fit with the user's requested direction and the TRA brand/message context.
+1. Fit with the user's requested direction and the company brand/message context.
 2. A clear single creative idea with strong hierarchy and an easy-to-understand composition.
-3. A layout and visual mechanism that can be cleanly adapted to TRA without copying third-party branding, people, claims, testimonials, or trademarks.
+3. A layout and visual mechanism that can be cleanly adapted to company without copying third-party branding, people, claims, testimonials, or trademarks.
 4. Prefer polished, simple, intentional ads over cluttered collages, busy multi-concept layouts, or visually confusing references.
 5. When quality is similar, prefer variety across visual structures and angles so the requested batch is not repetitive.
 
@@ -155,7 +155,7 @@ export async function selectBestReferenceCreatives(args: {
   const userContent: Array<Record<string, unknown>> = [
     {
       type: 'input_text',
-      text: `Shortlist ${args.requestedCount} reference options for independent angle/layout planning.\n\nUser direction:\n${args.userContext}\n\nTRA source summary:\n${args.traSummary}\n\nTRA identity/message cues:\n${args.traPreserve.join('; ') || 'Tax Relief Advocates identity'}\n\nReview every candidate below. Each candidate is labeled with its exact reference ID and current library category.`,
+      text: `Shortlist ${args.requestedCount} reference options for independent angle/layout planning.\n\nUser direction:\n${args.userContext}\n\nTRA source summary:\n${args.traSummary}\n\nTRA identity/message cues:\n${args.traPreserve.join('; ') || 'explicitly supplied company identity'}\n\nReview every candidate below. Each candidate is labeled with its exact reference ID and current library category.`,
     },
   ];
 
@@ -241,7 +241,7 @@ export async function selectBestReferenceCreatives(args: {
     used.add(item.referenceId);
     selected.push({
       ...candidate,
-      selectionReason: item.reason?.trim() || 'Best fit for this TRA creative batch.',
+      selectionReason: item.reason?.trim() || 'Best fit for this company creative batch.',
     });
   }
 

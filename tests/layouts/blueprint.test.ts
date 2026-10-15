@@ -111,7 +111,7 @@ describe('LayoutBlueprint validation', () => {
     const formatted = formatLayoutBlueprintForPlanning(blueprint());
 
     expect(formatted).toContain('HUMAN_PLACEHOLDER regions only as geometry');
-    expect(formatted).toContain('approved TRA human source');
+    expect(formatted).toContain('approved company human source');
     expect(formatted).toContain('replace human placeholder geometry with a non-human');
     expect(formatted).toContain('Do not reconstruct third-party logos');
   });

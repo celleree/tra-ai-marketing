@@ -314,7 +314,7 @@ describe('applyBrandLogoToCreatives', () => {
         [creative],
         `/api/media/files/${logoFileName}`
       )
-    ).rejects.toThrow('TRA logo has invalid dimensions.');
+    ).rejects.toThrow('Company logo has invalid dimensions.');
 
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:logo');
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:creative');

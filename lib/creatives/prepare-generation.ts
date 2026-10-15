@@ -24,12 +24,12 @@ import { primaryVideoGuidance, primaryVideoDirection, selectedVideoInputContract
 const buildPromptOnlyAnalysis = (
   context: string
 ): CreativeReferenceAnalysis => ({
-  summary: 'No source image was supplied. Create original TRA concepts from the user direction.',
+  summary: 'No source image was supplied. Create original company concepts from the user direction.',
   visibleText: [],
   visualStructure: 'Choose an original mobile-first static ad composition appropriate to the assigned category and format.',
   hookOrAngle: context,
-  offerOrCta: 'Use only claims and calls to action supported by the user direction and TRA guardrails.',
-  styleNotes: 'Original TRA creative. Clear hierarchy, strong readability, and no dependence on a source image.',
+  offerOrCta: 'Use only claims and calls to action supported by the user direction and company guardrails.',
+  styleNotes: 'Original company creative. Clear hierarchy, strong readability, and no dependence on a source image.',
   preserve: [],
   avoid: [
     'invented testimonials',
@@ -37,7 +37,7 @@ const buildPromptOnlyAnalysis = (
     'guaranteed outcomes',
     'government affiliation',
     'third-party brands or trademarks',
-    'people, faces, spokespersons, or human figures without an attached approved TRA human source',
+    'people, faces, spokespersons, or human figures without an attached approved company human source',
   ],
   unknowns: [],
   dominantCategory: 'customer-problems',
@@ -51,9 +51,9 @@ const buildLayoutReferenceAnalysis = (
   visibleText: [],
   visualStructure: formatLayoutBlueprintForPlanning(blueprint),
   hookOrAngle:
-    'Not supplied by the layout reference. Choose strategy only from approved TRA company context and user direction.',
+    'Not supplied by the layout reference. Choose strategy only from approved company company context and user direction.',
   offerOrCta:
-    'Not supplied by the layout reference. Use only approved TRA offers, claims, and CTA direction.',
+    'Not supplied by the layout reference. Use only approved company offers, claims, and CTA direction.',
   styleNotes:
     'Use only the validated blueprint geometry and controlled design mechanisms. Do not reconstruct restricted reference content.',
   preserve: ['validated layout geometry and design mechanisms only'],
@@ -111,7 +111,8 @@ export async function prepareCreativeGeneration(
     hookOrAngle: angle?.angleDescription ?? '' } : buildPromptOnlyAnalysis(data.context));
   let selectedReferences: SelectedReferenceCreative[] = [];
 
-  const library = (data.useReferenceLibrary === false ? [] : await listReferenceLibrary()).filter(item => item.referenceType === 'layout');
+  const library = (data.useReferenceLibrary === false ? [] : await listReferenceLibrary()).filter(item => item.referenceType === 'layout'
+    && (data.companySourceScope === undefined || data.companySourceScope.referenceIds.includes(item.id)));
   requireReferenceLibrarySelection(data.useReferenceLibrary, library.length);
   const requestedReferenceCount = Math.min(8, data.variationCount, library.length);
   const selectionArgs = {
@@ -142,11 +143,11 @@ export async function prepareCreativeGeneration(
     : '';
   const modeDirection = source
     ? generationSourceAsset?.role === 'TRA_REFERENCE'
-      ? 'TRA ad mode: the validated uploaded TRA reference may be attached to final generation. Any selected library references are optional analysis-only design guidance for planning. They do not dictate a creative category, do not need to be used by every output, and their raw pixels are never attached to final generation.'
+      ? 'company ad mode: the validated uploaded company reference may be attached to final generation. Any selected library references are optional analysis-only design guidance for planning. They do not dictate a creative category, do not need to be used by every output, and their raw pixels are never attached to final generation.'
       : 'Layout-reference mode: consider the uploaded reference angle and cached blueprint independently as priority options in the catalog. Either choice may be original. Its raw pixels and any person identity in it must never reach final image generation.'
     : videoFrameSet
-      ? `Video-source mode: the raw TRA video ${videoFrameSet.source.media.id} remains server-side and is never attached to the image provider. A bounded set of server-extracted approved still frames is available as TRA human/content source pixels. Do not treat old video framing, captions, or graphics as a required static-ad layout.`
-      : 'No-image mode: create TRA ads from the user direction, using catalog references only when they support the proposition.';
+      ? `Video-source mode: the raw company video ${videoFrameSet.source.media.id} remains server-side and is never attached to the image provider. A bounded set of server-extracted approved still frames is available as company human/content source pixels. Do not treat old video framing, captions, or graphics as a required static-ad layout.`
+      : 'No-image mode: create company ads from the user direction, using catalog references only when they support the proposition.';
 
   const approvedHumanSource =
     providerImageSource || videoFrameSet?.source || null;
@@ -159,29 +160,29 @@ export async function prepareCreativeGeneration(
         sourceSuppliedToImageGeneration
       )
     : false;
-  const approvedHumanOptions = videoGuidance ? [] : await loadApprovedHumanOptions();
+  const approvedHumanOptions = videoGuidance ? [] : await loadApprovedHumanOptions(data.companySourceScope === undefined ? undefined : data.sourceAssets.filter(item => item.role === 'TRA_VIDEO').map(item => item.mediaId));
   const humanSourceDirection = approvedHumanOptions.length
     ? 'Curated approvedHumanOptions are available as independent human sources. Choose a stable ID only when that person strengthens the proposition; selecting one replaces any supplied human source for that concept. Choose null for a graphic concept or an explicitly supplied approved source. No invented people or identity-based claims.'
     : videoFrameSet
-    ? `Use only a person visibly grounded in the attached approved TRA video frames from source ${videoFrameSet.source.media.id}. Preserve that visible identity; do not invent, replace, blend, or add another person. Layout-reference and library-reference people remain forbidden human sources.`
+    ? `Use only a person visibly grounded in the attached approved company video frames from source ${videoFrameSet.source.media.id}. Preserve that visible identity; do not invent, replace, blend, or add another person. Layout-reference and library-reference people remain forbidden human sources.`
     : hasUsableApprovedHumanSource
-      ? 'Use only the attached approved TRA human identity when depicting a person.'
-      : 'Current generation boundary: no approved TRA human source is attached to final image generation. Do not depict any person, face, spokesperson, body, or human figure; use a non-human visual concept. Layout-reference and library-reference people are never approved human sources.';
+      ? 'Use only the attached approved company human identity when depicting a person.'
+      : 'Current generation boundary: no approved company human source is attached to final image generation. Do not depict any person, face, spokesperson, body, or human figure; use a non-human visual concept. Layout-reference and library-reference people are never approved human sources.';
 
   const colorDirection = data.brandColors?.length
-    ? `Approved TRA brand palette from the uploaded logo: ${data.brandColors.join(', ')}. Use these as the primary design colors. Neutral black, white, and gray may be used for legibility, but do not substitute an unrelated dominant palette.`
+    ? `Approved company brand palette from the uploaded logo: ${data.brandColors.join(', ')}. Use these as the primary design colors. Neutral black, white, and gray may be used for legibility, but do not substitute an unrelated dominant palette.`
     : '';
   const fontDirection = data.brandFontNames?.length
-    ? `Approved typography guidance derived from actual uploaded TRA font files:\n${data.brandFontNames.map((font) => `- ${font}`).join('\n')}\nUse these descriptions to match the approved typography character as closely as the image model allows. Do not introduce a conflicting type style just because it appears in a third-party reference image.`
+    ? `Approved typography guidance derived from actual uploaded company font files:\n${data.brandFontNames.map((font) => `- ${font}`).join('\n')}\nUse these descriptions to match the approved typography character as closely as the image model allows. Do not introduce a conflicting type style just because it appears in a third-party reference image.`
     : '';
   const brandDirection = [colorDirection, fontDirection]
     .filter(Boolean)
     .join('\n\n');
 
   const analysisDirection = source
-    ? 'Use referenceAnalysis as analysis-only source guidance (raw layout/library pixels are not attached unless the source is the validated TRA reference explicitly allowed at the final provider boundary).'
+    ? 'Use referenceAnalysis as analysis-only source guidance (raw layout/library pixels are not attached unless the source is the validated company reference explicitly allowed at the final provider boundary).'
     : videoFrameSet
-      ? 'referenceAnalysis describes the approved TRA video-frame source; preserve approved TRA cues and obey its avoid guidance.'
+      ? 'referenceAnalysis describes the approved company video-frame source; preserve approved company cues and obey its avoid guidance.'
       : '';
 
   const generationContext = `${data.context}\n\n${modeDirection}\n\n${humanSourceDirection}${brandDirection ? `\n\nTRA brand system:\n${brandDirection}` : ''}${analysisDirection ? `\n\n${analysisDirection}` : ''}${referenceDirections ? `\n\n${data.useReferenceLibrary ? 'Required library layout options (choose a validated blueprint for every ad)' : 'Optional analysis-only reference guidance for the batch'}:\n${referenceDirections}\n${data.useReferenceLibrary ? 'Choose a supplied library layout for every ad; a layout may be reused for distinct concepts. Do not copy reference content or treat its library category as required.' : 'Use a reference only when it supports the planned strategy. Do not copy it, treat its library category as required, or force one reference per output.'}` : ''}`;
@@ -191,6 +192,7 @@ export async function prepareCreativeGeneration(
     : undefined;
   const plannerArgs: CreativeBatchPlannerArgs = {
     ...selectedVideoInputContract(data),
+    ...(data.companySourceScope ? { companySourceScope: data.companySourceScope } : {}),
     count: data.variationCount,
     context: videoGuidance ? `${primaryVideoDirection(videoGuidance, data.peoplePercent)}\n\n${generationContext}` : generationContext,
     proofRetrievalQuery: data.proofRetrievalQuery,

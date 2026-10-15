@@ -28,7 +28,7 @@ try {
   for (const width of [1440, 375]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     await context.addInitScript(() => {
-      localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', knowledgeBase: {}, guardrails: {},
+      localStorage.setItem('tax-marketing-studio:company-profile:v1', JSON.stringify({ websiteUrl: '', knowledgeBase: {}, guardrails: {},
         brandGuidelines: { logo: '/api/media/files/media_77777777777777777777777777777777.png' } }));
     });
     const page = await context.newPage(); const errors = [], posts = [], commands = [];

@@ -437,7 +437,7 @@ describe('saved creative revision API', () => {
     mocks.list.mockResolvedValue([record]); mocks.hydrate.mockResolvedValue(hydrateGeneralizedHuman(record));
     const response = await call({ operation, instruction: 'Make the headline blue.' });
     expect(response.status).toBe(409);
-    expect((await response.json()).error).toContain('explicitly selected TRA video frames');
+    expect((await response.json()).error).toContain('explicitly selected company video frames');
     expect(mocks.plan.mock.calls[0][0].requireSelectedVideoFrames).toBe(true);
     expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
   });
@@ -730,7 +730,7 @@ describe('saved creative revision API', () => {
     const response = await call({ operation, instruction: 'Use a different composition.' });
     const { creative } = await response.json();
     expect(response.status).toBe(201);
-    expect(mocks.plan).toHaveBeenCalledWith(expect.objectContaining({ operation, hasApprovedHumanSource: false, instruction: 'Use a different composition.', companyContext: expect.stringContaining('APPROVED TRA COMPANY CONTEXT') }));
+    expect(mocks.plan).toHaveBeenCalledWith(expect.objectContaining({ operation, hasApprovedHumanSource: false, instruction: 'Use a different composition.', companyContext: expect.stringContaining('APPROVED COMPANY CONTEXT') }));
     expect(mocks.generate.mock.calls[0][0]).not.toHaveProperty('companyContext');
     expect(mocks.generate.mock.calls[0][0]).not.toHaveProperty('instruction');
     expect(mocks.generate.mock.calls[0][0].concept.strategy).toEqual(changed);

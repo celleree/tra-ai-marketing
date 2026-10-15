@@ -146,17 +146,8 @@ const lines = (values: string[]) => values.join('\n');
 export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   websiteUrl: '',
   knowledgeBase: {
-    companySummary:
-      'Tax Relief Advocates (TRA) is a U.S. tax-relief service business that helps people dealing with IRS and tax problems.',
-    servicesOffers: lines([
-      'Free/no-cost tax-debt consultation.',
-      'Review of tax hardship and IRS communications.',
-      'Assessment of eligibility for IRS debt-forgiveness programs, including the IRS Fresh Start Program.',
-      'Representation notification to tax authorities.',
-      'Research and comparison of available debt-forgiveness programs.',
-      'Negotiation with the IRS and state taxing authorities.',
-      'Assistance with tax audits, tax-liability negotiation, wage garnishments, bank levies, and tax-debt resolution.',
-    ]),
+    companySummary: '',
+    servicesOffers: '',
     targetCustomers:
       'People dealing with IRS or tax problems, including overwhelmed taxpayers, skeptical buyers, people who tried handling a tax issue themselves, people who received an unexpected IRS notice, and people seeking clearer next steps.',
     customerProblems: lines([
@@ -175,25 +166,13 @@ export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
       'Responsive, professional, no-pressure communication.',
       'Feeling informed rather than confused or pressured.',
     ]),
-    differentiators: lines([
-      "TRA's stated process is Consultation, Research, Resolution.",
-      'TRA says it works directly with the IRS and develops a personalized strategy.',
-      'TRA says its team includes tax-relief experts, attorneys, and specialized licensed tax-resolution professionals.',
-    ]),
-    proof:
-      'TRA five-star reviews supplied to the project repeatedly emphasize knowledgeable representatives, clear explanations, responsiveness, professionalism, patience, reassurance, and no-pressure interactions. Use these as service-quality themes, not invented quotations or outcome claims.',
-    faqsFacts: lines([
-      'TRA says a consultation is free/no-cost.',
-      'Services may not be available in all states.',
-      'Fees may vary by state.',
-      'Address: 16808 Armstrong Ave., Irvine, CA 92606.',
-      'Phone: 800-501-4249 / 800-575-2063.',
-      'Email: contact@tra.com.',
-    ]),
+    differentiators: '',
+    proof: '',
+    faqsFacts: '',
   },
   brandGuidelines: {
     logo: '',
-    brandColors: '#0577BF\n#6D6E71\n#FFFFFF\n#333333',
+    brandColors: '',
     fonts: '',
     voiceTone:
       'Clear, professional, reassuring, patient, straightforward, approachable, empathetic, and no-pressure.',
@@ -201,7 +180,7 @@ export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
       'Professionally art-directed, restrained, and intentional.',
       'Favor one clear focal idea, strong hierarchy, deliberate whitespace, and clean image-to-text balance over information density.',
       'Do not automatically add benefit sections, icons, trust badges, floating cards, extra text boxes, CTA bars, proof blocks, or decorative elements.',
-      'If the reference is visually simple, keep the TRA adaptation visually simple.',
+      'If the reference is visually simple, keep the the company adaptation visually simple.',
       'Reference creatives may guide composition, hierarchy, spacing, image treatment, and visual mechanism without transferring third-party identity or branding.',
     ]),
     copyStyle:
@@ -210,19 +189,14 @@ export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   guardrails: {
     neverSay:
       'Do not fabricate guarantees, customer outcomes, dollar amounts, statistics, expert endorsements, government affiliation, or competitor claims. Do not imply every customer gets the same result.',
-    approvedClaims: lines([
-      'TRA is a U.S. tax-relief service business that helps people dealing with IRS and tax problems.',
-      'TRA provides a free/no-cost tax-debt consultation.',
-      "TRA's stated process is Consultation, Research, Resolution.",
-      'TRA provides the tax-debt and tax-resolution related services listed in the approved Company Profile.',
-    ]),
+    approvedClaims: '',
     claimsRequiringProof:
       'Financial, legal, tax-resolution, savings, settlement, outcome-specific, comparative, statistical, and performance claims require approved source material or human review before use.',
     requiredDisclaimers: '',
     testimonialsStatisticsRules:
-      'Never create a fake testimonial or combine multiple customer stories into one person. Do not use customer names, quotes, stories, claimed outcomes, or statistics in advertising unless TRA has confirmed the evidence and permission required for that specific use.',
+      'Never create a fake testimonial or combine multiple customer stories into one person. Do not use customer names, quotes, stories, claimed outcomes, or statistics in advertising unless the company has confirmed the evidence and permission required for that specific use.',
     industryComplianceRules:
-      'Do not imply TRA is affiliated with the IRS or another government agency unless that claim is explicitly approved and sourced. AI output is not automatically approved; tax-relief-specific factual, financial, legal, compliance, and outcome claims must be grounded in approved TRA source material.',
+      'Do not imply the company is affiliated with the IRS or another government agency unless that claim is explicitly approved and sourced. AI output is not automatically approved; tax-relief-specific factual, financial, legal, compliance, and outcome claims must be grounded in approved the company source material.',
   },
 };
 

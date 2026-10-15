@@ -61,7 +61,7 @@ export async function POST(request: Request, context: { params: Promise<{ creati
         planning: { ...parent.planning, logoAnchor: anchor },
         generationProvenance: { ...parent.generationProvenance, logoOverlaySource: { mediaId: logoMediaId, sha256: hash(logo.buffer) },
           revision: { parentCreativeId: parentId, canvasMediaId: parent.image.id, canvasSha256: hash(canvas.buffer),
-            instruction: 'Add the saved original TRA logo without AI; preserve the accepted image and copy.',
+            instruction: 'Add the saved original company logo without AI; preserve the accepted image and copy.',
             logoOverlay: { version: 1, anchor, outputSha256: hash(output) } } } };
       await assertCurrent();
       const [saved] = await saveCreativeBatch([record]);

@@ -88,7 +88,7 @@ describe('finished creative upload failure feedback', () => {
     expect(html()).toContain(files[0].name);
     expect(request).toHaveBeenCalledTimes(step + 1);
     expect(onUploaded).not.toHaveBeenCalled();
-    expect(html()).toContain(['Sign in again', 'Storage rejected', 'was not found', 'Check TRA creatives'][step]);
+    expect(html()).toContain(['Sign in again', 'Storage rejected', 'was not found', 'Check company creatives'][step]);
   });
 
   it.each([0, 1, 2, 3])('keeps stage %i on network failure without echoing the raw exception', async step => {
@@ -114,7 +114,7 @@ describe('finished creative upload failure feedback', () => {
   it.each(['http', 'incomplete'])('warns about an uncertain save after a %s failure', async kind => {
     responses(3, kind, 500); select(); await submit();
     expect(html()).toContain('Save creative:');
-    expect(html()).toContain('Check TRA creatives first; the save may have completed');
+    expect(html()).toContain('Check company creatives first; the save may have completed');
     expect(request).toHaveBeenCalledTimes(4);
     expect(onUploaded).not.toHaveBeenCalled();
   });

@@ -479,6 +479,7 @@ export function CreativeComposer({
             onChange={event => onPeoplePercentChange(Number(event.target.value))} disabled={generating} />
         </div>
         <span id="creative-people-counts" aria-live="polite">{mix.withPeople} with people · {mix.withoutPeople} without people</span>
+        <p>Supply your own approved people and select layouts with “Use for this company” in Reference Library. To start without assets, choose 0% people and turn the reference library Off. A logo is optional.</p>
       </div>
 
       <div className={styles.toolbar}>

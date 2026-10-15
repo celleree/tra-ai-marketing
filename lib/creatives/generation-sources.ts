@@ -18,7 +18,7 @@ export class CreativeGenerationPreparationError extends Error {
 }
 export function assertGenerationAvailable(request: Pick<SourceRequest, 'videoFrameSelection'>) {
   if (request.videoFrameSelection && !isDurableVideoIntelligenceAvailable()) {
-    throw new CreativeGenerationPreparationError('Selected TRA video frame generation is available in local development or protected Vercel Preview only.', 404);
+    throw new CreativeGenerationPreparationError('Selected company video frame generation is available in local development or protected Vercel Preview only.', 404);
   }
   if (!process.env.OPENAI_API_KEY) throw new CreativeGenerationPreparationError('OpenAI generation is not configured yet.', 503);
 }
@@ -57,18 +57,18 @@ export async function hydrateGenerationSources(request: SourceRequest) {
     const selection = request.videoFrameSelection;
     if ((selection.version !== 2 && selection.version !== 3) || !selection.sourceOverlays
       || selection.sourceOverlays.length !== selection.frameIds.length) {
-      throw new CreativeGenerationPreparationError('Selected TRA video frames are unassessed. Reassess the exact frames before generation.', 409);
+      throw new CreativeGenerationPreparationError('Selected company video frames are unassessed. Reassess the exact frames before generation.', 409);
     }
     if (videoSourceHash(traVideoSource) !== selection.sourceVideoContentHash) {
-      throw new CreativeGenerationPreparationError('The selected TRA video frames are stale. Reanalyze the video and select frames again.', 409);
+      throw new CreativeGenerationPreparationError('The selected company video frames are stale. Reanalyze the video and select frames again.', 409);
     }
     const context = await loadVideoSelectionContext(traVideoSource);
-    if (!context?.library) throw new CreativeGenerationPreparationError('The selected TRA video frame library is missing or invalid. Reanalyze the video and select frames again.', 409);
-    if (context.library.id !== selection.libraryId) throw new CreativeGenerationPreparationError('The selected TRA video frame library does not match this request. Select frames again.', 409);
+    if (!context?.library) throw new CreativeGenerationPreparationError('The selected company video frame library is missing or invalid. Reanalyze the video and select frames again.', 409);
+    if (context.library.id !== selection.libraryId) throw new CreativeGenerationPreparationError('The selected company video frame library does not match this request. Select frames again.', 409);
     if (selection.version === 3 && (selection.sourceVideoMediaId !== traVideoSource.media.id
       || !context.manifest || !context.librarySha256 || context.librarySha256 !== selection.librarySha256
       || !selection.candidateBindings)) {
-      throw new CreativeGenerationPreparationError('The selected TRA video candidate is stale. Reanalyze the video and select frames again.', 409);
+      throw new CreativeGenerationPreparationError('The selected company video candidate is stale. Reanalyze the video and select frames again.', 409);
     }
     try {
       const selected = await extractVideoSelectionFrames(traVideoSource, context,
@@ -80,21 +80,21 @@ export async function hydrateGenerationSources(request: SourceRequest) {
           || (selection.version === 3 && (frame.candidateIndex !== selection.candidateBindings![index].candidateIndex
             || frame.representativeFrameId !== selection.candidateBindings![index].representativeFrameId
             || frame.candidateFrameSha256 !== selection.candidateBindings![index].frameSha256)))) {
-        throw new Error('Selected TRA frame order or provenance changed. Reassess the exact frames.');
+        throw new Error('Selected company frame order or provenance changed. Reassess the exact frames.');
       }
       videoFrameSet = { ...selected, frames: selected.frames.map((frame, index) => ({ ...frame, sourceOverlay: selection.sourceOverlays![index] })) };
       generatedVideoFrameSelection = { libraryId: context.library.id, sourceVideoMediaId: traVideoSource.media.id,
         sourceVideoContentHash: selected.sourceVideoContentHash, frames: selected.selectionProvenance,
         ...(selection.version === 3 ? { librarySha256: selection.librarySha256 } : {}) };
     } catch (error) {
-      throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'The selected TRA video frames could not be verified. Select frames again.', 409);
+      throw new CreativeGenerationPreparationError(error instanceof Error ? error.message : 'The selected company video frames could not be verified. Select frames again.', 409);
     }
   } else if (traVideoSource && !providerImageSource) {
     videoFrameSet = await getApprovedTraVideoFrames(traVideoSource);
   }
   const brandLogo = request.brandLogoMediaId ? await storage.readImageById(request.brandLogoMediaId) : null;
   if (request.brandLogoMediaId && !brandLogo) {
-    throw new CreativeGenerationPreparationError('The saved TRA logo could not be found. Re-upload the logo in Company > Brand Guidelines and try again.', 404);
+    throw new CreativeGenerationPreparationError('The saved company logo could not be found. Re-upload the logo in Company > Brand Guidelines and try again.', 404);
   }
   const reserveLogoArea = Boolean(brandLogo);
   const logoOverlaySource = brandLogo && request.brandLogoMediaId ? { mediaId: request.brandLogoMediaId, sha256: sha256(brandLogo.buffer) } : undefined;

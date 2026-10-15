@@ -16,7 +16,7 @@ export type ReviewClaimReference =
   | { type: 'VIDEO_ON_SCREEN'; frame: VideoCandidateFrameBinding; statementIndex: number }
   | ({ type: 'PROOF'; proofId: string; proofType: ProofRecord['type']; proofUpdatedAt: string;
       recordSha256: string; field: 'originalReviewText' | 'approvedClaimWording' | 'verifiedFacts'; factIndex: number | null } & TextRange)
-  | ({ type: 'COMPANY_PROFILE'; profileVersion: typeof COMPANY_PROFILE_STORAGE_KEY; profileSha256: string;
+  | ({ type: 'COMPANY_PROFILE'; profileVersion: typeof COMPANY_PROFILE_STORAGE_KEY | 'tra-company-profile-v2'; profileSha256: string;
       section: CompanySectionId; field: string } & TextRange);
 /** null = untouched; [] = explicitly deselected. Both keep automatic frame selection available. */
 export type ReviewSelectionChoices = { video: ReviewVideoReference | null; frames: VideoCandidateFrameBinding[] | null;
@@ -70,7 +70,7 @@ const claim = (value: unknown, sourceHash: string) => {
       && (value.field === 'verifiedFacts' ? index(value.factIndex) : value.factIndex === null)
       && ['originalReviewText', 'approvedClaimWording', 'verifiedFacts'].includes(String(value.field));
     case 'COMPANY_PROFILE': return exact(value, ['type', 'profileVersion', 'profileSha256', 'section', 'field', 'start', 'end'])
-      && value.profileVersion === COMPANY_PROFILE_STORAGE_KEY && sha(value.profileSha256) && range(value)
+      && (value.profileVersion === COMPANY_PROFILE_STORAGE_KEY || value.profileVersion === 'tra-company-profile-v2') && sha(value.profileSha256) && range(value)
       && typeof value.section === 'string' && Object.hasOwn(SECTION_FIELDS, value.section) && typeof value.field === 'string'
       && SECTION_FIELDS[value.section as CompanySectionId].some(item => item.key === value.field);
     default: return false;

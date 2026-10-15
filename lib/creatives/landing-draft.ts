@@ -3,7 +3,7 @@ import type { CreativeSourceAsset } from '@/lib/media/types';
 import { parseCreativeSourceAsset } from '@/lib/media/source-contract';
 import { MAX_PORTFOLIO_CREATIVES } from '@/lib/creatives/planned';
 
-const STORAGE_KEY = 'tra-ai-marketing:landing-creative-draft';
+const STORAGE_KEY = 'tax-marketing-studio-ai-marketing:landing-creative-draft';
 const SCHEMA_VERSION = 2;
 const MIN_VARIATIONS = 1;
 const MAX_VARIATIONS = MAX_PORTFOLIO_CREATIVES;

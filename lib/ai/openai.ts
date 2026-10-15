@@ -96,7 +96,7 @@ const categoryList = CREATIVE_CATEGORIES.map(
 ).join('\n');
 
 const REFERENCE_ANALYSIS_RULES = `
-Analyze an uploaded advertising creative that will be used as CREATIVE INSPIRATION for a Tax Relief Advocates (TRA) ad.
+Analyze an uploaded advertising creative that will be used as CREATIVE INSPIRATION for an ad for the company described in the supplied company context.
 The uploaded image may belong to another advertiser. It is not the brand identity for the output.
 Your job is to understand the creative mechanism, not to copy the ad.
 Describe what is visibly present and separate observations from guesses.
@@ -105,21 +105,21 @@ Classify the ad into exactly one dominant creative category from the fixed list 
 Do not assume the reference ad performed well.
 Do not infer private performance data, customer outcomes, advertiser intent, or facts that are not visible.
 If third-party logos, trademarks, people, exact wording, testimonial claims, statistics, or outcome claims appear, put those concepts in avoid rather than suggesting they be copied.
-The resulting analysis will be used to create an original TRA ad, so preserve only high-level creative mechanisms and structural ideas.
+The resulting analysis will be used to create an original company ad, so preserve only high-level creative mechanisms and structural ideas.
 
 Creative categories:
 ${categoryList}
 `;
 
 const TRA_SOURCE_ANALYSIS_RULES = `
-Analyze an uploaded EXISTING Tax Relief Advocates (TRA) ad as a BRAND AND CONTENT ANCHOR.
-The output will be new TRA ads, but this uploaded TRA ad is NOT the creative layout template.
-Identify visible TRA identity cues, logo or company-name treatment, brand colors, service/message cues, offer or CTA cues, imagery cues, and any other information that helps a new ad remain clearly TRA.
+Analyze an uploaded existing ad for the company described in the supplied company context as a BRAND AND CONTENT ANCHOR.
+The output will be new company ads, but this uploaded company ad is NOT the creative layout template.
+Identify visible company identity cues, logo or company-name treatment, brand colors, service/message cues, offer or CTA cues, imagery cues, and any other information that helps a new ad remain clearly company.
 Describe the current layout for awareness, but do not recommend preserving its composition, hierarchy, spacing, or exact visual structure.
 Classify the current ad into one dominant creative category from the fixed list below, even though later generated ads may use other categories.
 Do not invent facts or claims that are not visible.
 Put unsupported claims, exact wording that should not be repeated, and any uncertain details in avoid or unknowns.
-In preserve, prioritize TRA identity and factual/service cues rather than the current ad's layout.
+In preserve, prioritize company identity and factual/service cues rather than the current ad's layout.
 
 Creative categories:
 ${categoryList}
@@ -223,7 +223,7 @@ export async function analyzeReferenceCreative(
     source,
     context,
     REFERENCE_ANALYSIS_RULES,
-    'Analyze this uploaded reference ad as creative inspiration for an original TRA adaptation.',
+    'Analyze this uploaded reference ad as creative inspiration for an original company adaptation.',
     'tra_reference_analysis'
   );
 }
@@ -243,13 +243,13 @@ export async function analyzeTraSourceCreative(
     source,
     context,
     TRA_SOURCE_ANALYSIS_RULES,
-    'Analyze this existing TRA ad as the TRA brand/content anchor. Do not treat its layout as the template for the new ads.',
+    'Analyze this existing company ad as the company brand/content anchor. Do not treat its layout as the template for the new ads.',
     'tra_source_analysis'
   );
 }
 
 const TRA_COPY_RULES = `
-You are writing Meta ad copy for Tax Relief Advocates (TRA), a tax-relief service business.
+You are writing Meta ad copy for the company described in the supplied company context, a tax-relief service business.
 Use plain, clear consumer language.
 Useful customer themes include stress about IRS notices or tax problems, wanting clarity, peace of mind, responsive help, clear explanations, professionalism, and no-pressure communication.
 The assigned creative category is the PRIMARY messaging direction for each variation. Formats are presentation structures only.
@@ -259,7 +259,7 @@ Treat the user's context as creative direction, not proof of a factual claim unl
 For testimonial/review formats, use customer-centered themes without inventing a quote or named person.
 For statistics/data formats, do not invent a number; use a data-inspired structure without unsupported figures.
 Keep each variation meaningfully different from the others.
-If the analysis is a TRA source anchor, use it for TRA identity and factual/message cues, not as a requirement to repeat that ad's layout or hook.
+If the analysis is a company source anchor, use it for company identity and factual/message cues, not as a requirement to repeat that ad's layout or hook.
 If the analysis is a reference ad, use its concept only as inspiration and never copy third-party wording, logos, trademarks, people, or unsupported claims.
 `;
 
@@ -405,11 +405,11 @@ const buildApprovedTraSourceImagePrompt = (
 ) => {
   const placementSpec = CREATIVE_PLACEMENT_SPECS[placement];
   return `
-Create an ORIGINAL ${placementSpec.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+Create an ORIGINAL ${placementSpec.aspectRatio} static Facebook/Instagram ad for the company described in the supplied company context.
 
 Compose natively for the ${placementSpec.aspectRatio} canvas (${placementSpec.width}x${placementSpec.height}). Recompose the hierarchy, subject, image copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
-The first attached image is a validated, TRA-owned reference. Layout references and video frames are not attached.
+The first attached image is a validated, company-owned reference. Layout references and video frames are not attached.
 ${documentPrompt}
 
 Primary creative format: ${CREATIVE_FORMAT_LABELS[primaryFormat]}
@@ -424,19 +424,19 @@ Use only this planned image copy when rendering text inside the creative:
 ${formatImageCopy(copy)}
 
 Approved-source rules:
-- The first attached TRA image is the only approved human-identity source for this generation call.
-- If the output depicts a person, preserve the visible identity from the attached TRA image. Do not invent, replace, blend, or add another person.
+- The first attached company image is the only approved human-identity source for this generation call.
+- If the output depicts a person, preserve the visible identity from the attached company image. Do not invent, replace, blend, or add another person.
 - Do not recreate the attached image verbatim or depend on its old layout unless the text direction explicitly asks for a high-level structural cue.
-- Make the result clearly original and specific to TRA.
+- Make the result clearly original and specific to company.
 ${formatCreativeSafeZoneRules(placement)}
 ${logoGeometry ? formatCreativeLogoReservation(logoGeometry) : ''}
-TRA guardrails:
+company guardrails:
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
 - Do not imply universal tax-debt results.
 - Keep the design credible, consumer-friendly, and readable on a phone.
 - Strong visual hierarchy. Avoid tiny text and clutter.
-- The only company/brand name that may appear is Tax Relief Advocates or TRA.
+- The only company/brand name that may appear is the company explicitly identified in the supplied company context; if none is identified, keep the ad unbranded and do not invent an identity, logo, contact detail or offer.
 `;
 };
 

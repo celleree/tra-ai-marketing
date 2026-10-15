@@ -209,7 +209,7 @@ const brandOneCreative = async (
   );
 
   try {
-    const logoSource = await fetchDrawableImage(safeLogoUrl, 'TRA logo');
+    const logoSource = await fetchDrawableImage(safeLogoUrl, 'Company logo');
 
     try {
       const canvas = document.createElement('canvas');

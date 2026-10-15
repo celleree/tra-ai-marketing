@@ -27,8 +27,8 @@ const videoFrameSelection = {
 const expectGroundedContext = (value: unknown) => {
   expect(value).toEqual(expect.stringContaining('USER CREATIVE DIRECTION:'));
   expect(value).toEqual(expect.stringContaining(baseRequest.context));
-  expect(value).toEqual(expect.stringContaining('APPROVED TRA COMPANY CONTEXT'));
-  expect(value).toEqual(expect.stringContaining('Free/no-cost tax-debt consultation'));
+  expect(value).toEqual(expect.stringContaining('APPROVED COMPANY CONTEXT'));
+  expect(value).not.toContain('Free/no-cost tax-debt consultation');
 };
 
 describe('multi-source creative generation request', () => {
@@ -224,7 +224,7 @@ describe('multi-source creative generation request', () => {
     expect(result.data.context).toContain('Runtime approved TRA summary.');
     expect(result.data.context).toContain('Runtime approved claim.');
     expect(result.data.context).toContain('Runtime approved disclaimer.');
-    expect(result.data.context).toContain('Free/no-cost tax-debt consultation');
+    expect(result.data.context).not.toContain('Free/no-cost tax-debt consultation');
     expect(result.data.context).not.toContain('Unrecognized field must be dropped.');
   });
 

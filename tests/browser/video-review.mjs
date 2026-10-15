@@ -77,7 +77,7 @@ async function scenario(name, options, run) {
     sessionStorage.setItem('video-review-fixture-seeded', 'true');
     if (id) localStorage.setItem('tra-video-review-draft-v1', id);
     localStorage.setItem('tra-create-video-ids-v1', JSON.stringify(inventory));
-    localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', knowledgeBase: {}, guardrails: {}, ...(hasProfile ? profile : {}),
+    localStorage.setItem('tax-marketing-studio:company-profile:v1', JSON.stringify({ websiteUrl: '', knowledgeBase: {}, guardrails: {}, ...(hasProfile ? profile : {}),
       brandGuidelines: noLogo ? {} : { logo: '/api/media/files/media_77777777777777777777777777777777.png' } }));
   }, { id: options.noSavedReview ? null : id, inventory: options.inventory ?? [mediaId], profile, hasProfile: options.profile, noLogo: options.noLogo });
   await page.route('**/api/**', async route => {
@@ -675,7 +675,7 @@ try {
       await ready(page); await page.waitForFunction(() => document.querySelectorAll('[data-frame-id] img').length >= 51);
       assert.deepEqual(previewBatches.map(batch => batch.length), [24, 24, 2]);
       const before = structuredClone(response());
-      await page.evaluate(() => localStorage.setItem('tra-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
+      await page.evaluate(() => localStorage.setItem('tax-marketing-studio-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
       await page.getByRole('region', { name: 'Saved portfolio progress' }).waitFor();
       await page.getByRole('button', { name: portfolioState === 'PENDING' ? 'Resume generation' : 'Retry creative 1', exact: true }).click();
       await page.getByText('Generation complete.').waitFor(); assert.deepEqual(response(), before); assert.equal(saves.length, 0);
@@ -790,7 +790,7 @@ try {
     assert.equal(calls.filter(([path, method]) => path === '/api/video/review-selection' && method === 'GET').length, loads + 1);
   });
   for (const portfolioState of ['PENDING', 'RETRY_REQUIRED', 'SAVED']) await scenario(`Saved portfolio ${portfolioState}`, { portfolioState }, async ({ page, calls }) => {
-    await page.evaluate(() => localStorage.setItem('tra-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
+    await page.evaluate(() => localStorage.setItem('tax-marketing-studio-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
     await page.getByRole('region', { name: 'Saved portfolio progress' }).waitFor();
     assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 0);
     if (portfolioState === 'PENDING') { await page.getByRole('button', { name: 'Resume generation' }).click(); await page.getByText('Generation complete.').waitFor(); }

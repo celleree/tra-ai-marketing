@@ -56,7 +56,7 @@ export const generatePromptOnlyCreativeImage = async (args: {
   const document = await prepareTaxDocumentReference(args.taxDocumentReference);
   const logoDirection = args.logoGeometry ? formatCreativeLogoReservation(args.logoGeometry) : '';
   const prompt = `
-Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for Tax Relief Advocates (TRA).
+Create an ORIGINAL ${placement.aspectRatio} static Facebook/Instagram ad for the company described in the supplied company context.
 
 Compose natively for the ${placement.aspectRatio} canvas (${placement.width}x${placement.height}). Recompose the hierarchy, subject, image copy, CTA, and logo space for this ratio; do not crop or stretch a square design.
 
@@ -68,15 +68,15 @@ ${formatImageCopy(args.copy)}
 
 ${logoDirection}
 ${formatCreativeSafeZoneRules(args.placement)}
-TRA guardrails:
+company guardrails:
 - ${document ? 'Use the document exemplar only for the planned paperwork.' : 'This request has no attached reference image.'} Follow the selected blueprint in the one-ad brief when present; otherwise create the planned original layout.
-- Do not depict a person, face, spokesperson, or human figure. No approved TRA human identity is attached to this image-generation call, so use a non-human concept.
+- Do not depict a person, face, spokesperson, or human figure. No approved company human identity is attached to this image-generation call, so use a non-human concept.
 - Do not invent a testimonial, review quote, statistic, dollar amount, customer outcome, expert endorsement, government affiliation, competitor claim, or guarantee.
 - If the assigned format normally relies on evidence that is not supplied, preserve the format concept without inventing the evidence.
 - Do not imply universal tax-debt results.
 - Keep the design credible, consumer-friendly, and readable on a phone.
 - Use strong visual hierarchy and avoid tiny text or clutter.
-- The only company or brand name that may appear is Tax Relief Advocates or TRA.
+- The only company or brand name that may appear is the company explicitly identified in the supplied company context; if none is identified, keep the ad unbranded and do not invent an identity, logo, contact detail or offer.
 ${document?.prompt ?? ''}
 `;
 

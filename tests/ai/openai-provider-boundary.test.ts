@@ -132,7 +132,7 @@ describe('approved TRA final image-provider boundary', () => {
     expect(images).toHaveLength(taxDocumentReference === 'none' ? 1 : 2);
     if (taxDocumentReference !== 'none') {
       expect((images[1] as File).name).toBe('tax-document-irs-notice-v1.jpg');
-      expect(result.prompt).toContain('NOT a TRA human source');
+      expect(result.prompt).toContain('NOT a company human source');
     } else expect(result.prompt).not.toContain('DOCUMENT-ONLY REFERENCE');
     expect(images[0]).toBeInstanceOf(File);
     const attached = images[0] as File;

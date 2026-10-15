@@ -20,12 +20,13 @@ const nodes = (tree: unknown): ReactElement<Record<string, unknown>>[] => !tree 
   : 'props' in tree ? [tree as ReactElement<Record<string, unknown>>, ...nodes((tree as ReactElement<{ children?: unknown }>).props.children)] : [];
 beforeEach(() => { vi.clearAllMocks(); mocks.settled = true; mocks.saved = null; mocks.sources = []; mocks.arrayState = 0; mocks.logoId = `media_${'d'.repeat(32)}`; mocks.stateUpdates = []; });
 describe('Create generation review-save gate', () => {
-  it('blocks a missing origin-local logo before submitting a paid generation job', async () => {
+  it('allows new company work without a logo and sends no invented logo identity', async () => {
     mocks.logoId = '';
     const tree = nodes(CreativeGenerator());
     await (tree.find(node => node.type === CreativeComposer)!.props.onSubmit as () => Promise<void>)();
-    expect(mocks.start).not.toHaveBeenCalled();
-    expect(mocks.stateUpdates).toContain('The approved TRA logo is missing for this site. Restore the original logo in Company > Brand Guidelines before generating.');
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(mocks.start.mock.calls[0][0]).not.toHaveProperty('brandLogoMediaId');
+    expect(mocks.start.mock.calls[0][0].companySourceScope).toEqual({ version: 1, referenceIds: [] });
   });
   it('submits the video, explicit layout, saved frame review and exact logo identity together', async () => {
     const videoId = `media_${'b'.repeat(32)}`, layoutId = `media_${'c'.repeat(32)}`;

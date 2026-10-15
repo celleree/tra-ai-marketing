@@ -6,7 +6,7 @@ import { createPortfolioSubmitter, PortfolioSignInRequiredError, requestPortfoli
 import { workspaceSignInUrl } from '@/lib/auth/return-path';
 import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
-const LAST_PORTFOLIO = 'tra-creative-portfolio-v1';
+const LAST_PORTFOLIO = 'tax-marketing-studio-creative-portfolio-v1';
 export function useCreativePortfolio() {
   const [response, setResponse] = useState<PortfolioResponse | null>(null);
   const [running, setRunning] = useState(false), [stopped, setStopped] = useState(false), [error, setError] = useState('');

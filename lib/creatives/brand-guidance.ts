@@ -7,7 +7,7 @@ import {
   type BrandFontAsset,
 } from '@/lib/company/brand-fonts';
 
-const STORAGE_KEY = 'tra-company-profile-v2';
+const STORAGE_KEY = 'tax-marketing-studio:company-profile:v1';
 const STORED_MEDIA_URL = /\/api\/media\/files\/(media_[a-f0-9]{32})\.(?:png|jpg|webp)(?:\?.*)?$/;
 
 export interface StoredBrandGuidance {
@@ -41,10 +41,10 @@ export function readStoredBrandGuidance({ omitLogo = false }: { omitLogo?: boole
         ? parsed.brandGuidelines.logo.trim()
         : '';
     if (!omitLogo && parsed.brandGuidelines?.logo != null && typeof parsed.brandGuidelines.logo !== 'string') {
-      throw new Error('The saved TRA logo is not a usable uploaded asset. Save the logo in Company > Brand Guidelines before generating.');
+      throw new Error('The saved Company logo is not a usable uploaded asset. Save the logo in Company > Brand Guidelines before generating.');
     }
     const logoMatch = logoUrl ? STORED_MEDIA_URL.exec(logoUrl) : null;
-    if (logoUrl && !logoMatch) throw new Error('The saved TRA logo is not a usable uploaded asset. Save the logo in Company > Brand Guidelines before generating.');
+    if (logoUrl && !logoMatch) throw new Error('The saved Company logo is not a usable uploaded asset. Save the logo in Company > Brand Guidelines before generating.');
     const colors = parseBrandColors(
       typeof parsed.brandGuidelines?.brandColors === 'string'
         ? parsed.brandGuidelines.brandColors
@@ -68,7 +68,7 @@ export function readStoredBrandGuidance({ omitLogo = false }: { omitLogo?: boole
       }),
     };
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('The saved TRA logo')) throw error;
+    if (error instanceof Error && error.message.startsWith('The saved Company logo')) throw error;
     throw new Error('Saved Company brand settings could not be read. Open Company and save them before generating.');
   }
 }

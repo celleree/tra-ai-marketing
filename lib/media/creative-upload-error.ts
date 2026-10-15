@@ -16,7 +16,7 @@ export class CreativeUploadError extends Error {
       reason = stage === 'transfer'
         ? 'The browser could not complete the image transfer. Check the connection and storage access before retrying.'
         : 'The browser could not reach the service. Check the connection before retrying.';
-      if (stage === 'save') reason += ' Check TRA creatives first; the save may have completed.';
+      if (stage === 'save') reason += ' Check company creatives first; the save may have completed.';
     } else if (failure === 'http') {
       reason = `HTTP ${status}. `;
       if (status === 401 && stage !== 'transfer') reason += 'Sign in again, then retry the file.';
@@ -25,16 +25,16 @@ export class CreativeUploadError extends Error {
         : 'Operator access was denied. Check your access before retrying.';
       else if (status === 413) reason += 'The file exceeds the upload limit. Choose a smaller image.';
       else if (status === 404 && stage === 'confirm') reason += 'The uploaded image was not found. Retry the file.';
-      else if (status === 409 && stage === 'save') reason += 'The save conflicted. Check TRA creatives before retrying.';
+      else if (status === 409 && stage === 'save') reason += 'The save conflicted. Check company creatives before retrying.';
       else if (status === 400) reason += stage === 'save'
         ? 'The request was rejected. Check the image and required copy before retrying.'
         : 'The request was rejected. Check the image file before retrying.';
       else reason += 'The service could not complete this step. Retry the file when it is available.';
       if (stage === 'save' && status !== undefined && status >= 500) {
-        reason += ' Check TRA creatives first; the save may have completed.';
+        reason += ' Check company creatives first; the save may have completed.';
       }
     } else if (stage === 'save') {
-      reason += ' Check TRA creatives first; the save may have completed.';
+      reason += ' Check company creatives first; the save may have completed.';
     }
     super(`${labels[stage]}: ${reason}`);
     this.name = 'CreativeUploadError';

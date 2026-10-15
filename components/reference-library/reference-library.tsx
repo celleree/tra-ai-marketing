@@ -290,8 +290,13 @@ export function ReferenceLibrary() {
     const nextIds = currentIds.includes(id)
       ? currentIds.filter((selectedId) => selectedId !== id)
       : [...currentIds, id];
-    setSelectedCompanyReferenceIds(nextIds);
-    setCompanyReferenceIds(readSelectedCompanyReferenceIds());
+    try {
+      setSelectedCompanyReferenceIds(nextIds);
+      setCompanyReferenceIds(readSelectedCompanyReferenceIds());
+      setError('');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not save company reference selection.');
+    }
   };
 
   const toggleSelection = (id: string) => {
