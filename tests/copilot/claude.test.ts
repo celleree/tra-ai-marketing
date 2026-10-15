@@ -25,6 +25,11 @@ describe('bounded Claude creative copilot adapter (offline)', () => {
     await expect(requestClaudeCopilot(context(), options)).resolves.toHaveProperty('action', 'DO_NOTHING');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it('bounds provider envelope bytes before JSON parsing', async () => {
+    const { fetchMock, options } = setup({ ...envelope(), padding: 'x'.repeat(128 * 1024) });
+    await expect(requestClaudeCopilot(context(), options)).rejects.toMatchObject({ code: 'provider_error' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it('sends one capped Messages request with supplied context, no tools and authoritative model/context', async () => {
     const { fetchMock, options } = setup(); const supplied = context();
     const result = await requestClaudeCopilot(supplied, options);
