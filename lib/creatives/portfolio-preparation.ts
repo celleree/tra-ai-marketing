@@ -8,7 +8,7 @@ import { selectBestReferenceCreatives, type ReferenceSelectionCandidate, type Se
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
-import { requireReferenceLibrarySelection, selectRequiredLibraryReferences } from '@/lib/creatives/reference-library-mode';
+import { requireReferenceLibrarySelection, selectRequiredLibraryReferences, withRequiredLibrarySource } from '@/lib/creatives/reference-library-mode';
 import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import type { PreparedCreativeGeneration } from '@/lib/creatives/prepare-generation';
 import { formatLayoutBlueprintForPlanning, LAYOUT_BLUEPRINT_SCHEMA_VERSION, type LayoutBlueprint } from '@/lib/layouts/blueprint';
@@ -239,7 +239,8 @@ export async function advancePortfolioPreparation(
     return { state };
   }
 
-  const enrichedCatalog = isPreviewAcceptanceOperation() ? null : await advanceReferenceAngles(state.referenceCatalog, storage, onProviderOperationStart);
+  const enrichedCatalog = isPreviewAcceptanceOperation() ? null : await withRequiredLibrarySource(data.useReferenceLibrary,
+    () => advanceReferenceAngles(state.referenceCatalog!, storage, onProviderOperationStart));
   if (enrichedCatalog) {
     state.referenceCatalog = enrichedCatalog;
     return { state };

@@ -1,8 +1,10 @@
+import { prepareCreativeGeneration } from '@/lib/creatives/prepare-generation';
+import { ReferenceSourceUnavailableError } from '@/lib/references/planning';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { requestCreativeBatch } from '@/lib/ai/creative-planner';
 import { advanceCreativePortfolio } from '@/lib/creatives/portfolio-execution';
-import { newCreativePortfolio } from '@/lib/creatives/portfolio-job';
+import { retryPortfolioWork, newCreativePortfolio } from '@/lib/creatives/portfolio-job';
 import { MemoryPortfolioStorage, portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
 import { referenceCandidate } from '../fixtures/reference-catalog';
 const mocks = vi.hoisted(() => ({ library: vi.fn(), image: vi.fn(), select: vi.fn(), humans: vi.fn() }));
@@ -66,5 +68,51 @@ it('uses the safe class for the actual pinned-layout conflict before any provide
     analysis: { summary: 'TRA', visibleText: [], visualStructure: '', hookOrAngle: '', offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'customer-problems' },
     hasApprovedHumanSource: false, referenceCatalog: [{ ...referenceCandidate('7'), priority: 'library' }],
     requiredLayoutReferenceIds: [referenceCandidate('4').referenceId] })).rejects.toBeInstanceOf(BatchControlsError);
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+const angleReference = () => {
+  const reference = { ...referenceCandidate('7'), priority: 'library' as const };
+  const item = { id: reference.referenceId, fileName: 'library.png', originalName: 'Library', mimeType: 'image/png' as const, size: 10,
+    url: '/api/media/files/library.png', addedAt: '2026-10-15T00:00:00Z', referenceType: 'layout' as const,
+    angle: 'educational' as const, angleSource: 'manual' as const };
+  return { reference, item, selected: { item, imageUrl: 'http://localhost/library.png', selectionReason: 'Layout match' } };
+};
+it.each(['missing', 'changed', 'unknown-storage', 'legacy-missing'])('handles selected reference %s at saved angle enrichment', async reason => {
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  const fetchMock = vi.fn(() => { throw new Error('NETWORK FORBIDDEN'); }); vi.stubGlobal('fetch', fetchMock);
+  const { reference, item, selected } = angleReference();
+  const storage = new MemoryPortfolioStorage();
+  const required = reason !== 'legacy-missing';
+  const job = newCreativePortfolio({ ...portfolioRequest(), peoplePercent: 0, ...(required ? { useReferenceLibrary: true } : {}) });
+  job.planning = { phase: 'INITIAL_PLAN', preparation: { quotaReserved: true, sourceAnalysis: { version: 1, entries: [] },
+    analysis: { summary: 'TRA', visibleText: [], visualStructure: '', hookOrAngle: '', offerOrCta: '', styleNotes: '', preserve: [], avoid: [], unknowns: [], dominantCategory: 'customer-problems' },
+    selectedReferences: [selected], referenceCatalog: [reference] } };
+  mocks.library.mockResolvedValue([item]);
+  if (reason === 'unknown-storage') mocks.image.mockRejectedValue(new Error(secret));
+  else mocks.image.mockResolvedValue(reason === 'changed' ? { buffer: Buffer.from('changed') } : null);
+  await storage.write(`creative-portfolios/v1/${job.id}.json`, Buffer.from(JSON.stringify(job)), null);
+  const result = await advanceCreativePortfolio(job.id, 'offline-controls', 'http://localhost', storage);
+  const actionable = required && reason !== 'unknown-storage';
+  expect(result.status).toBe(actionable ? 409 : 500); expect(result.job.lease).toBeNull();
+  expect(JSON.stringify(result)).not.toContain(secret);
+  if (actionable) {
+    expect(result.error).toMatch(/Restore the exact reference.*Retry planning.*new portfolio/);
+    expect(result.job.planningError).toBe(result.error);
+    expect((await advanceCreativePortfolio(job.id, 'offline-controls', 'http://localhost', storage)).job).toEqual(result.job);
+    const retried = retryPortfolioWork(result.job, null);
+    expect(retried.planningError).toBeUndefined(); expect(retried.request).toEqual(job.request);
+    expect(retried.planning).toEqual(job.planning);
+  } else {
+    expect(result.error).toBe('Portfolio work could not be completed. Review its status before retrying.');
+    expect(result.job.planningError).toBeUndefined();
+  }
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+it.each([true, undefined])('maps deterministic missing library input in direct preparation only for explicit On: %s', async enabled => {
+  const fetchMock = vi.fn(() => { throw new Error('NETWORK FORBIDDEN'); }); vi.stubGlobal('fetch', fetchMock);
+  const { item, selected } = angleReference(); mocks.library.mockResolvedValue([item]); mocks.select.mockResolvedValue([selected]);
+  await expect(prepareCreativeGeneration({ ...portfolioRequest(), peoplePercent: 0, ...(enabled ? { useReferenceLibrary: true } : {}) }, 'http://localhost'))
+    .rejects.toBeInstanceOf(enabled ? BatchControlsError : ReferenceSourceUnavailableError);
   expect(fetchMock).not.toHaveBeenCalled();
 });

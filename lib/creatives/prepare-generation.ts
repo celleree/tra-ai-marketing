@@ -1,4 +1,4 @@
-import { requireReferenceLibrarySelection, selectRequiredLibraryReferences } from '@/lib/creatives/reference-library-mode';
+import { requireReferenceLibrarySelection, selectRequiredLibraryReferences, withRequiredLibrarySource } from '@/lib/creatives/reference-library-mode';
 import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import type { CreativeRenderContext } from '@/lib/creatives/render-planned';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -122,14 +122,14 @@ export async function prepareCreativeGeneration(
     () => selectRequiredLibraryReferences(data.useReferenceLibrary, () => selectBestReferenceCreatives(selectionArgs)));
   requireReferenceLibrarySelection(data.useReferenceLibrary, selectedReferences.length);
   const uploadedCatalog = composedSourceCatalog(sourceAnalysis);
-  let referenceCatalog = [...uploadedCatalog, ...await buildReferencePlanningCatalog({ storage,
+  let referenceCatalog = [...uploadedCatalog, ...await withRequiredLibrarySource(data.useReferenceLibrary, () => buildReferencePlanningCatalog({ storage,
     selections: selectedReferences.filter(selection => !uploadedCatalog.some(item => item.referenceId === selection.item.id)),
-  })];
+  }))];
   let angleStep = 0;
   while (true) {
     const catalog = referenceCatalog;
     const enriched = await checkpointPaidPreparation(`reference-angle:${angleStep++}`, catalog,
-      () => advanceReferenceAngles(catalog, storage, () => {}));
+      () => withRequiredLibrarySource(data.useReferenceLibrary, () => advanceReferenceAngles(catalog, storage, () => {})));
     if (!enriched) break;
     referenceCatalog = enriched;
   }
