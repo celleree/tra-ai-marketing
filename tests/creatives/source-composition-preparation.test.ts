@@ -357,7 +357,7 @@ describe('reference library On/Off preparation', () => {
     mocks.library.mockResolvedValue([libraryItem()]);
     await expect(prepare(durable, true)).rejects.toThrow('no eligible layout');
     mocks.select.mockRejectedValueOnce(new Error('Library selection unavailable'));
-    await expect(prepare(durable, true)).rejects.toThrow('Library selection unavailable');
+    await expect(prepare(durable, true)).rejects.toThrow('Review saved progress and provider status before explicit Retry');
     expect(outbound).toHaveLength(0);
   });
 });

@@ -1,3 +1,4 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { assertGenerationAvailable, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import { directGenerationExecution } from '@/lib/creatives/direct-generation-execution';
 export { generatePromptOnlyCreativeImage } from '@/lib/ai/prompt-only-generation';
@@ -69,7 +70,7 @@ export async function POST(request: Request) {
               failedIndexes.push(item.index);
               emit('error', {
                 index: item.index,
-                error: error instanceof GeneratedImageValidationError
+                error: error instanceof BatchControlsError || error instanceof GeneratedImageValidationError
                   ? error.message
                   : `Creative ${item.index} could not be completed.`,
               });
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
         } catch (error) {
           console.error('Creative generation stream failed', error);
           emit('error', {
-            error: 'Creative generation was interrupted before completion.',
+            error: error instanceof BatchControlsError ? error.message : 'Creative generation was interrupted before completion.',
           });
         } finally {
           controller.close();
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status, headers: { 'Cache-Control': 'private, no-store',
         ...(status === 202 ? { 'Retry-After': '2' } : {}) } });
     }
-    if (error instanceof CreativeGenerationPreparationError || error instanceof CreativeSourceHydrationError || error instanceof TraVideoProcessingError) {
+    if (error instanceof BatchControlsError || error instanceof CreativeGenerationPreparationError || error instanceof CreativeSourceHydrationError || error instanceof TraVideoProcessingError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     console.error('Creative generation failed', error);

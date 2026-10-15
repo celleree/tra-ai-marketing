@@ -85,7 +85,7 @@ export function proposeCaseAmendment(job: CreativePortfolioJob, pairs: VideoCase
   return { amendment, attributionNotice: CASE_ATTRIBUTION_NOTICE,
     creatives: job.slots.map(slot => effectiveCaseConcept({ ...job, videoCaseAmendment: amendment }, slot.index, false)),
     providerOperations: { transcription: 0, planning: 0, audit: 0, maximumFrameAssessments: pairs.length * 2,
-      maximumPrimaryImages: pairs.length, fallbackImages: 0 } };
+      maximumPrimaryImages: job.slots.length, fallbackImages: 0 } };
 }
 
 /** Derive an overlay while leaving the original paid plan and layout/source snapshots intact. */

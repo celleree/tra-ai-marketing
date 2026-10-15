@@ -1,3 +1,4 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newCreativePortfolio, type CreativePortfolioJob } from '@/lib/creatives/portfolio-job';
 import { portfolioRequest, portfolioSnapshot } from '../fixtures/creative-portfolio';
@@ -219,4 +220,12 @@ describe('resumable portfolio API', () => {
     expect((await PATCH(request(body))).status).toBe(400);
     expect(mocks.advance).not.toHaveBeenCalled(); expect(mocks.update).not.toHaveBeenCalled();
   });
+});
+
+it.each([false, true])('maps only authored batch-control failures at the portfolio API catch (safe=%s)', async safe => {
+  const message = 'Start a new portfolio with Use reference library Off.';
+  mocks.advance.mockRejectedValueOnce(safe ? new BatchControlsError(message) : new Error('PRIVATE_PROVIDER_SECRET'));
+  const response = await PATCH(request({ id: job.id, action: 'advance' }));
+  expect(response.status).toBe(safe ? 409 : 500);
+  expect((await response.json()).error).toBe(safe ? message : 'Creative portfolio request failed. Reload its saved progress before continuing.');
 });

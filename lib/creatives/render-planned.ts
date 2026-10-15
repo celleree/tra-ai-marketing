@@ -1,3 +1,4 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { assertReferenceLibraryConcept } from '@/lib/creatives/reference-library-mode';
 import { listReferenceLibrary } from '@/lib/references/storage';
 import { createHash, randomUUID } from 'crypto';
@@ -96,7 +97,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
     const stored = available.some(reference => reference.id === chosen.referenceId && reference.referenceType === 'layout')
       ? await storage.readImageById(chosen.referenceId) : null;
     if (!stored || sha256(stored.buffer) !== chosen.sourceSha256) {
-      throw new Error('The selected library layout is unavailable or changed. Start a new portfolio or restore the reference; no prompt-only fallback was used.');
+      throw new BatchControlsError('The selected library layout is unavailable or changed. Restore the exact reference and explicitly Retry this creative, or start a new portfolio with Use reference library Off; no prompt-only fallback was used.');
     }
   }
   const copyMode = classifyPlannedCopy(item);

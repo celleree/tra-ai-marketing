@@ -1,4 +1,4 @@
-import { requireReferenceLibrarySelection } from '@/lib/creatives/reference-library-mode';
+import { requireReferenceLibrarySelection, selectRequiredLibraryReferences } from '@/lib/creatives/reference-library-mode';
 import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import type { CreativeRenderContext } from '@/lib/creatives/render-planned';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -119,7 +119,7 @@ export async function prepareCreativeGeneration(
     userContext: data.context, traSummary: analysis.summary, traPreserve: analysis.preserve,
   };
   if (requestedReferenceCount > 0) selectedReferences = await checkpointPaidPreparation('reference-shortlist', selectionArgs,
-    () => selectBestReferenceCreatives(selectionArgs));
+    () => selectRequiredLibraryReferences(data.useReferenceLibrary, () => selectBestReferenceCreatives(selectionArgs)));
   requireReferenceLibrarySelection(data.useReferenceLibrary, selectedReferences.length);
   const uploadedCatalog = composedSourceCatalog(sourceAnalysis);
   let referenceCatalog = [...uploadedCatalog, ...await buildReferencePlanningCatalog({ storage,

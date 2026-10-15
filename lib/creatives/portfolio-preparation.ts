@@ -1,3 +1,4 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { withCuratedReferenceMetadata, advanceReferenceAngles } from '@/lib/references/planning.server';
 import { analyzeReferenceCreative, analyzeTraSourceCreative, type CreativeReferenceAnalysis } from '@/lib/ai/openai';
 import { requestedVideoCases } from '@/lib/creatives/requested-video-cases';
@@ -7,7 +8,7 @@ import { selectBestReferenceCreatives, type ReferenceSelectionCandidate, type Se
 import { CREATIVE_CATEGORY_LABELS } from '@/lib/creative-categories';
 import type { ValidGenerateCreativeRequest } from '@/lib/creatives/generate-request';
 import type { CreativeGenerationProvenance } from '@/lib/creatives/generation-provenance';
-import { requireReferenceLibrarySelection } from '@/lib/creatives/reference-library-mode';
+import { requireReferenceLibrarySelection, selectRequiredLibraryReferences } from '@/lib/creatives/reference-library-mode';
 import { hydrateGenerationSources, CreativeGenerationPreparationError } from '@/lib/creatives/generation-sources';
 import type { PreparedCreativeGeneration } from '@/lib/creatives/prepare-generation';
 import { formatLayoutBlueprintForPlanning, LAYOUT_BLUEPRINT_SCHEMA_VERSION, type LayoutBlueprint } from '@/lib/layouts/blueprint';
@@ -195,13 +196,14 @@ export async function advancePortfolioPreparation(
     const requestedReferenceCount = Math.min(8, data.variationCount, library.length);
     if (requestedReferenceCount > 0) {
       onProviderOperationStart();
-      state.selectedReferences = await selectBestReferenceCreatives({
+      const selectionArgs = {
         candidates: buildReferenceCandidates(library, requestUrl),
         requestedCount: requestedReferenceCount,
         userContext: data.context,
         traSummary: state.analysis.summary,
         traPreserve: state.analysis.preserve,
-      });
+      };
+      state.selectedReferences = await selectRequiredLibraryReferences(data.useReferenceLibrary, () => selectBestReferenceCreatives(selectionArgs));
       return { state };
     }
     state.selectedReferences = [];
@@ -209,7 +211,7 @@ export async function advancePortfolioPreparation(
 
   requireReferenceLibrarySelection(data.useReferenceLibrary, state.selectedReferences.length);
   if (data.useReferenceLibrary === false && (state.selectedReferences.length || state.referenceCatalog?.some(item => item.priority === 'library'))) {
-    throw new Error('Saved preparation conflicts with Use reference library Off. Start a new portfolio.');
+    throw new BatchControlsError('Saved preparation conflicts with Use reference library Off. Start a new portfolio.');
   }
   if (!state.referenceCatalog) {
     state.referenceCatalog = source && generationSourceAsset && state.sourceLayout
@@ -222,7 +224,10 @@ export async function advancePortfolioPreparation(
   );
   if (pendingReference) {
     const stored = await storage.readImageById(pendingReference.item.id);
-    if (!stored) throw new Error(`Reference ${pendingReference.item.id} is unavailable.`);
+    if (!stored) {
+      if (data.useReferenceLibrary) throw new BatchControlsError('The selected library layout is unavailable. Restore it and explicitly Retry, or start a new portfolio with Use reference library Off.');
+      throw new Error(`Reference ${pendingReference.item.id} is unavailable.`);
+    }
     onProviderOperationStart();
     const layout = await getOrAnalyzeLayoutBlueprint(stored);
     state.referenceCatalog.push(toCatalogItem(

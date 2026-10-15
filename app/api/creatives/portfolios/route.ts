@@ -1,3 +1,4 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { recoverBoundCaseCrop, boundCaseCropRecoverySlot, reviseBoundCaseCrop, assessRevisedBoundCaseCrop, authorizeRevisedBoundCaseImage, validBoundPortraitCropRequest, BoundPortraitRecoveryError } from '@/lib/creatives/portfolio-bound-case-recovery';
 import { getOperatorAccess } from '@/lib/auth/server-access';
 import { operatorAccessDeniedResponse } from '@/lib/auth/require-operator';
@@ -38,6 +39,7 @@ const result = async (saved: CreativePortfolioJob, status = 200, error?: string,
     status, retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {});
 };
 const failure = (error: unknown) => {
+  if (error instanceof BatchControlsError) return json({ error: error.message }, error.status);
   if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body.' }, 400);
   if (error instanceof SubmissionConflictError) return json({ error: error.message }, 409);
   if (error instanceof ReviewSelectionError) return json({ error: error.message }, error.status);

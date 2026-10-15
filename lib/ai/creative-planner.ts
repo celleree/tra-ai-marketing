@@ -1,3 +1,4 @@
+import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { assertReferenceLibraryConcept, requireReferenceLibrarySelection } from '@/lib/creatives/reference-library-mode';
 import { assertPeopleMix, peopleMix } from '@/lib/creatives/people-mix';
 import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
@@ -274,7 +275,7 @@ export async function requestCreativeBatch(
   const draftVideoSourceCatalog = requiredCases ?? projectDraftVideoSourcePassages(sourceAnalysis, args.operatorSelectedSourceGuidance, args.primaryVideoMediaId ?? primaryVideo?.source.mediaId);
   const requiredHumanCount = args.peoplePercent === undefined ? args.count : peopleMix(args.count, args.peoplePercent).withPeople;
   if (requiredCases && requiredCases.length > requiredHumanCount) {
-    throw new Error('The selected video cases exceed the ads with people. Increase Ads with people or explicitly remove selected cases; no person or case will be substituted.');
+    throw new BatchControlsError('The selected video cases exceed the ads with people. Start a new portfolio with more Ads with people or explicitly fewer selected cases; no person or case will be substituted.');
   }
   const requiredCaseFor = (index: number) => index <= requiredHumanCount ? requiredCases?.[(index - 1) % requiredCases.length] : undefined;
   const videoHasHuman = primaryVideo?.hasHuman ?? args.primaryVideoHasHuman;
@@ -287,14 +288,14 @@ export async function requestCreativeBatch(
   const mix = args.peoplePercent === undefined ? undefined : peopleMix(args.count, args.peoplePercent);
   if (mix?.withPeople && ((!args.hasApprovedHumanSource && !args.approvedHumanOptions?.length)
     || ((primaryVideo || args.primaryVideoMediaId) && !videoHasHuman && !args.requireSelectedVideoFrames))) {
-    throw new Error('Ads with people requires eligible approved human evidence. No plan or images were generated. Add an eligible TRA human source or set Ads with people to 0%.');
+    throw new BatchControlsError('Ads with people requires eligible approved human evidence. No plan or images were generated. Add an eligible TRA human source and start a new portfolio, or start a new portfolio and set Ads with people to 0%.');
   }
   const libraryIds = args.referenceCatalog?.filter(item => item.priority === 'library').map(item => item.referenceId) ?? [];
   requireReferenceLibrarySelection(args.useReferenceLibrary, libraryIds.length);
-  if (args.useReferenceLibrary === false && libraryIds.length) throw new Error('Use reference library is Off; remove library candidates before planning.');
+  if (args.useReferenceLibrary === false && libraryIds.length) throw new BatchControlsError('Use reference library is Off; remove library candidates before planning.');
   if (args.useReferenceLibrary && args.requiredLayoutReferenceIds?.length
     && !libraryIds.some(id => args.requiredLayoutReferenceIds!.includes(id))) {
-    throw new Error('The explicitly supplied layout conflicts with Use reference library On. Remove that uploaded layout or turn the control Off; the selected source will not be silently replaced.');
+    throw new BatchControlsError('The explicitly supplied layout conflicts with Use reference library On. Start a new portfolio without that uploaded layout or with Use reference library Off; the selected source will not be silently replaced.');
   }
   const model = repairModel ?? (process.env.OPENAI_TEXT_MODEL || 'gpt-6.1-sol');
   if (args.approvedHumanOptions && (args.approvedHumanOptions.some(option => !isApprovedHumanId(option.id))
@@ -460,7 +461,7 @@ export async function requestCreativeBatch(
       draftVideoSourceSelection: { passageId: required.passageId, imageField: 'shortSupport' } } : value;
     if (requiredCases && args.peoplePercent !== undefined && expectedIndexes[index] > requiredHumanCount
       && isRecord(selected) && selected.draftVideoSourceSelection !== null) {
-      throw new Error('A non-human ad cannot take a selected person case. Preserve the selected case/person assignment.');
+      throw new BatchControlsError('A non-human ad cannot take a selected person case. Preserve the selected case/person assignment.');
     }
     const concept = parseConcept(selected, expectedIndexes[index], args.hasApprovedHumanSource, Boolean(args.hasBrandLogo), args.logoPlacement, args.referenceCatalog, args.approvedHumanOptions, proofCatalog, draftVideoSourceCatalog, Boolean(required));
     if (required && concept) {
