@@ -19,13 +19,16 @@ import { ProofLibrary } from '@/components/proof-library/proof-library';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
-import { consumeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
+import { consumeLandingCreativeDraft, pauseLandingCreativeDraft } from '@/lib/creatives/landing-draft';
 import type {
   CreativeSourceAsset,
   CreativeSourceRole,
 } from '@/lib/media/types';
 
-type WorkspaceSection = 'upload' | 'tra-creatives' | 'company' | 'proof-library' | 'reference-images';
+import { CopilotWorkspace } from '@/components/copilot/copilot-workspace';
+import { AIVideosWorkspace } from '@/components/ai-videos/ai-videos-workspace';
+import { CreativeDiscoveryWorkspace } from '@/components/discovery/creative-discovery-workspace';
+import { workspaceUrl, type WorkspaceSection } from '@/lib/workspace/navigation';
 type CreationMode = 'generate' | 'direct-upload';
 
 const NAV_ITEMS: Array<{
@@ -36,6 +39,9 @@ const NAV_ITEMS: Array<{
 }> = [
   { id: 'upload', label: 'Create', shortLabel: 'Create', icon: '+' },
   { id: 'tra-creatives', label: 'TRA Creatives', shortLabel: 'Creatives', icon: 'T' },
+  { id: 'copilot', label: 'Copilot', shortLabel: 'Copilot', icon: 'C' },
+  { id: 'ai-videos', label: 'AI Videos', shortLabel: 'AI Videos', icon: 'V' },
+  { id: 'discovery', label: 'Discovery', shortLabel: 'Discovery', icon: 'D' },
   { id: 'company', label: 'Company', shortLabel: 'Company', icon: 'C' },
   { id: 'proof-library', label: 'Proof Library', shortLabel: 'Proof', icon: 'P' },
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
@@ -55,6 +61,9 @@ const SECTION_HEADERS: Record<
     title: 'Creatives',
     description: 'Review, revise, and manage saved generated and uploaded TRA creatives.',
   },
+  copilot: { eyebrow: 'Creative planning', title: 'Copilot', description: 'Use your own Anthropic key for explicitly approved creative suggestions.' },
+  'ai-videos': { eyebrow: 'Character and motion', title: 'AI Videos', description: 'Prepare character motion transfers, review cost, and recover saved video jobs.' },
+  discovery: { eyebrow: 'Creative research', title: 'Discovery', description: 'Review inspiration across industries and selectively import useful references.' },
   company: {
     eyebrow: 'Company intelligence',
     title: 'Company',
@@ -86,8 +95,8 @@ function WorkspaceSectionHeader({ section }: { section: WorkspaceSection }) {
   );
 }
 
-export function CreativeGenerator({ acceptancePreview = false }: { acceptancePreview?: boolean } = {}) {
-  const [activeSection, setActiveSection] = useState<WorkspaceSection>('upload');
+export function CreativeGenerator({ acceptancePreview = false, initialSection = 'upload' }: { acceptancePreview?: boolean; initialSection?: WorkspaceSection } = {}) {
+  const [activeSection, setActiveSection] = useState<WorkspaceSection>(initialSection);
   const [creationMode, setCreationMode] = useState<CreationMode>('generate');
   const [sourceAssets, setSourceAssets] = useState<CreativeSourceAsset[]>([]);
   const [context, setContext] = useState('');
@@ -117,6 +126,8 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
     if (handoffConsumedRef.current) return;
     handoffConsumedRef.current = true;
 
+    // A bookmarked research/settings workspace must never launch an old paid Create handoff.
+    if (initialSection !== 'upload') { pauseLandingCreativeDraft(); return; }
     const draft = consumeLandingCreativeDraft();
     if (!draft) { void portfolio.restoreSaved(); return; }
 
@@ -180,7 +191,10 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
   const switchWorkspaceSection = (nextSection: WorkspaceSection) => {
     if (nextSection === activeSection) return;
     if (activeSection === 'upload') portfolio.stop();
+    if (nextSection !== 'upload') pauseLandingCreativeDraft();
+    setHandoffGenerate(false);
     setActiveSection(nextSection);
+    window.history.replaceState(null, '', workspaceUrl(window.location.href, nextSection));
     if (nextSection === 'upload') void portfolio.restoreSaved();
   };
 
@@ -363,6 +377,11 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
           <div className="workspace-view workspace-view-standard">
             <WorkspaceSectionHeader section="tra-creatives" />
             <CreativeLibrary />
+          </div>
+        ) : activeSection === 'copilot' || activeSection === 'ai-videos' || activeSection === 'discovery' ? (
+          <div className="workspace-view workspace-view-standard">
+            <WorkspaceSectionHeader section={activeSection} />
+            {activeSection === 'copilot' ? <CopilotWorkspace /> : activeSection === 'ai-videos' ? <AIVideosWorkspace /> : <CreativeDiscoveryWorkspace />}
           </div>
         ) : activeSection === 'company' ? (
           <div className="workspace-view workspace-view-standard">

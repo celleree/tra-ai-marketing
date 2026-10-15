@@ -57,12 +57,12 @@ export function CreativeCopilotPanel({ creativeId, hasIdentity }: { creativeId: 
     </button>
     {open ? <section id={id} aria-label="Creative copilot" aria-busy={checking || busy}>
       <p>Claude reviews saved text and planning, not the image itself. Performance and revenue are unknown.</p>
-      {checking ? <p role="status">Checking copilot availability…</p> : !available ? <p>Copilot is not enabled yet.</p> : null}
+      {checking ? <p role="status">Checking copilot availability…</p> : !available ? <p>Paid Copilot is unavailable. Save your own key in the Copilot workspace; separate administrator activation is also required.</p> : null}
       <details><summary>Company context for this request</summary><pre className={styles.context} tabIndex={0}>{approvedText}</pre></details>
       <button type="button" disabled={busy} onClick={refreshContext}>Refresh company context</button>
       <label className={styles.approval}><input type="checkbox" checked={approved} disabled={busy || !available}
         onChange={event => setApproved(event.target.checked)} />I approve this company context for this suggestion.</label>
-      <p>This request uses Claude API credits. Results stay in this panel until the page reloads.</p>
+      <p>This request uses your saved Anthropic key and API credits. Results stay in this panel until the page reloads.</p>
       <button type="button" disabled={!available || !approved || busy} onClick={() => void requestSuggestion()}>
         {busy ? 'Requesting suggestion…' : 'Request paid suggestion'}
       </button>

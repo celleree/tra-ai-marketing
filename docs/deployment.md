@@ -64,17 +64,15 @@ Server logs emit `tra_provider_usage` events with allowlisted metadata and a ver
 
 Browser recovery requires session storage and retains only a request digest and UUID in the current tab. Retry or refresh keeps an unresolved paid intent; completing it or choosing an explicit new paid action permits fresh work. Do not clear session storage during recovery. Review the offline corpus in `tests/fixtures/cost-regression-corpus.md`; actual creative quality and cost per accepted output require a separately authorized staging run and human review.
 
-## Claude creative copilot
+## Claude Copilot setup
 
-Store `ANTHROPIC_API_KEY` as a server-only Secret in the intended Vercel environment. For an acceptance test, scope it to the exact Preview branch through the secure Vercel dashboard; do not paste credentials into chat or commit them. Local credentials belong in an ignored local environment file. The application model is defined in `lib/copilot/claude.ts`.
+Copilot now uses operator-entered BYOK with a private encrypted server vault. A shared `ANTHROPIC_API_KEY` is not used by the recommendation route. Configure the server-only `TRA_PROVIDER_SECRETS_MASTER_KEY` only with separate authorization, preserve it across deployments, and keep all three Copilot paid-execution flags off until approved. Saving a key does not contact Anthropic or permit paid requests. Each recommendation requires explicit context and paid-request approval and remains subject to quota/output limits.
 
-Adding the key alone leaves the copilot disabled. Both `TRA_CLAUDE_COPILOT_ENABLED=true` and `TRA_CLAUDE_COPILOT_ALLOW_PAID=true` are required, followed by a new deployment. Enable them only after access and a paid budget are approved for that environment. Production configuration requires separate explicit authorization.
-
-The operator route requires approval of the effective company snapshot and each paid request. It uses authoritative saved creative evidence, a 4,096-token output limit, and a durable quota of 12 requests per operator per hour. Quotas and token limits do not enforce a total dollar cap. Provider failure or interruption can leave billing unknown; there are no automatic paid retries. Recommendations require human review and do not change creatives, publish ads, or claim measured performance or revenue. Adding credentials does not establish live quality or end-to-end acceptance.
+See [feature workspace activation](feature-workspaces.md) for secure storage, removal/rotation limitations, exact flags and offline verification boundaries.
 
 ## Video generation setup
 
-WAN 2.2 is the selected next model family. A hosted API or an approved GPU deployment, exact variant, input/output contract and cost/compute budget must be selected before live integration. Do not treat the existing Higgsfield environment variables or credentials as WAN access.
+The disabled AI Videos workspace implements Wan 2.2 Animate Move/Replace through the documented Fal API, with character image and source motion video inputs. Provider choice and paid budget still require explicit approval before live activation. See [feature workspace activation](feature-workspaces.md) for flags, private output, one-attempt recovery and cost-estimate limits. Do not treat existing Higgsfield credentials as Wan access.
 
 Keep the application UI and control routes on Vercel; run WAN inference on a separate GPU worker or hosted API. Vercel Hobby functions provide 2 GB of CPU memory, while the official WAN TI2V-5B setup documents a GPU with at least 24 GB VRAM. Vercel free function hosting therefore does not supply suitable WAN inference compute. See [Vercel function limits](https://vercel.com/docs/functions/limitations) and [WAN 2.2 setup](https://github.com/Wan-Video/Wan2.2); verify requirements for the selected variant before provisioning.
 

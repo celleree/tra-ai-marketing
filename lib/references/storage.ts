@@ -1,5 +1,6 @@
 import { parseReferenceCuratedMetadata, type ReferenceCuratedMetadata } from '@/lib/references/types';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink } from 'fs/promises';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'path';
 import {
   GetObjectCommand,
@@ -166,45 +167,77 @@ const readLocalIndex = async (): Promise<ReferenceLibraryIndex> => {
   }
 };
 
-const writeLocalIndex = async (index: ReferenceLibraryIndex) => {
-  await mkdir(resolve(LOCAL_INDEX_PATH, '..'), { recursive: true });
-  await writeFile(LOCAL_INDEX_PATH, JSON.stringify(index, null, 2), 'utf-8');
+// Mutations fail closed rather than silently rewriting an unreadable or future index.
+type StoredIndex = { index: ReferenceLibraryIndex; raw: Record<string, unknown>; rawItems: Record<string, unknown>[]; etag: string | null };
+function strictIndex(bytes: string, etag: string | null): StoredIndex {
+  const raw = JSON.parse(bytes) as Record<string, unknown>;
+  if (!raw || Array.isArray(raw) || ![1, 2, 3].includes(raw.version as number) || !Array.isArray(raw.items)) throw new Error('Reference index is unsupported; existing data was preserved.');
+  const items = raw.items.map(normalizeItem);
+  if (items.some(item => !item) || new Set(items.map(item => item!.id)).size !== items.length
+    || raw.items.some(item => !parseReferenceCuratedMetadata(item))) throw new Error('Reference index is invalid; existing data was preserved.');
+  return { index: { version: 3, items: items as ReferenceLibraryItem[] }, raw, rawItems: raw.items as Record<string, unknown>[], etag };
+}
+const missingIndex = (): StoredIndex => ({ index: emptyIndex(), raw: {}, rawItems: [], etag: null });
+function serialize(next: ReferenceLibraryIndex, stored: StoredIndex): string {
+  const rawById = new Map(stored.rawItems.map(item => [item.id, item]));
+  const items = next.items.map(item => {
+    const raw = { ...rawById.get(item.id) };
+    // Explicit editorial clearing must not resurrect prior raw notes/tags.
+    delete raw.notes; delete raw.tags;
+    return { ...raw, ...item };
+  });
+  return JSON.stringify({ ...stored.raw, version: 3, items });
+}
+const conflict = (error: unknown) => {
+  const value = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return ['PreconditionFailed', 'ConditionalRequestConflict'].includes(value?.name ?? '') || [409, 412].includes(value?.$metadata?.httpStatusCode ?? 0);
 };
-
-const readR2Index = async (): Promise<ReferenceLibraryIndex> => {
-  const { client, bucketName } = createR2Client();
-
+async function readR2(stable: ReturnType<typeof createR2Client>, strict: boolean): Promise<StoredIndex> {
   try {
-    const response = await client.send(
-      new GetObjectCommand({ Bucket: bucketName, Key: INDEX_KEY })
-    );
-    if (!response.Body) return emptyIndex();
-    return parseIndex(await response.Body.transformToString());
-  } catch (error) {
-    if (isMissingObjectError(error)) return emptyIndex();
-    throw error;
+    const response = await stable.client.send(new GetObjectCommand({ Bucket: stable.bucketName, Key: INDEX_KEY }));
+    if (!response.Body) throw new Error('Reference index body is missing.');
+    const bytes = await response.Body.transformToString();
+    if (!strict) return { ...missingIndex(), index: parseIndex(bytes) };
+    if (!response.ETag) throw new Error('Reference index revision is missing; existing data was preserved.');
+    return strictIndex(bytes, response.ETag);
+  } catch (error) { if (isMissingObjectError(error)) return missingIndex(); throw error; }
+}
+const readIndex = async (): Promise<ReferenceLibraryIndex> => process.env.NODE_ENV === 'production'
+  ? (await readR2(createR2Client(), false)).index : readLocalIndex();
+
+// Serialize local writers for this process. Production uses R2 conditional writes across instances.
+const localQueues = new Map<string, Promise<unknown>>();
+async function mutateIndex<T>(change: (index: ReferenceLibraryIndex) => { index: ReferenceLibraryIndex; result: T }): Promise<T> {
+  if (process.env.NODE_ENV === 'production') {
+    const stable = createR2Client();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const stored = await readR2(stable, true), next = change(stored.index);
+      if (JSON.stringify(next.index) === JSON.stringify(stored.index)) return next.result;
+      try {
+        await stable.client.send(new PutObjectCommand({ Bucket: stable.bucketName, Key: INDEX_KEY,
+          Body: serialize(next.index, stored), ContentType: 'application/json',
+          ...(stored.etag ? { IfMatch: stored.etag } : { IfNoneMatch: '*' }) }));
+        return next.result;
+      } catch (error) { if (!conflict(error)) throw error; }
+    }
+    throw new Error('Reference library changed concurrently. Reload and retry; existing data was preserved.');
   }
-};
-
-const writeR2Index = async (index: ReferenceLibraryIndex) => {
-  const { client, bucketName } = createR2Client();
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucketName,
-      Key: INDEX_KEY,
-      Body: JSON.stringify(index),
-      ContentType: 'application/json',
-    })
-  );
-};
-
-const readIndex = () =>
-  process.env.NODE_ENV === 'production' ? readR2Index() : readLocalIndex();
-
-const writeIndex = (index: ReferenceLibraryIndex) =>
-  process.env.NODE_ENV === 'production'
-    ? writeR2Index(index)
-    : writeLocalIndex(index);
+  const previous = localQueues.get(LOCAL_INDEX_PATH) ?? Promise.resolve();
+  const operation = previous.catch(() => undefined).then(async () => {
+    let stored: StoredIndex;
+    try { stored = strictIndex(await readFile(LOCAL_INDEX_PATH, 'utf8'), null); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; stored = missingIndex(); }
+    const next = change(stored.index);
+    if (JSON.stringify(next.index) === JSON.stringify(stored.index)) return next.result;
+    await mkdir(resolve(LOCAL_INDEX_PATH, '..'), { recursive: true });
+    const temporary = LOCAL_INDEX_PATH + '.' + randomUUID() + '.tmp';
+    try { await writeFile(temporary, serialize(next.index, stored), { encoding: 'utf8', flag: 'wx' }); await rename(temporary, LOCAL_INDEX_PATH); }
+    finally { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
+    return next.result;
+  });
+  localQueues.set(LOCAL_INDEX_PATH, operation);
+  try { return await operation; } finally { if (localQueues.get(LOCAL_INDEX_PATH) === operation) localQueues.delete(LOCAL_INDEX_PATH); }
+}
 
 const newestFirst = (a: ReferenceLibraryItem, b: ReferenceLibraryItem) =>
   new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
@@ -219,80 +252,44 @@ export const listReferenceLibrary = async (): Promise<ReferenceLibraryItem[]> =>
   return items.filter((item) => item.referenceType === 'layout');
 };
 
-export const addToReferenceLibrary = async (
-  additions: ReferenceLibraryAddition[]
-): Promise<ReferenceLibraryItem[]> => {
-  const index = await readIndex();
-  const existingIds = new Set(index.items.map((item) => item.id));
+export const addToReferenceLibrary = async (additions: ReferenceLibraryAddition[]): Promise<ReferenceLibraryItem[]> => {
   const addedAt = new Date().toISOString();
-  const nextItems = additions
-    .filter(({ media }) => !existingIds.has(media.id))
-    .map(({ media, referenceType, angle, angleSource }) => ({
-      ...media,
-      addedAt,
-      referenceType,
-      angle,
-      angleSource,
-    }));
-
-  const nextIndex: ReferenceLibraryIndex = {
-    version: 3,
-    items: [...nextItems, ...index.items],
-  };
-
-  await writeIndex(nextIndex);
-  return nextIndex.items;
-};
-
-export const updateReferenceAngle = async (
-  id: string,
-  angle: CreativeCategoryId
-): Promise<ReferenceLibraryItem[]> => {
-  const index = await readIndex();
-  let found = false;
-
-  const items = index.items.map((item) => {
-    if (item.id !== id) return item;
-    found = true;
-    if (item.referenceType !== 'layout') {
-      throw new Error('TRA reference images do not use creative-angle folders.');
-    }
-    return { ...item, angle, angleSource: 'manual' as const };
+  return mutateIndex(index => {
+    const existingIds = new Set(index.items.map(item => item.id));
+    const additionsUnique = additions.filter(({ media }) => {
+      if (existingIds.has(media.id)) return false;
+      existingIds.add(media.id); return true;
+    });
+    const items = [...additionsUnique.map(({ media, referenceType, angle, angleSource }) => ({ ...media, addedAt, referenceType, angle, angleSource })), ...index.items];
+    return { index: { version: 3, items }, result: items };
   });
-
-  if (!found) {
-    throw new Error('Reference image was not found.');
-  }
-
-  await writeIndex({ version: 3, items });
-  return items;
 };
 
-export const removeFromReferenceLibrary = async (
-  ids: string[]
-): Promise<ReferenceLibraryRemoval> => {
-  const index = await readIndex();
-  const selected = new Set(ids);
-  const removed = index.items.filter((item) => selected.has(item.id));
-  const items = index.items.filter((item) => !selected.has(item.id));
-
-  if (!removed.length) {
-    return { items: index.items, removed: [] };
-  }
-
-  await writeIndex({ version: 3, items });
-  return { items, removed };
-};
-
-export async function updateReferenceMetadata(id: string, patch: ReferenceCuratedMetadata): Promise<ReferenceLibraryItem[]> {
-  if (!parseReferenceCuratedMetadata(patch)) throw new Error('Invalid reference notes or tags.');
-  const index = await readIndex();
+export const updateReferenceAngle = async (id: string, angle: CreativeCategoryId): Promise<ReferenceLibraryItem[]> => mutateIndex(index => {
   if (!index.items.some(item => item.id === id)) throw new Error('Reference image was not found.');
   const items = index.items.map(item => {
     if (item.id !== id) return item;
-    const { notes: _notes, tags: _tags, ...unchanged } = item;
-    return { ...unchanged, ...parseReferenceCuratedMetadata({ ...item, ...patch })! };
+    if (item.referenceType !== 'layout') throw new Error('TRA reference images do not use creative-angle folders.');
+    return { ...item, angle, angleSource: 'manual' as const };
   });
-  await writeIndex({ version: 3, items });
-  return items;
+  return { index: { version: 3, items }, result: items };
+});
+
+export const removeFromReferenceLibrary = async (ids: string[]): Promise<ReferenceLibraryRemoval> => mutateIndex(index => {
+  const selected = new Set(ids), removed = index.items.filter(item => selected.has(item.id));
+  const items = index.items.filter(item => !selected.has(item.id));
+  return { index: { version: 3, items }, result: { items, removed } };
+});
+
+export async function updateReferenceMetadata(id: string, patch: ReferenceCuratedMetadata): Promise<ReferenceLibraryItem[]> {
+  if (!parseReferenceCuratedMetadata(patch)) throw new Error('Invalid reference notes or tags.');
+  return mutateIndex(index => {
+    if (!index.items.some(item => item.id === id)) throw new Error('Reference image was not found.');
+    const items = index.items.map(item => {
+      if (item.id !== id) return item;
+      const { notes: _notes, tags: _tags, ...unchanged } = item;
+      return { ...unchanged, ...parseReferenceCuratedMetadata({ ...item, ...patch })! };
+    });
+    return { index: { version: 3, items }, result: items };
+  });
 }

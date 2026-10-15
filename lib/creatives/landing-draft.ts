@@ -20,6 +20,12 @@ export function storeLandingCreativeDraft(draft: LandingCreativeDraft) {
   window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
 }
 
+/** Preserve a bypassed draft as manual input, never as a deferred paid action. */
+export function pauseLandingCreativeDraft() {
+  const draft = consumeLandingCreativeDraft();
+  if (draft) storeLandingCreativeDraft({ ...draft, generateOnOpen: false });
+}
+
 export function consumeLandingCreativeDraft(): LandingCreativeDraft | null {
   if (typeof window === 'undefined') return null;
 
