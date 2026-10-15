@@ -19,7 +19,7 @@ import { ProofLibrary } from '@/components/proof-library/proof-library';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
 import type { GeneratedCreative } from '@/lib/creatives/generated';
-import { consumeLandingCreativeDraft } from '@/lib/creatives/landing-draft';
+import { consumeLandingCreativeDraft, pauseLandingCreativeDraft } from '@/lib/creatives/landing-draft';
 import type {
   CreativeSourceAsset,
   CreativeSourceRole,
@@ -127,7 +127,7 @@ export function CreativeGenerator({ acceptancePreview = false, initialSection = 
     handoffConsumedRef.current = true;
 
     // A bookmarked research/settings workspace must never launch an old paid Create handoff.
-    if (initialSection !== 'upload') return;
+    if (initialSection !== 'upload') { pauseLandingCreativeDraft(); return; }
     const draft = consumeLandingCreativeDraft();
     if (!draft) { void portfolio.restoreSaved(); return; }
 
@@ -191,6 +191,7 @@ export function CreativeGenerator({ acceptancePreview = false, initialSection = 
   const switchWorkspaceSection = (nextSection: WorkspaceSection) => {
     if (nextSection === activeSection) return;
     if (activeSection === 'upload') portfolio.stop();
+    if (nextSection !== 'upload') pauseLandingCreativeDraft();
     setHandoffGenerate(false);
     setActiveSection(nextSection);
     window.history.replaceState(null, '', workspaceUrl(window.location.href, nextSection));

@@ -29,6 +29,7 @@ try {
     });
     await page.addInitScript(() => { if (!sessionStorage.getItem('fixture-seeded')) {
       sessionStorage.setItem('fixture-seeded', 'yes');
+      localStorage.setItem('tra-company-profile-v2', JSON.stringify({ brandGuidelines: { logo: `/api/media/files/media_${'a'.repeat(32)}.png` } }));
       sessionStorage.setItem('tra-ai-marketing:landing-creative-draft', JSON.stringify({ version: 2, context: 'STALE PAID HANDOFF', sourceAsset: null, variationCount: 2, generateOnOpen: true }));
     } });
     try {
@@ -44,7 +45,18 @@ try {
         await page.reload(); await page.locator('.workspace-section-header h1').filter({ hasText: name }).waitFor();
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${name} fits the viewport: ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('*')].filter(element => element.getBoundingClientRect().right > innerWidth + 1).map(element => ({ tag: element.tagName, type: element.getAttribute('type'), width: element.getBoundingClientRect().width, right: element.getBoundingClientRect().right })).slice(0, 15)))}`);
       }
-      assert.ok(await page.evaluate(() => sessionStorage.getItem('tra-ai-marketing:landing-creative-draft')));
+      const draft = await page.evaluate(() => JSON.parse(sessionStorage.getItem('tra-ai-marketing:landing-creative-draft')));
+      assert.equal(draft.context, 'STALE PAID HANDOFF'); assert.equal(draft.generateOnOpen, false);
+      await nav.getByRole('button', { name: 'Create', exact: true }).click();
+      await page.reload(); await page.getByRole('heading', { name: 'Create', exact: true }).waitFor();
+      await page.getByRole('textbox').filter({ visible: true }).first().waitFor();
+      assert.equal(await page.locator('textarea').first().inputValue(), 'STALE PAID HANDOFF');
+      assert.equal(await page.getByRole('button', { name: 'Generate creatives', exact: true }).isEnabled(), true);
+      // Let normal automatic-handoff effects settle with valid saved brand settings.
+      await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(() => sessionStorage.getItem('tra-ai-marketing:landing-creative-draft')), null);
+      await page.reload(); await page.getByRole('heading', { name: 'Create', exact: true }).waitFor();
+      await page.waitForTimeout(100);
       assert.deepEqual(writes, []); assert.deepEqual(errors, []);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); scenarios++;
     } finally { await context.close(); }
