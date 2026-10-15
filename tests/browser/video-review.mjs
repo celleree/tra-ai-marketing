@@ -686,7 +686,7 @@ try {
     assert.equal(submissions.length, 0);
   });
   await scenario('Review → Create exact revision/manual frames; refresh and reopen are read-only', {}, async ({ page, calls, submissions }) => {
-    await ready(page); assert.equal(await page.locator('input[type=checkbox]').first().isChecked(), true);
+    await ready(page); assert.equal(await page.getByRole('region', { name: 'Video material review' }).locator('[data-frame-id] input[type=checkbox]').first().isChecked(), true);
     await page.reload(); await ready(page);
     assert.equal(calls.some(([path, method]) => method !== 'GET' && path !== '/api/video/review-sources'), false);
     await page.evaluate(() => history.replaceState(null, '', location.pathname)); await page.reload(); await ready(page);
@@ -738,14 +738,14 @@ try {
     assert.equal(await page.getByLabel('Remove third.mp4').count(), 1);
   });
   for (const frames of [null, []]) await scenario(`Automatic frame mode ${JSON.stringify(frames)}`, { frames }, async ({ page, submissions, response }) => {
-    await ready(page); assert.equal(await page.locator('input[type=checkbox]').first().isChecked(), false);
+    await ready(page); assert.equal(await page.getByRole('region', { name: 'Video material review' }).locator('[data-frame-id] input[type=checkbox]').first().isChecked(), false);
     await generateButton(page).click(); await page.getByText('Generation needs attention.').waitFor();
     assert.deepEqual(response().draft.choices.frames, frames); assert.equal(submissions.length, 1);
   });
   await scenario('Manual selection save uses settled revision; Profile navigation preserves choices', { frames: null }, async ({ page, submissions, response }) => {
-    await ready(page); await page.locator('input[type=checkbox]').first().check(); await page.getByText('Saved ✓').waitFor();
+    await ready(page); await page.getByRole('region', { name: 'Video material review' }).locator('[data-frame-id] input[type=checkbox]').first().check(); await page.getByText('Saved ✓').waitFor();
     await page.getByRole('navigation', { name: 'Creative workspace' }).getByRole('button').filter({ hasText: 'Company' }).click(); await page.getByRole('navigation', { name: 'Creative workspace' }).getByRole('button').filter({ hasText: 'Create' }).click();
-    assert.equal(await page.locator('input[type=checkbox]').first().isChecked(), true);
+    assert.equal(await page.getByRole('region', { name: 'Video material review' }).locator('[data-frame-id] input[type=checkbox]').first().isChecked(), true);
     assert.deepEqual(response().draft.choices.frames, [frame]);
     await generateButton(page).click(); await page.getByText('Generation needs attention.').waitFor();
     assert.equal(submissions[0].videoReview.revision, 'revision-2');
