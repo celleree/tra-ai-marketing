@@ -1,3 +1,4 @@
+import { prepareWanWebhook } from './webhook';
 import { createHash, randomUUID } from 'node:crypto';
 import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
 import { FalWanProvider, type WanProvider } from './fal';
@@ -10,6 +11,7 @@ const safeId = (id: string) => /^[a-f\d]{8}(-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(
 export interface WanDependencies {
   storage: VideoIntelligenceStorage; provider: WanProvider; now: () => number;
   sources: typeof loadWanSources; probe: typeof probeWanVideo; sign: typeof signWanSource;
+  webhook: typeof prepareWanWebhook;
   access: () => boolean; paid: () => boolean; maxCents: () => number;
 }
 export class WanService {
@@ -69,6 +71,7 @@ export class WanService {
     if (existing.state !== 'QUOTED') return summarizeWanJob(existing);
     if (body.quoteId !== existing.quote.id || body.rightsConfirmed !== true || body.providerTransferConfirmed !== true || body.estimatedCostConfirmed !== true) throw new WanError('Confirm this quote, source and likeness rights, provider transfer and estimated cost.');
     if (existing.quote.expiresAt <= this.deps.now() || existing.quote.estimatedCents > this.deps.maxCents()) throw new WanError('Quote expired or exceeds the current limit. Prepare a new quote.');
+    const webhook = await this.deps.webhook(owner, id);
     const sources = await this.deps.sources(existing.imageId, existing.videoId);
     if (hash(sources.image.buffer) !== existing.imageHash || hash(sources.video.buffer) !== existing.videoHash) throw new WanError('Source files changed. Prepare a new quote.');
     const [imageUrl, videoUrl] = await Promise.all([this.deps.sign(sources.image.fileName), this.deps.sign(sources.video.fileName)]);
@@ -79,17 +82,19 @@ export class WanService {
       if (job.quote.expiresAt <= now) throw new WanError('Quote expired. Prepare a new quote.');
       const launches = ledger.jobs.filter(job => job.launchedAt !== undefined && job.launchedAt > now - 3_600_000).length;
       if (launches >= 3) throw new WanError('Wan launch limit reached (3 per hour). Wait before launching another job.', 429);
-      job.state = 'SUBMITTING'; job.updatedAt = Math.max(now, job.updatedAt + 1); job.launchedAt = now;
+      job.webhookUserId = webhook.userId; job.state = 'SUBMITTING'; job.updatedAt = Math.max(now, job.updatedAt + 1); job.launchedAt = now;
       job.consent = { quoteId: job.quote.id, acceptedAt: now, rights: true, providerTransfer: true, estimatedCost: true };
       return true;
     });
     if (!claimed) return summarizeWanJob(await this.get(owner, id));
     // Exactly one attempt after the durable claim. Never retry this POST, including HTTP errors.
     try {
-      const receipt = await this.deps.provider.submit(existing.mode, existing.resolution, imageUrl, videoUrl);
+      const receipt = await this.deps.provider.submit(existing.mode, existing.resolution, imageUrl, videoUrl, webhook.url);
       await this.mutate(owner, ledger => {
         const job = ledger.jobs.find(job => job.id === id)!;
-        job.receipt = receipt; job.state = 'IN_QUEUE'; job.updatedAt = Math.max(this.deps.now(), job.updatedAt + 1); job.message = undefined;
+        if (job.receipt && job.receipt.requestId !== receipt.requestId) throw new WanError('Provider receipt requires reconciliation.', 409);
+        job.receipt = receipt; if (['SUBMITTING', 'UNKNOWN'].includes(job.state)) { job.state = 'IN_QUEUE'; job.message = undefined; }
+        job.updatedAt = Math.max(this.deps.now(), job.updatedAt + 1);
       });
     } catch {
       await this.mutate(owner, ledger => {
@@ -99,8 +104,9 @@ export class WanService {
     }
     return summarizeWanJob(await this.get(owner, id));
   }
-  async refresh(owner: string, id: string) {
-    this.requireAccess(); const before = await this.get(owner, id);
+  async refresh(owner: string, id: string) { this.requireAccess(); return this.recover(owner, id); }
+  private async recover(owner: string, id: string) {
+    const before = await this.get(owner, id);
     if (before.state === 'SUBMITTING' && before.updatedAt + 90_000 < this.deps.now()) {
       await this.mutate(owner, ledger => {
         const job = ledger.jobs.find(job => job.id === id)!;
@@ -124,7 +130,7 @@ export class WanService {
         } else if (status.state === 'FAILED') { state = 'FAILED'; message = 'Provider reported generation failure. Review provider billing before purchasing another job.'; }
         else state = status.state;
       }
-    } catch { state = 'RECOVERY'; message = 'Status or private output could not be retrieved. Resume this accepted request; expired provider outputs require administrator recovery. This does not purchase another generation.'; }
+    } catch { state = 'RECOVERY'; message = 'Status or private output could not be retrieved. Resume this accepted request; permanently deleted provider outputs cannot be recovered from Fal. Check private app storage/backups before any new purchase. This does not purchase another generation.'; }
     await this.mutate(owner, ledger => {
       const job = ledger.jobs.find(job => job.id === id)!;
       if (job.state === 'SUCCEEDED' || job.state === 'FAILED') return;
@@ -133,6 +139,29 @@ export class WanService {
       job.state = state; job.message = message; job.updatedAt = Math.max(this.deps.now(), job.updatedAt + 1);
     });
     return summarizeWanJob(await this.get(owner, id));
+  }
+  /** Called only after the Fal signature is verified. Frozen billing account and receipt bind the notification to this paid job. */
+  async completeWebhook(operatorHash: string, id: string, requestId: string, userId: string, status: 'OK' | 'ERROR') {
+    if (!/^[a-f0-9]{64}$/.test(operatorHash) || !safeId(id) || !safeId(requestId)) throw new WanError('Completion job not found.', 404);
+    const stored = await this.deps.storage.read(`wan-generation/v1/operators/${operatorHash}/ledger.json`);
+    const job = stored ? (JSON.parse(stored.bytes.toString()) as Ledger).jobs.find(item => item.id === id) : undefined;
+    if (!job || hash(job.owner) !== operatorHash || job.launchedAt === undefined || job.webhookUserId !== userId
+      || !job.consent || (job.receipt && job.receipt.requestId !== requestId)) throw new WanError('Completion does not match an accepted job.', 403);
+    if (['SUCCEEDED', 'FAILED'].includes(job.state)) return;
+    await this.mutate(job.owner, ledger => {
+      const current = ledger.jobs.find(item => item.id === id)!;
+      if (['SUCCEEDED', 'FAILED'].includes(current.state)) return;
+      if (current.receipt && current.receipt.requestId !== requestId) throw new WanError('Completion receipt changed.', 409);
+      // Recovers the ordinary callback-before-submit-response race, including interrupted acknowledgment.
+      current.receipt ??= { requestId, statusUrl: `https://queue.fal.run/fal-ai/wan/requests/${requestId}/status`, responseUrl: `https://queue.fal.run/fal-ai/wan/requests/${requestId}` };
+      if (status === 'ERROR') { current.state = 'FAILED'; current.message = 'Provider reported generation failure. Review billing before purchasing another job.'; }
+      else if (['SUBMITTING', 'UNKNOWN'].includes(current.state)) current.state = 'IN_QUEUE';
+      current.updatedAt = Math.max(this.deps.now(), current.updatedAt + 1);
+    });
+    if (status === 'ERROR') return;
+    const saved = await this.recover(job.owner, id);
+    // Fal retries failed deliveries. Never acknowledge success before bytes are durable.
+    if (!['SUCCEEDED', 'FAILED'].includes(saved.state)) throw new WanError('Private output capture is pending. Retry this completion notification.', 503);
   }
   async output(owner: string, id: string) {
     this.requireAccess(); const job = await this.get(owner, id);
@@ -146,5 +175,5 @@ export const getWanService = () => new WanService({ storage: getVideoIntelligenc
   provider: { submit: (...args) => new FalWanProvider(process.env.FAL_KEY || '').submit(...args),
     poll: (...args) => new FalWanProvider(process.env.FAL_KEY || '').poll(...args),
     download: (...args) => new FalWanProvider(process.env.FAL_KEY || '').download(...args) },
-  now: Date.now, sources: loadWanSources, probe: probeWanVideo, sign: signWanSource,
+  webhook: prepareWanWebhook, now: Date.now, sources: loadWanSources, probe: probeWanVideo, sign: signWanSource,
   access: wanAccessEnabled, paid: wanPaidEnabled, maxCents: maxEstimatedCents });

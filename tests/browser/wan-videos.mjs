@@ -10,7 +10,7 @@ const url = `http://127.0.0.1:${server.httpServer.address().port}/tests/browser/
 let scenarios = 0;
 try {
   for (const width of [1200, 375]) {
-    const context = await browser.newContext({ viewport: { width, height: 900 } }); const page = await context.newPage();
+    const context = await browser.newContext({ viewport: { width, height: width < 500 ? 812 : 900 } }); const page = await context.newPage();
     page.setDefaultTimeout(10000); const errors = []; const posts = []; let enabled = false; let paid = false; let jobs = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.route(/^https:\/\//, route => route.abort());

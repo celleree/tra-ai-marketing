@@ -15,7 +15,7 @@ class Memory implements VideoIntelligenceStorage {
 }
 function fixture() {
   const storage = new Memory(); let clock = 100_000;
-  const deps: WanDependencies = { storage, now: () => clock, access: () => true, paid: () => true, maxCents: () => 500,
+  const deps: WanDependencies = { storage, webhook: vi.fn().mockResolvedValue({ url: 'https://app.example/api/ai-videos/webhook', userId: 'fal-account' }), now: () => clock, access: () => true, paid: () => true, maxCents: () => 500,
     sources: vi.fn().mockResolvedValue({ image: { fileName: 'image.png', buffer: Buffer.from('image'), mediaType: 'IMAGE', mimeType: 'image/png' }, video: { fileName: 'video.mp4', buffer: Buffer.from('video'), mediaType: 'VIDEO', mimeType: 'video/mp4' } }),
     probe: vi.fn().mockResolvedValue({ frames: 32, durationMs: 1333 }), sign: vi.fn().mockResolvedValue('https://private.example/source?signed=secret'),
     provider: { submit: vi.fn().mockResolvedValue(receipt), poll: vi.fn().mockResolvedValue({ state: 'COMPLETED' }), download: vi.fn().mockResolvedValue(Buffer.from('mock-output')) } };
@@ -35,7 +35,8 @@ describe('Wan quote/admission boundaries', () => {
   it('requires explicit access, paid and key flags and caps configured estimates', () => {
     vi.stubEnv('WAN_ACCESS_ENABLED', 'false'); vi.stubEnv('WAN_PAID_ENABLED', 'true'); vi.stubEnv('FAL_KEY', 'dummy');
     expect(wanAccessEnabled()).toBe(false); expect(wanPaidEnabled()).toBe(false);
-    vi.stubEnv('WAN_ACCESS_ENABLED', 'true'); expect(wanPaidEnabled()).toBe(true);
+    vi.stubEnv('WAN_ACCESS_ENABLED', 'true'); expect(wanPaidEnabled()).toBe(false);
+    vi.stubEnv('VERCEL_ENV', 'preview'); vi.stubEnv('VERCEL_URL', 'app.example'); vi.stubEnv('WAN_WEBHOOK_ORIGIN', 'https://app.example'); vi.stubEnv('FAL_WEBHOOK_USER_ID', 'fal-account'); expect(wanPaidEnabled()).toBe(true);
     vi.stubEnv('FAL_KEY', ''); expect(wanPaidEnabled()).toBe(false);
     vi.stubEnv('WAN_MAX_ESTIMATED_USD', '6'); expect(() => maxEstimatedCents()).toThrow();
     vi.stubEnv('WAN_MAX_ESTIMATED_USD', '2.50'); expect(maxEstimatedCents()).toBe(250);
@@ -147,4 +148,41 @@ describe('Wan durable paid attempt and recovery', () => {
     vi.mocked(f.deps.provider.poll).mockResolvedValue({ state: 'FAILED' }); expect((await f.service.refresh('operator-a', q.id)).state).toBe('FAILED');
     await f.service.refresh('operator-a', q.id); expect(f.deps.provider.download).not.toHaveBeenCalled(); expect(f.deps.provider.submit).toHaveBeenCalledTimes(1);
   });
+});
+
+it('captures unattended completion without browser polling and remains available after provider expiry', async () => {
+  const f = fixture(), q = await f.quote(); await f.service.launch('operator-a', q.id, f.consent(q.quote.id));
+  const owner = createHash('sha256').update('operator-a').digest('hex'); f.deps.access = () => false; f.deps.paid = () => false;
+  await f.service.completeWebhook(owner, q.id, receipt.requestId, 'fal-account', 'OK');
+  f.advance(2 * 3600000); vi.mocked(f.deps.provider.download).mockRejectedValue(new Error('provider permanently deleted'));
+  f.deps.access = () => true; expect((await f.service.list('operator-a'))[0].state).toBe('SUCCEEDED'); expect((await f.service.output('operator-a', q.id)).toString()).toBe('mock-output');
+  await f.service.completeWebhook(owner, q.id, receipt.requestId, 'fal-account', 'OK'); expect(f.deps.provider.submit).toHaveBeenCalledTimes(1); expect(f.deps.provider.download).toHaveBeenCalledTimes(1);
+});
+it('does not acknowledge a transient capture failure and accepts delivery retry without a new purchase', async () => {
+  const f = fixture(), q = await f.quote(); await f.service.launch('operator-a', q.id, f.consent(q.quote.id));
+  const owner = createHash('sha256').update('operator-a').digest('hex'); vi.mocked(f.deps.provider.download).mockRejectedValueOnce(new Error('temporary storage/network failure'));
+  await expect(f.service.completeWebhook(owner, q.id, receipt.requestId, 'fal-account', 'OK')).rejects.toMatchObject({ status: 503 });
+  await f.service.completeWebhook(owner, q.id, receipt.requestId, 'fal-account', 'OK'); expect((await f.service.get('operator-a', q.id)).state).toBe('SUCCEEDED'); expect(f.deps.provider.submit).toHaveBeenCalledTimes(1);
+});
+it('handles completion before submit acknowledgment without regressing the saved output', async () => {
+  const f = fixture(), q = await f.quote(), owner = createHash('sha256').update('operator-a').digest('hex');
+  vi.mocked(f.deps.provider.submit).mockImplementationOnce(async () => { await f.service.completeWebhook(owner, q.id, receipt.requestId, 'fal-account', 'OK'); return receipt; });
+  expect((await f.service.launch('operator-a', q.id, f.consent(q.quote.id))).state).toBe('SUCCEEDED'); expect(f.deps.provider.submit).toHaveBeenCalledTimes(1);
+});
+it('rejects wrong account/request/job and stops before paid submission when callback readiness fails', async () => {
+  const f = fixture(), q = await f.quote(), owner = createHash('sha256').update('operator-a').digest('hex');
+  vi.mocked(f.deps.webhook).mockRejectedValueOnce(new Error('protected callback'));
+  await expect(f.service.launch('operator-a', q.id, f.consent(q.quote.id))).rejects.toThrow(); expect(f.deps.provider.submit).not.toHaveBeenCalled(); expect((await f.service.get('operator-a', q.id)).state).toBe('QUOTED');
+  await f.service.launch('operator-a', q.id, f.consent(q.quote.id));
+  await expect(f.service.completeWebhook(owner, q.id, receipt.requestId, 'wrong-account', 'OK')).rejects.toMatchObject({ status: 403 });
+  await expect(f.service.completeWebhook(owner, q.id, '00000000-0000-0000-0000-000000000000', 'fal-account', 'OK')).rejects.toMatchObject({ status: 403 });
+  expect(f.deps.provider.download).not.toHaveBeenCalled();
+});
+
+it('persists signed provider failure without downloading or purchasing a replacement', async () => {
+  const f = fixture(), q = await f.quote(), owner = createHash('sha256').update('operator-a').digest('hex');
+  vi.mocked(f.deps.provider.submit).mockImplementationOnce(async () => { await f.service.completeWebhook(owner, q.id, receipt.requestId, 'fal-account', 'ERROR'); return receipt; });
+  expect((await f.service.launch('operator-a', q.id, f.consent(q.quote.id))).state).toBe('FAILED');
+  await f.service.completeWebhook(owner, q.id, receipt.requestId, 'fal-account', 'ERROR');
+  expect(f.deps.provider.submit).toHaveBeenCalledTimes(1); expect(f.deps.provider.download).not.toHaveBeenCalled();
 });

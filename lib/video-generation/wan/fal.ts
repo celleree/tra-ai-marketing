@@ -20,7 +20,7 @@ export const validateWanReceipt = (value: unknown, mode: WanMode): WanReceipt =>
   return { requestId: id, statusUrl: validate(v.status_url, true), responseUrl: validate(v.response_url, false) };
 };
 export interface WanProvider {
-  submit(mode: WanMode, resolution: WanResolution, imageUrl: string, videoUrl: string): Promise<WanReceipt>;
+  submit(mode: WanMode, resolution: WanResolution, imageUrl: string, videoUrl: string, webhookUrl: string): Promise<WanReceipt>;
   poll(receipt: WanReceipt, mode: WanMode): Promise<{ state: 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' }>;
   download(receipt: WanReceipt, mode: WanMode): Promise<Buffer>;
 }
@@ -46,8 +46,10 @@ export class FalWanProvider implements WanProvider {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return JSON.parse((await boundedBytes(response, 1024 * 1024)).toString()) as Record<string, unknown>;
   }
-  async submit(mode: WanMode, resolution: WanResolution, imageUrl: string, videoUrl: string) {
-    const value = await this.json(`${QUEUE}/${wanModel(mode)}`, 'POST', {
+  async submit(mode: WanMode, resolution: WanResolution, imageUrl: string, videoUrl: string, webhookUrl: string) {
+    const callback = new URL(webhookUrl);
+    if (callback.protocol !== 'https:' || callback.username || callback.password || callback.hash) throw new WanError('Invalid completion callback.', 503);
+    const value = await this.json(`${QUEUE}/${wanModel(mode)}?fal_webhook=${encodeURIComponent(callback.href)}`, 'POST', {
       image_url: imageUrl, video_url: videoUrl, resolution,
       enable_safety_checker: true, enable_output_safety_checker: true,
     }, { 'X-Fal-No-Retry': '1', 'X-Fal-Request-Start-Timeout': '60', 'X-Fal-Store-IO': '0',
@@ -66,7 +68,7 @@ export class FalWanProvider implements WanProvider {
   async download(receipt: WanReceipt, mode: WanMode) {
     const value = await this.json(this.checked(receipt, mode).responseUrl);
     const video = value.video as { url?: unknown; content_type?: unknown } | undefined;
-    if (typeof video?.url !== 'string' || video.content_type !== 'video/mp4') throw new WanError('Provider MP4 output unavailable.', 502);
+    if (typeof video?.url !== 'string' || (video.content_type != null && video.content_type !== 'video/mp4')) throw new WanError('Provider MP4 output unavailable.', 502);
     let url: URL; try { url = new URL(video.url); } catch { throw new WanError('Invalid provider output.', 502); }
     if (url.protocol !== 'https:' || url.hostname !== 'v3b.fal.media' || url.port || url.username || url.password || url.hash
       || !/^\/files\/[a-zA-Z0-9_./-]+\.mp4$/.test(url.pathname) || url.pathname.includes('..')) throw new WanError('Invalid private provider output.', 502);

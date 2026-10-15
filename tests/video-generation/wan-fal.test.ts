@@ -9,8 +9,8 @@ function mp4() {
 describe('Fal Wan private server transport', () => {
   it.each(['MOVE', 'REPLACE'] as const)('submits %s exact schema and privacy headers once', async mode => {
     const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json(queued)); const provider = new FalWanProvider('dummy-key', request);
-    await provider.submit(mode, '480p', 'https://r2/image?signed=secret', 'https://r2/source?signed=secret');
-    const [url, options] = request.mock.calls[0]; expect(url).toBe(`https://queue.fal.run/fal-ai/wan/v2.2-14b/animate/${mode.toLowerCase()}`);
+    await provider.submit(mode, '480p', 'https://r2/image?signed=secret', 'https://r2/source?signed=secret', 'https://app.example/api/ai-videos/webhook');
+    const [url, options] = request.mock.calls[0]; expect(String(url)).toBe(`https://queue.fal.run/fal-ai/wan/v2.2-14b/animate/${mode.toLowerCase()}?fal_webhook=${encodeURIComponent('https://app.example/api/ai-videos/webhook')}`);
     expect(JSON.parse(options!.body as string)).toEqual({ image_url: 'https://r2/image?signed=secret', video_url: 'https://r2/source?signed=secret', resolution: '480p', enable_safety_checker: true, enable_output_safety_checker: true });
     const headers = options!.headers as Record<string, string>;
     expect(headers['X-Fal-No-Retry']).toBe('1'); expect(headers['X-Fal-Store-IO']).toBe('0'); expect(headers['X-Fal-Request-Start-Timeout']).toBe('60');
@@ -24,8 +24,8 @@ describe('Fal Wan private server transport', () => {
   });
   it('does not retry network or non-success paid submission', async () => {
     const request = vi.fn<typeof fetch>().mockRejectedValue(new Error('timeout')); const provider = new FalWanProvider('dummy', request);
-    await expect(provider.submit('MOVE', '480p', 'image', 'video')).rejects.toThrow(); expect(request).toHaveBeenCalledTimes(1);
-    request.mockReset().mockResolvedValue(new Response('error', { status: 503 })); await expect(provider.submit('MOVE', '480p', 'image', 'video')).rejects.toThrow(); expect(request).toHaveBeenCalledTimes(1);
+    await expect(provider.submit('MOVE', '480p', 'image', 'video', 'https://app.example/api/ai-videos/webhook')).rejects.toThrow(); expect(request).toHaveBeenCalledTimes(1);
+    request.mockReset().mockResolvedValue(new Response('error', { status: 503 })); await expect(provider.submit('MOVE', '480p', 'image', 'video', 'https://app.example/api/ai-videos/webhook')).rejects.toThrow(); expect(request).toHaveBeenCalledTimes(1);
   });
   it('treats completed error/error_type as failed; rejects wrong status request binding', async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ request_id: id, status: 'COMPLETED', error_type: 'timeout' }));
@@ -55,4 +55,14 @@ describe('Fal Wan private server transport', () => {
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ video: { url: 'https://v3b.fal.media/files/b/test.mp4', content_type: 'video/mp4' } })).mockResolvedValueOnce(Response.json({ token: 'temporary' })).mockResolvedValueOnce(output);
     await expect(new FalWanProvider('dummy', request).download(validateWanReceipt(queued, 'MOVE'), 'MOVE')).rejects.toThrow();
   });
+});
+
+it.each([undefined, null, 'video/mp4'])('downloads documented output with optional MIME metadata %s', async content_type => {
+  const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ video: { url: 'https://v3b.fal.media/files/b/output.mp4', ...(content_type === undefined ? {} : { content_type }) }, seed: 1 }))
+    .mockResolvedValueOnce(Response.json({ token: 'short-lived-token' })).mockResolvedValueOnce(new Response(mp4(), { headers: { 'Content-Type': 'video/mp4' } }));
+  expect(await new FalWanProvider('dummy', request).download(validateWanReceipt(queued, 'MOVE'), 'MOVE')).toEqual(mp4()); expect(request).toHaveBeenCalledTimes(3);
+});
+it('rejects explicitly incompatible JSON MIME before token exchange', async () => {
+  const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ video: { url: 'https://v3b.fal.media/files/b/output.mp4', content_type: 'text/html' } }));
+  await expect(new FalWanProvider('dummy', request).download(validateWanReceipt(queued, 'MOVE'), 'MOVE')).rejects.toThrow(); expect(request).toHaveBeenCalledTimes(1);
 });

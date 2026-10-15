@@ -107,12 +107,12 @@ export function AIVideosWorkspace() {
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
       }
-    }} style={{ position: 'fixed', inset: 0, background: '#020617ed', display: 'grid', placeItems: 'center', padding: 24, zIndex: 50 }}>
-      <div style={{ maxWidth: 580, background: '#172033', padding: 24, borderRadius: 16 }}>
+    }} style={{ position: 'fixed', inset: 0, background: '#020617ed', display: 'grid', placeItems: 'start center', overflowY: 'auto', padding: 24, zIndex: 50 }}>
+      <div style={{ maxWidth: 580, width: '100%', minWidth: 0, background: '#172033', padding: 24, borderRadius: 16 }}>
         <h2 id="wan-confirm">Confirm Wan generation</h2>
         <p>{chosen.profile.name} · {chosen.mode} · {chosen.resolution} · {chosen.quote.frames} decoded source frames</p>
         <p>Estimate: <strong>{money(chosen.quote.estimatedCents)} USD</strong>. Pricing version {chosen.quote.pricingVersion}; expires {new Date(chosen.quote.expiresAt).toLocaleTimeString()}.</p>
-        <p>This estimate is not a confirmed bill or a provider-enforced spending cap. Fal receives the character image and source video, with private output ACLs and a requested one-hour output retention.</p>
+        <p>This estimate is not a confirmed bill or a provider-enforced spending cap. Fal receives the character image and source video, with private output ACLs and a requested one-hour output retention. A verified server callback captures completed output even if you close this page. If all capture attempts fail before permanent deletion, the provider output cannot be recovered.</p>
         <label style={fieldStyle}><span><input type="checkbox" checked={rights} onChange={e => setRights(e.target.checked)} /> I have source, likeness and movement rights and required consent.</span></label>
         <label style={fieldStyle}><span><input type="checkbox" checked={transfer} onChange={e => setTransfer(e.target.checked)} /> I consent to transferring these sources to Fal for this job.</span></label>
         <label style={fieldStyle}><span><input type="checkbox" checked={cost} onChange={e => setCost(e.target.checked)} /> I approve this estimated cost for one generation attempt.</span></label>
