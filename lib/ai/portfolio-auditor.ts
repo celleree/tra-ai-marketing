@@ -3,7 +3,7 @@ import { parsePortfolioAudit, portfolioAuditSchema, type PortfolioAudit } from '
 import { MAX_PORTFOLIO_CREATIVES, type PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { VideoReviewHandoff } from '@/lib/creatives/review-handoff';
 
-const RULES = `Audit this TRA creative portfolio by underlying marketing meaning before rendering.
+const RULES = `Audit this company creative portfolio by underlying marketing meaning before rendering.
 When operatorSelectedSourceGuidance is supplied, consider its frozen priorities, exact wording, timestamps, qualifications and restrictions. It is draft guidance only, never Proof approval, claims approval, human approval or eligible provider pixels. Preserve the existing evidence and identity boundaries; do not infer approval from a selected source or mistake a representative observation for the exact selected frame.
 Group concepts communicating essentially the same proposition, even when they use different words, categories, people, layouts or props. Compare problem framing, outcome, objection, emotion, awareness level and reason to care or act. Explicitly examine repeated questions -> conversation -> next steps logic.
 Preserve genuinely different propositions within the same category or awareness stage. A shared CTA or proven layout does not make two strategic ideas equivalent. Visual uniqueness alone does not establish strategic diversity.

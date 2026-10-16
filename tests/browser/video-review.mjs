@@ -75,9 +75,9 @@ async function scenario(name, options, run) {
   await context.addInitScript(({ id, inventory, profile, hasProfile, noLogo }) => {
     if (sessionStorage.getItem('video-review-fixture-seeded')) return;
     sessionStorage.setItem('video-review-fixture-seeded', 'true');
-    if (id) localStorage.setItem('tra-video-review-draft-v1', id);
-    localStorage.setItem('tra-create-video-ids-v1', JSON.stringify(inventory));
-    localStorage.setItem('tra-company-profile-v2', JSON.stringify({ websiteUrl: '', knowledgeBase: {}, guardrails: {}, ...(hasProfile ? profile : {}),
+    if (id) localStorage.setItem('tax-marketing-studio:video-review-draft:v1', id);
+    localStorage.setItem('tax-marketing-studio-create-video-ids-v1', JSON.stringify(inventory));
+    localStorage.setItem('tax-marketing-studio:company-profile:v1', JSON.stringify({ websiteUrl: '', knowledgeBase: {}, guardrails: {}, ...(hasProfile ? profile : {}),
       brandGuidelines: noLogo ? {} : { logo: '/api/media/files/media_77777777777777777777777777777777.png' } }));
   }, { id: options.noSavedReview ? null : id, inventory: options.inventory ?? [mediaId], profile, hasProfile: options.profile, noLogo: options.noLogo });
   await page.route('**/api/**', async route => {
@@ -241,11 +241,11 @@ const ready = async page => { await page.locator('textarea').fill('Create four d
 try {
   for(const denial of [false,true]) await scenario(`Original logo-only version saves without generation${denial?' after sign-in denial':''}`,{logoOverlay:true,width:375,...(denial?{accessDenials:{[`POST /api/creatives/creative_${'a'.repeat(32)}/logo`]:401}}:{})},async({page,calls,submissions})=>{
     await page.getByRole('button',{name:'Add saved logo without AI',exact:true}).click();
-    await page.getByRole('img',{name:'Saved original TRA logo',exact:true}).waitFor();
+    await page.getByRole('img',{name:'Saved company logo',exact:true}).waitFor();
     await page.getByLabel('Logo position').selectOption('top-left');
     assert.equal(submissions.length,0);await page.getByRole('button',{name:'Save logo-only version',exact:true}).click();
     if(denial){await page.getByText('Sign in to save this logo-only version. The original is unchanged.',{exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Save logo-only version',exact:true}).isDisabled(),true);assert.equal(submissions.length,0);}
-    else{await page.getByText('Logo-only version saved. Original preserved.',{exact:true}).waitFor();await page.getByRole('img',{name:'New creative with original TRA logo',exact:true}).waitFor();assert.equal(submissions.length,1);assert.match(submissions[0].key,/^[a-f0-9-]{36}$/);}
+    else{await page.getByText('Logo-only version saved. Original preserved.',{exact:true}).waitFor();await page.getByRole('img',{name:'New creative with company logo',exact:true}).waitFor();assert.equal(submissions.length,1);assert.match(submissions[0].key,/^[a-f0-9-]{36}$/);}
     assert.equal(calls.filter(([path,method])=>method==='POST'&&path.endsWith('/revise')).length,0);
     assert.equal(calls.filter(([path])=>path==='/api/creatives/portfolios').length,0);
     const bounds=await page.evaluate(()=>({body:document.documentElement.scrollWidth,viewport:innerWidth}));assert.ok(bounds.body<=bounds.viewport+1);
@@ -455,9 +455,6 @@ try {
       assert.equal(await page.getByText('Preview acceptance: Generate checks cached inputs and pauses before paid planning.', { exact: true }).count(), 0);
       await page.getByRole('slider', { name: 'Number of creatives to generate' }).fill('2');
       await page.getByRole('combobox', { name: 'Creative format' }).selectOption('PORTRAIT_4_5');
-      await generateButton(page).click();
-      await page.getByRole('alert').getByText('The approved TRA logo is missing for this site.', { exact: false }).waitFor();
-      assert.equal(submissions.length, 0);
       await page.getByLabel('Run this Preview test without a logo').check();
       await generateButton(page).click();
       await page.getByText('Cached-input preflight passed.', { exact: false }).waitFor();
@@ -476,7 +473,7 @@ try {
       holdSourceReadPaths: [source === 'video' ? '/api/references' : '/api/video/intelligence/jobs'] }, async ({ page, calls, videoActions, releaseSourceReads }) => {
       const removedName = source === 'video' ? 'second.mp4' : 'fixture-layout.png';
       const retainedName = source === 'video' ? 'fixture-layout.png' : 'second.mp4';
-      const key = source === 'video' ? 'tra-create-video-ids-v1' : 'tra-create-linked-layout-ids-v1';
+      const key = source === 'video' ? 'tax-marketing-studio-create-video-ids-v1' : 'tax-marketing-studio-create-linked-layout-ids-v1';
       await page.getByLabel(`Remove ${removedName}`).click();
       assert.deepEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), key), []);
       await page.reload(); releaseSourceReads(); await page.getByLabel(`Remove ${retainedName}`).waitFor();
@@ -488,8 +485,8 @@ try {
   await scenario('Saved source UI handoff survives refresh while its first reads are pending',
     { noSavedReview: true, inventory: [], linkedVideo: availableB, linkedLayout: layoutMediaId,
       holdSourceReads: true, runWhilePending: true }, async ({ page, calls, videoActions, releaseSourceReads }) => {
-      await page.waitForFunction(() => JSON.parse(localStorage.getItem('tra-create-video-ids-v1') ?? '[]').length === 1
-        && JSON.parse(localStorage.getItem('tra-create-linked-layout-ids-v1') ?? '[]').length === 1);
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem('tax-marketing-studio-create-video-ids-v1') ?? '[]').length === 1
+        && JSON.parse(localStorage.getItem('tax-marketing-studio-create-linked-layout-ids-v1') ?? '[]').length === 1);
       assert.equal(await page.getByLabel('Remove second.mp4').count(), 0);
       assert.equal(await page.getByLabel('Remove fixture-layout.png').count(), 0);
       assert.equal(new URL(page.url()).searchParams.has('videoMediaId'), false);
@@ -539,7 +536,7 @@ try {
       await page.waitForFunction(() => document.body.textContent.includes('Save failed') || document.body.textContent.includes('Conflict / reload required'));
       assert.equal(await checks.nth(2).isDisabled(), true);
       assert.deepEqual(response().draft.choices.frames, [frame]);
-      const expected = { 401: 'Sign in again', 403: 'approved TRA operator', 409: 'newer saved revision', 503: 'could not be confirmed' }[status];
+      const expected = { 401: 'Sign in again', 403: 'approved workspace operator', 409: 'newer saved revision', 503: 'could not be confirmed' }[status];
       await panel.getByText(expected, { exact: false }).waitFor();
       denyLoads(status); await page.getByRole('button', { name: 'Reload saved review', exact: true }).click();
       await page.waitForFunction(() => !document.body.textContent.includes('Saving…'));
@@ -675,15 +672,17 @@ try {
       await ready(page); await page.waitForFunction(() => document.querySelectorAll('[data-frame-id] img').length >= 51);
       assert.deepEqual(previewBatches.map(batch => batch.length), [24, 24, 2]);
       const before = structuredClone(response());
-      await page.evaluate(() => localStorage.setItem('tra-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
+      await page.evaluate(() => localStorage.setItem('tax-marketing-studio-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
       await page.getByRole('region', { name: 'Saved portfolio progress' }).waitFor();
       await page.getByRole('button', { name: portfolioState === 'PENDING' ? 'Resume generation' : 'Retry creative 1', exact: true }).click();
       await page.getByText('Generation complete.').waitFor(); assert.deepEqual(response(), before); assert.equal(saves.length, 0);
     });
-  await scenario('Missing original logo blocks a new generation before paid admission', { noLogo: true }, async ({ page, submissions }) => {
+  await scenario('A supplied company video can be submitted without requiring an unrelated logo', { noLogo: true }, async ({ page, submissions }) => {
     await ready(page); await generateButton(page).click();
-    await page.getByRole('alert').getByText('The approved TRA logo is missing for this site.', { exact: false }).waitFor();
-    assert.equal(submissions.length, 0);
+    await page.getByText('Generation needs attention.').waitFor();
+    assert.equal(submissions.length, 1); assert.equal(submissions[0].brandLogoMediaId, undefined);
+    assert.equal(submissions[0].previewOmitBrandLogo, undefined);
+    assert.deepEqual(submissions[0].sourceAssets, [{ mediaId, role: 'TRA_VIDEO' }]);
   });
   await scenario('Review → Create exact revision/manual frames; refresh and reopen are read-only', {}, async ({ page, calls, submissions }) => {
     await ready(page); assert.equal(await page.getByRole('region', { name: 'Video material review' }).locator('[data-frame-id] input[type=checkbox]').first().isChecked(), true);
@@ -697,7 +696,7 @@ try {
   });
   await scenario('Full video inventory survives refresh and explicit removal', {}, async ({ page }) => {
     await ready(page);
-    await page.evaluate(() => localStorage.setItem('tra-create-video-ids-v1', JSON.stringify([`media_${'b'.repeat(32)}`, `media_${'9'.repeat(32)}`])));
+    await page.evaluate(() => localStorage.setItem('tax-marketing-studio-create-video-ids-v1', JSON.stringify([`media_${'b'.repeat(32)}`, `media_${'9'.repeat(32)}`])));
     await page.reload(); await ready(page); await page.getByLabel('Remove second.mp4').waitFor();
     await page.getByLabel('Remove second.mp4').click(); await page.reload(); await ready(page);
     assert.equal(await page.getByLabel('Remove second.mp4').count(), 0);
@@ -790,7 +789,7 @@ try {
     assert.equal(calls.filter(([path, method]) => path === '/api/video/review-selection' && method === 'GET').length, loads + 1);
   });
   for (const portfolioState of ['PENDING', 'RETRY_REQUIRED', 'SAVED']) await scenario(`Saved portfolio ${portfolioState}`, { portfolioState }, async ({ page, calls }) => {
-    await page.evaluate(() => localStorage.setItem('tra-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
+    await page.evaluate(() => localStorage.setItem('tax-marketing-studio-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
     await page.getByRole('region', { name: 'Saved portfolio progress' }).waitFor();
     assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 0);
     if (portfolioState === 'PENDING') { await page.getByRole('button', { name: 'Resume generation' }).click(); await page.getByText('Generation complete.').waitFor(); }

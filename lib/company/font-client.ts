@@ -49,9 +49,9 @@ export async function createBrandFontSpecimen(
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.fillStyle = '#111111';
   context.font = `76px "${family}"`;
-  context.fillText('Tax Relief Advocates', 56, 118, 1088);
+  context.fillText('Your company name', 56, 118, 1088);
   context.font = `52px "${family}"`;
-  context.fillText('Clear answers. Confident next steps.', 56, 220, 1088);
+  context.fillText('Tax marketing, designed for clarity.', 56, 220, 1088);
   context.font = `32px "${family}"`;
   context.fillText('ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789', 56, 300, 1088);
 

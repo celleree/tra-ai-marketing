@@ -6,8 +6,8 @@ import type { useVideoReviewDraft } from './use-video-review-draft';
 import type { ReferenceLibraryItem } from '@/lib/references/types';
 import type { WorkspaceAccessObserver } from '@/lib/auth/workspace-access-client';
 
-const INVENTORY = 'tra-create-video-ids-v1';
-const LINKED_LAYOUTS = 'tra-create-linked-layout-ids-v1';
+const INVENTORY = 'tax-marketing-studio-create-video-ids-v1';
+const LINKED_LAYOUTS = 'tax-marketing-studio-create-linked-layout-ids-v1';
 /** Convenience IDs only. Reopen rehydrates current server media without advancing video work. */
 export function useSavedVideoSources(sources: CreativeSourceAsset[], setSources: Dispatch<SetStateAction<CreativeSourceAsset[]>>,
   review: ReturnType<typeof useVideoReviewDraft>, observeAccess?: WorkspaceAccessObserver) {

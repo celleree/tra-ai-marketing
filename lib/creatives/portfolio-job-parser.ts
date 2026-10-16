@@ -208,6 +208,7 @@ const validCheckpoint = (value: unknown, job: CreativePortfolioJob, auditMode: '
     || (args.requestedVideoCases !== undefined && !isDeepStrictEqual(args.requestedVideoCases,
       requestedVideoCases(job.request.context, job.request.reviewHandoff)))
     || typeof args.hasApprovedHumanSource !== 'boolean'
+    || !isDeepStrictEqual(args.companySourceScope, job.request.companySourceScope)
     || (args.hasBrandLogo !== undefined && typeof args.hasBrandLogo !== 'boolean')
     || (args.hasBrandLogo !== undefined && args.hasBrandLogo !== Boolean(job.request.brandLogoMediaId))
     || (args.logoPlacement !== undefined && (!isCreativeLogoPlacementContext(args.logoPlacement)

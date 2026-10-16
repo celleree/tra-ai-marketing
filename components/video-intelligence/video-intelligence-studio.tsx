@@ -147,7 +147,7 @@ export function VideoIntelligenceStudio({ acceptancePreview = false }: { accepta
     const mediaId = new URL(window.location.href).searchParams.get('mediaId');
     if (mediaId) {
       setBusy(true);
-      setProgress('Loading saved TRA video');
+      setProgress('Loading saved company video');
       void readSaved(mediaId, next).finally(() => { if (isCurrent(next)) setBusy(false); });
     }
     return () => {
@@ -163,7 +163,7 @@ export function VideoIntelligenceStudio({ acceptancePreview = false }: { accepta
     const next = begin();
     setBusy(true);
     setError('');
-    setProgress('Uploading TRA video');
+    setProgress('Uploading company video');
     clearSource();
 
     try {
@@ -190,7 +190,7 @@ export function VideoIntelligenceStudio({ acceptancePreview = false }: { accepta
     const next = begin();
     setBusy(true);
     setError('');
-    setProgress('Loading stored TRA video');
+    setProgress('Loading stored company video');
 
     try {
       rememberMediaId(mediaId);
@@ -264,7 +264,7 @@ export function VideoIntelligenceStudio({ acceptancePreview = false }: { accepta
         <p>Local development or Vercel Preview</p>
         <h1>Video intelligence</h1>
         <span>
-          Analyze a TRA-owned MP4, inspect evidence, then compare frame choices
+          Analyze a company-owned MP4, inspect evidence, then compare frame choices
           for distinct creative concepts.
         </span>
       </header>
@@ -273,7 +273,7 @@ export function VideoIntelligenceStudio({ acceptancePreview = false }: { accepta
         <div className={styles.sectionHeading}>
           <div>
             <p>1 · Source</p>
-            <h2 id="source-title">TRA video</h2>
+            <h2 id="source-title">Company video</h2>
           </div>
           {media ? <button className={styles.secondary} type="button" onClick={() => void loadStoredVideo()} disabled={busy}>Refresh saved status</button> : null}
         </div>
@@ -285,7 +285,7 @@ export function VideoIntelligenceStudio({ acceptancePreview = false }: { accepta
           <button className={styles.primary} type="button" onClick={() => void upload()} disabled={!file || busy}>{busy ? 'Working…' : 'Upload video'}</button>
         </div>
         <form className={styles.loadForm} onSubmit={loadStoredVideo}>
-          <label htmlFor="stored-media-id">Or load stored TRA video ID</label>
+          <label htmlFor="stored-media-id">Or load stored company video ID</label>
           <input id="stored-media-id" value={storedMediaId} onChange={(event) => setStoredMediaId(event.target.value)} placeholder="media_…" disabled={busy} />
           <button className={styles.secondary} disabled={!storedMediaId.trim() || busy}>Load</button>
         </form>
@@ -295,7 +295,7 @@ export function VideoIntelligenceStudio({ acceptancePreview = false }: { accepta
             <strong>{media.originalName}</strong>
             {acceptancePreview && status?.phase === 'COMPLETE'
               ? <p><a href={`/?videoMediaId=${encodeURIComponent(media.id)}`}>Use saved video in Create</a></p> : null}
-            <p>{Math.round(media.size / 1024 / 1024 * 10) / 10} MB · stored as TRA_VIDEO</p>
+            <p>{Math.round(media.size / 1024 / 1024 * 10) / 10} MB · stored as company video</p>
             {!status ? <button className={styles.primary} type="button" onClick={() => void analyze('START')} disabled={busy}>Start analysis (uses model/API)</button> : null}
             {status && !['COMPLETE', 'FAILED', 'RETRY_REQUIRED'].includes(status.phase) ? <button className={styles.primary} type="button" onClick={() => void analyze('ADVANCE')} disabled={busy}>Resume analysis (uses model/API)</button> : null}
             {status?.phase === 'RETRY_REQUIRED' ? <button className={styles.primary} type="button" onClick={() => void analyze('RETRY')} disabled={busy}>Retry analysis (uses model/API)</button> : null}

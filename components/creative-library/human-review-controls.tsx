@@ -20,7 +20,7 @@ function StoriesReviewGuide({ creative }: { creative: CreativeRecord }) {
         <img src={creative.image.url} alt="Saved creative with Stories safe-zone guide" style={{ display: 'block', width: '100%', height: 'auto' }} />
         <div aria-hidden="true" style={{ position: 'absolute', pointerEvents: 'none', boxSizing: 'border-box', border: '2px solid #facc15', boxShadow: '0 0 0 100vmax rgba(120, 20, 20, 0.45)', left: `${safe.left / spec.width * 100}%`, top: `${safe.top / spec.height * 100}%`, width: `${safe.width / spec.width * 100}%`, height: `${safe.height / spec.height * 100}%` }} />
       </div>
-      <figcaption>Keep essential text, CTA, faces and the TRA logo inside the unshaded area. This guide does not change the saved image.</figcaption>
+      <figcaption>Keep essential text, CTA, faces and the company logo inside the unshaded area. This guide does not change the saved image.</figcaption>
     </figure> : null}
   </div>;
 }

@@ -25,7 +25,11 @@ import {
   type GenerateVideoFrameSelection,
 } from '@/lib/video/generation-selection-contract';
 
+export type CompanySourceScope = { version: 1; referenceIds: string[] };
+
 export type GenerateCreativeRequest = {
+  /** Explicit current-company inputs; absent only on historical saved requests. */
+  companySourceScope?: CompanySourceScope;
   videoReview?: VideoReviewReference;
   sourceAssets?: CreativeSourceSelection[];
   brandLogoMediaId?: string;
@@ -237,6 +241,17 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
     return { success: false, error: 'brandColors contains an invalid color' };
   }
 
+  const scope = body.companySourceScope;
+  if (scope !== undefined && (typeof scope !== 'object' || scope === null
+    || (scope as CompanySourceScope).version !== 1
+    || !Array.isArray((scope as CompanySourceScope).referenceIds)
+    || (scope as CompanySourceScope).referenceIds.length > 50
+    || (scope as CompanySourceScope).referenceIds.some(id => typeof id !== 'string' || !SAFE_MEDIA_ID.test(id))
+    || new Set((scope as CompanySourceScope).referenceIds).size !== (scope as CompanySourceScope).referenceIds.length)) {
+    return { success: false, error: 'Choose at most 50 distinct company layout references.' };
+  }
+  const companySourceScope: CompanySourceScope = { version: 1,
+    referenceIds: scope === undefined ? [] : [...(scope as CompanySourceScope).referenceIds] };
   const companyContext = formatCreativeCompanyContext(
     buildCreativeCompanyContext(companyProfile)
   );
@@ -247,6 +262,7 @@ export function validateGenerateCreativeRequest(input: unknown, maximumCount: 30
     data: {
       ...(review ? { videoReview: { draftId: review.draftId as string, revision: review.revision as string } } : {}),
       sourceAssets,
+      companySourceScope,
       placement,
       ...(brandLogoMediaId ? { brandLogoMediaId } : {}),
       ...(body.previewOmitBrandLogo === true ? { previewOmitBrandLogo: true } : {}),

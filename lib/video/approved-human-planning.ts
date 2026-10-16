@@ -8,15 +8,16 @@ import { isDurableVideoIntelligenceAvailable } from '@/lib/video/preview-availab
 import { loadVideoSelectionContext } from '@/lib/video/selection-context';
 
 /** Curated notes are planning options, never factual proof or provider pixels. */
-export async function loadApprovedHumanOptions(): Promise<ApprovedHumanOption[]> {
-  if (!isDurableVideoIntelligenceAvailable()) return [];
+export async function loadApprovedHumanOptions(sourceVideoIds?: readonly string[]): Promise<ApprovedHumanOption[]> {
+  if (sourceVideoIds?.length === 0 || !isDurableVideoIntelligenceAvailable()) return [];
   let available: Awaited<ReturnType<typeof listApprovedHumanFrames>>;
   try { available = await listApprovedHumanFrames(); }
   catch {
     console.warn('Approved-human catalog unavailable; planning without library human options.');
     return [];
   }
-  const records = available.filter(record => record.active && record.version === 2)
+  const records = available.filter(record => record.active && record.version === 2
+    && (sourceVideoIds === undefined || sourceVideoIds.includes(record.source.sourceVideoMediaId)))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   const sourceContexts = new Map<string, Promise<{ hash: string; context: Awaited<ReturnType<typeof loadVideoSelectionContext>> } | null>>();
   const result: ApprovedHumanOption[] = [];

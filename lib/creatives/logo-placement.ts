@@ -97,7 +97,7 @@ export function resolveCreativeLogoGeometry(
   sourceHeight: number,
 ): CreativeLogoGeometry {
   if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
-    throw new Error('The TRA logo has invalid dimensions.');
+    throw new Error('The Company logo has invalid dimensions.');
   }
   const safe = getCreativeSafeRect(placement);
   const { width: canvasWidth, height: canvasHeight } = CREATIVE_PLACEMENT_SPECS[placement];

@@ -21,7 +21,7 @@ export function ContextInput({ value, onChange }: ContextInputProps) {
         onChange={(event) => onChange(event.target.value)}
         rows={7}
         maxLength={4000}
-        placeholder="Example: Use this visual idea as inspiration for a TRA Facebook/Instagram tax-relief ad. Keep the concept simple, direct, and trustworthy."
+        placeholder="Example: Turn this visual idea into a clear, trustworthy tax marketing ad for your company."
       />
       <div className="input-footer">
         <span className="muted">Tell the system what to preserve, change, or emphasize.</span>

@@ -685,7 +685,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
       event: 'complete',
       data: { requestedCount: 2, successfulCount: 2, failedCount: 0 },
     });
-    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('APPROVED TRA COMPANY CONTEXT');
+    expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('APPROVED COMPANY CONTEXT');
     expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('Runtime approved TRA summary.');
     expect(mocks.planCreativeBatch.mock.calls[0][0].context).toContain('Runtime approved claim.');
     const plannerInput = mocks.planCreativeBatch.mock.calls[0][0];
@@ -706,7 +706,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
       expect(body.quality).toBe('high');
       expect(body.size).toBe('1024x1024');
       expect(body.prompt).toContain('1:1 canvas (1024x1024)');
-      expect(body.prompt).not.toContain('APPROVED TRA COMPANY CONTEXT');
+      expect(body.prompt).not.toContain('APPROVED COMPANY CONTEXT');
       expect(body.prompt).toContain('"layoutBlueprint"');
       expect(body.prompt).toContain('HUMAN_PLACEHOLDER regions describe geometry only');
       expect(body.prompt).toContain('This planned concept is explicitly non-human');
@@ -925,7 +925,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     );
     expect(stale.status).toBe(409);
     await expect(stale.json()).resolves.toEqual({
-      error: 'The selected TRA video frames are stale. Reanalyze the video and select frames again.',
+      error: 'The selected company video frames are stale. Reanalyze the video and select frames again.',
     });
 
     const missing = await POST(
@@ -938,7 +938,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     );
     expect(missing.status).toBe(409);
     await expect(missing.json()).resolves.toEqual({
-      error: 'The selected TRA video frame library is missing or invalid. Reanalyze the video and select frames again.',
+      error: 'The selected company video frame library is missing or invalid. Reanalyze the video and select frames again.',
     });
 
     mocks.loadVideoSelectionContext.mockResolvedValue({
@@ -954,7 +954,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
     );
     expect(mismatchedLibrary.status).toBe(409);
     await expect(mismatchedLibrary.json()).resolves.toEqual({
-      error: 'The selected TRA video frame library does not match this request. Select frames again.',
+      error: 'The selected company video frame library does not match this request. Select frames again.',
     });
     expect(mocks.getApprovedTraVideoFrames).not.toHaveBeenCalled();
     expect(mocks.extractVideoSelectionFrames).not.toHaveBeenCalled();
@@ -1246,7 +1246,7 @@ describe('layout blueprint and final image-provider boundaries', () => {
         2,
         undefined,
         undefined,
-        { brandLogoMediaId: logoId }
+        { brandLogoMediaId: logoId, companySourceScope: { version: 1, referenceIds: [firstReference.id, secondReference.id] } }
       )
     );
     const events = await readStreamEvents(response);
@@ -1346,7 +1346,8 @@ describe('layout blueprint and final image-provider boundaries', () => {
     ]);
 
     const response = await POST(
-      generationRequest([{ mediaId: traId, role: 'TRA_REFERENCE' }])
+      generationRequest([{ mediaId: traId, role: 'TRA_REFERENCE' }], undefined, 2, undefined, undefined,
+        { companySourceScope: { version: 1, referenceIds: [reference.id] } })
     );
     const events = await readStreamEvents(response);
 

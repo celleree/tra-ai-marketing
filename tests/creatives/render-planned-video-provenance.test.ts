@@ -130,13 +130,13 @@ describe('render planned video provenance', () => {
     expect(creative.videoFrameSelection!.sourceVideoMediaId).toBe(mediaId);
   });
   it.each([false, true])('blocks non-human video rendering without primary evidence (explicit=%s)', async explicit => {
-    await expect(render(explicit, false)).rejects.toThrow(explicit ? 'explicitly selected TRA video frames' : 'selected video cannot be replaced');
+    await expect(render(explicit, false)).rejects.toThrow(explicit ? 'explicitly selected company video frames' : 'selected video cannot be replaced');
     expect(mocks.generate).not.toHaveBeenCalled();
     expect(mocks.promptOnly).not.toHaveBeenCalled();
   });
 
   it('blocks a frozen graphic plan that ignores manual reviewed frames before provider work', async () => {
-    await expect(render(false, false, selection, true)).rejects.toThrow('explicitly selected TRA video frames');
+    await expect(render(false, false, selection, true)).rejects.toThrow('explicitly selected company video frames');
     expect(mocks.generate).not.toHaveBeenCalled(); expect(mocks.promptOnly).not.toHaveBeenCalled();
     expect(mocks.saveBatch).not.toHaveBeenCalled();
   });

@@ -201,7 +201,7 @@ const fetchWithSafeRedirects = async (initialUrl: URL, signal: AbortSignal, disp
       redirect: 'manual',
       signal,
       headers: {
-        'User-Agent': 'TRA-AI-Marketing-Company-Profile/1.0',
+        'User-Agent': 'Company-AI-Marketing-Company-Profile/1.0',
         Accept: 'text/html,application/xhtml+xml',
       },
     });

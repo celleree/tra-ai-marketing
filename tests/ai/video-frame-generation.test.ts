@@ -57,7 +57,7 @@ describe('approved TRA video-frame provider boundary', () => {
     const images = (fetchMock.mock.calls[0][1].body as FormData).getAll('image[]') as File[];
     expect(images.map(file => file.type)).toEqual(['image/png', 'image/jpeg']);
     expect(result.providerFrames).toMatchObject(makeFrames(1));
-    expect(result.prompt).toContain('NOT a TRA human source');
+    expect(result.prompt).toContain('NOT a company human source');
   });
 
   it.each([false, true])('sends approved PNG pixels and preserves invisible logo reservation when enabled: %s', async (reserveLogoArea) => {
@@ -101,7 +101,7 @@ describe('approved TRA video-frame provider boundary', () => {
     vi.stubGlobal('fetch', fetchMock);
     const frames = makeFrames(1);
     frames[0] = { ...frames[0], sourceRole: 'LAYOUT_REFERENCE' as 'TRA_VIDEO' };
-    await expect(generateApprovedTraVideoFrameCreativeImage({ frames, primaryFormat: 'direct-response', context: 'context', copy: { headline: 'h' } })).rejects.toThrow('Refusing non-TRA or invalid pixels');
+    await expect(generateApprovedTraVideoFrameCreativeImage({ frames, primaryFormat: 'direct-response', context: 'context', copy: { headline: 'h' } })).rejects.toThrow('Refusing non-company or invalid pixels');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -111,7 +111,7 @@ describe('approved TRA video-frame provider boundary', () => {
     vi.stubGlobal('fetch', fetchMock);
     const frames = makeFrames(1);
     frames[0] = { ...frames[0], buffer: Buffer.from(PNG.subarray(0, 16)) };
-    await expect(generateApprovedTraVideoFrameCreativeImage({ frames, primaryFormat: 'direct-response', context: 'context', copy: { headline: 'h' } })).rejects.toThrow('Refusing non-TRA or invalid pixels');
+    await expect(generateApprovedTraVideoFrameCreativeImage({ frames, primaryFormat: 'direct-response', context: 'context', copy: { headline: 'h' } })).rejects.toThrow('Refusing non-company or invalid pixels');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

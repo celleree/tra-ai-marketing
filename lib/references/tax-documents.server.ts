@@ -16,7 +16,7 @@ export async function prepareTaxDocumentReference(selection?: TaxDocumentSelecti
   return {
     prompt: `
 DOCUMENT-ONLY REFERENCE: ${reference.id}; version=${reference.version}; sha256=${reference.sha256}.
-The attachment named ${fileName} is a document-structure exemplar, NOT a TRA human source, ad layout, proof or approved copy.
+The attachment named ${fileName} is a document-structure exemplar, NOT a company human source, ad layout, proof or approved copy.
 Use only its paper/envelope geometry, hierarchy, spacing and physical construction for the planned tax document.
 Do not copy IRS seals/logos, names, addresses, SSNs, signatures, case/notice/caller numbers, balances, barcodes, postage marks, source wording or claims. Do not invent replacements.
 Leave sensitive fields blank. Use only exact document wording explicitly provided in the planned brief; otherwise leave document text regions blank. No blurry pseudo-text, microprint or filler marks.

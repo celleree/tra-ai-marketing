@@ -70,7 +70,7 @@ it('enforces explicitly selected human frames and layout through the provider re
   const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => okResponse({ creatives })); vi.stubGlobal('fetch', fetchMock);
   const args = { count: 2, context: 'Use the selected human frames and layout', analysis, hasApprovedHumanSource: true,
     referenceCatalog: catalog, requireSelectedVideoFrames: true, requiredLayoutReferenceIds: [catalog[0].referenceId] };
-  await expect(requestCreativeBatch(args)).rejects.toThrow('explicitly selected TRA video frames');
+  await expect(requestCreativeBatch(args)).rejects.toThrow('explicitly selected company video frames');
   creatives = creatives.map(item => ({ ...item, strategy: strategy('approved-tra-human') }));
   await expect(requestCreativeBatch(args)).rejects.toThrow('supplied video layout reference');
   creatives = creatives.map(item => ({ ...item, referenceChoices: { angleSource: null, layoutSource: catalog[0].referenceId } }));

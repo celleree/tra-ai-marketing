@@ -23,7 +23,7 @@ it('rejects source-discarding revision plans and accepts retained frames and sup
     requireSelectedVideoFrames: true, requiredLayoutReferenceIds: [catalog[0].referenceId], referenceCatalog: catalog };
   const changed = { ...plan(), referenceChoices: { angleSource: null, layoutSource: null as string | null } };
   fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload(changed))));
-  await expect(planCreativeRevision(selectedArgs)).rejects.toThrow('explicitly selected TRA video frames');
+  await expect(planCreativeRevision(selectedArgs)).rejects.toThrow('explicitly selected company video frames');
   const preserved = { ...changed, strategy: { ...humanStrategy, conceptDetails } };
   fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload(preserved))));
   await expect(planCreativeRevision(selectedArgs)).rejects.toThrow('supplied video layout reference');

@@ -16,7 +16,7 @@ import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 const headers = { 'Cache-Control': 'private, no-store' };
-const concept = 'Assess TRA human source pixels for captions, lower thirds, logos, watermarks, and portrait suitability.';
+const concept = 'Assess company human source pixels for captions, lower thirds, logos, watermarks, and portrait suitability.';
 
 export async function POST(request: Request) {
   const access = await getOperatorAccess();
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     if (!(Object.keys(input).length === 2 || (Object.keys(input).length === 3 && 'retry' in input))
       || (input.retry !== undefined && typeof input.retry !== 'boolean')
       || typeof input.mediaId !== 'string' || !isSafeMediaId(input.mediaId) || !selection) {
-      return NextResponse.json({ error: 'Choose a valid stored TRA video frame selection.' }, { status: 400, headers });
+      return NextResponse.json({ error: 'Choose a valid stored company video frame selection.' }, { status: 400, headers });
     }
     const [source] = await hydrateCreativeSourceSelections(getMediaStorage(), [{ mediaId: input.mediaId, role: 'TRA_VIDEO' }]);
     const video = source as HydratedTraVideoSource;

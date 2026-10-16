@@ -19,12 +19,12 @@ body {
   flex: 0 0 auto;
   border-radius: 10px;
   background-color: #ffffff;
-  background-image: url('/tra-logo-sidebar.png');
+  background-image: none;
   background-repeat: no-repeat;
   background-position: center;
   background-size: 88% auto;
-  color: transparent;
-  text-indent: -9999px;
+  color: #10141b;
+  text-indent: 0;
   overflow: hidden;
 }
 

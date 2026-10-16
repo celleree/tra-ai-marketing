@@ -5,7 +5,7 @@ import type { MediaAsset } from '@/lib/media/types';
 import { resolveCreativeLogoGeometry } from '@/lib/creatives/logo-placement';
 import { CREATIVE_PLACEMENT_SPECS } from '@/lib/creatives/placements';
 
-const COMPANY_PROFILE_STORAGE_KEY = 'tra-company-profile-v2';
+const COMPANY_PROFILE_STORAGE_KEY = 'tax-marketing-studio:company-profile:v1';
 const STORED_MEDIA_URL = /\/api\/media\/files\/(media_[a-f0-9]{32})\.(?:png|jpg|webp)(?:\?.*)?$/;
 const BRAND_BATCH_SIZE = 3;
 
@@ -209,7 +209,7 @@ const brandOneCreative = async (
   );
 
   try {
-    const logoSource = await fetchDrawableImage(safeLogoUrl, 'TRA logo');
+    const logoSource = await fetchDrawableImage(safeLogoUrl, 'Company logo');
 
     try {
       const canvas = document.createElement('canvas');

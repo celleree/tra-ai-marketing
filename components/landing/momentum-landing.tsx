@@ -78,7 +78,7 @@ export function MomentumLanding() {
                       className={styles.placeholder}
                       key={`${columnIndex}-${setIndex}-${cardIndex}`}
                     >
-                      <span>TRA</span>
+                      <span>TM</span>
                     </div>
                   ))}
                 </div>
@@ -91,7 +91,7 @@ export function MomentumLanding() {
       <div className={styles.fade} aria-hidden="true" />
 
       <section className={styles.hero}>
-        <h1>MOMENTUM</h1>
+        <h1>Tax Marketing Studio</h1>
 
         <div className={styles.composerWrap}>
           <CreativeComposer

@@ -13,7 +13,7 @@ export async function resolveCreativeBrandLogoPlacementContext(
 ): Promise<CreativeLogoPlacementContext> {
   const orientedLogo = await sharp(logo).rotate().png().toBuffer();
   const metadata = await sharp(orientedLogo).metadata();
-  if (!metadata.width || !metadata.height) throw new Error('The TRA logo has invalid dimensions.');
+  if (!metadata.width || !metadata.height) throw new Error('The Company logo has invalid dimensions.');
   return { placement, sourceWidth: metadata.width, sourceHeight: metadata.height };
 }
 
@@ -42,12 +42,12 @@ export async function compositeCreativeBrandLogo(
   const orientedLogo = await sharp(logo).rotate().png().toBuffer();
   const logoMetadata = await sharp(orientedLogo).metadata();
   if (!logoMetadata.width || !logoMetadata.height) {
-    throw new Error('The TRA logo has invalid dimensions.');
+    throw new Error('The Company logo has invalid dimensions.');
   }
   const { panel: panelRect, artwork } = geometry;
   if (artwork.width <= 0 || artwork.height <= 0 || panelRect.width <= 0 || panelRect.height <= 0
     || panelRect.left < 0 || panelRect.top < 0 || panelRect.left + panelRect.width > width
-    || panelRect.top + panelRect.height > height) throw new Error('The TRA logo geometry is invalid.');
+    || panelRect.top + panelRect.height > height) throw new Error('The Company logo geometry is invalid.');
   const radius = Math.round(width * 0.012);
   const panel = Buffer.from(
     `<svg width="${panelRect.width}" height="${panelRect.height}"><rect width="${panelRect.width}" height="${panelRect.height}" rx="${radius}" fill="white" fill-opacity="0.94"/></svg>`

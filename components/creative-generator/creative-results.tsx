@@ -471,7 +471,7 @@ export function CreativeResults({
               <img
                 className={styles.image}
                 src={creative.image.url}
-                alt={`TRA creative variation ${creative.index}`}
+                alt={`Creative variation ${creative.index}`}
               />
               <div className={styles.body}>
                 <div className={styles.pills}>

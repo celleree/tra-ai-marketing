@@ -103,7 +103,7 @@ export function effectiveCaseConcept(job: CreativePortfolioJob, slotIndex: numbe
   concept.selectedProof = null;
   concept.adCopy = { headline: 'A video case account', primaryText: assertion.exactText, description: concept.copy.description };
   concept.copy = { ...concept.adCopy };
-  concept.imageCopy = { headline: 'One person’s TRA experience', shortSupport: assertion.exactText,
+  concept.imageCopy = { headline: 'One person’s tax-service experience', shortSupport: assertion.exactText,
     proofAttribution: 'Supplied video account', cta: original.imageCopy?.cta ?? original.strategy.cta,
     disclosure: original.imageCopy?.disclosure || 'Individual result. Results vary.' };
   delete concept.strategy.approvedHumanId; delete concept.strategy.humanSourceId;

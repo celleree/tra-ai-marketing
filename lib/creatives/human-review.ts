@@ -20,12 +20,12 @@ export const CREATIVE_HUMAN_REVIEW_CHECKLIST_LABELS: Readonly<
   artifactIntegrity: 'No obvious AI artifacts or implausible people',
   textReadability: 'Text is accurate and readable',
   layoutAndHierarchy: 'Layout is clear, with no material clutter or spacing problems',
-  imageryAndBrandFit: 'Imagery is relevant and fits the TRA brand',
+  imageryAndBrandFit: 'Imagery is relevant and fits the company brand',
   claimsAndDisclaimers: 'Claims are supported and required disclaimers are present',
   sourceAndThirdPartyCompliance: 'No improper source, third-party identity or branding transfer',
   conceptDistinctness: 'The concept is sufficiently distinct for the intended operation',
   placementSafety: 'Critical content is clear of placement overlays and cropping',
-  logoIntegrity: 'The original TRA logo is correct and has a viable placement',
+  logoIntegrity: 'The original company logo is correct and has a viable placement',
   productionReadiness: 'Ready for use without material designer cleanup',
 };
 

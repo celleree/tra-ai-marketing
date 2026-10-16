@@ -157,6 +157,10 @@ export function selectProofForPlanning(
   return selected;
 }
 
-export async function loadPlanningProofCatalog(query: string) {
-  return selectProofForPlanning(await listProofRecords(), query);
+export async function loadPlanningProofCatalog(query: string, allowedIds?: readonly string[]) {
+  if (allowedIds?.length === 0) return [];
+  const records = await listProofRecords();
+  const selected = allowedIds === undefined ? records : records.filter(item => allowedIds.includes(item.id));
+  return selectProofForPlanning(selected, query, allowedIds === undefined ? []
+    : selected.map(({ id, type, updatedAt }) => ({ id, type, updatedAt })));
 }

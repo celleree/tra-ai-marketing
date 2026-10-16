@@ -148,7 +148,21 @@ describe('real preparation to Astra with composed sources', () => {
     await expect(run()).rejects.toThrow('unknown');
     expect(operations).toEqual(calls); expect(mocks.image).toHaveBeenCalledTimes(1); expect(outbound).toHaveLength(0);
   });
-  it('keeps Proof retrieval bound to original Create direction across audit repair feedback', async () => {
+  it('new unbranded prompt-only work ignores the shared Proof and human catalogs', async () => {
+    const parsed = validateGenerateCreativeRequest({ context: 'Create tax guidance about wage garnishment.',
+      variationCount: 2, peoplePercent: 0, useReferenceLibrary: false });
+    if (!parsed.success) throw new Error(parsed.error);
+    mocks.proof.mockRejectedValue(new Error('Shared company proof must not be read'));
+    const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
+    expect(prepared.plannerArgs?.companySourceScope).toEqual({ version: 1, referenceIds: [] });
+    expect(prepared.plannerArgs?.hasBrandLogo).toBe(false);
+    expect(mocks.proof).not.toHaveBeenCalled();
+    expect(mocks.library).not.toHaveBeenCalled();
+    expect(outbound).toHaveLength(1);
+    expect(outbound[0]).not.toHaveProperty('proofCatalog');
+    expect(JSON.stringify(outbound[0])).not.toMatch(/Tax Relief Advocates|contact@tra\.com|800-501|Free\/no-cost/);
+  });
+  it('keeps historical Proof retrieval bound to original Create direction across audit repair feedback', async () => {
     const userDirection = 'Create proof-led ads about wage garnishment.';
     const parsed = validateGenerateCreativeRequest({ context: userDirection, variationCount: 2, peoplePercent: 0, useReferenceLibrary: false,
       companyProfile: { knowledgeBase: { companySummary: 'APPROVED TRA COMPANY CONTEXT IRS tax professionalism patience reassurance.' } } });
@@ -166,6 +180,7 @@ describe('real preparation to Astra with composed sources', () => {
     mocks.audit.mockResolvedValueOnce({ ...portfolioAudit(2),
       groups: [{ conceptIndexes: [1, 2], proposition: 'Same', distinction: 'Repeated' }] })
       .mockResolvedValueOnce(portfolioAudit(2));
+    delete parsed.data.companySourceScope; // Historical saved jobs retain their original retrieval contract.
     expect(parsed.data.proofRetrievalQuery).toBe(userDirection);
     const prepared = await prepareCreativeGeneration(parsed.data, 'http://localhost');
     expect(prepared.plannerArgs).toMatchObject({ proofRetrievalQuery: userDirection, context: expect.stringContaining('IRS tax professionalism patience reassurance.') });

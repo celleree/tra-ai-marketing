@@ -10,11 +10,11 @@ describe('creative company context contract', () => {
     const context = buildCreativeCompanyContext();
     const formatted = formatCreativeCompanyContext(context);
 
-    expect(context.servicesOffers).toContain('Free/no-cost tax-debt consultation');
-    expect(context.brandColors).toContain('#0577BF');
-    expect(context.approvedClaims).toContain('free/no-cost tax-debt consultation');
+    expect(context.servicesOffers).toBe('');
+    expect(context.brandColors).toBe('');
+    expect(context.approvedClaims).toBe('');
     expect(context.requiredDisclaimers).toBe('');
-    expect(formatted).toContain('APPROVED TRA COMPANY CONTEXT');
+    expect(formatted).toContain('APPROVED COMPANY CONTEXT');
     expect(formatted).toContain('Required disclaimers:\n[UNKNOWN / NOT APPROVED]');
     expect(formatted).toContain('Do not infer or invent it');
   });
@@ -32,7 +32,7 @@ describe('creative company context contract', () => {
     const context = buildCreativeCompanyContext(runtime);
 
     expect(context.companySummary).toBe('Current approved runtime company summary.');
-    expect(context.servicesOffers).toContain('Free/no-cost tax-debt consultation');
+    expect(context.servicesOffers).toBe('');
     expect(context.approvedClaims).toBe('Current approved runtime claim.');
   });
 

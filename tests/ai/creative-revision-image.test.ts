@@ -154,7 +154,7 @@ describe('revision image provider', () => {
     const input = args();
     input.sources.originalApprovedSource = { kind: 'TRA_VIDEO_FRAMES', source: {} as never, selectionMode: 'AUTOMATIC',
       frames: [{ buffer: videoPng, mimeType: 'image/png' } as ApprovedTraVideoFrame] };
-    await expect(generateCreativeRevisionImage(input)).rejects.toThrow('Non-human revision cannot attach TRA video-human frames');
+    await expect(generateCreativeRevisionImage(input)).rejects.toThrow('Non-human revision cannot attach company video-human frames');
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it('reattaches a saved pixel crop on revision and rejects derivative drift before HTTP', async () => {
@@ -182,7 +182,7 @@ describe('revision image provider', () => {
   });
   it('rejects human strategy without original approval before spending', async () => {
     const input = args(); input.concept.strategy.execution.subjectSource = 'approved-tra-human';
-    await expect(generateCreativeRevisionImage(input)).rejects.toThrow('unavailable approved TRA source');
+    await expect(generateCreativeRevisionImage(input)).rejects.toThrow('unavailable approved company source');
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it('fails clearly for absent credentials, provider errors and missing output', async () => {

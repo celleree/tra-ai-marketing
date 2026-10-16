@@ -19,7 +19,7 @@ describe('seeded tax documents', () => {
     expect(createHash('sha256').update(buffer).digest('hex')).toBe(reference.sha256);
     expect((await sharp(buffer).metadata()).format).toBe('jpeg');
     expect(prepared!.prompt).toContain(reference.sha256);
-    expect(prepared!.prompt).toContain('NOT a TRA human source');
+    expect(prepared!.prompt).toContain('NOT a company human source');
     expect(prepared!.prompt).toContain('Leave sensitive fields blank');
   });
 

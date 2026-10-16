@@ -406,11 +406,11 @@ export function CreativeComposer({
                     disabled={generating || source.media.mediaType === 'VIDEO'}
                   >
                     {source.media.mediaType === 'VIDEO' ? (
-                      <option value="TRA_VIDEO">TRA_VIDEO</option>
+                      <option value="TRA_VIDEO">Company video</option>
                     ) : (
                       <>
-                        <option value="TRA_REFERENCE">TRA_REFERENCE</option>
-                        <option value="LAYOUT_REFERENCE">LAYOUT_REFERENCE</option>
+                        <option value="TRA_REFERENCE">Company reference</option>
+                        <option value="LAYOUT_REFERENCE">Layout reference</option>
                       </>
                     )}
                   </select>
@@ -436,7 +436,7 @@ export function CreativeComposer({
         onKeyDown={handleKeyDown}
         rows={4}
         maxLength={4000}
-        placeholder="Tell TRA AI what you want to create…"
+        placeholder="Describe the tax marketing content you want to create…"
       />
 
       <div className={styles.variationControl}>
@@ -465,7 +465,7 @@ export function CreativeComposer({
         <label><input type="checkbox" role="switch" aria-label="Use reference library" checked={useReferenceLibrary}
           onChange={event => onReferenceLibraryChange(event.target.checked)} disabled={generating} />
           Use reference library · {useReferenceLibrary ? 'On' : 'Off'}</label>
-        <p>{useReferenceLibrary ? 'Use library layouts. People, copy and branding come from TRA.' : 'Create from your prompt and supplied TRA sources.'}</p>
+        <p>{useReferenceLibrary ? 'Use library layouts. People, copy, and branding come from your company.' : 'Create from your prompt and supplied company sources.'}</p>
       </div>
       <div className={styles.peopleControl}>
         <div className={styles.variationControl}>
@@ -479,6 +479,7 @@ export function CreativeComposer({
             onChange={event => onPeoplePercentChange(Number(event.target.value))} disabled={generating} />
         </div>
         <span id="creative-people-counts" aria-live="polite">{mix.withPeople} with people · {mix.withoutPeople} without people</span>
+        <p>Supply your own approved people and select layouts with “Use for this company” in Reference Library. To start without assets, choose 0% people and turn the reference library Off. A logo is optional.</p>
       </div>
 
       <div className={styles.toolbar}>
@@ -529,7 +530,7 @@ export function CreativeComposer({
       {dragActive ? (
         <div className={styles.dropOverlay} aria-hidden="true">
           <strong>Drop to attach</strong>
-          <span>Images start as TRA_REFERENCE; MP4 files use TRA_VIDEO.</span>
+          <span>Images use the company reference source; MP4 files use the company video source.</span>
         </div>
       ) : null}
 

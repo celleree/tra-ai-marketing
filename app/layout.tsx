@@ -11,8 +11,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'TRA AI Marketing',
-  description: 'Internal creative generation workspace for TRA marketing.',
+  title: 'Tax Marketing Studio',
+  description: 'A workspace for creating tax marketing content for your company.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
