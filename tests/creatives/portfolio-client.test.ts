@@ -23,6 +23,19 @@ const withSlots = (value: PortfolioResponse, statuses: Array<'PENDING' | 'SAVED'
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('resumable portfolio browser controller', () => {
+  it('resumes pending ad 6 in a frozen mixed-six batch without retrying failed ads or replacing saved ads', async () => {
+    const value: PortfolioResponse = { job: portfolioProgress(newCreativePortfolio({ ...portfolioRequest(6), peoplePercent: 70, useReferenceLibrary: true })), creatives: [] };
+    const paused = withSlots(value, ['SAVED', 'RETRY_REQUIRED', 'RETRY_REQUIRED', 'RETRY_REQUIRED', 'SAVED', 'PENDING']);
+    const done = withSlots(paused, ['SAVED', 'RETRY_REQUIRED', 'RETRY_REQUIRED', 'RETRY_REQUIRED', 'SAVED', 'SAVED']);
+    const fetcher = vi.fn().mockResolvedValue(Response.json(done)); vi.stubGlobal('fetch', fetcher);
+    const result = await runPortfolio(paused, vi.fn(), () => false);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ action: 'advance', id: value.job.id });
+    expect(result.job.peoplePercent).toBe(70); expect(result.job.useReferenceLibrary).toBe(true);
+    expect(result.job.slots.slice(0, 5)).toEqual(paused.job.slots.slice(0, 5));
+    expect(result.creatives.filter(item => [1, 5].includes(item.index))).toEqual(paused.creatives);
+  });
+
   it.each(['json', 'html'])('surfaces a %s 401 as sign-in recovery without any automatic retry', async format => {
     const fetcher = vi.fn().mockResolvedValue(format === 'json' ? Response.json({ error: 'Sign in required.' }, { status: 401 })
       : new Response('<html>Sign in</html>', { status: 401 }));
