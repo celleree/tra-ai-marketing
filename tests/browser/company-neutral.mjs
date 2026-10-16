@@ -49,6 +49,12 @@ try {
       await page.goto(url);
       const people = page.getByRole('slider', { name: 'Ads with people', exact: true });
       await people.waitFor(); assert.equal(await people.inputValue(), '50');
+      const mark = page.getByRole('img', { name: 'Tax Marketing Studio', exact: true });
+      await mark.waitFor();
+      const style = await mark.evaluate(element => ({ image: getComputedStyle(element).backgroundImage,
+        color: getComputedStyle(element).color, indent: getComputedStyle(element).textIndent, text: element.textContent }));
+      assert.equal(style.image, 'none'); assert.equal(style.indent, '0px'); assert.equal(style.text, 'TM');
+      assert.notEqual(style.color, 'rgba(0, 0, 0, 0)');
       assert.equal(await page.getByRole('switch').isChecked(), true);
       await people.focus(); await page.keyboard.press('Home'); await page.getByRole('switch').uncheck();
       await page.locator('textarea').fill('Create a generic tax guidance ad.');
@@ -58,6 +64,7 @@ try {
       assert.deepEqual(posts[0].sourceAssets, []); assert.deepEqual(posts[0].companySourceScope, { version: 1, referenceIds: [] });
       assert.equal(posts[0].companyProfile, undefined); assert.equal(posts[0].brandLogoMediaId, undefined);
       assert.ok(await page.evaluate(() => localStorage.getItem('tra-company-profile-v2')?.includes('Old TRA claims')));
+      await page.screenshot({ path: join(tmpdir(), `tax-company-neutral-${width}.png`), fullPage: true });
       await page.goto(`${url}?references`);
       const use = page.getByRole('checkbox', { name: 'Use Own layout.png for this company' });
       await use.waitFor(); assert.equal(await use.isChecked(), false); await use.check();

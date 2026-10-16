@@ -241,7 +241,7 @@ export function CreativeGenerator({ acceptancePreview = false }: { acceptancePre
     <main className="workspace-shell">
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
-          <div className="workspace-brand-mark">TM</div>
+          <div className="workspace-brand-mark" role="img" aria-label="Tax Marketing Studio">TM</div>
         </div>
 
         <nav className="workspace-nav" aria-label="Creative workspace">
