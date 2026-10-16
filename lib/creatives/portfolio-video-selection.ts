@@ -1,3 +1,4 @@
+import type { CandidateAssessmentDiagnostic } from '@/lib/video/candidate-assessment-failure';
 import { createHash } from 'node:crypto';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
 import type { PlanningSourceAnalysisState } from '@/lib/creatives/planning-source-packet';
@@ -24,7 +25,7 @@ type Restored = { source: HydratedTraVideoSource; context: VideoSelectionContext
 export type PortfolioVideoSelectionResult =
   | { status: 'BUSY' }
   | { status: 'CONTINUE' }
-  | { status: 'RETRY_REQUIRED'; reason: 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME' }
+  | { status: 'RETRY_REQUIRED'; reason: 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME'; diagnostic?: CandidateAssessmentDiagnostic }
   | { status: 'NO_SUITABLE_HUMAN' }
   | { status: 'COMPLETE'; selection: GenerateVideoFrameSelection };
 export type PortfolioVideoSelectionPreflight = { status: 'READY' }

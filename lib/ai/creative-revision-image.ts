@@ -67,7 +67,7 @@ ${originalApprovedSource
 ${args.concept.strategy.execution.subjectSource === 'non-human' ? 'The planned concept is non-human. Do not depict people even if original approved sources contain people.' : ''}
 No ad-layout reference, video-analysis JPEGs or logo artwork are attached as generation sources.
 ${document?.prompt ?? ''}
-${formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: args.concept, companyProfile: args.companyProfile, referenceCatalog: args.referenceCatalog, ...(args.proofProvenance ? { proofProvenance: args.proofProvenance } : {}) }))}
+${formatCreativeRenderBrief(buildCreativeRenderBrief({ concept: args.concept, companyProfile: args.companyProfile, logoGeometry: args.logoGeometry, referenceCatalog: args.referenceCatalog, ...(args.proofProvenance ? { proofProvenance: args.proofProvenance } : {}) }))}
 Saved canvas copy and prior outputs do not approve factual claims. Execute the planned copy and visual direction while respecting the brief's prohibited claims and required disclaimers.
 Never invent testimonials, quotes, statistics, dollar amounts, outcomes, guarantees, endorsements, government affiliation or competitor claims. Do not imply universal tax-debt results. The only company name is the company explicitly identified in the supplied company context; if none is identified, keep the ad unbranded and do not invent an identity, logo, contact detail or offer.
 Keep text readable on a phone, with clear hierarchy and no clutter.

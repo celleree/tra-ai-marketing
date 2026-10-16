@@ -76,6 +76,32 @@ describe('distilled render brief', () => {
     expect(prompt).not.toContain(concept.copy.description);
   });
 
+  it.each([true, false])('projects conflicting logo instructions into one optional deterministic region (logo=%s)', hasLogo => {
+    const selected = referenceCandidate('b');
+    selected.blueprint.regions.push({ role: 'LOGO_PLACEHOLDER', xPct: 9, yPct: 16, widthPct: 82, heightPct: 5,
+      alignment: 'CENTER', emphasis: 'LOW', crop: 'NONE', overlapsOtherRegions: false });
+    const referenceCatalog = [selected];
+    const referenceSelection = resolveReferenceSelection({ angleSource: null, layoutSource: selected.referenceId }, referenceCatalog);
+    const frozen = { ...concept, imageCopy: { headline: 'Exact approved case copy', disclosure: 'Results vary.' },
+      strategy: { ...concept.strategy, referenceSelection,
+        visualDirection: 'Blue background; logo at x9/y16/w82/h5; headline below the focal point.',
+        conceptDetails: { ...conceptDetails, compositionInstructions: 'Use asymmetric whitespace. Draw a black company logo above the headline.' } } };
+    const before = JSON.stringify({ frozen, referenceCatalog });
+    const logoGeometry = hasLogo ? { placement: 'PORTRAIT_4_5' as const, anchor: 'top-center' as const,
+      panel: { left: 410, top: 31, width: 205, height: 139 }, artwork: { left: 420, top: 41, width: 185, height: 119 } } : undefined;
+    const brief = buildCreativeRenderBrief({ concept: frozen, referenceCatalog, logoGeometry });
+    const prompt = formatCreativeRenderBrief(brief);
+    expect(prompt).not.toMatch(/x9\/y16|Draw a black|"LOGO_PLACEHOLDER"/);
+    expect(brief.visualDirection).toContain('Blue background');
+    expect(brief.visualDirection).toContain('headline below the focal point');
+    expect(brief.visualConcept?.compositionInstructions).toBe('Use asymmetric whitespace.');
+    expect(brief.layoutBlueprint?.regions).toEqual(selected.blueprint.regions.filter(region => region.role !== 'LOGO_PLACEHOLDER'));
+    expect(brief.exactCopy).toEqual(frozen.imageCopy);
+    expect(JSON.stringify({ frozen, referenceCatalog })).toBe(before);
+    if (hasLogo) { expect(prompt).toContain('Exactly one uploaded company logo'); expect(prompt).toContain('x=410..614, y=31..169'); }
+    else { expect(prompt).toContain('No uploaded logo is selected'); expect(prompt).not.toContain('overlay rectangle x='); }
+  });
+
   it('includes authoritative Review Proof only as evidence context, not extra image copy', () => {
     const proofProvenance = {
       version: 1 as const, type: 'review' as const, proofId: `proof_${'a'.repeat(32)}`,

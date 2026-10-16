@@ -1,3 +1,4 @@
+import { formatCandidateAssessmentDiagnostic } from '@/lib/video/candidate-assessment-failure';
 import { BatchControlsError } from '@/lib/creatives/batch-controls-error';
 import { randomUUID } from 'node:crypto';
 import { ReviewSelectionError } from '@/lib/video/review-selection';
@@ -353,7 +354,7 @@ async function advancePortfolio(
         if (preflight.status === 'RETRY_REQUIRED') return { job: await updateCreativePortfolio(id, current => {
           const checkpointed = checkpointPortfolioVideoSelectionAttempt(current, token, proposed).job;
           return failPortfolioWork(checkpointed, token,
-            `Video frame selection requires explicit Retry (${preflight.reason}).`);
+            `Video frame selection requires explicit Retry (${preflight.reason}).${formatCandidateAssessmentDiagnostic(preflight.diagnostic)}`);
         }, storage) };
         if (isPreviewAcceptanceOperation()) throw new PreviewAcceptanceError('Selected-frame cache is no longer complete. Preview acceptance does not authorize a new assessment.');
         const denied = await reserveWorkQuota('VIDEO_SELECTION');
@@ -380,7 +381,7 @@ async function advancePortfolio(
           status: 202, retryAfterSeconds: 1 };
         if (selected.status === 'RETRY_REQUIRED') {
           return { job: await updateCreativePortfolio(id, current => failPortfolioWork(current, token,
-            `Video frame selection requires explicit Retry (${selected.reason}).`), storage) };
+            `Video frame selection requires explicit Retry (${selected.reason}).${formatCandidateAssessmentDiagnostic(selected.diagnostic)}`), storage) };
         }
         if (selected.status === 'NO_SUITABLE_HUMAN') {
           return { job: await updateCreativePortfolio(id, current =>

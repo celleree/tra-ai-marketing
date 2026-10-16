@@ -25,7 +25,7 @@ export const CREATIVE_HUMAN_REVIEW_CHECKLIST_LABELS: Readonly<
   sourceAndThirdPartyCompliance: 'No improper source, third-party identity or branding transfer',
   conceptDistinctness: 'The concept is sufficiently distinct for the intended operation',
   placementSafety: 'Critical content is clear of placement overlays and cropping',
-  logoIntegrity: 'The original company logo is correct and has a viable placement',
+  logoIntegrity: 'Exactly one original uploaded company logo is correct and well placed, with no generated duplicate; when no logo is selected, no logo or invented branding appears',
   productionReadiness: 'Ready for use without material designer cleanup',
 };
 

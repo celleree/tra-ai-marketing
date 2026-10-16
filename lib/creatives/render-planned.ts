@@ -170,7 +170,7 @@ export async function renderPlannedCreative(item: PlannedCreativeConcept, {
   const renderBrief = formatCreativeRenderBrief(buildCreativeRenderBrief({
     concept: item, companyProfile: request.companyProfile,
     brandColors: request.brandColors, brandFontNames: request.brandFontNames,
-    referenceCatalog,
+    referenceCatalog, logoGeometry,
     ...(proofProvenance ? { proofProvenance } : {}),
   }));
   const itemContext = `${request.previewOmitBrandLogo ? PREVIEW_NO_LOGO_DIRECTION + '\n\n' : ''}${videoGuidance ? `${primaryVideoRenderDirection(videoGuidance, request.peoplePercent)}\n\n${renderBrief}` : renderBrief}`;
