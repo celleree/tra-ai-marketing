@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_COMPANY_PROFILE } from '@/lib/company/profile';
 import { readStoredRuntimeCompanyProfile } from '@/lib/company/creative-context';
+import { readStoredBrandLogo } from '@/lib/creatives/brand-logo';
 import { readStoredBrandGuidance } from '@/lib/creatives/brand-guidance';
 import { readSelectedCompanyReferenceIds, setSelectedCompanyReferenceIds } from '@/lib/company/reference-selection';
 import { validateGenerateCreativeRequest } from '@/lib/creatives/generate-request';
@@ -30,10 +31,12 @@ describe('company-neutral new work', () => {
     store.set('tra-company-profile-v2', legacy);
     expect(readStoredRuntimeCompanyProfile()).toBeUndefined();
     expect(readStoredBrandGuidance().logo).toBeNull();
+    expect(readStoredBrandLogo()).toBeNull();
     expect(store.get('tra-company-profile-v2')).toBe(legacy);
     store.set('tax-marketing-studio:company-profile:v1', JSON.stringify({ knowledgeBase: { companySummary: 'Own company' }, brandGuidelines: { logo: `/api/media/files/${id}.png` } }));
     expect(readStoredRuntimeCompanyProfile()?.knowledgeBase?.companySummary).toBe('Own company');
     expect(readStoredBrandGuidance().logo?.mediaId).toBe(id);
+    expect(readStoredBrandLogo()?.mediaId).toBe(id);
   });
   it('starts with no implicitly selected shared references and round-trips explicit valid choices', () => {
     browserStore(); expect(readSelectedCompanyReferenceIds()).toEqual([]);

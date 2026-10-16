@@ -37,7 +37,7 @@ const NAV_ITEMS: Array<{
   icon: string;
 }> = [
   { id: 'upload', label: 'Create', shortLabel: 'Create', icon: '+' },
-  { id: 'tra-creatives', label: 'Company Creatives', shortLabel: 'Creatives', icon: 'T' },
+  { id: 'tra-creatives', label: 'Creatives', shortLabel: 'Creatives', icon: 'C' },
   { id: 'company', label: 'Company', shortLabel: 'Company', icon: 'C' },
   { id: 'proof-library', label: 'Proof Library', shortLabel: 'Proof', icon: 'P' },
   { id: 'reference-images', label: 'Reference Images', shortLabel: 'References', icon: 'R' },
@@ -50,12 +50,12 @@ const SECTION_HEADERS: Record<
   upload: {
     eyebrow: 'Creative studio',
     title: 'Create',
-    description: 'Generate new Company creatives with AI or upload finished ads.',
+    description: 'Generate new company creatives with AI or upload finished ads.',
   },
   'tra-creatives': {
     eyebrow: 'Company creative library',
     title: 'Creatives',
-    description: 'Review, revise, and manage saved generated and uploaded Company creatives.',
+    description: 'Review, revise, and manage saved generated and uploaded company creatives.',
   },
   company: {
     eyebrow: 'Company intelligence',
@@ -72,7 +72,7 @@ const SECTION_HEADERS: Record<
     eyebrow: 'Reference library',
     title: 'References',
     description:
-      'Manage layout inspiration and Company-owned source imagery used for new creatives.',
+      'Manage layout inspiration and company-owned source imagery used for new creatives.',
   },
 };
 
