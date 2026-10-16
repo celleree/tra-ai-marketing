@@ -536,7 +536,7 @@ try {
       await page.waitForFunction(() => document.body.textContent.includes('Save failed') || document.body.textContent.includes('Conflict / reload required'));
       assert.equal(await checks.nth(2).isDisabled(), true);
       assert.deepEqual(response().draft.choices.frames, [frame]);
-      const expected = { 401: 'Sign in again', 403: 'approved TRA operator', 409: 'newer saved revision', 503: 'could not be confirmed' }[status];
+      const expected = { 401: 'Sign in again', 403: 'approved workspace operator', 409: 'newer saved revision', 503: 'could not be confirmed' }[status];
       await panel.getByText(expected, { exact: false }).waitFor();
       denyLoads(status); await page.getByRole('button', { name: 'Reload saved review', exact: true }).click();
       await page.waitForFunction(() => !document.body.textContent.includes('Saving…'));
