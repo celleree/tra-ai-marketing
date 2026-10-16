@@ -88,6 +88,18 @@ const renderPanel = ({
 };
 
 describe('portfolio progress panel', () => {
+  it('separates untouched pending work from retry-required work in a reopened six-ad batch', () => {
+    const { html } = renderPanel({ count: 6, planReady: true,
+      statuses: ['SAVED', 'RETRY_REQUIRED', 'RETRY_REQUIRED', 'RETRY_REQUIRED', 'SAVED', 'PENDING'] });
+    expect(html).toContain('1 pending · 3 require Retry · 0 blocked');
+    expect(html).toContain('Resume generation');
+    expect(html).toContain('Prepare retry for ad 2');
+    expect(html).not.toContain('Prepare retry for ad 6');
+    expect(html).toContain('including prepared retries');
+    expect(html).toContain('reason continuation paused is unknown in this browser');
+    expect(html).toContain('no dollar ceiling is guaranteed');
+  });
+
   it('distinguishes a read-only refresh and an idle saved plan from active generation', () => {
     const idle = renderPanel({ count: 2, planReady: true }).html;
     expect(idle).toContain('Generation is paused. Resume to continue the saved plan.');
@@ -110,7 +122,7 @@ describe('portfolio progress panel', () => {
     const args = { count: 2, planningError: 'Prior assessment failed', previewAcceptanceError: 'Old run stopped', previewInitializationAvailable: true };
     const { html } = renderPanel(args);
     expect(html).toContain('Prepare approved reassessment'); expect(html).toContain('This starts no AI calls');
-    expect(html).toContain('Old run stopped'); expect(html).not.toContain('Retry planning'); expect(html).not.toContain('Resume generation');
+    expect(html).toContain('Old run stopped'); expect(html).not.toContain('Prepare planning retry'); expect(html).not.toContain('Resume generation');
     const busy = renderPanel({ ...args, running: true }).html;
     expect(busy).toMatch(/disabled=""[^>]*>Prepare approved reassessment/);
     expect(busy).toContain('No AI calls are started');
@@ -120,7 +132,7 @@ describe('portfolio progress panel', () => {
     const { html } = renderPanel({ count: 2, planReady: true, previewPreparationApproved: true,
       statuses: [status, 'PENDING'], previewAcceptanceError: 'Approved test stopped after an unknown image outcome.' });
     expect(html).toContain('unknown image outcome'); expect(html).toContain('role="alert"');
-    expect(html).not.toContain('Resume generation'); expect(html).not.toContain('Retry creative');
+    expect(html).not.toContain('Resume generation'); expect(html).not.toContain('Prepare retry for ad');
   });
   it('offers Resume for the new approved run, labels the estimated budget and hides Retry', () => {
     const { html } = renderPanel({ count: 2,
@@ -128,13 +140,13 @@ describe('portfolio progress panel', () => {
     expect(html).toContain('two new selected-frame assessments once each');
     expect(html).toContain('Both frames must pass before planning');
     expect(html).toContain('estimate, with no guaranteed dollar ceiling');
-    expect(html).toContain('Resume generation'); expect(html).not.toContain('Retry planning');
+    expect(html).toContain('Resume generation'); expect(html).not.toContain('Prepare planning retry');
     const checkpoint = renderPanel({ count: 2, previewPreparationApproved: true, preflightReady: true }).html;
     expect(checkpoint).toContain('Approved preparation is complete. Planning and images have not started.');
     expect(checkpoint).not.toContain('Cached-input preflight passed');
     const failure = renderPanel({ count: 2, previewPreparationApproved: true, planningError: 'Provider outcome is unknown.' }).html;
     expect(failure).toContain('Provider outcome is unknown.'); expect(failure).toContain('role="alert"');
-    expect(failure).not.toContain('Resume generation'); expect(failure).not.toContain('Retry planning');
+    expect(failure).not.toContain('Resume generation'); expect(failure).not.toContain('Prepare planning retry');
   });
   it('marks the frozen no-logo scope separately from cached preflight or image completion', () => {
     const { html } = renderPanel({ count: 2, preflightReady: true, previewOmitBrandLogo: true });
@@ -227,15 +239,15 @@ describe('portfolio progress panel', () => {
       statuses: ['RETRY_REQUIRED', 'PENDING'],
     });
     expect(html).toContain('Generation needs attention.');
-    expect(html).toContain('Retrying failed work may make another paid call.');
-    expect(html).toContain('Retry creative 1');
+    expect(html).toContain('Prepare retry resets only the selected failure and starts no paid work.');
+    expect(html).toContain('Prepare retry for ad 1');
     expect(html).toContain('Resume generation');
   });
 
   it('shows planning Retry explicitly and never auto-starts work merely by rendering reopened progress', () => {
     const { html, resume, retry } = renderPanel({ planningError: 'Previous planning was interrupted.' });
     expect(html).toContain('Generation needs attention.');
-    expect(html).toContain('Retry planning');
+    expect(html).toContain('Prepare planning retry');
     expect(html).not.toContain('Resume generation');
     expect(resume).not.toHaveBeenCalled();
     expect(retry).not.toHaveBeenCalled();
@@ -245,7 +257,7 @@ describe('portfolio progress panel', () => {
     const { html } = renderPanel({ count: 3, planReady: true, statuses: ['SAVED', 'BLOCKED', 'PENDING'] });
     expect(html).toContain('<strong>1 / 3</strong> creatives saved');
     expect(html).toContain('Create a new portfolio with a smaller video pool; saved creatives remain available.');
-    expect(html).not.toContain('Retry creative 2');
+    expect(html).not.toContain('Prepare retry for ad 2');
     expect(html).not.toContain('Generation complete.');
     expect(html).toContain('Resume generation');
   });

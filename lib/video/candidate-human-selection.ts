@@ -1,3 +1,4 @@
+import type { CandidateAssessmentDiagnostic } from '@/lib/video/candidate-assessment-failure';
 import { createHash } from 'node:crypto';
 import { validateReviewFrame } from '@/lib/video/review-selection-sources';
 import type { HydratedTraVideoSource } from '@/lib/video/candidate-extractor';
@@ -17,7 +18,7 @@ type CandidateOption = { binding: VideoCandidateFrameBinding; source: CandidateS
   identity: CandidateAssessmentIdentity; useCount: number };
 export type CandidateSelectionPlan = { status: 'COMPLETE'; selection: GenerateVideoFrameSelection }
   | { status: 'NO_SUITABLE_HUMAN' } | { status: 'CONTINUE' } | { status: 'BUSY' }
-  | { status: 'RETRY_REQUIRED'; reason: 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME' }
+  | { status: 'RETRY_REQUIRED'; reason: 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME'; diagnostic?: CandidateAssessmentDiagnostic }
   | { status: 'READY'; candidate: CandidateOption };
 const words = (value: string) => new Set((value.toLowerCase().match(/[a-z]{4,20}/g) ?? [])
   .filter((word) => !['with', 'from', 'that', 'this', 'your', 'about', 'portfolio', 'video', 'selection',

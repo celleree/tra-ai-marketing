@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { portfolioPauseLabel } from '@/lib/creatives/portfolio-continuation';
 import { peopleMix } from '@/lib/creatives/people-mix';
 import { PortfolioCaseAmendment } from './portfolio-case-amendment';
 
@@ -23,6 +24,7 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
 
   const savedMix = job.peoplePercent === undefined ? null : peopleMix(job.requestedCount, job.peoplePercent);
   const savedCount = job.slots.filter(slot => slot.status === 'SAVED').length;
+  const pending = job.slots.filter(slot => slot.status === 'PENDING');
   const failed = job.slots.filter(slot => slot.status === 'RETRY_REQUIRED');
   const ordinaryFailed = failed.filter(slot=>slot.videoSelection?.version!==2 || !slot.videoSelection.portraitCropRevision);
   const blocked = job.slots.filter(slot => slot.status === 'BLOCKED');
@@ -56,6 +58,9 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
     {savedMix ? <p>Saved mix: {savedMix.withPeople} with people · {savedMix.withoutPeople} without people ({job.peoplePercent}%).</p> : null}
     {job.useReferenceLibrary === undefined ? null : <p>Saved reference library: {job.useReferenceLibrary ? 'On' : 'Off'}.</p>}
     {!complete ? <p>Leaving this page pauses continuation after the current step. Saved progress is preserved; returning does not restart generation.</p> : null}
+    {!complete && !portfolio.running && !portfolio.loading ? <p role="status">{portfolio.pauseReason ? portfolioPauseLabel[portfolio.pauseReason] : 'The reason continuation paused is unknown in this browser.'} This explanation is local to this browser; the portfolio remains saved on the server.</p> : null}
+    {job.planReady ? <p>{pending.length} pending · {failed.length} require Retry · {blocked.length} blocked. Resume continues all pending work, including prepared retries. Other failed slots require separate retry preparation; saved creatives are preserved.</p> : null}
+    {!complete ? <p>Resume may make paid calls, including after retry preparation. The saved plan, mix and source choices are reused; no dollar ceiling is guaranteed.</p> : null}
     {initializationAvailable ? <p role="status">The stopped run is preserved. Prepare the approved reassessment with the same saved inputs and layout preparation. This starts no AI calls; use Resume separately for the two approved frame assessments.</p> : null}
     {portfolio.response?.previewPreparationApproved ? <p role="status">This saved Preview test reuses the saved layout preparation and permits two new selected-frame assessments once each. Both frames must pass before planning. The $1 budget is an estimate, with no guaranteed dollar ceiling. No retries, repair or fallback are authorized.</p> : null}
     {portfolio.response?.preflightReady ? <p role="status">{portfolio.response.previewPreparationApproved
@@ -121,17 +126,17 @@ export function PortfolioProgressPanel({ portfolio, canAdvance = () => true }: {
       onClose={() => setCaseEditorOpen(false)} onSaved={() => { setCaseEditorOpen(false); void portfolio.restoreSaved(); }} /> : null}
 
     {retryFailure && !boundedPreview ? <div className={styles.failures} aria-live="polite">
-      <p>Retrying failed work may make another paid call.</p>
+      <p>Prepare retry resets only the selected failure and starts no paid work. Use Resume separately to continue pending work; it may make paid calls.</p>
       {job.planningError ? <p>{job.planningError} <button type="button" className="button button-secondary" disabled={portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease) || !canAdvance()}
-        onClick={() => { if (canAdvance()) void portfolio.retry(null); }}>Retry planning</button></p> : null}
-      {ordinaryFailed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}{' '}
+        onClick={() => { if (canAdvance()) void portfolio.retry(null); }}>Prepare planning retry</button></p> : null}
+      {ordinaryFailed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: Retry required. {slot.videoSelection && !slot.videoSelection.selection ? 'Frame selection failed before image generation. ' : ''}{slot.error || 'Could not be completed.'}{' '}
         <button type="button" className="button button-secondary" disabled={portfolio.running || portfolio.loading || portfolio.authRequired || Boolean(job.lease) || !canAdvance()}
-          onClick={() => { if (canAdvance()) void portfolio.retry(slot.index); }}>Retry creative {slot.index}</button></p>)}
+          onClick={() => { if (canAdvance()) void portfolio.retry(slot.index); }}>Prepare retry for ad {slot.index}</button></p>)}
     </div> : null}
     {boundedPreview && hasFailure ? <div role="alert" className={styles.failures}>
       {job.previewAcceptanceError ? <p>{job.previewAcceptanceError}</p> : null}
       {job.planningError ? <p>{job.planningError}</p> : null}
-      {ordinaryFailed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error || 'Could not be completed.'}</p>)}
+      {ordinaryFailed.map(slot => <p key={slot.creativeId}>Creative {slot.index}: Retry required. {slot.videoSelection && !slot.videoSelection.selection ? 'Frame selection failed before image generation. ' : ''}{slot.error || 'Could not be completed.'}</p>)}
     </div> : null}
     {blocked.length ? <div className={styles.failures} aria-live="polite">
       {blocked.map(slot => <p key={slot.creativeId}>Creative {slot.index}: {slot.error}</p>)}

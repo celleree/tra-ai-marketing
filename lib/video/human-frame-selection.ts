@@ -1,6 +1,6 @@
 import { fetchWithProviderUsage } from '@/lib/ai/provider-telemetry';
 import { createHash } from 'node:crypto';
-import { parseSourceOverlayDecision, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
+import { parseProviderSourceOverlayDecision, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
 import { getJpegDimensions } from '@/lib/video/candidate-file-integrity';
 import { canonicalizeVideoSelectionPool, parseVideoConceptSelection, VIDEO_SELECTION_TIMEOUT_MS, type VideoConceptSelection,
   type VideoSelectionPoolBinding } from '@/lib/video/concept-selection';
@@ -205,12 +205,7 @@ const parseAssessment = (value: unknown): VideoHumanFrameAssessment => {
     || !item.sourceOverlay || typeof item.sourceOverlay !== 'object') {
     throw new Error('Visual human selection returned an invalid assessment.');
   }
-  const overlay = item.sourceOverlay as unknown as Record<string, unknown>;
-  const decision = parseSourceOverlayDecision(overlay) ?? (overlay.status === 'EDGE_CROP'
-    ? parseSourceOverlayDecision({ version: 2, status: overlay.status, edge: overlay.edge,
-      removePermille: overlay.removePermille, overlayDepthPermille: overlay.overlayDepthPermille })
-    : overlay.edge === 'NONE' && overlay.removePermille === 0 && overlay.overlayDepthPermille === 0
-      ? parseSourceOverlayDecision({ version: 2, status: overlay.status }) : null);
+  const decision = parseProviderSourceOverlayDecision(item.sourceOverlay);
   if (!decision) throw new Error('Visual human selection returned an invalid source overlay assessment.');
   return { ...item, sourceOverlay: decision } as VideoHumanFrameAssessment;
 };

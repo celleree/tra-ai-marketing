@@ -1,3 +1,5 @@
+import type { CreativeLogoGeometry } from '@/lib/creatives/logo-placement';
+import { formatCreativeLogoReservation } from '@/lib/creatives/safe-zones';
 import { buildCreativeCompanyContext, type RuntimeCompanyProfileSnapshot } from '@/lib/company/creative-context';
 import type { CreativeImageCopy } from '@/lib/creatives/generated';
 import type { PlannedCreativeConcept } from '@/lib/creatives/planned';
@@ -23,6 +25,7 @@ export type CreativeRenderBrief = {
   visualDirection: string;
   visualConcept?: Pick<CreativeConceptDetails, 'visualArchetype' | 'visualMechanism' | 'subject' | 'environment' | 'compositionInstructions'>;
   layoutBlueprint?: LayoutBlueprint;
+  logoGeometry?: CreativeLogoGeometry;
   brand: { colors: string; typography: string; visualStyle: string };
   compliance: {
     prohibitedClaims: string; claimsRequiringProof: string; requiredDisclaimers: string;
@@ -32,12 +35,16 @@ export type CreativeRenderBrief = {
   draftSourceAssertion?: Pick<DraftVideoSourceAssertion, 'sourceMediaId' | 'sourceSha256' | 'startMs' | 'endMs' | 'verification' | 'permission'>;
 };
 
+const withoutLogoClauses = (value: string) => value.split(/(?<=[.!?;])\s+|\n+/)
+  .filter(clause => !/\blogo(?:s|_PLACEHOLDER)?\b|\bbrand(?:ing)?[ -]marks?\b/i.test(clause)).join(' ').trim();
+
 export function buildCreativeRenderBrief(args: {
   concept: Pick<PlannedCreativeConcept, 'format' | 'copy' | 'imageCopy' | 'strategy' | 'draftSourceAssertion'>;
   companyProfile?: RuntimeCompanyProfileSnapshot;
   brandColors?: readonly string[];
   brandFontNames?: readonly string[];
   layoutBlueprint?: LayoutBlueprint;
+  logoGeometry?: CreativeLogoGeometry;
   referenceCatalog?: ReferencePlanningCandidate[];
   proofProvenance?: CreativeProofProvenance;
 }): CreativeRenderBrief {
@@ -57,13 +64,15 @@ export function buildCreativeRenderBrief(args: {
       ctaTreatment: execution.ctaTreatment, typographyHierarchy: execution.typographyHierarchy,
       ...(execution.taxDocumentReference ? { taxDocumentReference: execution.taxDocumentReference } : {}),
     },
-    visualDirection: strategy.visualDirection,
+    visualDirection: withoutLogoClauses(strategy.visualDirection),
+    ...(args.logoGeometry ? { logoGeometry: args.logoGeometry } : {}),
     ...(strategy.conceptDetails ? { visualConcept: {
       visualArchetype: strategy.conceptDetails.visualArchetype, visualMechanism: strategy.conceptDetails.visualMechanism,
       subject: strategy.conceptDetails.subject, environment: strategy.conceptDetails.environment,
-      compositionInstructions: strategy.conceptDetails.compositionInstructions,
+      compositionInstructions: withoutLogoClauses(strategy.conceptDetails.compositionInstructions),
     } } : {}),
-    ...(layoutBlueprint ? { layoutBlueprint } : {}),
+    ...(layoutBlueprint ? { layoutBlueprint: { ...layoutBlueprint,
+      regions: layoutBlueprint.regions.filter(region => region.role !== 'LOGO_PLACEHOLDER') } } : {}),
     brand: {
       colors: args.brandColors?.length ? args.brandColors.join(', ') : company.brandColors,
       typography: args.brandFontNames?.length ? args.brandFontNames.join('\n') : company.fonts,
@@ -105,7 +114,7 @@ Preserve composition flow=${blueprint.composition.flow}, balance=${blueprint.com
 Generic composition and visual direction may style or fill content within this scaffold, but must not replace, reorder or materially resize blueprint structure when they conflict. Safe zones may shift or tighten regions only as needed to protect essential content; never treat safe zones as decorative borders.
 Planned image text fields: ${plannedFields.join(', ')}. Map only these actually planned fields into appropriate blueprint regions. ${missingOptional.length ? `Absent optional imageCopy fields (${missingOptional.join(', ')}) must stay absent. ` : ''}Do not invent filler copy, badges, trust blocks, benefit rows, cards or extra sections to fill a region; preserve useful whitespace or simplify an empty region while keeping the overall balance.
 ${hasCta ? `Preserve CTA placement and treatment (${blueprint.ctaTreatment}) where the blueprint provides a CTA region.` : 'No CTA text is planned; do not create a CTA label, button or treatment solely because the blueprint contains one.'}
-HUMAN_PLACEHOLDER regions describe geometry only. HUMAN_PLACEHOLDER controls geometry only and never authorizes a person, face or identity; only a separately approved company human source can authorize human identity. LOGO_PLACEHOLDER controls reserved geometry only; actual company logo handling remains deterministic.
+HUMAN_PLACEHOLDER regions describe geometry only. HUMAN_PLACEHOLDER controls geometry only and never authorizes a person, face or identity; only a separately approved company human source can authorize human identity. Logo placeholder regions from the source blueprint are excluded from this render projection; the optional deterministic overlay is the only logo region.
 restrictedElementsPresent is warning metadata about the analyzed external Layout Reference, never permission. Never reproduce external people/identity, branding/logos, exact copy, claims, testimonials/proof or trademarks from that reference. Use blueprint data only; raw Layout Reference pixels must not be introduced into final image generation.`;
 };
 
@@ -120,6 +129,7 @@ export function formatCreativeRenderBrief(brief: CreativeRenderBrief): string {
 ${JSON.stringify(brief, null, 2)}
 Execute this planned concept; do not invent another angle, outcome, offer or message.
 ${copyInstruction}
+${brief.logoGeometry ? `Exactly one uploaded company logo will be composited after generation. ${formatCreativeLogoReservation(brief.logoGeometry)} Do not generate another mark anywhere on the canvas.` : 'No uploaded logo is selected. Do not draw or invent a logo, branding mark or logo placeholder, and do not reserve a logo region.'}
 ${brief.proof ? 'proof is authoritative evidence/compliance context for the planned claim. It is NOT additional image copy: render only exactCopy fields, never render proof.selectedText, proof attribution, restrictions or disclaimer unless that exact text is already present in exactCopy. Preserve any exactCopy disclosure verbatim.' : 'No Proof is selected. Do not invent or infer testimonials, evidence, attribution or Proof.'}
 Planned copy is not advertising approval. Do not add factual claims or treat source pixels as proof.
 ${brief.draftSourceAssertion ? 'draftSourceAssertion binds an exact source statement already inserted in exactCopy for this DRAFT. Render that planned statement verbatim, preserving amounts, outcomes and qualifications. It is unverified source content, not Proof, a verified result or permission to publish/reuse. Do not add attribution or any further claim; do not render provenance IDs, review flags or source context as extra image text.' : ''}

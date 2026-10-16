@@ -129,6 +129,7 @@ describe('revision image provider', () => {
     const input = args();
     input.sources.originalApprovedSource = { kind: 'TRA_REFERENCE', sha256: 'b'.repeat(64), source: { stored: { buffer: Buffer.from('original'), mimeType: 'image/png', fileName: 'original.png' } } as EligibleProviderImageSource };
     input.sources.logoOverlay = { kind: 'LOGO_OVERLAY', mediaId: 'logo', fileName: 'logo.png', mimeType: 'image/png', buffer: Buffer.from('logo'), sha256: 'c'.repeat(64) };
+    input.concept.strategy.visualDirection += ' Draw a black company logo at x9/y16/w82/h5.';
     input.logoGeometry = resolveCreativeLogoGeometry('PORTRAIT_4_5', 'top-center', 200, 100);
     await generateCreativeRevisionImage(input);
     expect(files().map(file => file.name)).toEqual(['editing-canvas-canvas.png', 'approved-tra-source-original.png']);
@@ -138,6 +139,9 @@ describe('revision image provider', () => {
     expect(body().get('prompt')).toContain('deterministically removed prior logo panel');
     expect(body().get('prompt')).toContain('invisible composition constraint');
     expect(body().get('prompt')).toContain('do not render a placeholder, box, panel, border, dashed outline');
+    expect(body().get('prompt')).toContain('Exactly one uploaded company logo');
+    expect(body().get('prompt')).not.toContain('No uploaded logo is selected');
+    expect(body().get('prompt')).not.toContain('x9/y16/w82/h5');
   });
   it('retains the exact approved video frame subset and order', async () => {
     const input = args();

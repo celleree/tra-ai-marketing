@@ -19,3 +19,20 @@ export const parseSourceOverlayDecision = (value: unknown): SourceOverlayDecisio
     || (item.overlayDepthPermille as number) > (item.removePermille as number)) return null;
   return item as SourceOverlayDecision;
 };
+
+/** Provider wire schema requires geometry even for UNSAFE; normalize rejection, never approval. */
+export const parseProviderSourceOverlayDecision = (value: unknown): SourceOverlayDecision | null => {
+  const canonical = parseSourceOverlayDecision(value);
+  if (canonical) return canonical;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (Object.keys(item).length !== 4 || !['CLEAN', 'EDGE_CROP', 'UNSAFE'].includes(String(item.status))
+    || !['NONE', 'TOP', 'BOTTOM', 'LEFT', 'RIGHT'].includes(String(item.edge))
+    || !Number.isSafeInteger(item.removePermille) || !Number.isSafeInteger(item.overlayDepthPermille)
+    || (item.removePermille as number) < 0 || (item.removePermille as number) > 450
+    || (item.overlayDepthPermille as number) < 0 || (item.overlayDepthPermille as number) > 450) return null;
+  if (item.status === 'UNSAFE') return { version: 2, status: 'UNSAFE' };
+  if (item.status === 'CLEAN') return item.edge === 'NONE' && item.removePermille === 0 && item.overlayDepthPermille === 0
+    ? { version: 2, status: 'CLEAN' } : null;
+  return parseSourceOverlayDecision({ version: 2, ...item });
+};

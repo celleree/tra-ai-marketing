@@ -50,6 +50,7 @@ async function scenario(name, options, run) {
     text: options.longStatements ? `Saved consultation wording ${index + 1}. ${'A detailed statement with several useful lines of text. '.repeat(6)} ${'reference_'.repeat(18)}` : segment.text }));
   let releaseSourceReads = () => {};
   let releasePortfolioAdvance = () => {}, portfolioLoadFailure = 0, caseRecovered = false;
+  let genericPortfolioState = options.portfolioState ?? 'BLOCKED';
   const portfolioAdvanceGate = options.holdPortfolioAdvance ? new Promise(resolve => { releasePortfolioAdvance = resolve; }) : null;
   const sourceReadGate = options.holdSourceReads || options.holdSourceReadPaths ? new Promise(resolve => { releaseSourceReads = resolve; }) : null;
   page.on('pageerror', error => errors.push(error.message));
@@ -162,7 +163,8 @@ async function scenario(name, options, run) {
         mimeType: 'image/png', size: 42, url: thumbnails[0], referenceType: options.wrongLayoutType ? 'tra' : 'layout' }] : [] };
     } else if (path === '/api/creatives/portfolios') {
       if (request.method() === 'POST') { submissions.push(body); if (options.generationDelay) await new Promise(resolve => setTimeout(resolve, options.generationDelay)); }
-      const state = request.method() === 'GET' ? options.portfolioState ?? 'BLOCKED' : request.method() === 'PATCH' ? 'SAVED' : 'BLOCKED';
+      if (request.method() === 'PATCH') genericPortfolioState = body.action === 'retry' ? 'PENDING' : 'SAVED';
+      const state = request.method() === 'GET' || request.method() === 'PATCH' ? genericPortfolioState : 'BLOCKED';
       if (options.revisedCrop) {
         if(request.method()==='PATCH') {
           submissions.push(body);assert.equal(body.slotIndex,2);assert.notEqual(body.action,'advance');assert.notEqual(body.action,'retry');
@@ -430,7 +432,7 @@ try {
     { previewInitialization: true, initializationDenied, generationDelay: 300, noLogo: true, acceptancePreview: true }, async ({ page, calls, submissions }) => {
       const button = page.getByRole('button', { name: 'Prepare approved reassessment', exact: true });
       await button.waitFor(); assert.equal(submissions.length, 0);
-      assert.equal(await page.getByRole('button', { name: 'Retry planning', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Prepare planning retry', exact: true }).count(), 0);
       await button.click(); assert.equal(await button.isDisabled(), true);
       if (initializationDenied) {
         await page.locator('.generation-error').filter({ hasText: 'Fixture initialization denied.' }).waitFor();
@@ -674,7 +676,11 @@ try {
       const before = structuredClone(response());
       await page.evaluate(() => localStorage.setItem('tax-marketing-studio-creative-portfolio-v1', `portfolio_${'4'.repeat(32)}`)); await page.reload();
       await page.getByRole('region', { name: 'Saved portfolio progress' }).waitFor();
-      await page.getByRole('button', { name: portfolioState === 'PENDING' ? 'Resume generation' : 'Retry creative 1', exact: true }).click();
+      if (portfolioState === 'RETRY_REQUIRED') {
+        await page.getByRole('button', { name: 'Prepare retry for ad 1', exact: true }).click();
+        await page.getByRole('button', { name: 'Prepare retry for ad 1', exact: true }).waitFor({ state: 'detached' });
+      }
+      await page.getByRole('button', { name: 'Resume generation', exact: true }).click();
       await page.getByText('Generation complete.').waitFor(); assert.deepEqual(response(), before); assert.equal(saves.length, 0);
     });
   await scenario('A supplied company video can be submitted without requiring an unrelated logo', { noLogo: true }, async ({ page, submissions }) => {
@@ -793,7 +799,13 @@ try {
     await page.getByRole('region', { name: 'Saved portfolio progress' }).waitFor();
     assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 0);
     if (portfolioState === 'PENDING') { await page.getByRole('button', { name: 'Resume generation' }).click(); await page.getByText('Generation complete.').waitFor(); }
-    else if (portfolioState === 'RETRY_REQUIRED') { await page.getByRole('button', { name: 'Retry creative 1', exact: true }).click(); await page.getByText('Generation complete.').waitFor(); }
+    else if (portfolioState === 'RETRY_REQUIRED') {
+      await page.getByRole('button', { name: 'Prepare retry for ad 1', exact: true }).click();
+      await page.getByRole('button', { name: 'Prepare retry for ad 1', exact: true }).waitFor({ state: 'detached' });
+      assert.equal(calls.filter(([path, method]) => path === '/api/creatives/portfolios' && method !== 'GET').length, 1, 'preparation must not advance');
+      await page.getByRole('button', { name: 'Resume generation', exact: true }).click();
+      await page.getByText('Generation complete.').waitFor();
+    }
     else await page.getByText('Generation complete.').waitFor();
   });
   await scenario('Clean-frame recovery prepares Creative 2 without generation and survives reload', { casePortfolio: true, caseRecovery: true, width: 375 }, async ({ page, calls }) => {

@@ -5,7 +5,9 @@ import { fetchWithProviderUsage, emitProviderReuse } from '@/lib/ai/provider-tel
 import { VIDEO_SELECTION_TIMEOUT_MS } from '@/lib/video/concept-selection';
 import { CANDIDATE_HUMAN_FRAME_SELECTION_POLICY } from '@/lib/video/human-frame-selection';
 import { getVideoIntelligenceStorage, type VideoIntelligenceStorage } from '@/lib/video/intelligence-storage';
-import { parseSourceOverlayDecision, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
+import { parseProviderSourceOverlayDecision, type SourceOverlayDecision } from '@/lib/video/source-overlay-contract';
+
+import { CandidateAssessmentFailure, candidateAssessmentDiagnostic, parseCandidateAssessmentDiagnostic, type CandidateAssessmentDiagnostic } from '@/lib/video/candidate-assessment-failure';
 
 const LEASE_MS = 5 * 60 * 1000;
 const MAX_RECORD_BYTES = 16 * 1024;
@@ -32,11 +34,11 @@ export type CandidateAssessmentIdentity = {
 type RetryReason = 'LEASE_EXPIRED' | 'PROVIDER_FAILED' | 'INSUFFICIENT_TIME';
 type RecordState = { version: 1; identity: CandidateAssessmentIdentity } & (
   | { status: 'RUNNING'; lease: { id: string; expiresAtMs: number } }
-  | { status: 'RETRY_REQUIRED'; reason: RetryReason }
+  | { status: 'RETRY_REQUIRED'; reason: RetryReason; diagnostic?: CandidateAssessmentDiagnostic }
   | { status: 'COMPLETE'; assessment: CandidateSuitabilityAssessment }
 );
 export type CandidateAssessmentState = { status: 'MISSING' } | { status: 'BUSY' }
-  | { status: 'RETRY_REQUIRED'; reason: RetryReason }
+  | { status: 'RETRY_REQUIRED'; reason: RetryReason; diagnostic?: CandidateAssessmentDiagnostic }
   | { status: 'COMPLETE'; assessment: CandidateSuitabilityAssessment };
 export type CandidateAssessmentDependencies = { storage?: VideoIntelligenceStorage; now?: () => number;
   newLeaseId?: () => string; request?: typeof fetch; deadlineAtMs: number; retry?: boolean;
@@ -59,18 +61,17 @@ const headAndShouldersRules = `${rules}
 For the head-and-shoulders-v1 contract, useful portrait framing means a clean head-and-shoulders source inset, not preservation of the original torso or source aspect ratio. A single edge crop may discard lower torso or clothing and change the aspect ratio; the final ad canvas is composed separately. Assess the retained crop: preserve the visible head, entire useful face, identity cues, usable shoulders and sufficient facial detail. Internal marks means marks remaining inside the retained portrait; marks wholly inside the discarded edge strip may be excluded only when every mark is removed. Determine the crop and deepest mark extent from the actual pixels, never a preset crop percentage. Keep the 450-permille maximum. If the boundaries, retained face/identity/framing or complete overlay removal are uncertain, return UNSAFE. Do not propose retouching, inpainting or generated replacement anatomy.`;
 
 export const parseCandidateSuitability = (value: unknown): CandidateSuitabilityAssessment => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Candidate suitability assessment is invalid.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CandidateAssessmentFailure({ code: 'ASSESSMENT_SHAPE' });
   const item = value as Record<string, unknown>;
-  if (Object.keys(item).length !== Object.keys(values).length + 2
-    || Object.entries(values).some(([name, allowed]) => !allowed.includes(item[name] as never))
-    || typeof item.observableReason !== 'string' || !item.observableReason.trim() || item.observableReason.length > 500
-    || !item.sourceOverlay || typeof item.sourceOverlay !== 'object') throw new Error('Candidate suitability assessment is invalid.');
-  const overlay = item.sourceOverlay as Record<string, unknown>;
-  const sourceOverlay = parseSourceOverlayDecision(overlay) ?? (overlay.status === 'EDGE_CROP'
-    ? parseSourceOverlayDecision({ version: 2, ...overlay })
-    : overlay.edge === 'NONE' && overlay.removePermille === 0 && overlay.overlayDepthPermille === 0
-      ? parseSourceOverlayDecision({ version: 2, status: overlay.status }) : null);
-  if (!sourceOverlay) throw new Error('Candidate source-overlay assessment is invalid.');
+  if (Object.keys(item).length !== Object.keys(values).length + 2) throw new CandidateAssessmentFailure({ code: 'ASSESSMENT_SHAPE' });
+  for (const name of Object.keys(values) as Array<keyof typeof values>) {
+    if (!values[name].includes(item[name] as never)) throw new CandidateAssessmentFailure({ code: 'ASSESSMENT_FIELD', field: name });
+  }
+  if (typeof item.observableReason !== 'string' || !item.observableReason.trim() || item.observableReason.length > 500) {
+    throw new CandidateAssessmentFailure({ code: 'ASSESSMENT_FIELD', field: 'observableReason' });
+  }
+  const sourceOverlay = parseProviderSourceOverlayDecision(item.sourceOverlay);
+  if (!sourceOverlay) throw new CandidateAssessmentFailure({ code: 'OVERLAY_INVALID' });
   return { ...item, sourceOverlay } as CandidateSuitabilityAssessment;
 };
 
@@ -100,6 +101,11 @@ const recordFor = (identity: CandidateAssessmentIdentity, dependencies: Candidat
       || !['LEASE_EXPIRED', 'PROVIDER_FAILED', 'INSUFFICIENT_TIME'].includes(value.reason)) {
       throw new Error('Candidate assessment cache state is invalid.');
     }
+    if (value.status === 'RETRY_REQUIRED' && value.diagnostic !== undefined) {
+      const diagnostic = parseCandidateAssessmentDiagnostic(value.diagnostic);
+      if (!diagnostic) throw new Error('Candidate assessment diagnostic is invalid.');
+      value.diagnostic = diagnostic;
+    }
     return { value, etag: stored.etag };
   };
   const write = (value: RecordState, etag: string | null) => {
@@ -123,9 +129,9 @@ export const readCandidateSuitability = async (identity: CandidateAssessmentIden
 
 const assess = async (identity: CandidateAssessmentIdentity, image: Buffer, request: typeof fetch, standardTier = false) => {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured for candidate suitability.');
+  if (!apiKey) throw new CandidateAssessmentFailure({ code: 'CONFIGURATION' });
   if (image.length > MAX_IMAGE_BYTES || sha(image) !== identity.frameSha256) {
-    throw new Error('Candidate suitability image failed integrity or size admission.');
+    throw new CandidateAssessmentFailure({ code: 'IMAGE_ADMISSION' });
   }
   const body = JSON.stringify({ model: identity.model, store: false, ...(standardTier ? {service_tier:'default'} : {}), reasoning: { effort: 'low' }, max_output_tokens: 2048,
     input: [{ role: 'developer', content: [{ type: 'input_text', text: ['clean-portrait-v1', 'clean-provider-portrait-v1'].includes(identity.assessmentContract ?? '') ? `${rules}\nThese are the actual retained portrait pixels. Accept only CLEAN overlays; any remaining mark is UNSAFE. Reassess all human quality fields on these pixels.` : identity.assessmentContract ? headAndShouldersRules : rules }] }, { role: 'user', content: [
@@ -133,22 +139,33 @@ const assess = async (identity: CandidateAssessmentIdentity, image: Buffer, requ
         candidateIndex: identity.candidateIndex, ...(identity.assessmentContract ? { assessmentContract: identity.assessmentContract } : {}) }) },
       { type: 'input_image', image_url: `data:image/${identity.assessmentContract === 'clean-provider-portrait-v1' ? 'png' : 'jpeg'};base64,${image.toString('base64')}`, detail: 'high' },
     ] }], text: { format: { type: 'json_schema', name: 'tra_candidate_human_suitability', strict: true, schema } } });
-  const response = await fetchWithProviderUsage('video-human-selection', identity.model, 'https://api.openai.com/v1/responses', {
+  let response: Response;
+  try { response = await fetchWithProviderUsage('video-human-selection', identity.model, 'https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(VIDEO_SELECTION_TIMEOUT_MS), body,
-  }, request);
-  if (!response.ok) throw new Error(`Candidate suitability failed (HTTP ${response.status}).`);
-  const payload = await response.json() as { status?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
-  const output = payload.output?.flatMap((item) => item.content || []).find((part) => part.type === 'output_text')?.text;
-  if (payload.status !== 'completed' || typeof output !== 'string') throw new Error('Candidate suitability returned no completed assessment.');
-  return parseCandidateSuitability(JSON.parse(output));
+  }, request); } catch { throw new CandidateAssessmentFailure({ code: 'TRANSPORT' }); }
+  if (!response.ok) throw new CandidateAssessmentFailure({ code: 'HTTP', httpStatus: response.status });
+  let payload: unknown;
+  try { payload = await response.json(); } catch { throw new CandidateAssessmentFailure({ code: 'RESPONSE_JSON' }); }
+  if (!payload || typeof payload !== 'object') throw new CandidateAssessmentFailure({ code: 'RESPONSE_JSON' });
+  const result = payload as { status?: unknown; output?: unknown };
+  if (result.status !== 'completed') throw new CandidateAssessmentFailure({ code: 'RESPONSE_INCOMPLETE' });
+  const parts = Array.isArray(result.output) ? result.output.flatMap(item =>
+    item && Array.isArray(item.content) ? item.content : []) : [];
+  if (parts.some(part => part?.type === 'refusal')) throw new CandidateAssessmentFailure({ code: 'REFUSAL' });
+  const output = parts.find(part => part?.type === 'output_text')?.text;
+  if (typeof output !== 'string') throw new CandidateAssessmentFailure({ code: 'OUTPUT_MISSING' });
+  let assessment: unknown;
+  try { assessment = JSON.parse(output); } catch { throw new CandidateAssessmentFailure({ code: 'OUTPUT_JSON' }); }
+  return parseCandidateSuitability(assessment);
 };
 
 /** Cached crop feasibility only. Pixel approval belongs to the freshly extracted provider PNG. */
 async function assessBoundPortrait(identity: CandidateAssessmentIdentity, image: Buffer, dependencies: CandidateAssessmentDependencies) {
   if (sha(image) !== identity.frameSha256) throw new Error('Bound portrait source pixels changed.');
   const initial = await assessCandidateWithCache({ ...identity, assessmentContract: 'head-and-shoulders-v1' }, image, dependencies);
-  if (initial.status !== 'COMPLETE') throw new Error('Portrait crop assessment needs explicit recovery.');
+  if (initial.status !== 'COMPLETE') throw new CandidateAssessmentFailure(
+    initial.status === 'RETRY_REQUIRED' && initial.diagnostic ? initial.diagnostic : { code: 'UNKNOWN' });
   if (!isSuitableCandidate(initial.assessment)) return initial.assessment;
   const metadata = await sharp(image).metadata();
   if (!metadata.width || !metadata.height) throw new Error('Portrait dimensions are unavailable.');
@@ -192,6 +209,7 @@ export const assessCandidateWithCache = async (identity: CandidateAssessmentIden
   let assessment: CandidateSuitabilityAssessment;
   try { assessment = identity.assessmentContract === 'bound-case-portrait-v2'
     ? await assessBoundPortrait(identity, image, dependencies) : await assess(identity, image, dependencies.request ?? fetch, dependencies.standardTier); }
-  catch { return checkpoint({ version: 1, identity, status: 'RETRY_REQUIRED', reason: 'PROVIDER_FAILED' }); }
+  catch (error) { return checkpoint({ version: 1, identity, status: 'RETRY_REQUIRED', reason: 'PROVIDER_FAILED',
+    diagnostic: candidateAssessmentDiagnostic(error) }); }
   return checkpoint({ version: 1, identity, status: 'COMPLETE', assessment });
 };

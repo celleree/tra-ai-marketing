@@ -73,7 +73,7 @@ try {
       await page.reload(); await page.waitForFunction(() => document.querySelector('#creative-people-slider')?.value === '100');
       assert.equal(await count.inputValue(), '1'); assert.equal(await toggle.isChecked(), true);
       await toggle.uncheck(); await people.focus(); await page.keyboard.press('Home');
-      await page.getByRole('button', { name: 'Retry planning', exact: true }).click();
+      await page.getByRole('button', { name: 'Prepare planning retry', exact: true }).click();
       await page.waitForFunction(() => !document.querySelector('#creative-people-slider')?.disabled);
       assert.deepEqual(commands, [{ id: savedId, action: 'retry', slotIndex: null }]);
       assert.equal(saved.peoplePercent, 100); assert.equal(saved.useReferenceLibrary, true);
